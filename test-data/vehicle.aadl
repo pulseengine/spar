@@ -1,0 +1,21 @@
+-- Vehicle ECU example for testing spar CLI
+package Vehicle
+public
+  with SensorLib;
+
+  system ECU
+    features
+      brake_cmd : out data port;
+      throttle_cmd : out data port;
+    flows
+      control_flow : flow source brake_cmd;
+  end ECU;
+
+  system implementation ECU.basic
+    subcomponents
+      nav : system SensorLib::GPSSensor.basic;
+      engine_ctrl : system;
+    connections
+      c1 : port nav.position -> engine_ctrl.pos_in;
+  end ECU.basic;
+end Vehicle;

@@ -1,0 +1,486 @@
+//! Resource budget analysis (memory, MIPS, bandwidth).
+//!
+//! Checks that memory, processing, and communication resources
+//! are not exceeded:
+//!
+//! - **Memory budget**: For each memory component, sums the memory demands
+//!   (Source_Code_Size + Data_Size + Stack_Size) of bound software components
+//!   and compares against Memory_Size capacity.
+//! - **Bandwidth budget**: For each bus, checks if total Data_Rate of bound
+//!   connections exceeds bus bandwidth.
+//!
+//! This is a v1 implementation focusing on memory budgets since those
+//! properties are most commonly specified in AADL models.
+
+use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::property_value::parse_size_value;
+
+use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+
+/// Resource budget analysis (memory, MIPS, bandwidth).
+pub struct ResourceBudgetAnalysis;
+
+impl Analysis for ResourceBudgetAnalysis {
+    fn name(&self) -> &str {
+        "resource_budget"
+    }
+
+    fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+
+        check_memory_budgets(instance, &mut diags);
+        check_bandwidth_budgets(instance, &mut diags);
+
+        diags
+    }
+}
+
+/// Check memory budgets: compare software memory demands against memory capacity.
+fn check_memory_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+    for (mem_idx, mem_comp) in instance.all_components() {
+        if mem_comp.category != ComponentCategory::Memory {
+            continue;
+        }
+
+        let mem_props = instance.properties_for(mem_idx);
+        let mem_path = component_path(instance, mem_idx);
+
+        // Get memory capacity (Memory_Size property)
+        let capacity_bits = get_size_property(mem_props, "Memory_Size");
+
+        if capacity_bits.is_none() {
+            continue; // No capacity specified, skip budget check
+        }
+        let capacity_bits = capacity_bits.unwrap();
+
+        // Find all software components bound to this memory
+        let mut total_demand_bits: u64 = 0;
+        let mut bound_components: Vec<(String, u64)> = Vec::new();
+
+        for (comp_idx, _comp) in instance.all_components() {
+            let comp_props = instance.properties_for(comp_idx);
+
+            // Check if this component is bound to this memory
+            let binding = get_memory_binding(comp_props);
+            if let Some(ref target) = binding {
+                if !target.eq_ignore_ascii_case(mem_comp.name.as_str()) {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+
+            let demand = compute_memory_demand(comp_props);
+            if demand > 0 {
+                let comp = instance.component(comp_idx);
+                bound_components.push((comp.name.as_str().to_string(), demand));
+                total_demand_bits = total_demand_bits.saturating_add(demand);
+            }
+        }
+
+        if bound_components.is_empty() {
+            continue; // No bound components to check
+        }
+
+        let demand_kb = total_demand_bits as f64 / (8.0 * 1024.0);
+        let capacity_kb = capacity_bits as f64 / (8.0 * 1024.0);
+
+        if total_demand_bits > capacity_bits {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "memory '{}' budget exceeded: {:.1} KB used of {:.1} KB capacity \
+                     ({} bound components, {:.1}% utilization)",
+                    mem_comp.name,
+                    demand_kb,
+                    capacity_kb,
+                    bound_components.len(),
+                    (total_demand_bits as f64 / capacity_bits as f64) * 100.0,
+                ),
+                path: mem_path.clone(),
+                analysis: "resource_budget".to_string(),
+            });
+        } else {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "memory '{}' utilization: {:.1} KB of {:.1} KB ({:.1}%, {} bound components)",
+                    mem_comp.name,
+                    demand_kb,
+                    capacity_kb,
+                    (total_demand_bits as f64 / capacity_bits as f64) * 100.0,
+                    bound_components.len(),
+                ),
+                path: mem_path,
+                analysis: "resource_budget".to_string(),
+            });
+        }
+    }
+}
+
+/// Check bandwidth budgets: compare connection data rates against bus capacity.
+fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+    for (bus_idx, bus_comp) in instance.all_components() {
+        if bus_comp.category != ComponentCategory::Bus && bus_comp.category != ComponentCategory::VirtualBus {
+            continue;
+        }
+
+        let bus_props = instance.properties_for(bus_idx);
+        let bus_path = component_path(instance, bus_idx);
+
+        // Get bus bandwidth capacity (Data_Rate property)
+        let capacity_raw = bus_props
+            .get("Communication_Properties", "Data_Rate")
+            .or_else(|| bus_props.get("", "Data_Rate"));
+
+        if capacity_raw.is_none() {
+            continue; // No bandwidth specified, skip
+        }
+        let capacity_raw = capacity_raw.unwrap();
+        let capacity_bps = parse_data_rate(capacity_raw);
+
+        if capacity_bps.is_none() {
+            continue;
+        }
+        let capacity_bps = capacity_bps.unwrap();
+
+        // Find connections bound to this bus
+        let mut total_rate: f64 = 0.0;
+        let mut connection_count = 0;
+
+        // Check if any components reference this bus in their connection binding
+        for (comp_idx, _comp) in instance.all_components() {
+            let comp_props = instance.properties_for(comp_idx);
+
+            // Check Actual_Connection_Binding for this bus
+            let binding = comp_props
+                .get("Deployment_Properties", "Actual_Connection_Binding")
+                .or_else(|| comp_props.get("", "Actual_Connection_Binding"));
+
+            if let Some(binding_val) = binding {
+                if binding_val.to_lowercase().contains(&bus_comp.name.as_str().to_lowercase()) {
+                    // This component's connections use this bus
+                    if let Some(rate_raw) = comp_props
+                        .get("Communication_Properties", "Data_Rate")
+                        .or_else(|| comp_props.get("", "Data_Rate"))
+                    {
+                        if let Some(rate) = parse_data_rate(rate_raw) {
+                            total_rate += rate;
+                            connection_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if connection_count == 0 {
+            continue;
+        }
+
+        if total_rate > capacity_bps {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Warning,
+                message: format!(
+                    "bus '{}' bandwidth may be exceeded: {:.1} bps demanded vs {:.1} bps capacity \
+                     ({} connections)",
+                    bus_comp.name,
+                    total_rate,
+                    capacity_bps,
+                    connection_count,
+                ),
+                path: bus_path,
+                analysis: "resource_budget".to_string(),
+            });
+        }
+    }
+}
+
+/// Compute total memory demand from Source_Code_Size + Data_Size + Stack_Size (in bits).
+fn compute_memory_demand(props: &spar_hir_def::properties::PropertyMap) -> u64 {
+    let code_size = get_size_property(props, "Source_Code_Size").unwrap_or(0);
+    let data_size = get_size_property(props, "Data_Size").unwrap_or(0);
+    let stack_size = get_size_property(props, "Stack_Size").unwrap_or(0);
+    code_size.saturating_add(data_size).saturating_add(stack_size)
+}
+
+/// Get a size property in bits.
+fn get_size_property(
+    props: &spar_hir_def::properties::PropertyMap,
+    name: &str,
+) -> Option<u64> {
+    let raw = props
+        .get("Memory_Properties", name)
+        .or_else(|| props.get("", name))?;
+    parse_size_value(raw)
+}
+
+/// Extract memory binding target name from property.
+fn get_memory_binding(
+    props: &spar_hir_def::properties::PropertyMap,
+) -> Option<String> {
+    let raw = props
+        .get("Deployment_Properties", "Actual_Memory_Binding")
+        .or_else(|| props.get("", "Actual_Memory_Binding"))?;
+    extract_reference_target(raw).map(|s| s.to_string())
+}
+
+/// Extract the target name from a `reference(name)` string.
+fn extract_reference_target(val: &str) -> Option<&str> {
+    let trimmed = val.trim();
+    if let Some(start) = trimmed.find("reference") {
+        let after_ref = &trimmed[start + "reference".len()..];
+        if let Some(paren_start) = after_ref.find('(') {
+            let inner = &after_ref[paren_start + 1..];
+            if let Some(paren_end) = inner.find(')') {
+                let target = inner[..paren_end].trim();
+                if !target.is_empty() {
+                    return Some(target);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse a data rate value string like "100 KBytesps" into bits per second.
+///
+/// Supports common formats: "N bitsps", "N KBytesps", "N MBytesps", "N Bytesps"
+/// or just a numeric value assumed to be in bps.
+fn parse_data_rate(s: &str) -> Option<f64> {
+    let s = s.trim();
+    // Try common AADL data rate units
+    for &(suffix, factor) in DATA_RATE_UNITS {
+        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim()) {
+            if let Ok(val) = num_str.parse::<f64>() {
+                return Some(val * factor);
+            }
+        }
+    }
+    // Try plain number (assume bps)
+    s.parse::<f64>().ok()
+}
+
+/// Data rate units and their conversion factors to bits per second.
+const DATA_RATE_UNITS: &[(&str, f64)] = &[
+    ("Gbitsps", 1_000_000_000.0),
+    ("Mbitsps", 1_000_000.0),
+    ("Kbitsps", 1_000.0),
+    ("bitsps", 1.0),
+    ("GBytesps", 8_000_000_000.0),
+    ("MBytesps", 8_000_000.0),
+    ("KBytesps", 8_000.0),
+    ("Bytesps", 8.0),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+    use spar_hir_def::instance::*;
+    use spar_hir_def::item_tree::*;
+    use spar_hir_def::name::{Name, PropertyRef};
+    use spar_hir_def::properties::{PropertyMap, PropertyValue};
+
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+        property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    }
+
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+                property_maps: FxHashMap::default(),
+            }
+        }
+
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: Some(Name::new("impl")),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+            })
+        }
+
+        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+            self.components[parent].children = children;
+        }
+
+        fn set_property(
+            &mut self,
+            comp: ComponentInstanceIdx,
+            set: &str,
+            name: &str,
+            value: &str,
+        ) {
+            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+            map.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                is_append: false,
+            });
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: self.property_maps,
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn memory_budget_within_capacity() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        // Memory capacity: 1 MByte
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "1 MByte");
+
+        // Thread demands: 100 KByte code + 50 KByte data + 10 KByte stack = 160 KByte
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 KByte");
+        b.set_property(thread, "Memory_Properties", "Data_Size", "50 KByte");
+        b.set_property(thread, "Memory_Properties", "Stack_Size", "10 KByte");
+        b.set_property(thread, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        assert!(errors.is_empty(), "should be within budget: {:?}", errors);
+
+        let infos: Vec<_> = diags.iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report memory utilization: {:?}", diags);
+        assert!(infos[0].message.contains("ram"), "should mention ram: {}", infos[0].message);
+    }
+
+    #[test]
+    fn memory_budget_exceeded() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // Memory capacity: 100 KByte
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "100 KByte");
+
+        // t1: 60 KByte code
+        b.set_property(t1, "Memory_Properties", "Source_Code_Size", "60 KByte");
+        b.set_property(t1, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+
+        // t2: 60 KByte code -> total 120 KByte > 100 KByte
+        b.set_property(t2, "Memory_Properties", "Source_Code_Size", "60 KByte");
+        b.set_property(t2, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        assert_eq!(errors.len(), 1, "should error on exceeded budget: {:?}", diags);
+        assert!(errors[0].message.contains("exceeded"), "should mention exceeded: {}", errors[0].message);
+    }
+
+    #[test]
+    fn memory_no_capacity_no_check() {
+        // Memory without Memory_Size property should not produce diagnostics
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        b.set_children(root, vec![mem]);
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let mem_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message.contains("ram"))
+            .collect();
+        assert!(mem_diags.is_empty(), "no capacity = no check: {:?}", mem_diags);
+    }
+
+    #[test]
+    fn parse_data_rate_values() {
+        assert_eq!(parse_data_rate("100 Kbitsps"), Some(100_000.0));
+        assert_eq!(parse_data_rate("1 Mbitsps"), Some(1_000_000.0));
+        assert_eq!(parse_data_rate("10 KBytesps"), Some(80_000.0));
+        assert_eq!(parse_data_rate("1000"), Some(1000.0));
+        assert_eq!(parse_data_rate("invalid"), None);
+    }
+
+    #[test]
+    fn memory_multiple_properties_summed() {
+        // Test that Source_Code_Size + Data_Size + Stack_Size are all summed
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        // 512 KByte capacity
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "512 KByte");
+
+        // Thread: 100 KByte code + 100 KByte data + 100 KByte stack = 300 KByte
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 KByte");
+        b.set_property(thread, "Memory_Properties", "Data_Size", "100 KByte");
+        b.set_property(thread, "Memory_Properties", "Stack_Size", "100 KByte");
+        b.set_property(thread, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        assert!(errors.is_empty(), "300 KB < 512 KB, should be within budget: {:?}", errors);
+
+        let infos: Vec<_> = diags.iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report utilization: {:?}", diags);
+        // ~58.6% utilization
+        assert!(infos[0].message.contains("58."), "should show ~58% utilization: {}", infos[0].message);
+    }
+}
