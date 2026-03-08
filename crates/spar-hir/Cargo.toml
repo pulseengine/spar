@@ -1,0 +1,16 @@
+[package]
+name = "spar-hir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Public semantic API facade for AADL models"
+
+[dependencies]
+spar-syntax.workspace = true
+spar-base-db.workspace = true
+spar-hir-def.workspace = true
+salsa.workspace = true
+smol_str = "0.3"
+
+[dev-dependencies]

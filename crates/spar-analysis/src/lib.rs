@@ -21,9 +21,12 @@ pub mod connectivity;
 pub mod direction_rules;
 pub mod flow_check;
 pub mod hierarchy;
+pub mod latency;
 pub mod legality;
 pub mod mode_check;
 pub mod naming_rules;
+pub mod resource_budget;
+pub mod scheduling;
 
 use spar_hir_def::instance::SystemInstance;
 

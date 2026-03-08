@@ -355,4 +355,64 @@ impl GlobalScope {
     pub fn package_names(&self) -> Vec<&Name> {
         self.packages.values().map(|s| &s.name).collect()
     }
+
+    /// List all property set names (including standard predeclared sets).
+    pub fn property_set_names(&self) -> Vec<&Name> {
+        self.property_sets.values().map(|ps| &ps.name).collect()
+    }
+
+    /// List all property names within a given property set.
+    ///
+    /// Returns an empty vec if the property set is not found.
+    /// Comparison is case-insensitive.
+    pub fn property_names_in_set(&self, set_name: &str) -> Vec<&Name> {
+        let key = CiName::from_str(set_name);
+        match self.property_sets.get(&key) {
+            Some(info) => info.property_names.iter().collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// List all component types across all packages, returning (package_name, type_name, category).
+    pub fn all_component_types(&self) -> Vec<(&Name, &Name, crate::item_tree::ComponentCategory)> {
+        let mut result = Vec::new();
+        for pkg_scope in self.packages.values() {
+            for (_, loc) in &pkg_scope.component_types {
+                if let Some(ct) = self.get_component_type(*loc) {
+                    result.push((&pkg_scope.name, &ct.name, ct.category));
+                }
+            }
+        }
+        result
+    }
+
+    /// List all component implementations across all packages,
+    /// returning (package_name, type_name, impl_name, category).
+    pub fn all_component_impls(
+        &self,
+    ) -> Vec<(&Name, &Name, &Name, crate::item_tree::ComponentCategory)> {
+        let mut result = Vec::new();
+        for pkg_scope in self.packages.values() {
+            for (_, loc) in &pkg_scope.component_impls {
+                if let Some(ci) = self.get_component_impl(*loc) {
+                    result.push((&pkg_scope.name, &ci.type_name, &ci.impl_name, ci.category));
+                }
+            }
+        }
+        result
+    }
+
+    /// List all feature group types across all packages,
+    /// returning (package_name, fgt_name).
+    pub fn all_feature_group_types(&self) -> Vec<(&Name, &Name)> {
+        let mut result = Vec::new();
+        for pkg_scope in self.packages.values() {
+            for (_, loc) in &pkg_scope.feature_group_types {
+                if let Some(fgt) = self.get_feature_group_type(*loc) {
+                    result.push((&pkg_scope.name, &fgt.name));
+                }
+            }
+        }
+        result
+    }
 }

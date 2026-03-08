@@ -6,7 +6,9 @@ members = [
     "crates/spar-annex",
     "crates/spar-base-db",
     "crates/spar-hir-def",
+    "crates/spar-hir",
     "crates/spar-analysis",
+    "crates/spar-transform",
     "crates/spar-cli",
 ]
 
@@ -22,7 +24,9 @@ spar-syntax = { path = "crates/spar-syntax" }
 spar-annex = { path = "crates/spar-annex" }
 spar-base-db = { path = "crates/spar-base-db" }
 spar-hir-def = { path = "crates/spar-hir-def" }
+spar-hir = { path = "crates/spar-hir" }
 spar-analysis = { path = "crates/spar-analysis" }
+spar-transform = { path = "crates/spar-transform" }
 rowan = "0.16"
 salsa = "0.26"
 la-arena = "0.3"

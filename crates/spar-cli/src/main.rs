@@ -362,7 +362,10 @@ fn run_all_analyses(
     use spar_analysis::direction_rules::DirectionRuleAnalysis;
     use spar_analysis::flow_check::FlowCheckAnalysis;
     use spar_analysis::hierarchy::HierarchyAnalysis;
+    use spar_analysis::latency::LatencyAnalysis;
     use spar_analysis::mode_check::ModeCheckAnalysis;
+    use spar_analysis::resource_budget::ResourceBudgetAnalysis;
+    use spar_analysis::scheduling::SchedulingAnalysis;
     use spar_analysis::AnalysisRunner;
 
     let mut runner = AnalysisRunner::new();
@@ -373,6 +376,9 @@ fn run_all_analyses(
     runner.register(Box::new(BindingCheckAnalysis));
     runner.register(Box::new(FlowCheckAnalysis));
     runner.register(Box::new(ModeCheckAnalysis));
+    runner.register(Box::new(SchedulingAnalysis));
+    runner.register(Box::new(LatencyAnalysis));
+    runner.register(Box::new(ResourceBudgetAnalysis));
     runner.run_all(inst)
 }
 
