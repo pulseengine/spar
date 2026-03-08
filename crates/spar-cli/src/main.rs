@@ -1,3 +1,5 @@
+mod lsp;
+
 use std::{env, fs, process};
 
 fn main() {
@@ -13,6 +15,7 @@ fn main() {
         "items" => cmd_items(&args[2..]),
         "instance" => cmd_instance(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
+        "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
             process::exit(1);
@@ -28,12 +31,17 @@ fn print_usage() {
     eprintln!("  items      Show item tree (declarations) for file(s)");
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
+    eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    <file...>");
     eprintln!("  instance --root Package::Type.Impl [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl <file...>");
+}
+
+fn cmd_lsp() {
+    lsp::run_lsp_server();
 }
 
 fn cmd_parse(args: &[String]) {

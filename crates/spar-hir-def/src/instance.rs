@@ -24,6 +24,20 @@ pub type EndToEndFlowInstanceIdx = Idx<EndToEndFlowInstance>;
 pub type ModeInstanceIdx = Idx<ModeInstance>;
 pub type ModeTransitionInstanceIdx = Idx<ModeTransitionInstance>;
 
+/// A System Operation Mode — one valid combination of modes across all modal subcomponents.
+///
+/// Per AS5506 §12, when a system contains multiple modal subcomponents, the
+/// System Operation Modes (SOMs) are the cartesian product of all constituent
+/// component modes. Each SOM represents one configuration of the system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemOperationMode {
+    /// Human-readable name (e.g., "active_fast" — concatenation of constituent mode names).
+    pub name: String,
+    /// The mode selection: which mode each modal component is in.
+    /// Each entry is (component_instance_idx, mode_instance_idx).
+    pub mode_selections: Vec<(ComponentInstanceIdx, ModeInstanceIdx)>,
+}
+
 /// A fully instantiated AADL system.
 #[derive(Debug)]
 pub struct SystemInstance {
@@ -40,6 +54,8 @@ pub struct SystemInstance {
     pub property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
     /// Semantic (end-to-end) connection instances traced through the hierarchy.
     pub semantic_connections: Vec<SemanticConnection>,
+    /// System Operation Modes — the cartesian product of modes across all modal components.
+    pub system_operation_modes: Vec<SystemOperationMode>,
 }
 
 /// A component instance in the flattened hierarchy.
@@ -193,8 +209,10 @@ impl SystemInstance {
             diagnostics: builder.diagnostics,
             property_maps: builder.property_maps,
             semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
         };
         instance.compute_semantic_connections();
+        instance.compute_soms();
         instance
     }
 
@@ -245,52 +263,369 @@ impl SystemInstance {
         self.semantic_connections.len()
     }
 
+    /// Total number of System Operation Modes.
+    pub fn som_count(&self) -> usize {
+        self.system_operation_modes.len()
+    }
+
+    /// Maximum number of SOMs before truncation.
+    const MAX_SOMS: usize = 10_000;
+
+    /// Compute System Operation Modes (SOMs) as the cartesian product of modes
+    /// across all modal components in the instance hierarchy.
+    ///
+    /// Per AS5506 §12, a SOM represents one valid combination of mode selections
+    /// for every modal subcomponent. If no component has modes, no SOMs are produced.
+    /// The total is capped at [`Self::MAX_SOMS`] to prevent combinatorial explosion.
+    pub fn compute_soms(&mut self) {
+        // Collect all components that have at least one mode.
+        // Each entry: (component_instance_idx, vec of mode_instance_idx)
+        let modal_components: Vec<(ComponentInstanceIdx, Vec<ModeInstanceIdx>)> = self
+            .components
+            .iter()
+            .filter_map(|(idx, comp)| {
+                if comp.modes.is_empty() {
+                    None
+                } else {
+                    Some((idx, comp.modes.clone()))
+                }
+            })
+            .collect();
+
+        if modal_components.is_empty() {
+            self.system_operation_modes = Vec::new();
+            return;
+        }
+
+        // Check product size before computing to avoid unnecessary work.
+        let total: u64 = modal_components
+            .iter()
+            .map(|(_, modes)| modes.len() as u64)
+            .product();
+
+        let truncated = total > Self::MAX_SOMS as u64;
+
+        // Cartesian product via iterative expansion.
+        // Start with one empty selection, then extend with each modal component's modes.
+        let mut soms: Vec<Vec<(ComponentInstanceIdx, ModeInstanceIdx)>> = vec![vec![]];
+
+        for (comp_idx, mode_indices) in &modal_components {
+            let mut next = Vec::with_capacity(
+                (soms.len() * mode_indices.len()).min(Self::MAX_SOMS + 1),
+            );
+            for existing in &soms {
+                for &mode_idx in mode_indices {
+                    let mut selection = existing.clone();
+                    selection.push((*comp_idx, mode_idx));
+                    next.push(selection);
+                    if next.len() > Self::MAX_SOMS {
+                        break;
+                    }
+                }
+                if next.len() > Self::MAX_SOMS {
+                    break;
+                }
+            }
+            soms = next;
+            if soms.len() > Self::MAX_SOMS {
+                break;
+            }
+        }
+
+        // Truncate to the cap.
+        if soms.len() > Self::MAX_SOMS {
+            soms.truncate(Self::MAX_SOMS);
+        }
+
+        if truncated {
+            self.diagnostics.push(InstanceDiagnostic {
+                message: format!(
+                    "system operation mode count ({}) exceeds limit ({}); truncated",
+                    total,
+                    Self::MAX_SOMS
+                ),
+                path: vec![self.components[self.root].name.clone()],
+            });
+        }
+
+        // Build named SOMs.
+        self.system_operation_modes = soms
+            .into_iter()
+            .map(|selections| {
+                let name = selections
+                    .iter()
+                    .map(|(_, mi)| self.mode_instances[*mi].name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("_");
+                SystemOperationMode {
+                    name,
+                    mode_selections: selections,
+                }
+            })
+            .collect();
+    }
+
     /// Compute semantic (end-to-end) connection instances by tracing connections
     /// through the component hierarchy.
     ///
-    /// Currently handles the common case: "across" connections within a single
-    /// implementation level (sub_a.port -> sub_b.port). These are already fully
-    /// resolved — we just convert them to `SemanticConnection` by resolving the
-    /// subcomponent names to `ComponentInstanceIdx`.
+    /// Handles three kinds of connections:
+    /// - **Across**: `sub_a.port -> sub_b.port` — both endpoints reference subcomponents
+    /// - **Up**: `sub.port -> port` — source references a subcomponent, destination is
+    ///   on the enclosing component itself
+    /// - **Down**: `port -> sub.port` — source is on the enclosing component, destination
+    ///   references a subcomponent
+    ///
+    /// For across connections, the algorithm traces deeper into each subcomponent
+    /// to find the ultimate source/destination by following up/down connections
+    /// inside the subcomponents recursively.
+    ///
+    /// For up/down connections at the root level, they produce standalone semantic
+    /// connections with the root component's own port as one endpoint.
     pub fn compute_semantic_connections(&mut self) {
+        /// Maximum recursion depth to prevent infinite loops.
+        const MAX_TRACE_DEPTH: usize = 20;
+
         let mut semantic = Vec::new();
 
-        for (conn_idx, conn) in self.connections.iter() {
+        // Collect all connection indices so we can iterate without borrowing self.
+        let all_conn_indices: Vec<ConnectionInstanceIdx> =
+            self.connections.iter().map(|(idx, _)| idx).collect();
+
+        for conn_idx in &all_conn_indices {
+            let conn = &self.connections[*conn_idx];
             let (src, dst) = match (&conn.src, &conn.dst) {
-                (Some(s), Some(d)) => (s, d),
+                (Some(s), Some(d)) => (s.clone(), d.clone()),
                 // Skip connections with missing endpoints.
                 _ => continue,
             };
+            let conn_owner = conn.owner;
+            let conn_name = conn.name.clone();
+            let conn_kind = conn.kind;
 
-            // Only handle "across" connections: both endpoints reference a subcomponent.
-            let (src_sub_name, dst_sub_name) = match (&src.subcomponent, &dst.subcomponent) {
-                (Some(s), Some(d)) => (s, d),
-                // "up" or "down" connections require multi-level tracing — skip for now.
-                _ => continue,
-            };
+            match (&src.subcomponent, &dst.subcomponent) {
+                // ── Across connection: sub_a.port -> sub_b.port ──
+                (Some(src_sub_name), Some(dst_sub_name)) => {
+                    let owner = &self.components[conn_owner];
+                    let src_idx = owner.children.iter().find(|&&child_idx| {
+                        self.components[child_idx].name.as_str() == src_sub_name.as_str()
+                    }).copied();
+                    let dst_idx = owner.children.iter().find(|&&child_idx| {
+                        self.components[child_idx].name.as_str() == dst_sub_name.as_str()
+                    }).copied();
 
-            // Resolve subcomponent names to ComponentInstanceIdx by looking at
-            // the owner's children.
-            let owner = &self.components[conn.owner];
-            let src_idx = owner.children.iter().find(|&&child_idx| {
-                self.components[child_idx].name.as_str() == src_sub_name.as_str()
-            });
-            let dst_idx = owner.children.iter().find(|&&child_idx| {
-                self.components[child_idx].name.as_str() == dst_sub_name.as_str()
-            });
+                    if let (Some(src_component), Some(dst_component)) = (src_idx, dst_idx) {
+                        let mut path = vec![*conn_idx];
 
-            if let (Some(&src_component), Some(&dst_component)) = (src_idx, dst_idx) {
-                semantic.push(SemanticConnection {
-                    name: conn.name.clone(),
-                    kind: conn.kind,
-                    ultimate_source: (src_component, src.feature.clone()),
-                    ultimate_destination: (dst_component, dst.feature.clone()),
-                    connection_path: vec![conn_idx],
-                });
+                        // Trace source deeper: look for up connections inside
+                        // the source subcomponent that feed this port.
+                        let ultimate_src =
+                            self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
+
+                        // Trace destination deeper: look for down connections inside
+                        // the destination subcomponent that distribute from this port.
+                        let ultimate_dst =
+                            self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
+
+                        semantic.push(SemanticConnection {
+                            name: conn_name,
+                            kind: conn_kind,
+                            ultimate_source: ultimate_src,
+                            ultimate_destination: ultimate_dst,
+                            connection_path: path,
+                        });
+                    }
+                }
+
+                // ── Up connection: sub.port -> port ──
+                // These produce semantic connections only when chained with
+                // connections in the parent. They are traced into when processing
+                // across connections in the parent. However, if this component IS
+                // the root (no parent), we record a standalone semantic connection
+                // with the root component's own port as the destination.
+                (Some(src_sub_name), None) => {
+                    let owner = &self.components[conn_owner];
+                    if owner.parent.is_none() {
+                        let src_idx = owner.children.iter().find(|&&child_idx| {
+                            self.components[child_idx].name.as_str() == src_sub_name.as_str()
+                        }).copied();
+
+                        if let Some(src_component) = src_idx {
+                            let mut path = vec![*conn_idx];
+                            let ultimate_src =
+                                self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
+
+                            semantic.push(SemanticConnection {
+                                name: conn_name,
+                                kind: conn_kind,
+                                ultimate_source: ultimate_src,
+                                ultimate_destination: (conn_owner, dst.feature.clone()),
+                                connection_path: path,
+                            });
+                        }
+                    }
+                    // Otherwise, this up connection will be consumed when the parent
+                    // traces an across connection through this component.
+                }
+
+                // ── Down connection: port -> sub.port ──
+                // Similar to up: standalone semantic connection only at the root.
+                (None, Some(dst_sub_name)) => {
+                    let owner = &self.components[conn_owner];
+                    if owner.parent.is_none() {
+                        let dst_idx = owner.children.iter().find(|&&child_idx| {
+                            self.components[child_idx].name.as_str() == dst_sub_name.as_str()
+                        }).copied();
+
+                        if let Some(dst_component) = dst_idx {
+                            let mut path = vec![*conn_idx];
+                            let ultimate_dst =
+                                self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
+
+                            semantic.push(SemanticConnection {
+                                name: conn_name,
+                                kind: conn_kind,
+                                ultimate_source: (conn_owner, src.feature.clone()),
+                                ultimate_destination: ultimate_dst,
+                                connection_path: path,
+                            });
+                        }
+                    }
+                }
+
+                // Both endpoints on the enclosing component (no subcomponents) — skip.
+                (None, None) => {}
             }
         }
 
         self.semantic_connections = semantic;
+    }
+
+    /// Trace the ultimate source of a connection by following up connections
+    /// inside a subcomponent.
+    ///
+    /// Given a component instance and a feature name on that component, look for
+    /// an "up" connection inside it of the form `inner_sub.port -> feature_name`.
+    /// If found, recurse into `inner_sub` to find the deepest source.
+    ///
+    /// Returns `(component_idx, feature_name)` for the deepest source found.
+    fn trace_source(
+        &self,
+        component: ComponentInstanceIdx,
+        feature: &Name,
+        path: &mut Vec<ConnectionInstanceIdx>,
+        depth_remaining: usize,
+    ) -> (ComponentInstanceIdx, Name) {
+        if depth_remaining == 0 {
+            return (component, feature.clone());
+        }
+
+        // Clone the connection indices to avoid borrow conflicts.
+        let conn_indices: Vec<ConnectionInstanceIdx> =
+            self.components[component].connections.clone();
+
+        // Look through connections owned by this component for an up connection
+        // whose destination feature matches (i.e., `sub.port -> feature`).
+        for conn_idx in conn_indices {
+            let conn = &self.connections[conn_idx];
+            let (src, dst) = match (&conn.src, &conn.dst) {
+                (Some(s), Some(d)) => (s, d),
+                _ => continue,
+            };
+
+            // Up connection: source has subcomponent, destination does not,
+            // and destination feature matches the one we're tracing.
+            if let (Some(src_sub_name), None) = (&src.subcomponent, &dst.subcomponent) {
+                if dst.feature.as_str() == feature.as_str() {
+                    // Found an up connection feeding this port.
+                    // Resolve the source subcomponent.
+                    let inner_sub = self.components[component]
+                        .children
+                        .iter()
+                        .find(|&&child_idx| {
+                            self.components[child_idx].name.as_str() == src_sub_name.as_str()
+                        })
+                        .copied();
+
+                    if let Some(inner_component) = inner_sub {
+                        let src_feature = src.feature.clone();
+                        path.push(conn_idx);
+                        return self.trace_source(
+                            inner_component,
+                            &src_feature,
+                            path,
+                            depth_remaining - 1,
+                        );
+                    }
+                }
+            }
+        }
+
+        // No further up connection found — this is the ultimate source.
+        (component, feature.clone())
+    }
+
+    /// Trace the ultimate destination of a connection by following down connections
+    /// inside a subcomponent.
+    ///
+    /// Given a component instance and a feature name on that component, look for
+    /// a "down" connection inside it of the form `feature_name -> inner_sub.port`.
+    /// If found, recurse into `inner_sub` to find the deepest destination.
+    ///
+    /// Returns `(component_idx, feature_name)` for the deepest destination found.
+    fn trace_destination(
+        &self,
+        component: ComponentInstanceIdx,
+        feature: &Name,
+        path: &mut Vec<ConnectionInstanceIdx>,
+        depth_remaining: usize,
+    ) -> (ComponentInstanceIdx, Name) {
+        if depth_remaining == 0 {
+            return (component, feature.clone());
+        }
+
+        // Clone the connection indices to avoid borrow conflicts.
+        let conn_indices: Vec<ConnectionInstanceIdx> =
+            self.components[component].connections.clone();
+
+        // Look through connections owned by this component for a down connection
+        // whose source feature matches (i.e., `feature -> sub.port`).
+        for conn_idx in conn_indices {
+            let conn = &self.connections[conn_idx];
+            let (src, dst) = match (&conn.src, &conn.dst) {
+                (Some(s), Some(d)) => (s, d),
+                _ => continue,
+            };
+
+            // Down connection: source has no subcomponent, destination has subcomponent,
+            // and source feature matches the one we're tracing.
+            if let (None, Some(dst_sub_name)) = (&src.subcomponent, &dst.subcomponent) {
+                if src.feature.as_str() == feature.as_str() {
+                    // Found a down connection distributing from this port.
+                    // Resolve the destination subcomponent.
+                    let inner_sub = self.components[component]
+                        .children
+                        .iter()
+                        .find(|&&child_idx| {
+                            self.components[child_idx].name.as_str() == dst_sub_name.as_str()
+                        })
+                        .copied();
+
+                    if let Some(inner_component) = inner_sub {
+                        let dst_feature = dst.feature.clone();
+                        path.push(conn_idx);
+                        return self.trace_destination(
+                            inner_component,
+                            &dst_feature,
+                            path,
+                            depth_remaining - 1,
+                        );
+                    }
+                }
+            }
+        }
+
+        // No further down connection found — this is the ultimate destination.
+        (component, feature.clone())
     }
 
     /// Return a multi-line summary of the instance model.
@@ -305,6 +640,7 @@ impl SystemInstance {
              End-to-end flows: {}\n  \
              Modes: {}\n  \
              Mode transitions: {}\n  \
+             System operation modes: {}\n  \
              Diagnostics: {}",
             self.components.len(),
             self.features.len(),
@@ -314,6 +650,7 @@ impl SystemInstance {
             self.end_to_end_flows.len(),
             self.mode_instances.len(),
             self.mode_transition_instances.len(),
+            self.system_operation_modes.len(),
             self.diagnostics.len(),
         )
     }

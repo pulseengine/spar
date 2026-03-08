@@ -471,6 +471,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 property_maps: FxHashMap::default(),
                 semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
             }
         }
     }

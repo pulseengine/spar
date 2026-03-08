@@ -1514,10 +1514,12 @@ end FlightSystem;
     }
 
     #[test]
-    fn semantic_connections_skips_incomplete() {
+    fn semantic_connections_root_down_and_across() {
         let db = make_db();
         // Model with a down-connection (ext_in -> a.in1) and one across (a.out1 -> b.in1).
-        // Only the across connection should produce a semantic connection.
+        // At the root level, both produce semantic connections:
+        // - c1 is across (a.out1 -> b.in1)
+        // - c2 is a down connection at root (ext_in -> a.in1)
         let src = r#"package P
 public
   system S
@@ -1549,14 +1551,27 @@ end P;
             &Name::new("impl"),
         );
 
-        // c2 is a down-connection (no subcomponent on src side), so only c1 is semantic
+        // Both c1 (across) and c2 (down at root) produce semantic connections
         assert_eq!(
             inst.semantic_connection_count(),
-            1,
-            "expected 1 semantic connection (across only), got {}",
+            2,
+            "expected 2 semantic connections, got {}",
             inst.semantic_connection_count()
         );
+        // c1: across connection
         assert_eq!(inst.semantic_connections[0].name.as_str(), "c1");
+        // c2: down connection at root
+        assert_eq!(inst.semantic_connections[1].name.as_str(), "c2");
+
+        // Verify c2 endpoints: source is the root component's ext_in,
+        // destination is subcomponent 'a'
+        let sc2 = &inst.semantic_connections[1];
+        let (src_idx, ref src_feat) = sc2.ultimate_source;
+        assert_eq!(inst.component(src_idx).name.as_str(), "S.impl");
+        assert_eq!(src_feat.as_str(), "ext_in");
+        let (dst_idx, ref dst_feat) = sc2.ultimate_destination;
+        assert_eq!(inst.component(dst_idx).name.as_str(), "a");
+        assert_eq!(dst_feat.as_str(), "in1");
     }
 
     #[test]
@@ -1596,5 +1611,974 @@ end P;
             "summary should contain semantic connection count: {}",
             summary
         );
+    }
+
+    #[test]
+    fn semantic_connections_simple_up() {
+        let db = make_db();
+        // Inner has an up connection: inner_sub.sensor_out -> reading
+        // Since Inner.i is instantiated as a child of Top.impl, the up connection
+        // is NOT at the root level — it's consumed when Top traces across connections.
+        // But here Inner.i IS the root, so the up connection produces a standalone
+        // semantic connection.
+        let src = r#"package UpPkg
+public
+  system Probe
+    features
+      sensor_out : out data port;
+  end Probe;
+  system implementation Probe.i
+  end Probe.i;
+
+  system Inner
+    features
+      reading : out data port;
+  end Inner;
+  system implementation Inner.i
+    subcomponents
+      probe : system Probe.i;
+    connections
+      c_up : port probe.sensor_out -> reading;
+  end Inner.i;
+end UpPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "up_conn.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("UpPkg"),
+            &Name::new("Inner"),
+            &Name::new("i"),
+        );
+
+        // The up connection at root produces 1 semantic connection
+        assert_eq!(
+            inst.semantic_connection_count(),
+            1,
+            "expected 1 semantic connection for root up connection, got {}",
+            inst.semantic_connection_count()
+        );
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.name.as_str(), "c_up");
+
+        // Source is the probe subcomponent's sensor_out
+        let (src_idx, ref src_feat) = sc.ultimate_source;
+        assert_eq!(inst.component(src_idx).name.as_str(), "probe");
+        assert_eq!(src_feat.as_str(), "sensor_out");
+
+        // Destination is the root component's reading port
+        let (dst_idx, ref dst_feat) = sc.ultimate_destination;
+        assert_eq!(inst.component(dst_idx).name.as_str(), "Inner.i");
+        assert_eq!(dst_feat.as_str(), "reading");
+
+        // Connection path has 1 entry
+        assert_eq!(sc.connection_path.len(), 1);
+    }
+
+    #[test]
+    fn semantic_connections_simple_down() {
+        let db = make_db();
+        // Root has a down connection: cmd_in -> actuator.command
+        let src = r#"package DownPkg
+public
+  system Actuator
+    features
+      command : in data port;
+  end Actuator;
+  system implementation Actuator.i
+  end Actuator.i;
+
+  system Controller
+    features
+      cmd_in : in data port;
+  end Controller;
+  system implementation Controller.i
+    subcomponents
+      actuator : system Actuator.i;
+    connections
+      c_down : port cmd_in -> actuator.command;
+  end Controller.i;
+end DownPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "down_conn.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("DownPkg"),
+            &Name::new("Controller"),
+            &Name::new("i"),
+        );
+
+        // The down connection at root produces 1 semantic connection
+        assert_eq!(
+            inst.semantic_connection_count(),
+            1,
+            "expected 1 semantic connection for root down connection, got {}",
+            inst.semantic_connection_count()
+        );
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.name.as_str(), "c_down");
+
+        // Source is the root component's cmd_in port
+        let (src_idx, ref src_feat) = sc.ultimate_source;
+        assert_eq!(inst.component(src_idx).name.as_str(), "Controller.i");
+        assert_eq!(src_feat.as_str(), "cmd_in");
+
+        // Destination is the actuator subcomponent's command port
+        let (dst_idx, ref dst_feat) = sc.ultimate_destination;
+        assert_eq!(inst.component(dst_idx).name.as_str(), "actuator");
+        assert_eq!(dst_feat.as_str(), "command");
+
+        // Connection path has 1 entry
+        assert_eq!(sc.connection_path.len(), 1);
+    }
+
+    #[test]
+    fn semantic_connections_multi_level_tracing() {
+        let db = make_db();
+        // Three-level hierarchy:
+        //   Top.impl
+        //     inner_a : Inner.i
+        //       probe : Probe.i          (leaf, has sensor_out)
+        //       c_up : probe.sensor_out -> reading   (up connection)
+        //     inner_b : Inner2.i
+        //       handler : Handler.i       (leaf, has data_in)
+        //       c_down : data_in -> handler.data_in  (down connection)
+        //     c_across : inner_a.reading -> inner_b.data_in  (across connection)
+        //
+        // The semantic connection should trace:
+        //   probe.sensor_out -> (up) -> inner_a.reading -> (across) -> inner_b.data_in -> (down) -> handler.data_in
+        // Ultimate source: probe.sensor_out
+        // Ultimate destination: handler.data_in
+        let src = r#"package MultiPkg
+public
+  system Probe
+    features
+      sensor_out : out data port;
+  end Probe;
+  system implementation Probe.i
+  end Probe.i;
+
+  system Handler
+    features
+      data_in : in data port;
+  end Handler;
+  system implementation Handler.i
+  end Handler.i;
+
+  system Inner
+    features
+      reading : out data port;
+  end Inner;
+  system implementation Inner.i
+    subcomponents
+      probe : system Probe.i;
+    connections
+      c_up : port probe.sensor_out -> reading;
+  end Inner.i;
+
+  system Inner2
+    features
+      data_in : in data port;
+  end Inner2;
+  system implementation Inner2.i
+    subcomponents
+      handler : system Handler.i;
+    connections
+      c_down : port data_in -> handler.data_in;
+  end Inner2.i;
+
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      inner_a : system Inner.i;
+      inner_b : system Inner2.i;
+    connections
+      c_across : port inner_a.reading -> inner_b.data_in;
+  end Top.impl;
+end MultiPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "multi_conn.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("MultiPkg"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        // Should have exactly 1 semantic connection (the across at root, traced
+        // through up and down connections in children).
+        // The up/down connections inside inner_a and inner_b are not at the root
+        // level, so they don't produce standalone semantic connections.
+        assert_eq!(
+            inst.semantic_connection_count(),
+            1,
+            "expected 1 semantic connection (multi-level traced), got {}; diagnostics: {:?}",
+            inst.semantic_connection_count(),
+            inst.diagnostics
+        );
+
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.name.as_str(), "c_across");
+
+        // Ultimate source: probe.sensor_out (deepest source via up connection)
+        let (src_idx, ref src_feat) = sc.ultimate_source;
+        assert_eq!(inst.component(src_idx).name.as_str(), "probe");
+        assert_eq!(src_feat.as_str(), "sensor_out");
+
+        // Ultimate destination: handler.data_in (deepest destination via down connection)
+        let (dst_idx, ref dst_feat) = sc.ultimate_destination;
+        assert_eq!(inst.component(dst_idx).name.as_str(), "handler");
+        assert_eq!(dst_feat.as_str(), "data_in");
+
+        // Connection path: c_across + c_up + c_down = 3 connections
+        assert_eq!(
+            sc.connection_path.len(),
+            3,
+            "expected 3 connections in path (across + up + down), got {}",
+            sc.connection_path.len()
+        );
+    }
+
+    #[test]
+    fn semantic_connections_up_not_at_root_skipped() {
+        let db = make_db();
+        // Up connection inside a non-root component should NOT produce a standalone
+        // semantic connection (it's consumed by the parent's across tracing).
+        let src = r#"package UpSkipPkg
+public
+  system Sensor
+    features
+      raw : out data port;
+  end Sensor;
+  system implementation Sensor.i
+  end Sensor.i;
+
+  system Wrapper
+    features
+      output : out data port;
+  end Wrapper;
+  system implementation Wrapper.i
+    subcomponents
+      s : system Sensor.i;
+    connections
+      c_up : port s.raw -> output;
+  end Wrapper.i;
+
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      w : system Wrapper.i;
+      other : system;
+    connections
+      c_across : port w.output -> other.in1;
+  end Top.impl;
+end UpSkipPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "up_skip.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("UpSkipPkg"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        // Only 1 semantic connection: the across connection c_across, which
+        // traces through the up connection inside Wrapper to find the ultimate
+        // source (s.raw). The up connection c_up inside Wrapper does not produce
+        // its own standalone semantic connection.
+        assert_eq!(
+            inst.semantic_connection_count(),
+            1,
+            "expected 1 semantic connection, got {}",
+            inst.semantic_connection_count()
+        );
+
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.name.as_str(), "c_across");
+
+        // Ultimate source should be s.raw (traced through the up connection)
+        let (src_idx, ref src_feat) = sc.ultimate_source;
+        assert_eq!(inst.component(src_idx).name.as_str(), "s");
+        assert_eq!(src_feat.as_str(), "raw");
+
+        // Connection path should be 2: c_across + c_up
+        assert_eq!(
+            sc.connection_path.len(),
+            2,
+            "expected 2 connections in path, got {}",
+            sc.connection_path.len()
+        );
+    }
+
+    // ── System Operation Mode (SOM) tests ────────────────────────────
+
+    #[test]
+    fn som_no_modes_yields_zero_soms() {
+        let db = make_db();
+        let src = r#"package NoModePkg
+public
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      sub1 : system Top;
+  end Top.impl;
+end NoModePkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "no_mode.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("NoModePkg"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        assert_eq!(
+            inst.som_count(),
+            0,
+            "system with no modal components should have 0 SOMs"
+        );
+        let summary = inst.summary();
+        assert!(
+            summary.contains("System operation modes: 0"),
+            "summary should show 0 SOMs: {}",
+            summary
+        );
+    }
+
+    #[test]
+    fn som_single_modal_component_three_modes() {
+        let db = make_db();
+        let src = r#"package SingleModalPkg
+public
+  system Controller
+    modes
+      standby : initial mode;
+      active : mode;
+      shutdown : mode;
+  end Controller;
+
+  system implementation Controller.impl
+  end Controller.impl;
+end SingleModalPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "single_modal.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("SingleModalPkg"),
+            &Name::new("Controller"),
+            &Name::new("impl"),
+        );
+
+        assert_eq!(
+            inst.som_count(),
+            3,
+            "single component with 3 modes should produce 3 SOMs; diagnostics: {:?}",
+            inst.diagnostics
+        );
+
+        // Each SOM should have exactly one mode selection and its name should match the mode.
+        let names: Vec<&str> = inst
+            .system_operation_modes
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["standby", "active", "shutdown"]);
+
+        for som in &inst.system_operation_modes {
+            assert_eq!(som.mode_selections.len(), 1);
+        }
+    }
+
+    #[test]
+    fn som_two_modal_subcomponents_cartesian_product() {
+        let db = make_db();
+        let src = r#"package TwoModalPkg
+public
+  system SensorA
+    modes
+      active : initial mode;
+      standby : mode;
+  end SensorA;
+
+  system implementation SensorA.impl
+  end SensorA.impl;
+
+  system SensorB
+    modes
+      fast : initial mode;
+      slow : mode;
+  end SensorB;
+
+  system implementation SensorB.impl
+  end SensorB.impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      sub_a : system SensorA.impl;
+      sub_b : system SensorB.impl;
+  end Top.impl;
+end TwoModalPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "two_modal.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("TwoModalPkg"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        assert_eq!(
+            inst.som_count(),
+            4,
+            "2x2 modes should produce 4 SOMs; diagnostics: {:?}",
+            inst.diagnostics
+        );
+
+        // Verify names: cartesian product should give 4 combinations.
+        let mut names: Vec<String> = inst
+            .system_operation_modes
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        names.sort();
+        let mut expected = vec![
+            "active_fast".to_string(),
+            "active_slow".to_string(),
+            "standby_fast".to_string(),
+            "standby_slow".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(names, expected);
+
+        // Each SOM should have exactly 2 mode selections (one per modal component).
+        for som in &inst.system_operation_modes {
+            assert_eq!(
+                som.mode_selections.len(),
+                2,
+                "each SOM should select a mode for each of the 2 modal components"
+            );
+        }
+
+        let summary = inst.summary();
+        assert!(
+            summary.contains("System operation modes: 4"),
+            "summary should show 4 SOMs: {}",
+            summary
+        );
+    }
+
+    #[test]
+    fn som_names_concatenated_with_underscores() {
+        let db = make_db();
+        let src = r#"package SomNamePkg
+public
+  system M1
+    modes
+      a : initial mode;
+      b : mode;
+  end M1;
+
+  system implementation M1.impl
+  end M1.impl;
+
+  system M2
+    modes
+      x : initial mode;
+      y : mode;
+      z : mode;
+  end M2;
+
+  system implementation M2.impl
+  end M2.impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      m1 : system M1.impl;
+      m2 : system M2.impl;
+  end Top.impl;
+end SomNamePkg;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "som_names.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("SomNamePkg"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        // 2 * 3 = 6 SOMs
+        assert_eq!(inst.som_count(), 6);
+
+        // Verify every name is "modeA_modeB" format with underscore separator.
+        for som in &inst.system_operation_modes {
+            let parts: Vec<&str> = som.name.split('_').collect();
+            assert_eq!(
+                parts.len(),
+                2,
+                "SOM name '{}' should have exactly 2 underscore-separated parts",
+                som.name
+            );
+        }
+    }
+
+    // ── PropertyExpr lowering tests ─────────────────────────────────
+
+    /// Helper: parse AADL source and return the typed_value of the first property
+    /// association found in the first component type.
+    fn lower_first_typed_value(src: &str) -> Option<item_tree::PropertyExpr> {
+        let db = make_db();
+        let file = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        // Get the first property association from the first component type
+        let ct = &tree.component_types[tree.component_types.iter().next()?.0];
+        let pa_idx = ct.property_associations.first()?;
+        let pa = &tree.property_associations[*pa_idx];
+        pa.typed_value.clone()
+    }
+
+    #[test]
+    fn lower_integer_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      MyProp => 42;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Integer(42, None)),
+            "expected Integer(42, None), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_integer_with_unit() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Period => 10 ms;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Integer(
+                10,
+                Some(Name::new("ms"))
+            )),
+            "expected Integer(10, Some(ms)), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_real_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Weight => 3.14;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Real("3.14".to_string(), None)),
+            "expected Real(3.14, None), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_real_with_unit() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Latency => 1.5 ms;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Real(
+                "1.5".to_string(),
+                Some(Name::new("ms"))
+            )),
+            "expected Real(1.5, Some(ms)), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_string_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Source_Name => "main.c";
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::StringLit("main.c".to_string())),
+            "expected StringLit(main.c), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_boolean_true() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Active => true;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Boolean(true)),
+            "expected Boolean(true), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_boolean_false() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Active => false;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Boolean(false)),
+            "expected Boolean(false), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_enum_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Dispatch_Protocol => Periodic;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Enum(Name::new("Periodic"))),
+            "expected Enum(Periodic), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn lower_list_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Allowed_Periods => (10, 20, 30);
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::List(items)) => {
+                assert_eq!(items.len(), 3, "expected 3 list items, got {}", items.len());
+                assert_eq!(items[0], item_tree::PropertyExpr::Integer(10, None));
+                assert_eq!(items[1], item_tree::PropertyExpr::Integer(20, None));
+                assert_eq!(items[2], item_tree::PropertyExpr::Integer(30, None));
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_record_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      MyRecord => [x => 10; y => 20;];
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::Record(fields)) => {
+                assert_eq!(
+                    fields.len(),
+                    2,
+                    "expected 2 record fields, got {}",
+                    fields.len()
+                );
+                assert_eq!(fields[0].0.as_str(), "x");
+                assert_eq!(fields[0].1, item_tree::PropertyExpr::Integer(10, None));
+                assert_eq!(fields[1].0.as_str(), "y");
+                assert_eq!(fields[1].1, item_tree::PropertyExpr::Integer(20, None));
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_range_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Size_Range => 1 .. 100;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::Range { min, max, delta }) => {
+                assert_eq!(*min, item_tree::PropertyExpr::Integer(1, None));
+                assert_eq!(*max, item_tree::PropertyExpr::Integer(100, None));
+                assert!(delta.is_none(), "expected no delta");
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_classifier_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Classifier_Ref => classifier (P::MyType);
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::ClassifierValue(cr)) => {
+                assert_eq!(cr.type_name.as_str(), "MyType");
+            }
+            other => panic!("expected ClassifierValue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_reference_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Actual_Processor_Binding => reference (cpu1);
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::ReferenceValue(path)) => {
+                assert_eq!(path, "cpu1");
+            }
+            other => panic!("expected ReferenceValue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_compute_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Compute_Deadline => compute (calc_deadline);
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::ComputedValue(name)) => {
+                assert_eq!(name.as_str(), "calc_deadline");
+            }
+            other => panic!("expected ComputedValue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_list_of_strings() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Source_Text => ("file1.c", "file2.c");
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::List(items)) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(
+                    items[0],
+                    item_tree::PropertyExpr::StringLit("file1.c".to_string())
+                );
+                assert_eq!(
+                    items[1],
+                    item_tree::PropertyExpr::StringLit("file2.c".to_string())
+                );
+            }
+            other => panic!("expected List of strings, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_empty_list() {
+        let src = r#"package P
+public
+  system S
+    properties
+      EmptyList => ();
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::List(items)) => {
+                assert!(items.is_empty(), "expected empty list, got {:?}", items);
+            }
+            other => panic!("expected empty List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn lower_preserves_raw_value_text() {
+        // Verify that the raw value string is still populated alongside typed_value
+        let db = make_db();
+        let src = r#"package P
+public
+  system S
+    properties
+      Period => 10 ms;
+  end S;
+end P;
+"#;
+        let file = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let ct = &tree.component_types[tree.component_types.iter().next().unwrap().0];
+        let pa_idx = ct.property_associations.first().unwrap();
+        let pa = &tree.property_associations[*pa_idx];
+
+        // Raw value should still be set
+        assert!(
+            !pa.value.is_empty(),
+            "raw value string should not be empty"
+        );
+        // Typed value should also be set
+        assert!(
+            pa.typed_value.is_some(),
+            "typed_value should be Some"
+        );
+    }
+
+    #[test]
+    fn lower_qualified_enum_value() {
+        let src = r#"package P
+public
+  system S
+    properties
+      Protocol => MyProps::Custom;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        match val {
+            Some(item_tree::PropertyExpr::Enum(name)) => {
+                assert_eq!(name.as_str(), "MyProps::Custom");
+            }
+            other => panic!("expected Enum(MyProps::Custom), got {:?}", other),
+        }
     }
 }

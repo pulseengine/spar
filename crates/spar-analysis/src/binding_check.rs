@@ -264,6 +264,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
                 semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
             }
         }
     }

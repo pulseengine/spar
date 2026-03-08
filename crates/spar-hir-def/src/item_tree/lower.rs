@@ -1000,10 +1000,14 @@ fn lower_single_property_association(node: &SyntaxNode) -> Option<PropertyAssoci
         .map(|mpv| extract_mode_names_from_modal(&mpv))
         .unwrap_or_default();
 
+    // Try to lower the property value into a typed PropertyExpr.
+    // Find the first value-bearing CST node child of the PROPERTY_ASSOCIATION.
+    let typed_value = find_property_value_node(node).and_then(|vn| lower_property_expr(&vn));
+
     Some(PropertyAssociationItem {
         name,
         value,
-        typed_value: None,
+        typed_value,
         is_append,
         applies_to,
         in_modes,
@@ -1057,6 +1061,517 @@ fn extract_property_value_text(node: &SyntaxNode) -> String {
     let raw = parts.join(" ");
     // Normalize whitespace
     raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Find the first property value CST node within a PROPERTY_ASSOCIATION.
+///
+/// Looks for value-bearing nodes (INTEGER_VALUE, REAL_VALUE, STRING_VALUE, etc.)
+/// that appear after the `=>` / `+=>` token.
+fn find_property_value_node(node: &SyntaxNode) -> Option<SyntaxNode> {
+    let mut past_arrow = false;
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            if tok.kind() == SyntaxKind::FAT_ARROW || tok.kind() == SyntaxKind::PLUS_ARROW {
+                past_arrow = true;
+                continue;
+            }
+        }
+        if past_arrow {
+            if let Some(n) = elem.as_node() {
+                match n.kind() {
+                    SyntaxKind::INTEGER_VALUE
+                    | SyntaxKind::REAL_VALUE
+                    | SyntaxKind::STRING_VALUE
+                    | SyntaxKind::BOOLEAN_VALUE
+                    | SyntaxKind::LIST_VALUE
+                    | SyntaxKind::RECORD_VALUE
+                    | SyntaxKind::RANGE_VALUE
+                    | SyntaxKind::CLASSIFIER_VALUE
+                    | SyntaxKind::REFERENCE_VALUE
+                    | SyntaxKind::COMPUTED_VALUE
+                    | SyntaxKind::PROPERTY_EXPRESSION => {
+                        return Some(n.clone());
+                    }
+                    SyntaxKind::APPLIES_TO
+                    | SyntaxKind::IN_BINDING
+                    | SyntaxKind::MODAL_PROPERTY_VALUE => {
+                        // Stop searching — we've passed the value region
+                        return None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Lower a CST property value node into a typed `PropertyExpr`.
+///
+/// Handles all property expression node kinds produced by the parser:
+/// INTEGER_VALUE, REAL_VALUE, STRING_VALUE, BOOLEAN_VALUE, LIST_VALUE,
+/// RECORD_VALUE, RANGE_VALUE, CLASSIFIER_VALUE, REFERENCE_VALUE,
+/// COMPUTED_VALUE, and PROPERTY_EXPRESSION (for named values/enums).
+///
+/// Returns `None` if the node cannot be lowered (the caller should fall back
+/// to `PropertyExpr::Opaque`).
+fn lower_property_expr(node: &SyntaxNode) -> Option<PropertyExpr> {
+    match node.kind() {
+        SyntaxKind::INTEGER_VALUE => lower_integer_value(node),
+        SyntaxKind::REAL_VALUE => lower_real_value(node),
+        SyntaxKind::STRING_VALUE => lower_string_value(node),
+        SyntaxKind::BOOLEAN_VALUE => lower_boolean_value(node),
+        SyntaxKind::LIST_VALUE => lower_list_value(node),
+        SyntaxKind::RECORD_VALUE => lower_record_value(node),
+        SyntaxKind::RANGE_VALUE => lower_range_value(node),
+        SyntaxKind::CLASSIFIER_VALUE => lower_classifier_value(node),
+        SyntaxKind::REFERENCE_VALUE => lower_reference_value(node),
+        SyntaxKind::COMPUTED_VALUE => lower_computed_value(node),
+        SyntaxKind::PROPERTY_EXPRESSION => lower_named_value(node),
+        _ => None,
+    }
+}
+
+/// Lower an INTEGER_VALUE node.
+///
+/// Structure: INTEGER_LIT [IDENT(unit)]
+/// The parser may also produce a signed wrapper: PROPERTY_EXPRESSION → PLUS/MINUS INTEGER_VALUE
+fn lower_integer_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut int_text: Option<String> = None;
+    let mut unit: Option<Name> = None;
+    let mut sign: i64 = 1;
+
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::INTEGER_LIT => {
+                    int_text = Some(tok.text().to_string());
+                }
+                SyntaxKind::IDENT => {
+                    unit = Some(Name::new(tok.text()));
+                }
+                SyntaxKind::MINUS => {
+                    sign = -1;
+                }
+                SyntaxKind::PLUS => {
+                    sign = 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let text = int_text?;
+    let val = parse_aadl_integer(&text)?;
+    let val = val * sign;
+
+    if let Some(u) = unit {
+        Some(PropertyExpr::Integer(val, Some(u)))
+    } else {
+        Some(PropertyExpr::Integer(val, None))
+    }
+}
+
+/// Parse an AADL integer literal.
+///
+/// Supports decimal and based literals like `16#FF#`.
+fn parse_aadl_integer(s: &str) -> Option<i64> {
+    let s = s.replace('_', "");
+    // Check for based notation: base#digits#
+    if let Some(hash_pos) = s.find('#') {
+        let base_str = &s[..hash_pos];
+        let rest = &s[hash_pos + 1..];
+        if let Some(end_hash) = rest.find('#') {
+            let digits = &rest[..end_hash];
+            let base = base_str.parse::<u32>().ok()?;
+            return i64::from_str_radix(digits, base).ok();
+        }
+    }
+    s.parse::<i64>().ok()
+}
+
+/// Lower a REAL_VALUE node.
+///
+/// Structure: REAL_LIT [IDENT(unit)]
+fn lower_real_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut real_text: Option<String> = None;
+    let mut unit: Option<Name> = None;
+    let mut negative = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::REAL_LIT => {
+                    real_text = Some(tok.text().to_string());
+                }
+                SyntaxKind::IDENT => {
+                    unit = Some(Name::new(tok.text()));
+                }
+                SyntaxKind::MINUS => {
+                    negative = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let text = real_text?;
+    let display = if negative {
+        format!("-{}", text)
+    } else {
+        text
+    };
+
+    if let Some(u) = unit {
+        Some(PropertyExpr::Real(display, Some(u)))
+    } else {
+        Some(PropertyExpr::Real(display, None))
+    }
+}
+
+/// Lower a STRING_VALUE node.
+///
+/// Structure: STRING_LIT
+fn lower_string_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    for tok in node.children_with_tokens().filter_map(|it| it.into_token()) {
+        if tok.kind() == SyntaxKind::STRING_LIT {
+            let raw = tok.text();
+            // Strip surrounding quotes
+            let unquoted = if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+                &raw[1..raw.len() - 1]
+            } else {
+                raw
+            };
+            return Some(PropertyExpr::StringLit(unquoted.to_string()));
+        }
+    }
+    None
+}
+
+/// Lower a BOOLEAN_VALUE node.
+///
+/// Structure: TRUE_KW | FALSE_KW | NOT_KW BOOLEAN_VALUE
+fn lower_boolean_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    // Check for `not` prefix
+    let mut has_not = false;
+    for tok in node.children_with_tokens().filter_map(|it| it.into_token()) {
+        match tok.kind() {
+            SyntaxKind::NOT_KW => {
+                has_not = true;
+            }
+            SyntaxKind::TRUE_KW => {
+                return Some(PropertyExpr::Boolean(!has_not));
+            }
+            SyntaxKind::FALSE_KW => {
+                return Some(PropertyExpr::Boolean(has_not));
+            }
+            _ => {}
+        }
+    }
+    // If there are child nodes (e.g., `not` wrapping another boolean expression)
+    for child in node.children() {
+        if child.kind() == SyntaxKind::BOOLEAN_VALUE {
+            if let Some(PropertyExpr::Boolean(val)) = lower_boolean_value(&child) {
+                return Some(PropertyExpr::Boolean(if has_not { !val } else { val }));
+            }
+        }
+    }
+    None
+}
+
+/// Lower a LIST_VALUE node.
+///
+/// Structure: L_PAREN [property_expression, ...] R_PAREN
+fn lower_list_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut items = Vec::new();
+    for child in node.children() {
+        if let Some(expr) = lower_property_expr(&child) {
+            items.push(expr);
+        } else if is_value_node(child.kind()) {
+            // Fallback: store as opaque
+            items.push(PropertyExpr::Opaque(
+                child.text().to_string().trim().to_string(),
+            ));
+        }
+    }
+    Some(PropertyExpr::List(items))
+}
+
+/// Lower a RECORD_VALUE node.
+///
+/// Structure: L_BRACKET [RECORD_FIELD ...] R_BRACKET
+/// RECORD_FIELD: IDENT FAT_ARROW property_expression SEMICOLON
+fn lower_record_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut fields = Vec::new();
+    for child in node.children() {
+        if child.kind() == SyntaxKind::RECORD_FIELD {
+            let field_name = first_ident_token(&child).map(|t| Name::new(t.text()));
+            // Find the value node within the record field
+            let field_value = child
+                .children()
+                .find_map(|c| lower_property_expr(&c))
+                .unwrap_or_else(|| {
+                    // Fallback: extract text after => as opaque
+                    let text = child.text().to_string();
+                    PropertyExpr::Opaque(text.trim().to_string())
+                });
+            if let Some(name) = field_name {
+                fields.push((name, field_value));
+            }
+        }
+    }
+    Some(PropertyExpr::Record(fields))
+}
+
+/// Lower a RANGE_VALUE node.
+///
+/// Structure: property_expression DOT_DOT property_expression [DELTA_VALUE]
+/// DELTA_VALUE: DELTA_KW property_expression
+fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut value_nodes: Vec<SyntaxNode> = Vec::new();
+    let mut delta_node: Option<SyntaxNode> = None;
+
+    for child in node.children() {
+        if child.kind() == SyntaxKind::DELTA_VALUE {
+            delta_node = Some(child);
+        } else if is_value_node(child.kind()) {
+            value_nodes.push(child);
+        }
+    }
+
+    // We need at least two value nodes (min and max)
+    if value_nodes.len() < 2 {
+        // Might be that the min is a token directly in the range node
+        // (e.g., `10 .. 20` where 10 is the leading token before the range was created)
+        // Try to extract them from the full node
+        return lower_range_from_tokens(node);
+    }
+
+    let min_expr = lower_property_expr(&value_nodes[0])
+        .unwrap_or_else(|| PropertyExpr::Opaque(value_nodes[0].text().to_string().trim().to_string()));
+    let max_expr = lower_property_expr(&value_nodes[1])
+        .unwrap_or_else(|| PropertyExpr::Opaque(value_nodes[1].text().to_string().trim().to_string()));
+
+    let delta = delta_node.and_then(|dn| {
+        dn.children()
+            .find_map(|c| lower_property_expr(&c))
+            .map(Box::new)
+    });
+
+    Some(PropertyExpr::Range {
+        min: Box::new(min_expr),
+        max: Box::new(max_expr),
+        delta,
+    })
+}
+
+/// Lower a range value by parsing tokens directly.
+///
+/// Handles the case where the range node contains the min value as tokens
+/// (e.g., INTEGER_LIT [IDENT] DOT_DOT ...) rather than as a child node.
+fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
+    // The RANGE_VALUE node was created by the parser wrapping everything:
+    //   INTEGER_LIT [IDENT] DOT_DOT property_expression [DELTA_VALUE]
+    // or
+    //   REAL_LIT [IDENT] DOT_DOT property_expression [DELTA_VALUE]
+    //
+    // The min value's tokens are directly in this node, while the max
+    // is a child node.
+
+    let mut min_num: Option<String> = None;
+    let mut min_unit: Option<Name> = None;
+    let mut min_is_real = false;
+    let mut min_sign: i64 = 1;
+    let mut past_dot_dot = false;
+
+    let mut max_expr: Option<PropertyExpr> = None;
+    let mut delta_expr: Option<PropertyExpr> = None;
+
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::INTEGER_LIT if !past_dot_dot => {
+                    min_num = Some(tok.text().to_string());
+                    min_is_real = false;
+                }
+                SyntaxKind::REAL_LIT if !past_dot_dot => {
+                    min_num = Some(tok.text().to_string());
+                    min_is_real = true;
+                }
+                SyntaxKind::IDENT if !past_dot_dot && min_num.is_some() => {
+                    min_unit = Some(Name::new(tok.text()));
+                }
+                SyntaxKind::MINUS if !past_dot_dot && min_num.is_none() => {
+                    min_sign = -1;
+                }
+                SyntaxKind::DOT_DOT => {
+                    past_dot_dot = true;
+                }
+                _ => {}
+            }
+        }
+        if let Some(n) = elem.as_node() {
+            if past_dot_dot {
+                if n.kind() == SyntaxKind::DELTA_VALUE {
+                    delta_expr = n.children().find_map(|c| lower_property_expr(&c));
+                } else if max_expr.is_none() {
+                    max_expr = lower_property_expr(n);
+                }
+            }
+        }
+    }
+
+    let min = if let Some(num_text) = min_num {
+        if min_is_real {
+            let display = if min_sign < 0 {
+                format!("-{}", num_text)
+            } else {
+                num_text
+            };
+            PropertyExpr::Real(display, min_unit)
+        } else {
+            let val = parse_aadl_integer(&num_text).unwrap_or(0) * min_sign;
+            PropertyExpr::Integer(val, min_unit)
+        }
+    } else {
+        return None;
+    };
+
+    let max = max_expr.unwrap_or_else(|| {
+        PropertyExpr::Opaque("?".to_string())
+    });
+
+    Some(PropertyExpr::Range {
+        min: Box::new(min),
+        max: Box::new(max),
+        delta: delta_expr.map(Box::new),
+    })
+}
+
+/// Lower a CLASSIFIER_VALUE node.
+///
+/// Structure: CLASSIFIER_KW L_PAREN CLASSIFIER_REF R_PAREN
+fn lower_classifier_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let cr = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+        .and_then(|cr| parse_classifier_ref_node(&cr))?;
+    Some(PropertyExpr::ClassifierValue(cr))
+}
+
+/// Lower a REFERENCE_VALUE node.
+///
+/// Structure: REFERENCE_KW L_PAREN CONTAINMENT_PATH R_PAREN
+fn lower_reference_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let path = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::CONTAINMENT_PATH)
+        .map(|cp| cp.text().to_string().trim().to_string())
+        .unwrap_or_default();
+    Some(PropertyExpr::ReferenceValue(path))
+}
+
+/// Lower a COMPUTED_VALUE node.
+///
+/// Structure: COMPUTE_KW L_PAREN IDENT R_PAREN
+fn lower_computed_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    // Find the IDENT inside (skip the compute keyword)
+    let mut past_lparen = false;
+    for tok in node.children_with_tokens().filter_map(|it| it.into_token()) {
+        match tok.kind() {
+            SyntaxKind::L_PAREN => {
+                past_lparen = true;
+            }
+            SyntaxKind::IDENT if past_lparen => {
+                return Some(PropertyExpr::ComputedValue(Name::new(tok.text())));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Lower a PROPERTY_EXPRESSION node (named/enum values).
+///
+/// Structure: IDENT [COLON_COLON IDENT ...] (for qualified property constant refs)
+/// or: PLUS/MINUS property_expression (signed value wrapper)
+///
+/// A bare IDENT in property context is treated as an enum literal.
+/// A qualified reference like `PS::Const` is also treated as an enum/named value.
+fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
+    // Check if this is a signed wrapper (PLUS/MINUS followed by a child expr)
+    let first_tok = node
+        .children_with_tokens()
+        .filter_map(|it| it.into_token())
+        .next();
+
+    if let Some(ref tok) = first_tok {
+        if tok.kind() == SyntaxKind::PLUS || tok.kind() == SyntaxKind::MINUS {
+            // Signed value wrapper — find the inner expression
+            let sign_negative = tok.kind() == SyntaxKind::MINUS;
+            for child in node.children() {
+                if let Some(inner) = lower_property_expr(&child) {
+                    return Some(apply_sign(inner, sign_negative));
+                }
+            }
+            return None;
+        }
+    }
+
+    // Collect all identifiers and separators to form the name
+    let mut idents: Vec<String> = Vec::new();
+    for tok in node.children_with_tokens().filter_map(|it| it.into_token()) {
+        match tok.kind() {
+            SyntaxKind::IDENT => idents.push(tok.text().to_string()),
+            k if k.is_keyword() => idents.push(tok.text().to_string()),
+            _ => {}
+        }
+    }
+
+    if idents.is_empty() {
+        return None;
+    }
+
+    // A single identifier is an enum literal
+    // Multiple identifiers (qualified) are joined with "::"
+    let full_name = idents.join("::");
+    Some(PropertyExpr::Enum(Name::new(&full_name)))
+}
+
+/// Apply a sign to a property expression (negate integers/reals).
+fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
+    if !negative {
+        return expr;
+    }
+    match expr {
+        PropertyExpr::Integer(val, unit) => PropertyExpr::Integer(-val, unit),
+        PropertyExpr::Real(val, unit) => {
+            if val.starts_with('-') {
+                PropertyExpr::Real(val[1..].to_string(), unit)
+            } else {
+                PropertyExpr::Real(format!("-{}", val), unit)
+            }
+        }
+        other => other,
+    }
+}
+
+/// Check whether a SyntaxKind represents a property value node.
+fn is_value_node(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::INTEGER_VALUE
+            | SyntaxKind::REAL_VALUE
+            | SyntaxKind::STRING_VALUE
+            | SyntaxKind::BOOLEAN_VALUE
+            | SyntaxKind::LIST_VALUE
+            | SyntaxKind::RECORD_VALUE
+            | SyntaxKind::RANGE_VALUE
+            | SyntaxKind::CLASSIFIER_VALUE
+            | SyntaxKind::REFERENCE_VALUE
+            | SyntaxKind::COMPUTED_VALUE
+            | SyntaxKind::PROPERTY_EXPRESSION
+    )
 }
 
 /// Parse a PROPERTY_REF node into a PropertyRef.
