@@ -99,6 +99,7 @@ impl WitTransform {
             with_clauses: Vec::new(),
             public_items,
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         tree
@@ -259,6 +260,7 @@ fn lower_interface(iface: &WitInterface, tree: &mut ItemTree) -> Vec<ItemRef> {
         mode_transitions: Vec::new(),
         prototypes: Vec::new(),
         property_associations: Vec::new(),
+        is_public: true,
     });
     items.push(ItemRef::ComponentType(sg_idx));
 
@@ -313,6 +315,7 @@ fn lower_function(
         mode_transitions: Vec::new(),
         prototypes: Vec::new(),
         property_associations: Vec::new(),
+        is_public: true,
     })
 }
 
@@ -431,6 +434,7 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
         mode_transitions: Vec::new(),
         prototypes: Vec::new(),
         property_associations: Vec::new(),
+        is_public: true,
     });
     ItemRef::ComponentType(ct_idx)
 }
@@ -468,6 +472,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -525,6 +530,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: vec![prop_idx, enum_prop_idx],
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -556,6 +562,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -613,6 +620,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: vec![prop_idx, flags_prop_idx],
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -630,6 +638,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -646,6 +655,7 @@ fn lower_type_def(
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
+                is_public: true,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -1221,6 +1231,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -1228,6 +1239,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let wit_text = WitTransform::item_tree_to_wit(&tree);
@@ -1265,6 +1277,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         // Create a subprogram group type with a feature referencing the subprogram
@@ -1289,6 +1302,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -1299,6 +1313,7 @@ mod tests {
                 ItemRef::ComponentType(sg_idx),
             ],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let wit_text = WitTransform::item_tree_to_wit(&tree);

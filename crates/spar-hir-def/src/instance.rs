@@ -11,6 +11,7 @@
 use la_arena::{Arena, Idx};
 use rustc_hash::FxHashMap;
 
+use crate::feature_group::{expand_feature_group, ExpandedFeature};
 use crate::item_tree::{ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
 use crate::name::{ClassifierRef, Name};
 use crate::properties::PropertyMap;
@@ -212,6 +213,7 @@ impl SystemInstance {
             system_operation_modes: Vec::new(),
         };
         instance.compute_semantic_connections();
+        instance.expand_feature_group_connections(scope);
         instance.compute_soms();
         instance
     }
@@ -500,6 +502,159 @@ impl SystemInstance {
         self.semantic_connections = semantic;
     }
 
+    /// Expand feature group connections into individual port-level semantic connections.
+    ///
+    /// Per AS5506 §9.2, when a connection references a feature group (rather than
+    /// an individual port), it represents connections between all matching features
+    /// in the source and destination feature groups. This method finds feature group
+    /// connections and creates individual `SemanticConnection` entries for each
+    /// matched port pair.
+    ///
+    /// This is called as a post-processing step after `compute_semantic_connections()`.
+    pub fn expand_feature_group_connections(&mut self, scope: &GlobalScope) {
+        let mut expanded = Vec::new();
+
+        // Collect connection indices to avoid borrow conflicts.
+        let all_conn_indices: Vec<ConnectionInstanceIdx> =
+            self.connections.iter().map(|(idx, _)| idx).collect();
+
+        for conn_idx in &all_conn_indices {
+            let conn = &self.connections[*conn_idx];
+
+            // Only process feature group connections.
+            if conn.kind != ConnectionKind::FeatureGroup {
+                continue;
+            }
+
+            let (src_end, dst_end) = match (&conn.src, &conn.dst) {
+                (Some(s), Some(d)) => (s.clone(), d.clone()),
+                _ => continue,
+            };
+            let conn_owner = conn.owner;
+            let conn_name = conn.name.clone();
+
+            // Resolve the source and destination components.
+            let src_component = self.resolve_endpoint_component(conn_owner, &src_end.subcomponent);
+            let dst_component = self.resolve_endpoint_component(conn_owner, &dst_end.subcomponent);
+
+            let (src_comp_idx, dst_comp_idx) = match (src_component, dst_component) {
+                (Some(s), Some(d)) => (s, d),
+                _ => continue,
+            };
+
+            // Look up the feature group types for both endpoints.
+            let src_expanded = self.expand_endpoint_feature_group(
+                scope, src_comp_idx, &src_end.feature,
+            );
+            let dst_expanded = self.expand_endpoint_feature_group(
+                scope, dst_comp_idx, &dst_end.feature,
+            );
+
+            let (src_features, dst_features) = match (src_expanded, dst_expanded) {
+                (Some(s), Some(d)) => (s, d),
+                _ => continue,
+            };
+
+            // Match features by name and create individual semantic connections.
+            for src_feat in &src_features {
+                for dst_feat in &dst_features {
+                    if src_feat.name.eq_ci(&dst_feat.name) {
+                        // Build the dotted feature name: group_prefix.feature_name or just feature_name
+                        let src_full_name = make_expanded_name(
+                            &src_end.feature, &src_feat.group_prefix, &src_feat.name,
+                        );
+                        let dst_full_name = make_expanded_name(
+                            &dst_end.feature, &dst_feat.group_prefix, &dst_feat.name,
+                        );
+
+                        expanded.push(SemanticConnection {
+                            name: Name::new(&format!(
+                                "{}.{}", conn_name, src_feat.name
+                            )),
+                            kind: feature_kind_to_connection_kind(src_feat.kind),
+                            ultimate_source: (src_comp_idx, src_full_name),
+                            ultimate_destination: (dst_comp_idx, dst_full_name),
+                            connection_path: vec![*conn_idx],
+                        });
+                        break; // matched; move to next src feature
+                    }
+                }
+            }
+        }
+
+        self.semantic_connections.extend(expanded);
+    }
+
+    /// Resolve the component index for a connection endpoint.
+    ///
+    /// If `subcomponent` is Some, look for a child with that name.
+    /// If None, return the owner itself.
+    fn resolve_endpoint_component(
+        &self,
+        owner: ComponentInstanceIdx,
+        subcomponent: &Option<Name>,
+    ) -> Option<ComponentInstanceIdx> {
+        match subcomponent {
+            Some(sub_name) => {
+                let owner_comp = &self.components[owner];
+                owner_comp.children.iter().find(|&&child_idx| {
+                    self.components[child_idx].name.eq_ci(sub_name)
+                }).copied()
+            }
+            None => Some(owner),
+        }
+    }
+
+    /// Expand a feature group on a component instance into its individual features.
+    ///
+    /// Looks up the component's type in the GlobalScope, finds the feature group
+    /// feature by name, then uses `expand_feature_group()` to get individual features.
+    fn expand_endpoint_feature_group(
+        &self,
+        scope: &GlobalScope,
+        component: ComponentInstanceIdx,
+        feature_name: &Name,
+    ) -> Option<Vec<ExpandedFeature>> {
+        let comp = &self.components[component];
+
+        // Check if this feature is actually a FeatureGroup in the instance features.
+        let is_fg = comp.features.iter().any(|&fi| {
+            let feat = &self.features[fi];
+            feat.name.eq_ci(feature_name) && feat.kind == FeatureKind::FeatureGroup
+        });
+
+        if !is_fg {
+            return None;
+        }
+
+        // Find the feature's classifier reference from the type declaration.
+        let type_ref = ClassifierRef::qualified(comp.package.clone(), comp.type_name.clone());
+        let resolved = scope.resolve_classifier(&comp.package, &type_ref);
+
+        let type_loc = match &resolved {
+            ResolvedClassifier::ComponentType { loc, .. } => *loc,
+            _ => return None,
+        };
+
+        let ct = scope.get_component_type(type_loc)?;
+
+        // Find the feature group feature in the type's features.
+        for &feat_idx in &ct.features {
+            let feat = scope.get_feature(type_loc.tree, feat_idx)?;
+            if feat.name.eq_ci(feature_name) && feat.kind == FeatureKind::FeatureGroup {
+                if let Some(cls_ref) = &feat.classifier {
+                    // Resolve the feature group type and expand it.
+                    let fg_name = &cls_ref.type_name;
+                    let fg_pkg = cls_ref.package.as_ref().unwrap_or(&comp.package);
+                    return Some(expand_feature_group(scope, fg_pkg, fg_name, false));
+                }
+                return None;
+            }
+        }
+
+        None
+    }
+
     /// Trace the ultimate source of a connection by following up connections
     /// inside a subcomponent.
     ///
@@ -653,6 +808,35 @@ impl SystemInstance {
             self.system_operation_modes.len(),
             self.diagnostics.len(),
         )
+    }
+}
+
+// ── Feature group expansion helpers ──────────────────────────────────
+
+/// Build a dotted feature name for an expanded feature group member.
+///
+/// The result is `fg_name.prefix.feature_name` or `fg_name.feature_name`
+/// depending on whether the expanded feature has a group prefix.
+fn make_expanded_name(fg_name: &Name, prefix: &Option<Name>, feature_name: &Name) -> Name {
+    match prefix {
+        Some(p) => Name::new(&format!("{}.{}.{}", fg_name, p, feature_name)),
+        None => Name::new(&format!("{}.{}", fg_name, feature_name)),
+    }
+}
+
+/// Map a FeatureKind to the corresponding ConnectionKind.
+fn feature_kind_to_connection_kind(kind: FeatureKind) -> ConnectionKind {
+    match kind {
+        FeatureKind::DataPort
+        | FeatureKind::EventPort
+        | FeatureKind::EventDataPort => ConnectionKind::Port,
+        FeatureKind::Parameter => ConnectionKind::Parameter,
+        FeatureKind::DataAccess
+        | FeatureKind::BusAccess
+        | FeatureKind::SubprogramAccess
+        | FeatureKind::SubprogramGroupAccess => ConnectionKind::Access,
+        FeatureKind::FeatureGroup => ConnectionKind::FeatureGroup,
+        FeatureKind::AbstractFeature => ConnectionKind::Feature,
     }
 }
 
