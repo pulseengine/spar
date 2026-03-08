@@ -34,6 +34,7 @@ pub type PrototypeBindingIdx = Idx<PrototypeBindingItem>;
 pub type FlowImplIdx = Idx<FlowImplItem>;
 pub type CallSequenceIdx = Idx<CallSequenceItem>;
 pub type SubprogramCallIdx = Idx<SubprogramCallItem>;
+pub type RenamesIdx = Idx<RenamesItem>;
 
 // ── Item Tree ──────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ pub struct ItemTree {
     pub flow_impls: Arena<FlowImplItem>,
     pub call_sequences: Arena<CallSequenceItem>,
     pub subprogram_calls: Arena<SubprogramCallItem>,
+    pub renames: Arena<RenamesItem>,
 }
 
 // ── Top-level items ────────────────────────────────────────────────
@@ -116,6 +118,8 @@ pub struct Package {
     pub public_items: Vec<ItemRef>,
     /// Items in the private section.
     pub private_items: Vec<ItemRef>,
+    /// Renames declarations within this package.
+    pub renames: Vec<RenamesIdx>,
 }
 
 /// Reference to an item in the item tree.
@@ -133,6 +137,9 @@ pub enum ItemRef {
 pub struct ComponentTypeItem {
     pub name: Name,
     pub category: ComponentCategory,
+    /// Whether this declaration is in the public section of its package.
+    /// Defaults to `true` when the section cannot be determined.
+    pub is_public: bool,
     pub extends: Option<ClassifierRef>,
     pub features: Vec<FeatureIdx>,
     pub flow_specs: Vec<FlowSpecIdx>,
@@ -150,6 +157,9 @@ pub struct ComponentImplItem {
     /// Implementation-specific name (after the dot).
     pub impl_name: Name,
     pub category: ComponentCategory,
+    /// Whether this declaration is in the public section of its package.
+    /// Defaults to `true` when the section cannot be determined.
+    pub is_public: bool,
     pub extends: Option<ClassifierRef>,
     pub subcomponents: Vec<SubcomponentIdx>,
     pub connections: Vec<ConnectionIdx>,
@@ -166,6 +176,9 @@ pub struct ComponentImplItem {
 #[derive(Debug, PartialEq, Eq)]
 pub struct FeatureGroupTypeItem {
     pub name: Name,
+    /// Whether this declaration is in the public section of its package.
+    /// Defaults to `true` when the section cannot be determined.
+    pub is_public: bool,
     pub extends: Option<ClassifierRef>,
     pub inverse_of: Option<ClassifierRef>,
     pub features: Vec<FeatureIdx>,
@@ -435,6 +448,32 @@ pub struct SubprogramCallItem {
     pub name: Name,
     /// The subprogram being called (classifier reference).
     pub called_subprogram: Option<ClassifierRef>,
+}
+
+// ── Renames ────────────────────────────────────────────────────────
+
+/// Kind of renames declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RenamesKind {
+    /// `alias renames package Other_Package;`
+    Package,
+    /// `alias renames <category> Pkg::Classifier;`
+    Classifier,
+    /// `alias renames feature group Pkg::FGT;`
+    FeatureGroup,
+}
+
+/// A renames declaration within a package (AS5506 section 4.2).
+///
+/// Example: `OtherPkg renames package Other_Package;`
+#[derive(Debug, PartialEq, Eq)]
+pub struct RenamesItem {
+    /// The alias name being introduced.
+    pub alias: Name,
+    /// The original name being aliased.
+    pub original: Name,
+    /// What kind of entity is being renamed.
+    pub kind: RenamesKind,
 }
 
 // ── Array dimensions ───────────────────────────────────────────────

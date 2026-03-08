@@ -200,6 +200,7 @@ mod tests {
 
         let fgt_idx = tree.feature_group_types.alloc(FeatureGroupTypeItem {
             name: Name::new(fg_name),
+            is_public: true,
             extends: None,
             inverse_of,
             features: feat_indices,
@@ -211,6 +212,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::FeatureGroupType(fgt_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         tree
@@ -326,6 +328,7 @@ mod tests {
 
         let fgt_output = tree.feature_group_types.alloc(FeatureGroupTypeItem {
             name: Name::new("SensorOutput"),
+            is_public: true,
             extends: None,
             inverse_of: None,
             features: vec![f0, f1],
@@ -334,6 +337,7 @@ mod tests {
 
         let fgt_input = tree.feature_group_types.alloc(FeatureGroupTypeItem {
             name: Name::new("SensorInput"),
+            is_public: true,
             extends: None,
             inverse_of: Some(ClassifierRef::type_only(Name::new("SensorOutput"))),
             features: Vec::new(),
@@ -348,6 +352,7 @@ mod tests {
                 ItemRef::FeatureGroupType(fgt_input),
             ],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
@@ -402,6 +407,7 @@ mod tests {
 
         let inner_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
             name: Name::new("InnerFG"),
+            is_public: true,
             extends: None,
             inverse_of: None,
             features: vec![inner_f0, inner_f1],
@@ -432,6 +438,7 @@ mod tests {
 
         let outer_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
             name: Name::new("OuterFG"),
+            is_public: true,
             extends: None,
             inverse_of: None,
             features: vec![outer_f0, outer_f1],
@@ -446,6 +453,7 @@ mod tests {
                 ItemRef::FeatureGroupType(outer_fgt),
             ],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
@@ -565,6 +573,7 @@ mod tests {
             with_clauses: vec![Name::new("Types")],
             public_items: Vec::new(),
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let scope = GlobalScope::from_trees(vec![

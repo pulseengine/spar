@@ -67,6 +67,15 @@ pub struct PackageScope {
     pub component_impls: FxHashMap<(CiName, CiName), ItemLoc>,
     /// Feature group types: ci_name → loc
     pub feature_group_types: FxHashMap<CiName, ItemLoc>,
+    /// Set of private component type names (ci_name) — these are only
+    /// visible within the declaring package.
+    pub private_types: rustc_hash::FxHashSet<CiName>,
+    /// Set of private component impl keys — same visibility rule.
+    pub private_impls: rustc_hash::FxHashSet<(CiName, CiName)>,
+    /// Set of private feature group type names — same visibility rule.
+    pub private_fgts: rustc_hash::FxHashSet<CiName>,
+    /// Package renames: alias (ci_name) → original package name.
+    pub package_renames: FxHashMap<CiName, Name>,
 }
 
 /// Stored property set info for resolution.
@@ -99,58 +108,34 @@ impl GlobalScope {
                     ..Default::default()
                 };
 
-                for item_ref in &pkg.public_items {
-                    match item_ref {
-                        ItemRef::ComponentType(idx) => {
-                            let ct = &tree.component_types[*idx];
-                            pkg_scope.component_types.insert(
-                                CiName::new(&ct.name),
-                                ItemLoc {
-                                    tree: tree_idx,
-                                    raw_idx: idx.into_raw().into_u32(),
-                                },
-                            );
-                        }
-                        ItemRef::ComponentImpl(idx) => {
-                            let ci = &tree.component_impls[*idx];
-                            pkg_scope.component_impls.insert(
-                                (CiName::new(&ci.type_name), CiName::new(&ci.impl_name)),
-                                ItemLoc {
-                                    tree: tree_idx,
-                                    raw_idx: idx.into_raw().into_u32(),
-                                },
-                            );
-                        }
-                        ItemRef::FeatureGroupType(idx) => {
-                            let fgt = &tree.feature_group_types[*idx];
-                            pkg_scope.feature_group_types.insert(
-                                CiName::new(&fgt.name),
-                                ItemLoc {
-                                    tree: tree_idx,
-                                    raw_idx: idx.into_raw().into_u32(),
-                                },
-                            );
-                        }
-                        ItemRef::PropertySet(idx) => {
-                            let ps = &tree.property_sets[*idx];
-                            scope.property_sets.insert(
-                                CiName::new(&ps.name),
-                                PropertySetInfo {
-                                    name: ps.name.clone(),
-                                    property_names: ps
-                                        .property_defs
-                                        .iter()
-                                        .map(|d| d.name.clone())
-                                        .collect(),
-                                    constant_names: ps
-                                        .property_constants
-                                        .iter()
-                                        .map(|c| c.name.clone())
-                                        .collect(),
-                                },
-                            );
-                        }
-                        ItemRef::AnnexLibrary => {}
+                // Register items from both public and private sections.
+                // Items from the private section are registered but marked
+                // so they can be filtered out when resolving from another package.
+                Self::register_items(
+                    &mut pkg_scope,
+                    &mut scope.property_sets,
+                    tree,
+                    tree_idx,
+                    &pkg.public_items,
+                    true,
+                );
+                Self::register_items(
+                    &mut pkg_scope,
+                    &mut scope.property_sets,
+                    tree,
+                    tree_idx,
+                    &pkg.private_items,
+                    false,
+                );
+
+                // Process renames declarations
+                for &renames_idx in &pkg.renames {
+                    let ri = &tree.renames[renames_idx];
+                    if ri.kind == crate::item_tree::RenamesKind::Package {
+                        pkg_scope.package_renames.insert(
+                            CiName::new(&ri.alias),
+                            ri.original.clone(),
+                        );
                     }
                 }
 
@@ -203,6 +188,83 @@ impl GlobalScope {
         scope
     }
 
+    /// Register items from a package section (public or private) into a PackageScope.
+    fn register_items(
+        pkg_scope: &mut PackageScope,
+        property_sets: &mut FxHashMap<CiName, PropertySetInfo>,
+        tree: &ItemTree,
+        tree_idx: usize,
+        items: &[ItemRef],
+        is_public: bool,
+    ) {
+        for item_ref in items {
+            match item_ref {
+                ItemRef::ComponentType(idx) => {
+                    let ct = &tree.component_types[*idx];
+                    let ci_name = CiName::new(&ct.name);
+                    pkg_scope.component_types.insert(
+                        ci_name.clone(),
+                        ItemLoc {
+                            tree: tree_idx,
+                            raw_idx: idx.into_raw().into_u32(),
+                        },
+                    );
+                    if !is_public {
+                        pkg_scope.private_types.insert(ci_name);
+                    }
+                }
+                ItemRef::ComponentImpl(idx) => {
+                    let ci = &tree.component_impls[*idx];
+                    let key = (CiName::new(&ci.type_name), CiName::new(&ci.impl_name));
+                    pkg_scope.component_impls.insert(
+                        key.clone(),
+                        ItemLoc {
+                            tree: tree_idx,
+                            raw_idx: idx.into_raw().into_u32(),
+                        },
+                    );
+                    if !is_public {
+                        pkg_scope.private_impls.insert(key);
+                    }
+                }
+                ItemRef::FeatureGroupType(idx) => {
+                    let fgt = &tree.feature_group_types[*idx];
+                    let ci_name = CiName::new(&fgt.name);
+                    pkg_scope.feature_group_types.insert(
+                        ci_name.clone(),
+                        ItemLoc {
+                            tree: tree_idx,
+                            raw_idx: idx.into_raw().into_u32(),
+                        },
+                    );
+                    if !is_public {
+                        pkg_scope.private_fgts.insert(ci_name);
+                    }
+                }
+                ItemRef::PropertySet(idx) => {
+                    let ps = &tree.property_sets[*idx];
+                    property_sets.insert(
+                        CiName::new(&ps.name),
+                        PropertySetInfo {
+                            name: ps.name.clone(),
+                            property_names: ps
+                                .property_defs
+                                .iter()
+                                .map(|d| d.name.clone())
+                                .collect(),
+                            constant_names: ps
+                                .property_constants
+                                .iter()
+                                .map(|c| c.name.clone())
+                                .collect(),
+                        },
+                    );
+                }
+                ItemRef::AnnexLibrary => {}
+            }
+        }
+    }
+
     /// Get an item tree by index.
     pub fn tree(&self, idx: usize) -> Option<&ItemTree> {
         self.trees.get(idx).map(|arc| arc.as_ref())
@@ -242,22 +304,38 @@ impl GlobalScope {
         from_package: &Name,
         reference: &ClassifierRef,
     ) -> ResolvedClassifier {
+        let from_key = CiName::new(from_package);
+        let is_same_package;
+
         let target_pkg = match &reference.package {
-            Some(pkg_name) => CiName::new(pkg_name),
-            None => CiName::new(from_package),
+            Some(pkg_name) => {
+                let mut key = CiName::new(pkg_name);
+                // Check if the package name is a renames alias
+                if let Some(from_scope) = self.packages.get(&from_key) {
+                    if let Some(original) = from_scope.package_renames.get(&key) {
+                        key = CiName::new(original);
+                    }
+                }
+                is_same_package = key == from_key;
+                key
+            }
+            None => {
+                is_same_package = true;
+                from_key.clone()
+            }
         };
 
-        if let Some(result) = self.resolve_in_package(&target_pkg, reference) {
+        if let Some(result) = self.resolve_in_package(&target_pkg, reference, is_same_package) {
             return result;
         }
 
         // If no explicit package, search imports
         if reference.package.is_none() {
-            let from_key = CiName::new(from_package);
             if let Some(from_scope) = self.packages.get(&from_key) {
                 for import in &from_scope.imports {
                     let import_key = CiName::new(import);
-                    if let Some(result) = self.resolve_in_package(&import_key, reference) {
+                    // Resolving from an imported package — never same package
+                    if let Some(result) = self.resolve_in_package(&import_key, reference, false) {
                         return result;
                     }
                 }
@@ -271,6 +349,7 @@ impl GlobalScope {
         &self,
         pkg_key: &CiName,
         reference: &ClassifierRef,
+        is_same_package: bool,
     ) -> Option<ResolvedClassifier> {
         let pkg_scope = self.packages.get(pkg_key)?;
 
@@ -281,6 +360,10 @@ impl GlobalScope {
                 CiName::new(impl_name),
             );
             if let Some(&loc) = pkg_scope.component_impls.get(&key) {
+                // Check visibility: private impls are only visible within the same package
+                if !is_same_package && pkg_scope.private_impls.contains(&key) {
+                    return None;
+                }
                 return Some(ResolvedClassifier::ComponentImpl {
                     package: pkg_scope.name.clone(),
                     loc,
@@ -292,6 +375,10 @@ impl GlobalScope {
         // Component type
         let type_key = CiName::new(&reference.type_name);
         if let Some(&loc) = pkg_scope.component_types.get(&type_key) {
+            // Check visibility: private types are only visible within the same package
+            if !is_same_package && pkg_scope.private_types.contains(&type_key) {
+                return None;
+            }
             return Some(ResolvedClassifier::ComponentType {
                 package: pkg_scope.name.clone(),
                 loc,
@@ -300,10 +387,67 @@ impl GlobalScope {
 
         // Feature group type
         if let Some(&loc) = pkg_scope.feature_group_types.get(&type_key) {
+            // Check visibility: private FGTs are only visible within the same package
+            if !is_same_package && pkg_scope.private_fgts.contains(&type_key) {
+                return None;
+            }
             return Some(ResolvedClassifier::FeatureGroupType {
                 package: pkg_scope.name.clone(),
                 loc,
             });
+        }
+
+        None
+    }
+
+    /// Check if a classifier in a target package is private (not visible from outside).
+    pub fn is_private_classifier(
+        &self,
+        target_package: &Name,
+        reference: &ClassifierRef,
+    ) -> bool {
+        let pkg_key = CiName::new(target_package);
+        let pkg_scope = match self.packages.get(&pkg_key) {
+            Some(s) => s,
+            None => return false,
+        };
+
+        if let Some(impl_name) = &reference.impl_name {
+            let key = (
+                CiName::new(&reference.type_name),
+                CiName::new(impl_name),
+            );
+            return pkg_scope.private_impls.contains(&key);
+        }
+
+        let type_key = CiName::new(&reference.type_name);
+        if pkg_scope.private_types.contains(&type_key) {
+            return true;
+        }
+        if pkg_scope.private_fgts.contains(&type_key) {
+            return true;
+        }
+        false
+    }
+
+    /// Resolve a package name, following renames aliases if present.
+    pub fn resolve_package_name(
+        &self,
+        from_package: &Name,
+        pkg_name: &Name,
+    ) -> Option<Name> {
+        let from_key = CiName::new(from_package);
+        let from_scope = self.packages.get(&from_key)?;
+
+        let ci = CiName::new(pkg_name);
+        // Check if it's a renames alias
+        if let Some(original) = from_scope.package_renames.get(&ci) {
+            return Some(original.clone());
+        }
+
+        // Check if it's a real package
+        if self.packages.contains_key(&ci) {
+            return Some(pkg_name.clone());
         }
 
         None

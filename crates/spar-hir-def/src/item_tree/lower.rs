@@ -38,6 +38,7 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
     let mut with_clauses = Vec::new();
     let mut public_items = Vec::new();
     let mut private_items = Vec::new();
+    let mut renames = Vec::new();
 
     // Walk children to find sections and with clauses
     for child in pkg.syntax().children() {
@@ -46,10 +47,14 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
                 collect_with_names(&child, &mut with_clauses);
             }
             SyntaxKind::PUBLIC_SECTION => {
-                lower_section(&child, tree, &mut public_items, &mut with_clauses);
+                lower_section_with_visibility(
+                    &child, tree, &mut public_items, &mut with_clauses, &mut renames, true,
+                );
             }
             SyntaxKind::PRIVATE_SECTION => {
-                lower_section(&child, tree, &mut private_items, &mut with_clauses);
+                lower_section_with_visibility(
+                    &child, tree, &mut private_items, &mut with_clauses, &mut renames, false,
+                );
             }
             _ => {}
         }
@@ -60,6 +65,7 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
         with_clauses,
         public_items,
         private_items,
+        renames,
     });
 }
 
@@ -80,11 +86,13 @@ fn collect_with_names(with_node: &SyntaxNode, names: &mut Vec<Name>) {
     }
 }
 
-fn lower_section(
+fn lower_section_with_visibility(
     section: &SyntaxNode,
     tree: &mut ItemTree,
     items: &mut Vec<ItemRef>,
     with_clauses: &mut Vec<Name>,
+    renames_out: &mut Vec<RenamesIdx>,
+    is_public: bool,
 ) {
     for child in section.children() {
         match child.kind() {
@@ -92,17 +100,17 @@ fn lower_section(
                 collect_with_names(&child, with_clauses);
             }
             SyntaxKind::COMPONENT_TYPE => {
-                if let Some(item_ref) = lower_component_type(&child, tree) {
+                if let Some(item_ref) = lower_component_type_with_visibility(&child, tree, is_public) {
                     items.push(item_ref);
                 }
             }
             SyntaxKind::COMPONENT_IMPL => {
-                if let Some(item_ref) = lower_component_impl(&child, tree) {
+                if let Some(item_ref) = lower_component_impl_with_visibility(&child, tree, is_public) {
                     items.push(item_ref);
                 }
             }
             SyntaxKind::FEATURE_GROUP_TYPE => {
-                if let Some(item_ref) = lower_feature_group_type(&child, tree) {
+                if let Some(item_ref) = lower_feature_group_type_with_visibility(&child, tree, is_public) {
                     items.push(item_ref);
                 }
             }
@@ -114,12 +122,17 @@ fn lower_section(
             SyntaxKind::ANNEX_LIBRARY => {
                 items.push(ItemRef::AnnexLibrary);
             }
+            SyntaxKind::RENAMES_CLAUSE => {
+                if let Some(idx) = lower_renames_clause(&child, tree) {
+                    renames_out.push(idx);
+                }
+            }
             _ => {}
         }
     }
 }
 
-fn lower_component_type(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRef> {
+fn lower_component_type_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
     let category = extract_category(node)?;
     let name = extract_decl_name(node)?;
 
@@ -172,6 +185,7 @@ fn lower_component_type(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRe
     let idx = tree.component_types.alloc(ComponentTypeItem {
         name,
         category,
+        is_public,
         extends,
         features,
         flow_specs,
@@ -183,7 +197,7 @@ fn lower_component_type(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRe
     Some(ItemRef::ComponentType(idx))
 }
 
-fn lower_component_impl(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRef> {
+fn lower_component_impl_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
     let category = extract_category(node)?;
 
     // Extract type_name from REALIZATION child
@@ -262,6 +276,7 @@ fn lower_component_impl(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRe
         type_name,
         impl_name,
         category,
+        is_public,
         extends,
         subcomponents,
         connections,
@@ -276,7 +291,7 @@ fn lower_component_impl(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRe
     Some(ItemRef::ComponentImpl(idx))
 }
 
-fn lower_feature_group_type(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRef> {
+fn lower_feature_group_type_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
     let name = extract_decl_name(node)?;
 
     let extends = node
@@ -305,12 +320,108 @@ fn lower_feature_group_type(node: &SyntaxNode, tree: &mut ItemTree) -> Option<It
 
     let idx = tree.feature_group_types.alloc(FeatureGroupTypeItem {
         name,
+        is_public,
         extends,
         inverse_of,
         features,
         prototypes,
     });
     Some(ItemRef::FeatureGroupType(idx))
+}
+
+// ── Renames lowering ────────────────────────────────────────────────
+
+fn lower_renames_clause(node: &SyntaxNode, tree: &mut ItemTree) -> Option<RenamesIdx> {
+    // A RENAMES_CLAUSE can be:
+    //   Named:   IDENT RENAMES_KW [PACKAGE_KW NAME | category CLASSIFIER_REF | FEATURE_KW GROUP_KW CLASSIFIER_REF]
+    //   Unnamed: RENAMES_KW [PACKAGE_KW NAME | category CLASSIFIER_REF | ...]
+    //
+    // We look for an alias (first IDENT before RENAMES_KW) and the target name.
+
+    let mut alias: Option<String> = None;
+    let mut kind = RenamesKind::Classifier;
+    let mut has_package_kw = false;
+    let mut has_feature_group = false;
+    let mut past_renames = false;
+
+    // Determine if this is a named renames (first token is IDENT before RENAMES_KW)
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::IDENT if !past_renames && alias.is_none() => {
+                    alias = Some(tok.text().to_string());
+                }
+                SyntaxKind::RENAMES_KW => {
+                    past_renames = true;
+                }
+                SyntaxKind::PACKAGE_KW if past_renames => {
+                    has_package_kw = true;
+                    kind = RenamesKind::Package;
+                }
+                SyntaxKind::FEATURE_KW if past_renames => {
+                    has_feature_group = true;
+                }
+                SyntaxKind::GROUP_KW if past_renames && has_feature_group => {
+                    kind = RenamesKind::FeatureGroup;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // We need an alias name for named renames; skip unnamed renames for now
+    let alias_name = alias?;
+
+    // Extract the target name from NAME or CLASSIFIER_REF children after renames kw
+    let original_name = if has_package_kw {
+        // `alias renames package PkgName;` — look for NAME child
+        node.children()
+            .find(|c| c.kind() == SyntaxKind::NAME)
+            .map(|n| n.text().to_string().trim().to_string())
+    } else {
+        // `alias renames <category> Pkg::Classifier;` or
+        // `alias renames feature group Pkg::FGT;`
+        // Look for CLASSIFIER_REF child or collect remaining idents
+        node.children()
+            .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+            .map(|cr| cr.text().to_string().trim().to_string())
+            .or_else(|| {
+                // Fallback: collect text after the keyword(s) before semicolon
+                let mut collecting = false;
+                let mut parts = Vec::new();
+                for elem in node.children_with_tokens() {
+                    if let Some(tok) = elem.as_token() {
+                        if tok.kind() == SyntaxKind::RENAMES_KW {
+                            collecting = true;
+                            continue;
+                        }
+                        if tok.kind() == SyntaxKind::SEMICOLON {
+                            break;
+                        }
+                        if collecting && tok.kind() == SyntaxKind::IDENT {
+                            parts.push(tok.text().to_string());
+                        }
+                    }
+                }
+                if parts.len() > 1 {
+                    // Skip alias and category tokens, take the last part as target
+                    Some(parts.last().unwrap().clone())
+                } else {
+                    None
+                }
+            })
+    };
+
+    let original = original_name?;
+    if original.is_empty() {
+        return None;
+    }
+
+    Some(tree.renames.alloc(RenamesItem {
+        alias: Name::new(&alias_name),
+        original: Name::new(&original),
+        kind,
+    }))
 }
 
 fn lower_property_set(ps: &ast::PropertySet, tree: &mut ItemTree) {
@@ -360,28 +471,50 @@ fn extract_property_set_items(
         match child.kind() {
             SyntaxKind::PROPERTY_DEFINITION => {
                 if let Some(tok) = first_ident_token(&child) {
+                    let type_def = child
+                        .children()
+                        .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                        .and_then(|pt| lower_property_type_def(&pt));
+
+                    let default_value = extract_property_def_default(&child);
+                    let applies_to = extract_applies_to_list(&child);
+
                     defs.push(PropertyDefItem {
                         name: Name::new(tok.text()),
-                        type_def: None,
-                        default_value: None,
-                        applies_to: Vec::new(),
+                        type_def,
+                        default_value,
+                        applies_to,
                     });
                 }
             }
             SyntaxKind::PROPERTY_TYPE_DECL => {
                 if let Some(tok) = first_ident_token(&child) {
+                    let type_def = child
+                        .children()
+                        .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                        .and_then(|pt| lower_property_type_def(&pt));
+
                     type_defs.push(PropertyTypeDefItem {
                         name: Name::new(tok.text()),
-                        type_def: None,
+                        type_def,
                     });
                 }
             }
             SyntaxKind::PROPERTY_CONSTANT => {
                 if let Some(tok) = first_ident_token(&child) {
+                    let type_def = child
+                        .children()
+                        .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                        .and_then(|pt| lower_property_type_def(&pt));
+
+                    // The constant value is after the FAT_ARROW
+                    let value = find_property_value_node(&child)
+                        .and_then(|vn| lower_property_expr(&vn));
+
                     constants.push(PropertyConstantItem {
                         name: Name::new(tok.text()),
-                        type_def: None,
-                        value: None,
+                        type_def,
+                        value,
                     });
                 }
             }
@@ -390,6 +523,339 @@ fn extract_property_set_items(
     }
 
     (defs, type_defs, constants)
+}
+
+// ── Property type definition lowering ──────────────────────────────
+
+/// Lower a PROPERTY_TYPE CST node into a `PropertyTypeDef`.
+///
+/// The PROPERTY_TYPE node wraps the type keywords and their arguments
+/// as produced by the parser's `property_type` rule.
+fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
+    // Collect tokens and children from the PROPERTY_TYPE node
+    let mut tokens: Vec<(SyntaxKind, String)> = Vec::new();
+    let mut child_nodes: Vec<SyntaxNode> = Vec::new();
+
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            tokens.push((tok.kind(), tok.text().to_string()));
+        }
+        if let Some(n) = elem.as_node() {
+            child_nodes.push(n.clone());
+        }
+    }
+
+    // Find the primary type keyword
+    let first_kw = tokens.iter().find(|(k, _)| {
+        matches!(
+            k,
+            SyntaxKind::AADLINTEGER_KW
+                | SyntaxKind::AADLREAL_KW
+                | SyntaxKind::AADLSTRING_KW
+                | SyntaxKind::AADLBOOLEAN_KW
+                | SyntaxKind::ENUMERATION_KW
+                | SyntaxKind::LIST_KW
+                | SyntaxKind::RANGE_KW
+                | SyntaxKind::RECORD_KW
+                | SyntaxKind::UNITS_KW
+                | SyntaxKind::CLASSIFIER_KW
+                | SyntaxKind::REFERENCE_KW
+        )
+    });
+
+    match first_kw.map(|(k, _)| *k) {
+        Some(SyntaxKind::AADLINTEGER_KW) => {
+            let units = extract_units_ref(&tokens, &child_nodes);
+            Some(PropertyTypeDef::AadlInteger { range: None, units })
+        }
+        Some(SyntaxKind::AADLREAL_KW) => {
+            let units = extract_units_ref(&tokens, &child_nodes);
+            Some(PropertyTypeDef::AadlReal {
+                range: None,
+                units,
+            })
+        }
+        Some(SyntaxKind::AADLSTRING_KW) => Some(PropertyTypeDef::AadlString),
+        Some(SyntaxKind::AADLBOOLEAN_KW) => Some(PropertyTypeDef::AadlBoolean),
+        Some(SyntaxKind::ENUMERATION_KW) => {
+            let mut variants = Vec::new();
+            let mut in_parens = false;
+            for (kind, text) in &tokens {
+                match kind {
+                    SyntaxKind::L_PAREN => in_parens = true,
+                    SyntaxKind::R_PAREN => break,
+                    SyntaxKind::IDENT if in_parens => {
+                        variants.push(Name::new(text));
+                    }
+                    _ => {}
+                }
+            }
+            Some(PropertyTypeDef::Enumeration(variants))
+        }
+        Some(SyntaxKind::LIST_KW) => {
+            // list of <type> -- inner type is a nested PROPERTY_TYPE child
+            let inner = child_nodes
+                .iter()
+                .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                .and_then(|pt| lower_property_type_def(pt))
+                .unwrap_or(PropertyTypeDef::AadlString);
+            Some(PropertyTypeDef::ListOf(Box::new(inner)))
+        }
+        Some(SyntaxKind::RANGE_KW) => {
+            // range of <type> -- inner type is a nested PROPERTY_TYPE child
+            let inner = child_nodes
+                .iter()
+                .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                .and_then(|pt| lower_property_type_def(pt))
+                .unwrap_or(PropertyTypeDef::AadlInteger {
+                    range: None,
+                    units: None,
+                });
+            Some(PropertyTypeDef::Range(Box::new(inner)))
+        }
+        Some(SyntaxKind::RECORD_KW) => {
+            let mut fields = Vec::new();
+            for child in &child_nodes {
+                if child.kind() == SyntaxKind::RECORD_FIELD {
+                    let field_name = first_ident_token(child).map(|t| Name::new(t.text()));
+                    let field_type = child
+                        .children()
+                        .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
+                        .and_then(|pt| lower_property_type_def(&pt))
+                        .unwrap_or(PropertyTypeDef::AadlString);
+                    if let Some(name) = field_name {
+                        fields.push((name, field_type));
+                    }
+                }
+            }
+            Some(PropertyTypeDef::RecordType(fields))
+        }
+        Some(SyntaxKind::UNITS_KW) => {
+            let mut units = Vec::new();
+            let mut in_parens = false;
+            let mut idx = 0;
+            while idx < tokens.len() {
+                let (kind, text) = &tokens[idx];
+                match kind {
+                    SyntaxKind::L_PAREN => in_parens = true,
+                    SyntaxKind::R_PAREN => break,
+                    SyntaxKind::IDENT if in_parens => {
+                        let unit_name = Name::new(text);
+                        // Check for `=> base * factor`
+                        if idx + 1 < tokens.len()
+                            && tokens[idx + 1].0 == SyntaxKind::FAT_ARROW
+                        {
+                            // Skip =>
+                            idx += 2;
+                            // base unit name
+                            let base_name = if idx < tokens.len()
+                                && tokens[idx].0 == SyntaxKind::IDENT
+                            {
+                                let b = Name::new(&tokens[idx].1);
+                                idx += 1;
+                                b
+                            } else {
+                                Name::new("?")
+                            };
+                            // * factor
+                            if idx < tokens.len() && tokens[idx].0 == SyntaxKind::STAR {
+                                idx += 1;
+                                let factor = if idx < tokens.len()
+                                    && (tokens[idx].0 == SyntaxKind::INTEGER_LIT
+                                        || tokens[idx].0 == SyntaxKind::REAL_LIT)
+                                {
+                                    let f = tokens[idx].1.clone();
+                                    idx += 1;
+                                    f
+                                } else {
+                                    "1".to_string()
+                                };
+                                units.push((unit_name, Some((base_name, factor))));
+                            } else {
+                                units.push((
+                                    unit_name,
+                                    Some((base_name, "1".to_string())),
+                                ));
+                            }
+                            continue; // skip normal idx increment
+                        } else {
+                            // Base unit (no conversion factor)
+                            units.push((unit_name, None));
+                        }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            Some(PropertyTypeDef::UnitsType(units))
+        }
+        Some(SyntaxKind::CLASSIFIER_KW) => {
+            // classifier [(category)]
+            let category = child_nodes
+                .iter()
+                .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+                .and_then(|cr| {
+                    let text = cr.text().to_string().trim().to_string();
+                    parse_category(&text)
+                });
+            Some(PropertyTypeDef::Classifier(category))
+        }
+        Some(SyntaxKind::REFERENCE_KW) => {
+            // reference [(category)]
+            let category = child_nodes
+                .iter()
+                .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+                .and_then(|cr| {
+                    let text = cr.text().to_string().trim().to_string();
+                    parse_category(&text)
+                });
+            Some(PropertyTypeDef::Reference(category))
+        }
+        None => {
+            // No type keyword -- could be a type reference (IDENT)
+            // The parser wraps `IDENT` in a CLASSIFIER_REF child
+            if let Some(cr) = child_nodes
+                .iter()
+                .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+            {
+                let text = cr.text().to_string().trim().to_string();
+                if !text.is_empty() {
+                    return Some(PropertyTypeDef::TypeRef(Name::new(&text)));
+                }
+            }
+            // Fallback: use the text of any IDENT token
+            for (kind, text) in &tokens {
+                if *kind == SyntaxKind::IDENT {
+                    return Some(PropertyTypeDef::TypeRef(Name::new(text)));
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Extract `units UnitTypeName` reference from token list.
+///
+/// Looks for UNITS_KW followed by a CLASSIFIER_REF child node or IDENT token.
+fn extract_units_ref(
+    tokens: &[(SyntaxKind, String)],
+    children: &[SyntaxNode],
+) -> Option<Name> {
+    let has_units_kw = tokens.iter().any(|(k, _)| *k == SyntaxKind::UNITS_KW);
+    if !has_units_kw {
+        return None;
+    }
+    // First try CLASSIFIER_REF child
+    if let Some(cr) = children
+        .iter()
+        .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+    {
+        let text = cr.text().to_string().trim().to_string();
+        if !text.is_empty() {
+            return Some(Name::new(&text));
+        }
+    }
+    // Fallback: IDENT token after UNITS_KW
+    let mut saw_units = false;
+    for (kind, text) in tokens {
+        if *kind == SyntaxKind::UNITS_KW {
+            saw_units = true;
+            continue;
+        }
+        if saw_units && *kind == SyntaxKind::IDENT {
+            return Some(Name::new(text));
+        }
+    }
+    None
+}
+
+/// Extract the default value expression from a PROPERTY_DEFINITION node.
+///
+/// The default value appears after FAT_ARROW but before APPLIES_KW.
+fn extract_property_def_default(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let mut past_type = false;
+    let mut past_arrow = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(n) = elem.as_node() {
+            if n.kind() == SyntaxKind::PROPERTY_TYPE {
+                past_type = true;
+                continue;
+            }
+            if past_arrow {
+                // Try to lower this node as a property expression
+                if let Some(expr) = lower_property_expr(n) {
+                    return Some(expr);
+                }
+            }
+        }
+        if let Some(tok) = elem.as_token() {
+            if tok.kind() == SyntaxKind::FAT_ARROW && past_type {
+                past_arrow = true;
+                continue;
+            }
+            if tok.kind() == SyntaxKind::APPLIES_KW {
+                break;
+            }
+        }
+    }
+    None
+}
+
+/// Extract the `applies to (cat1, cat2, ...)` list from a PROPERTY_DEFINITION node.
+///
+/// Returns a list of `AppliesToKind` values.
+fn extract_applies_to_list(node: &SyntaxNode) -> Vec<AppliesToKind> {
+    let mut result = Vec::new();
+    let mut past_applies_to = false;
+    let mut in_parens = false;
+
+    for elem in node.children_with_tokens() {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::APPLIES_KW => past_applies_to = true,
+                SyntaxKind::TO_KW if past_applies_to => {}
+                SyntaxKind::L_PAREN if past_applies_to => in_parens = true,
+                SyntaxKind::R_PAREN if in_parens => break,
+                SyntaxKind::ALL_KW if in_parens => {
+                    result.push(AppliesToKind::All);
+                }
+                SyntaxKind::IDENT if in_parens => {
+                    let text = tok.text();
+                    result.push(parse_applies_to_name(text));
+                }
+                _ => {}
+            }
+        }
+        if let Some(n) = elem.as_node() {
+            if in_parens && n.kind() == SyntaxKind::COMPONENT_CATEGORY {
+                let text = n.text().to_string();
+                let normalized: String =
+                    text.split_whitespace().collect::<Vec<_>>().join(" ");
+                if let Some(cat) = parse_category(&normalized) {
+                    result.push(AppliesToKind::Category(cat));
+                } else {
+                    result.push(AppliesToKind::Named(Name::new(&normalized)));
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Parse a single `applies to` entry from its text form.
+fn parse_applies_to_name(text: &str) -> AppliesToKind {
+    match text.to_lowercase().as_str() {
+        "all" => AppliesToKind::All,
+        "connection" | "connections" => AppliesToKind::Connection,
+        "flow" | "flows" => AppliesToKind::Flow,
+        "mode" | "modes" => AppliesToKind::Mode,
+        "port" | "ports" => AppliesToKind::Port,
+        "access" => AppliesToKind::Access,
+        _ => AppliesToKind::Named(Name::new(text)),
+    }
 }
 
 // ── Feature lowering ───────────────────────────────────────────────

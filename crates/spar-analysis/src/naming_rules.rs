@@ -317,6 +317,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -324,6 +325,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         tree
@@ -368,6 +370,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -375,6 +378,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         tree
@@ -487,6 +491,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -494,6 +499,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -532,6 +538,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -539,6 +546,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -575,6 +583,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -582,6 +591,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -606,6 +616,7 @@ mod tests {
             ],
             public_items: Vec::new(),
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -624,6 +635,7 @@ mod tests {
             with_clauses: vec![Name::new("Base_Types"), Name::new("mypkg")],
             public_items: Vec::new(),
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -646,6 +658,7 @@ mod tests {
             ],
             public_items: Vec::new(),
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -693,6 +706,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::PropertySet(ps_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -727,6 +741,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::PropertySet(ps_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -796,6 +811,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         // Subcomponents
@@ -844,6 +860,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         // Property set with unique names
@@ -879,6 +896,7 @@ mod tests {
                 ItemRef::PropertySet(ps_idx),
             ],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);
@@ -963,6 +981,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -970,6 +989,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let diags = check_naming_rules(&tree);

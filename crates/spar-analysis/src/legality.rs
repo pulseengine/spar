@@ -508,6 +508,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         let ci_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -524,6 +525,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -531,6 +533,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx), ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         tree
@@ -644,6 +647,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -651,6 +655,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let engine = LegalityEngine::new();
@@ -715,6 +720,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -722,6 +728,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentImpl(ci_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let engine = LegalityEngine::new();
@@ -755,6 +762,7 @@ mod tests {
             inverse_of: None,
             features: Vec::new(),
             prototypes: Vec::new(),
+            is_public: true,
         });
 
         let engine = LegalityEngine::new();
@@ -786,6 +794,7 @@ mod tests {
             inverse_of: None,
             features: vec![f],
             prototypes: Vec::new(),
+            is_public: true,
         });
 
         let engine = LegalityEngine::new();
@@ -833,12 +842,14 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
         tree.packages.alloc(Package {
             name: Name::new("Pkg"),
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         // Instance with a hierarchy violation (thread in system)
@@ -884,6 +895,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            is_public: true,
         });
 
         tree.packages.alloc(Package {
@@ -891,6 +903,7 @@ mod tests {
             with_clauses: Vec::new(),
             public_items: vec![ItemRef::ComponentType(ct_idx)],
             private_items: Vec::new(),
+            renames: Vec::new(),
         });
 
         let engine = LegalityEngine::new();
