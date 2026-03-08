@@ -70,6 +70,7 @@ pub struct ItemTree {
 
 /// AADL component category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ComponentCategory {
     System,
     Process,

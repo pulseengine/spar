@@ -53,6 +53,7 @@ pub struct AnalysisDiagnostic {
 
 /// Severity level for an analysis diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,
