@@ -1,0 +1,79 @@
+package aadlbook::icd
+
+public
+
+with base_types;
+with data_model;
+
+-- data obstacle_position
+-- properties
+-- 	Data_Model::Data_Representation => Struct;
+-- end obstacle_position;
+
+-- data implementation obstacle_position.i
+-- subcomponents
+--   present : data base_types::boolean;
+--   x       : data Base_Types::Unsigned_8;
+-- end obstacle_position.i;
+data obstacle_position
+properties
+	Data_Model::Data_Representation => Boolean;
+end obstacle_position;
+
+data speed
+properties
+	Data_Model::Data_Representation => unsigned_16;
+end speed;
+
+data picture 
+properties
+	data_model::data_representation => array;
+	data_model::base_type => classifier (Base_Types::Integer);
+	data_model::dimension => (4, 3);
+end picture; 
+
+data boolean
+properties
+	Data_Model::Data_Representation => Boolean;
+end boolean;
+
+
+data pressure
+properties
+	Data_Model::Data_Representation => Integer_8;
+end pressure;
+
+data entertainment_infos
+properties
+	Data_Model::Data_Representation => Integer_8;
+end entertainment_infos;
+
+
+data speed_cmd
+properties
+	Data_Model::Data_Representation => Integer_8;
+end speed_cmd;
+
+data brake_cmd
+properties
+	Data_Model::Data_Representation => Integer_8;
+end brake_cmd;
+
+data distance
+properties
+	Data_Model::Data_Representation => unsigned_32;
+end distance;
+
+data music
+properties
+	Data_Model::Data_Representation => Boolean;
+end music;
+
+
+data contacts
+properties
+	Data_Model::Data_Representation => Integer_8;
+end contacts;
+
+
+end aadlbook::icd;

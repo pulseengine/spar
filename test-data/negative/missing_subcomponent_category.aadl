@@ -1,0 +1,11 @@
+-- ERROR: Integer literal where component category expected in subcomponent
+package missing_subcomponent_category
+public
+    system top
+    end top;
+
+    system implementation top.i
+    subcomponents
+        sub1: 42;
+    end top.i;
+end missing_subcomponent_category;

@@ -1,0 +1,38 @@
+-- Test mode declarations and transitions
+package Modes_Test
+public
+
+  system Modal_System
+    features
+      switch : in event port;
+      data_in : in data port;
+      data_out : out data port;
+    modes
+      nominal : initial mode;
+      degraded : mode;
+      emergency : mode;
+      t1 : nominal -[switch]-> degraded;
+      t2 : degraded -[switch]-> emergency;
+      t3 : emergency -[switch]-> nominal;
+  end Modal_System;
+
+  system implementation Modal_System.impl
+    subcomponents
+      normal_proc : process Normal_Handler in modes (nominal);
+      backup_proc : process Backup_Handler in modes (degraded, emergency);
+    connections
+      c1 : port data_in -> normal_proc.input in modes (nominal);
+      c2 : port data_in -> backup_proc.input in modes (degraded, emergency);
+  end Modal_System.impl;
+
+  process Normal_Handler
+    features
+      input : in data port;
+  end Normal_Handler;
+
+  process Backup_Handler
+    features
+      input : in data port;
+  end Backup_Handler;
+
+end Modes_Test;

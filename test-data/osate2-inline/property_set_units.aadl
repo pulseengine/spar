@@ -1,0 +1,5 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testUnitLiterals)
+-- Tests: property set with units type, unit literal base references
+property set ps is
+  ut1: type units (ul1, ul2 => ul1 * 10, ul3 => ul4 * 10, ul4 => ul4 * 10);
+end ps;

@@ -1,0 +1,63 @@
+-- Extracted from OSATE2 Issue575Test.xtend
+-- Tests: feature group with inverse of, flows through feature groups,
+--        flow path through nested feature group members,
+--        end to end flow through feature group connections,
+--        in out data port in feature groups
+package issue575
+public
+
+  feature group FG
+    features
+      outMsg: out event data port;
+      inMsg: in data port;
+      inoutMsg: in out data port;
+  end FG;
+
+  system Box
+    features
+      ioports: feature group FG;
+    flows
+      outFlow: flow source ioports.outMsg;
+      inFlow: flow sink ioports.inMsg;
+  end Box;
+
+  process P
+    features
+      ioports: feature group inverse of FG;
+    flows
+      processFlow: flow path ioports.outMsg -> ioports.inMsg;
+  end P;
+
+  process implementation P.i
+    subcomponents
+      t1: thread T.i;
+    connections
+      c: feature group ioports <-> t1.ioports;
+    flows
+      processFlow: flow path ioports.outMsg -> c -> t1.threadFlow -> c -> ioports.inMsg;
+  end P.i;
+
+  thread T
+    features
+      ioports: feature group inverse of FG;
+    flows
+      threadFlow: flow path ioports.outMsg -> ioports.inMsg;
+  end T;
+
+  thread implementation T.i
+  end T.i;
+
+  system S
+  end S;
+
+  system implementation S.top
+    subcomponents
+      proc: process P.i;
+      box: system Box;
+    connections
+      c: feature group box.ioports <-> proc.ioports;
+    flows
+      f_bb_proc_bb: end to end flow box.outFlow -> c -> proc.processFlow -> c -> box.inFlow;
+  end S.top;
+
+end issue575;

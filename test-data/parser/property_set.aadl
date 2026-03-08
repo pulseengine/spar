@@ -1,0 +1,14 @@
+-- Test property set declaration
+property set My_Properties is
+
+  Max_Threads : aadlinteger applies to (process, system);
+
+  Protocol_Type : type enumeration (TCP, UDP, CAN, SPI);
+
+  Network_Protocol : My_Properties::Protocol_Type applies to (bus, virtual bus);
+
+  Bandwidth : aadlreal units My_Properties::Data_Rate_Units applies to (bus);
+
+  Data_Rate_Units : type units (bps, Kbps => bps * 1000, Mbps => Kbps * 1000);
+
+end My_Properties;

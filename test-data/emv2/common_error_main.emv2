@@ -1,0 +1,7 @@
+use types ErrorLibrary;
+use behavior ErrorLibrary::FailStop;
+
+composite error behavior
+	states
+		[a0.failstop and a1.failstop]-> failstop;
+end composite;

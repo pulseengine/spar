@@ -1,0 +1,406 @@
+--------------------------------------------------------------------------------
+--  This AADL package models a naive Flight Control Systems, adapted
+--  from a lab on scheduling analysis tools developed by C. Pagetti
+--  from ONERA; and adapted for AADL teaching classes by J. Hugues at
+--  ISAE. Only the architecture is developed, to be analyzed with
+--  Cheddar.
+--------------------------------------------------------------------------------
+
+package Flight_Control_System
+public
+  -- with processors;
+  -- with buses::I2C;
+
+  ----------
+  -- Data --
+  ----------
+
+  data pos_c
+    --  Required Position
+  properties
+      Data_Model::Data_Representation => Float;
+  end pos_c;
+
+  data pos_o
+    --  Observed Position
+  properties
+      Data_Model::Data_Representation => Float;
+  end pos_o;
+
+  data acc_c
+    --  Required Acceleration
+  properties
+      Data_Model::Data_Representation => Float;
+  end acc_c;
+
+  data acc_o
+    --  Observed Acceleration
+  properties
+      Data_Model::Data_Representation => Float;
+  end acc_o;
+
+  data angle_c
+    --  Required Angle
+  properties
+      Data_Model::Data_Representation => Float;
+  end angle_c;
+
+  data angle_o
+    --  Observed angle
+  properties
+      Data_Model::Data_Representation => Float;
+  end angle_o;
+
+  data order
+  properties
+      Data_Model::Data_Representation => Float;
+  end order;
+  
+  data angle
+  properties
+      Data_Model::Data_Representation => Float;
+  end angle;
+  
+  data position
+  properties
+      Data_Model::Data_Representation => Float;
+  end position;
+
+  data acc
+    --  Acceleration
+  properties
+      Data_Model::Data_Representation => Float;
+  end acc;
+
+  data acc_i
+  properties
+      Data_Model::Data_Representation => Float;
+  end acc_i;
+
+  data pos_i
+  properties
+      Data_Model::Data_Representation => Float;
+  end pos_i;
+
+  -------------
+  -- Threads --
+  -------------
+
+  thread NL
+    --  Navigation Law
+  features
+    pos_c : in  data port pos_c;
+    pos_o : in  data port pos_o;
+    acc_c : out data port acc_c;
+  end NL;
+
+  thread implementation NL.impl
+  properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 120 ms;
+    Compute_Execution_Time => 0 ms .. 20 ms;
+    Deadline               => 120 ms;
+    Priority               => 2;
+  end NL.impl;
+
+  thread NF
+    --  Navigation Filter
+  features
+    pos_i : in  data port pos_i;
+    pos_o : out data port pos_o;
+  end NF;
+
+  thread implementation NF.impl
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 120 ms;
+    Compute_Execution_Time => 0 ms .. 10 ms;
+    Deadline               => 120 ms;
+    Priority               => 1;
+  end NF.impl;
+
+  thread PL
+    --  Piloting Law
+  features
+    acc_c   : in  data port acc_c;
+    acc_o   : in  data port acc_o;
+    angle_c : out data port angle_c;
+  end PL;
+
+  thread implementation PL.impl
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 40 ms;
+    Compute_Execution_Time => 0 ms .. 5 ms;
+    Deadline               => 40 ms;
+    Priority               => 4;
+  end PL.impl;
+
+  thread PF
+    --  Piloting Filter
+  features
+    acc_i : in  data port acc_i;
+    acc_o : out data port acc_o;
+
+  end PF;
+
+  thread implementation PF.impl
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 40 ms;
+    Compute_Execution_Time => 0 ms .. 5 ms;
+    Deadline               => 40 ms;
+    Priority               => 3;
+  end PF.impl;
+
+  thread FL
+    --  Feddback Law
+  features
+    angle_c : in  data port angle_c;
+    angle_o : in  data port angle_o;
+    order   : out data port order;
+  
+  end FL;
+
+  thread implementation FL.impl
+  properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 2 ms;
+    Deadline               => 10 ms;
+    Priority               => 7;
+  end FL.impl;
+
+  thread FF
+    --  Feedback Filter
+  features
+    angle   : in  data port angle;
+    angle_o : out data port angle_o;
+  end FF;
+
+  thread implementation FF.impl
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Deadline               => 10 ms;
+    Priority               => 6;
+  end FF.impl;
+
+  thread AP
+    --  Acceleration Position Acquisition
+  features
+    position : in  data port position;
+    acc      : in  data port acc;
+    acc_i    : out data port acc_i;
+    pos_i    : out data port pos_i;
+  end AP;
+
+  thread implementation AP.impl
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Deadline               => 10 ms;
+    Priority               => 5;
+  end AP.impl;
+
+  thread Mock_Operator
+  features
+    pos_c : out data port pos_c;
+  end Mock_Operator;
+  thread implementation Mock_Operator.impl 
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 120 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Priority               => 8;
+  end Mock_Operator.impl;
+
+  thread Mock_GPS
+  features
+    position : out data port position;
+  end Mock_GPS;
+  thread implementation Mock_GPS.impl 
+    properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Priority               => 8;
+  end Mock_GPS.impl;
+
+  thread Mock_IMU
+  features
+    angle : out data port angle;
+    acc   : out data port acc;
+  end Mock_IMU;
+  thread implementation Mock_IMU.impl 
+  properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Priority               => 8;
+  end Mock_IMU.impl;
+
+  thread Mock_Platform
+  features
+    order : in data port order;
+  end Mock_Platform;
+  thread implementation Mock_Platform.impl 
+  properties
+    Dispatch_Protocol      => Periodic;
+    Period                 => 10 ms;
+    Compute_Execution_Time => 0 ms .. 1 ms;
+    Priority               => 1;
+  end Mock_Platform.impl;
+
+  ---------------
+  -- Processor --
+  ---------------
+
+  -- processor cpu extends processors::cpu_rma
+  -- features
+  --   i2c   : requires bus access i2c_bus;
+
+  -- end cpu;
+
+  processor cpu
+  -- features
+  --   i2c   : requires bus access i2c_bus;
+  end cpu;
+  ---------------
+  -- Processes --
+  ---------------
+
+  process node_a
+  features
+    pos_c    : in  data port pos_c;
+    order    : out data port order;
+    angle    : in  data port angle;
+    position : in  data port position;
+    acc      : in  data port acc;
+  -- flows
+  --   f1 : flow path pos_c -> order { latency => 10 ms .. 20 ms;};
+  end node_a;
+
+  process implementation node_a.impl
+  subcomponents
+    ff : thread FF;
+    nl : thread NL;
+    nf : thread NF;
+    pl : thread PL;
+    pf : thread PF;
+    fl : thread FL;
+    ap : thread AP;
+    op_mock : thread Mock_Operator;
+    gps_mock: thread Mock_GPS;
+    imu_mock: thread Mock_IMU;
+    plt_mock: thread Mock_Platform;
+  connections
+    --  Inter-thread communication
+    V1:port nl.acc_c   -> pl.acc_c;
+    V2:port pl.angle_c -> fl.angle_c;
+    V3:port nf.pos_o   -> nl.pos_o;
+    V4:port pf.acc_o   -> pl.acc_o;
+    V5:port ff.angle_o -> fl.angle_o;
+    V6:port ap.acc_i   -> pf.acc_i;
+    V7:port ap.pos_i   -> nf.pos_i;
+
+    -- Process/thread communication
+    -- V8:port pos_c     -> nl.pos_c;
+    -- V9:port fl.order -> order;
+    -- V10:port angle    -> ff.angle;
+    -- V11:port position -> ap.position;
+    -- V12:port acc       -> ap.acc;
+    V8:port op_mock.pos_c     -> nl.pos_c;
+    V9:port fl.order          -> plt_mock.order;
+    V10:port imu_mock.angle   -> ff.angle;
+    V11:port gps_mock.position -> ap.position;
+    V12:port imu_mock.acc     -> ap.acc;
+  end node_a.impl;
+
+  -------------
+  -- Devices --
+  -------------
+
+  -- device Operator
+  -- features
+  --   pos_c : out data port pos_c;
+  --   i2c   : requires bus access i2c_bus;
+  -- flows
+  --   f1 : flow source pos_c { latency => 10 ms .. 20 ms;};
+  -- end Operator;
+
+  -- device GPS
+  -- features
+  --   position : out data port position;
+  --   i2c   : requires bus access i2c_bus;
+  -- end GPS;
+
+  -- device IMU
+  -- features
+  --   angle : out data port angle;
+  --   acc   : out data port acc;
+  --   i2c   : requires bus access i2c_bus;
+  -- end IMU;
+
+  -- device Platform
+  -- features
+  --   order : in data port order;
+  --   i2c   : requires bus access i2c_bus;
+  -- flows
+  --   f1 : flow sink order { latency => 20 ms .. 20 ms;};
+  -- end Platform;
+
+  ---------
+  -- Bus --
+  ---------
+
+  -- bus I2C_bus extends buses::I2C::I2C
+  --   --  I2C bus
+  -- properties
+  --   Transmission_Time => [ Fixed => 0 ms .. 10ms;
+  --   PerByte => 0 ms .. 10 ms; ];
+  -- end I2C_bus;
+
+  ------------
+  -- System --
+  ------------
+
+  system fcs
+  end fcs;
+
+  system implementation fcs.impl
+  subcomponents
+    node_a   : process   node_a.impl;
+    cpu_rm   : processor cpu;
+    -- operator : device    Operator;
+    -- GPS      : device    GPS;
+    -- IMU      : device    IMU;
+    -- platform : device    Platform;
+    -- i2c      : bus       i2c_bus;
+
+  -- connections
+  --   V13:port operator.pos_c -> node_a.pos_c;
+  --   V14:port node_a.order   -> platform.order;
+  --   V15:port GPS.position   -> node_a.position;
+  --   V16:port IMU.angle      -> node_a.angle;
+  --   V17:port IMU.acc        -> node_a.acc;
+
+  --   V18:bus access i2c -> GPS.i2c;
+  --   V19:bus access i2c -> IMU.i2c;
+  --   V20:bus access i2c -> platform.i2c;
+  --   V21:bus access i2c -> cpu_rm.i2c;
+
+  -- flows
+  --   etef1 : end to end flow operator.f1 -> V13 -> node_a.f1 -> V14 -> platform.f1 { latency => 40 ms .. 90 ms;};
+  properties
+    Actual_Processor_Binding => reference (cpu_rm) applies to node_a;
+    -- Actual_Connection_Binding => (reference (i2c)) applies to V13;
+    -- Actual_Connection_Binding => (reference (i2c)) applies to V14;
+    -- Actual_Connection_Binding => (reference (i2c)) applies to V15;
+    -- Actual_Connection_Binding => (reference (i2c)) applies to V16;
+    -- Actual_Connection_Binding => (reference (i2c)) applies to V17;
+  end fcs.impl;
+
+end Flight_Control_System;

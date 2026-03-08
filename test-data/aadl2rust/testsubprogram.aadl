@@ -1,0 +1,130 @@
+package testsubprogram
+public 
+	with Base_Types;
+	-- with HAMR;
+
+	data Operands
+		properties
+			Data_Model::Data_Representation => Struct;
+	end Operands;
+
+	data implementation Operands.impl
+		subcomponents
+			A      : data Base_Types::Unsigned_32;
+			B      : data Base_Types::Unsigned_32;
+			result : data Base_Types::Unsigned_32;
+	end Operands.impl;
+
+	subprogram add_uint32
+		-- features
+		-- 	A: in parameter Base_Types::Unsigned_32;
+		-- 	B: in parameter Base_Types::Unsigned_32;
+		-- 	result: out parameter Base_Types::Unsigned_32;
+		properties
+			source_language => (C);
+			source_name => "operations_add";
+			source_text => ("sender.c");
+	end add_uint32;
+
+	subprogram subtract_uint32
+		-- features
+		-- 	A: in parameter Base_Types::Unsigned_32;
+		-- 	B: in parameter Base_Types::Unsigned_32;
+		-- 	result: out parameter Base_Types::Unsigned_32;
+		properties
+			source_language => (C);
+			source_name => "operations_subtract";
+			source_text => ("sender.c");
+	end subtract_uint32;
+
+	subprogram spg_run_sender
+		properties
+			source_language => (C);
+			source_name => "run_sender";
+			source_text => ("sender.c");
+	end spg_run_sender;
+
+	subprogram spg_sender_init
+		properties
+			source_language => (C);
+			source_name => "sender_init";
+			source_text => ("sender.c");
+	end spg_sender_init;
+
+	-- subprogram group operations_interface
+	-- 	features
+	-- 		add: provides subprogram access add_uint32;
+	-- 		subtract: provides subprogram access subtract_uint32;  
+	-- end operations_interface;
+
+	thread sender
+		features
+			-- operations: requires subprogram group access operations_interface;
+			op_add: requires subprogram access add_uint32;
+			op_sub: requires subprogram access subtract_uint32;
+	end sender;
+
+	thread implementation sender.impl
+		calls 
+			MyCalls: {
+				Init_Call : subprogram spg_sender_init;
+				Run_Call  : subprogram spg_run_sender;
+			};
+		-- properties 
+			-- Source_Text => ("behavior_code/components/sender/src/sender.c");
+			-- Initialize_Entrypoint_Source_Text => "sender_init";
+			-- Compute_Entrypoint_Source_Text => "run_sender";
+	end sender.impl;
+	
+	thread receiver
+		features
+			-- operations: provides subprogram group access operations_interface;
+			op_add: provides subprogram access add_uint32;
+			op_sub: provides subprogram access subtract_uint32;
+	end receiver;
+
+	thread implementation receiver.impl
+		-- properties 
+		-- 	Source_Text => ("behavior_code/components/receiver/src/receiver.c");
+	end receiver.impl;
+
+	processor proc
+	end proc;
+
+	processor implementation proc.impl
+	end proc.impl;
+
+	process top_process
+	end top_process;
+
+	process implementation top_process.impl
+		subcomponents
+			source_inst: thread sender.impl;
+			destination_inst: thread receiver.impl;
+			-- subgroup: subprogram group operations_interface;
+			-- sub1: subprogram add_uint32;
+			-- sub2: subprogram subtract_uint32;
+		connections
+			-- source_to_destination :
+			-- 	subprogram group access
+			-- 		source_inst.operations -> destination_inst.operations;
+			conn_add : subprogram access source_inst.op_add -> destination_inst.op_add;
+			conn_sub : subprogram access source_inst.op_sub -> destination_inst.op_sub;
+	end top_process.impl;
+
+	system top
+	end top;
+	
+	system implementation top.impl
+		subcomponents
+			proc : processor proc.impl;
+			testsubprogram: process top_process.impl;
+		properties
+			Actual_Processor_Binding => reference (proc) applies to testsubprogram;
+		-- 	HAMR::Platform => (seL4_TB);
+		-- annex resolute {**
+		-- 	check CASE_Tools
+		-- **};			
+	end top.impl;
+
+end testsubprogram;

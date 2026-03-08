@@ -1,0 +1,28 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckModalElementMissingModeValues)
+-- Tests: modal property values on connections (in modes within property
+--        association), with clause, contained property associations
+package testmemissingmodevalues
+public
+  with psmemmv;
+  system s1
+    features
+      af1 : feature;
+      af2 : feature;
+    modes
+      m1: initial mode;
+      m2: mode;
+      m3: mode;
+  end s1;
+  system implementation s1.i
+    subcomponents
+      asub1: abstract a1;
+    connections
+      conn1: feature asub1.af3->af2 {psmemmv::def1 => "g" in modes(m3);} in modes(m1, m2);
+      conn2: feature asub1.af3->af2 {psmemmv::def1 => "g" in modes(m1);} in modes(m1, m2);
+      conn3: feature asub1.af3->af2 {psmemmv::def1 => "g" in modes(m1); };
+  end s1.i;
+  abstract a1
+    features
+      af3: feature;
+  end a1;
+end testmemissingmodevalues;

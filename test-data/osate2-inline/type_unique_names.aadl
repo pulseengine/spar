@@ -1,0 +1,52 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckComponentTypeUniqueNames)
+-- Tests: duplicate identifier detection, prototypes vs features name conflicts,
+--        refined to vs redeclare, multi-level extends chains
+package testtypeuniquenames
+public
+  system s1
+    prototypes
+      dp7: in feature;
+      dp12: in feature;
+    features
+      af1: feature;
+      dp2: in data port;
+      dp3: in data port;
+      dp4: feature;
+      dp5: feature;
+      dp6: in event port;
+      dp10: in data port;
+      dp11: in data port;
+      dp13: in data port;
+    flows
+      fsource1: flow source af1;
+    modes
+      m1: initial mode;
+  end s1;
+  system s2 extends s1
+    prototypes
+      dp1: in feature;
+      dp7: in feature;
+      dp11: feature;
+    features
+      dp1: in feature;
+      dp2: in data port;
+      dp3: refined to in data port;
+      dp4: in data port;
+      dp5: refined to in data port;
+      dp6: in data port;
+      dp12: in data port;
+      dp13: refined to in data port;
+    flows
+      fsource1: flow source af1;
+    modes
+      m1 : mode;
+  end s2;
+  system s3 extends s2
+  end s3;
+  system s4 extends s3
+    features
+      dp3: in data port;
+      dp13: refined to in data port;
+      dp10: in data port;
+  end s4;
+end testtypeuniquenames;

@@ -1,0 +1,5 @@
+-- ERROR: Missing 'end' keyword to close the package
+package missing_end_keyword
+public
+    system s
+    end s;

@@ -1,0 +1,26 @@
+-- Test annex subclauses (parsed as opaque text blocks)
+package Annex_Test
+public
+
+  system Safety_Critical
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        data_out : out propagation {ServiceError};
+      end propagations;
+    **};
+  end Safety_Critical;
+
+  system implementation Safety_Critical.impl
+    annex EMV2 {**
+      use behavior ErrorLibrary::Simple;
+      component error behavior
+        transitions
+          Operational -[Failure]-> Failed;
+        propagations
+          Failed -[]-> data_out {ServiceError};
+      end component;
+    **};
+  end Safety_Critical.impl;
+
+end Annex_Test;

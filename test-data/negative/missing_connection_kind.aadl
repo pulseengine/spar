@@ -1,0 +1,16 @@
+-- ERROR: Missing connection kind keyword
+package missing_connection_kind
+public
+    system s
+    features
+        p1: in data port;
+        p2: out data port;
+    end s;
+
+    system implementation s.i
+    subcomponents
+        sub1: system s;
+    connections
+        c1: sub1.p2 -> p1;
+    end s.i;
+end missing_connection_kind;

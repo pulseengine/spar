@@ -1,0 +1,271 @@
+--  This AADL model is inspired from the original SunSeeker model
+--  published by SEI for the SAE AADL standard.
+
+--  $Id: toy_example.aadl 234 2007-02-21 15:14:01Z hugues $
+
+package Sunseeker
+public
+  --with Beacon_Standard;
+  with Data_Model;
+----------
+-- Data --
+----------
+
+  data Single_Float
+  properties
+    Data_Size => 4 Bytes;
+    Data_Model::Data_Representation => Integer;
+  end Single_Float;
+
+-----------------
+-- Subprograms --
+-----------------
+
+
+
+-- subprogram Sunseekerplant_Subprogram
+-- features
+--   Controllerinput : in  parameter Beacon_Standard::Single_Float;
+--   Outputfeedback  : out parameter Beacon_Standard::Single_Float;
+-- properties
+--   Source_Language        => (C);
+--   Source_Name            => "user_sunseekerplant";
+--   source_text            => ("sunseeker.c");
+-- end Sunseekerplant_Subprogram;
+
+  subprogram Plant_Receive
+  features
+    val : in parameter Single_Float;
+  properties
+    Source_Language => (C);
+    Source_Name     => "plant_receive";
+    Source_Text     => ("sunseeker.c");
+  end Plant_Receive;
+
+  subprogram Plant_Compute
+  properties
+    Source_Language => (C);
+    Source_Name     => "plant_compute";
+    Source_Text     => ("sunseeker.c");
+  end Plant_Compute;
+
+  subprogram Plant_Send
+  features
+    val : out parameter Single_Float;
+  properties
+    Source_Language => (C);
+    Source_Name     => "plant_send";
+    Source_Text     => ("sunseeker.c");
+  end Plant_Send;
+
+-- subprogram implementation Sunseekerplant_Subprogram.Beacon
+-- properties
+--   Source_Language        => (C);
+--   Source_Name            => "user_sunseekerplant";
+--   source_text            => ("sunseeker.c");
+--   -- Compute_Execution_Time => 1 Us .. 1 Us;
+-- end Sunseekerplant_Subprogram.Beacon;
+
+-- Add a subprogram that does the job of the controller
+
+-- subprogram Sunseekercontroller_Subprogram
+-- features
+--   Controllerinput : out parameter Beacon_Standard::Single_Float;
+--   Outputfeedback  : in parameter Beacon_Standard::Single_Float;
+-- properties
+--   Source_Language        => (C);
+--   Source_Name            => "user_sunseekercontroller";
+--   source_text            => ("sunseeker.c");
+-- end Sunseekercontroller_Subprogram;
+
+subprogram Controller_Receive
+  features
+    val : in parameter Single_Float;
+  properties
+    Source_Language => (C);
+    Source_Name     => "controller_receive";
+    Source_Text     => ("sunseeker.c");
+  end Controller_Receive;
+
+  subprogram Controller_Compute
+  properties
+    Source_Language => (C);
+    Source_Name     => "controller_compute";
+    Source_Text     => ("sunseeker.c");
+  end Controller_Compute;
+
+  subprogram Controller_Send
+  features
+    val : out parameter Single_Float;
+  properties
+    Source_Language => (C);
+    Source_Name     => "controller_send";
+    Source_Text     => ("sunseeker.c");
+  end Controller_Send;
+
+-- subprogram implementation Sunseekercontroller_Subprogram.Impl
+-- properties
+--   Source_Language        => (C);
+--   Source_Name            => "user_sunseekercontroller";
+--   source_text            => ("sunseeker.c");
+--   -- Compute_Execution_Time => 1 Us .. 1 Us;
+-- end Sunseekercontroller_Subprogram.Impl;
+
+
+-------------
+-- Threads --
+-------------
+
+thread Plant_Type
+features
+  Controllerinput : in  data port Beacon_Standard::Single_Float;
+  Outputfeedback  : out data port Beacon_Standard::Single_Float;
+end Plant_Type;
+
+thread implementation Plant_Type.Plant
+calls 
+  Main: {
+  -- plant: subprogram Sunseekerplant_Subprogram;
+    step1: subprogram Plant_Receive;
+    step2: subprogram Plant_Compute;
+    step3: subprogram Plant_Send;
+  };
+connections
+  -- cn0: parameter Controllerinput -> plant.Controllerinput;
+  -- cn1: parameter plant.Outputfeedback -> Outputfeedback;
+    cn0: parameter Controllerinput -> step1.val;
+    cn1: parameter step3.val -> Outputfeedback;
+properties
+  Dispatch_Protocol  => Periodic;
+  Period             => 10 ms;
+  Priority           => 10;
+  --  ATTENTION: If you modify this period, make sur to update its
+  --  value in the implementation subprograms also.
+  
+  -- Compute_Execution_Time => 1 Us .. 1 Us;
+end Plant_Type.Plant;
+
+thread Controller_Type
+features
+  Controllerinput : out data port Beacon_Standard::Single_Float;
+  Outputfeedback  :  in data port Beacon_Standard::Single_Float;
+end Controller_Type;
+
+thread implementation Controller_Type.Controller
+calls 
+  Main: {
+  -- ctrl: subprogram Sunseekercontroller_Subprogram;
+    step1: subprogram Controller_Receive;
+    step2: subprogram Controller_Compute;
+    step3: subprogram Controller_Send;
+  };
+connections
+  -- cn0: parameter Outputfeedback -> ctrl.Outputfeedback;
+  -- cn1: parameter ctrl.Controllerinput -> Controllerinput;
+    cn0: parameter Outputfeedback -> step1.val;
+    cn1: parameter step3.val -> Controllerinput;
+properties
+  Dispatch_Protocol => Periodic;
+  Period            => 10 ms;
+  Priority           => 10;
+  --  ATTENTION: If you modify this period, make sur to update its
+  --  value in the implementation subprograms also.
+
+  -- Compute_Execution_Time => 1 Us .. 1 Us;
+end Controller_Type.Controller;
+
+-------------
+-- Process --
+-------------
+
+-- process Sunseekerplant_Type
+-- features
+--   Controllerinput : in  data port Beacon_Standard::Single_Float;
+--   Outputfeedback  : out data port Beacon_Standard::Single_Float;
+-- end Sunseekerplant_Type;
+
+-- process implementation Sunseekerplant_Type.Sunseekerplant
+-- subcomponents
+--   Plant : thread Plant_type.Plant;
+-- connections
+
+--   -- The connection specification here is describing where the process
+--   -- gets its data from. So, in this case, the data port of the
+--   -- process is getting its data from the data port of its thread
+--   -- subcomponent.  Earlier in the specification, at the system level,
+--   -- we specified the connections between the process ports.
+
+--   cn0: port Controllerinput -> Plant.Controllerinput;
+--   cn1: port Plant.Outputfeedback -> Outputfeedback;
+-- end Sunseekerplant_Type.Sunseekerplant;
+
+-- process Sunseekercontroller_Type
+-- features
+--   Controllerinput : out data port Beacon_Standard::Single_Float;
+--   Outputfeedback  : in  data port Beacon_Standard::Single_Float;
+-- end Sunseekercontroller_Type;
+
+-- process implementation Sunseekercontroller_Type.Sunseekercontroller
+-- subcomponents 
+--   Controller : thread Controller_type.Controller;
+
+-- connections
+
+--   -- The connection specification here is describing where the process
+--   -- gets its data from. So, in this case, the data port of the
+--   -- process is getting its data from the data port of its thread
+--   -- subcomponent.  Earlier in the specification, at the system level,
+--   -- we specified the connections between the process ports.
+
+--   cn0: port Controller.Controllerinput -> Controllerinput;
+--   cn1: port Outputfeedback -> Controller.Outputfeedback;
+-- end Sunseekercontroller_Type.Sunseekercontroller;
+
+-----------------------------------
+-- Process for the local example --
+-----------------------------------
+
+process sunseeker_local 
+end sunseeker_local;
+
+process implementation sunseeker_local.Impl
+subcomponents
+  controller : thread Controller_type.Controller;
+  plant      : thread Plant_type.Plant;
+connections
+  cn0: port controller.Controllerinput -> plant.Controllerinput;
+  cn1: port plant.Outputfeedback -> controller.Outputfeedback;
+end sunseeker_local.Impl;
+
+---------------
+-- Processor --
+---------------
+
+processor LEON_Type
+-- properties
+--   Deployment::Execution_Platform => Native;
+end LEON_Type;
+
+processor implementation LEON_Type.LEON
+-- properties
+--   none;
+end LEON_Type.LEON;
+
+------------
+-- System --
+------------
+
+system Sunseekercontrolsystem_Type
+end Sunseekercontrolsystem_Type;
+
+system implementation Sunseekercontrolsystem_Type.Local
+subcomponents
+
+  Sunseeker : process Sunseeker::sunseeker_local.Impl;
+
+  Platform: processor LEON_Type.LEON;
+properties
+  Actual_Processor_Binding => reference (Platform) applies to Sunseeker;
+end Sunseekercontrolsystem_Type.Local;
+
+end sunseeker;

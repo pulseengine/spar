@@ -1,0 +1,29 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckFeaturesInInverseFeatureGroupType)
+-- Tests: feature group inverse with own features, bus access in fg,
+--        inverse validation (direction/access kind checking)
+package testfeaturegroupinverse
+public
+  feature group fg1
+    features
+      b1: requires bus access mybus;
+      d1: out data port;
+  end fg1;
+  feature group fg2
+    features
+      b2: requires bus access mybus;
+      d2: out data port;
+    inverse of fg1
+  end fg2;
+  feature group fg3
+    features
+      b3: provides bus access mybus;
+      d3: in data port;
+      d4: in data port;
+    inverse of fg1
+  end fg3;
+  feature group fg4
+    inverse of fg1
+  end fg4;
+  bus mybus
+  end mybus;
+end testfeaturegroupinverse;

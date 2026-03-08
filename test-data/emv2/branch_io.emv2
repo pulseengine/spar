@@ -1,0 +1,13 @@
+use types ErrorLibrary;
+use behavior ErrorLibrary::FailStop;
+
+component error behavior
+	events
+		Reset: recover event;
+	transitions
+		t0: Operational -[Failure]-> FailStop;
+		t1: FailStop -[Reset]-> Operational;
+end component;
+
+properties
+	emv2::occurrencedistribution => [probabilityValue => 0.06e-6;] applies to Failure;

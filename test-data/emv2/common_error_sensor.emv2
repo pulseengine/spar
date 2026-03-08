@@ -1,0 +1,7 @@
+use types ErrorLibrary;
+
+error propagations
+	valueout: out propagation {LateDelivery};
+	flows
+		ef0: error source valueout {LateDelivery};
+end propagations;

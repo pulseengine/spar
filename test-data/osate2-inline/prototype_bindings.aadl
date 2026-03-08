@@ -1,0 +1,78 @@
+-- Extracted from OSATE2 OtherAadl2ScopeProviderTest.xtend (testPrototypeBindings)
+-- Tests: prototype bindings on extends, prototype bindings on subcomponents,
+--        feature group prototype bindings, feature prototype references,
+--        component implementation references with prototype bindings,
+--        array subcomponents with impl refs
+package pack
+public
+  abstract a1
+  prototypes
+    proto1: abstract;
+    proto3: feature group;
+    proto5: feature group;
+    proto8: feature;
+    proto9: feature;
+    proto11: abstract;
+  end a1;
+
+  abstract a2 extends a1 (
+    proto1 => abstract a3 (
+      proto2 => in data port
+    ),
+    proto3 => feature group fgt1 (
+      proto4 => in data port
+    )
+  )
+  end a2;
+
+  abstract implementation a1.i1
+  subcomponents
+    asub1: abstract a3 [](a3.i1 (
+      proto2 => in data port
+    ));
+    asub2: abstract a3 (
+      proto2 => in data port
+    );
+  end a1.i1;
+
+  abstract implementation a1.i2 extends a1.i1 (
+    proto1 => abstract a3,
+    proto3 => feature group fgt1,
+    proto5 => feature group proto3,
+    proto8 => feature proto9,
+    proto11 => abstract proto1
+  )
+  end a1.i2;
+
+  abstract implementation a1.i3 (
+    proto1 => abstract a3
+  )
+  end a1.i3;
+
+  abstract a3
+  prototypes
+    proto2: feature;
+  end a3;
+
+  abstract implementation a3.i1
+  end a3.i1;
+
+  feature group fgt1
+  prototypes
+    proto4: feature;
+    proto6: feature group;
+    proto10: feature;
+    proto12: abstract;
+  end fgt1;
+
+  feature group fgt2 extends fgt1 (
+    proto4 => in data port,
+    proto6 => feature group proto7,
+    proto10 => feature proto4,
+    proto12 => abstract proto13
+  )
+  prototypes
+    proto7: feature group;
+    proto13: abstract;
+  end fgt2;
+end pack;

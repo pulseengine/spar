@@ -1,0 +1,25 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckSubcomponentImplementationReferenceList)
+-- Tests: component implementation reference lists on array subcomponents,
+--        property constant in array dimension, with clause for property set
+package testcompimplreflist
+public
+  with ps2;
+  abstract a
+  end a;
+  abstract implementation a.i1
+    subcomponents
+      bsub0: bus b2[2] (b2.i, b2.i);
+      bsub1: bus b2[2] (b2.i, b2.i, b2.i);
+      bsub2: bus b2.i[2] (b2.i, b2.i);
+      bsub3: bus b2[ps2::const1] (b2.i, b2.i);
+      bsub4: bus b2[2] (b1.i, b2.i);
+  end a.i1;
+  bus b1
+  end b1;
+  bus implementation b1.i
+  end b1.i;
+  bus b2
+  end b2;
+  bus implementation b2.i
+  end b2.i;
+end TestCompImplRefList;

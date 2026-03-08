@@ -1,0 +1,30 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckFlowPathElements)
+-- Tests: flow implementations referencing feature group members,
+--        feature group connections, inverse of on features
+package testCheckFlowPathElements
+public
+  system implementation S.i
+    subcomponents
+      s1: system s;
+      s2: system s;
+    connections
+      c1: feature group s1.fg_out -> s2.fg_in;
+    flows
+      fl1: flow path fg_in.p -> fg_out.p;
+      fl2: flow path fg_in -> fg_out;
+      fl3: flow path fg_in.p -> fg_out.p;
+  end S.i;
+  feature group fg
+    features
+      p: in data port;
+  end fg;
+  system s
+    features
+      fg_in: feature group fg;
+      fg_out: feature group inverse of fg;
+    flows
+      fl1: flow path fg_in -> fg_out;
+      fl2: flow path fg_in -> fg_out;
+      fl3: flow path fg_in.p -> fg_out.p ;
+    end s;
+end testCheckFlowPathElements;

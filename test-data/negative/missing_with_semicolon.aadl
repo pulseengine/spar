@@ -1,0 +1,7 @@
+-- ERROR: Missing semicolon after with clause
+package missing_with_semicolon
+public
+    with SomePackage
+    system s
+    end s;
+end missing_with_semicolon;

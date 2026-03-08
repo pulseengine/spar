@@ -1,0 +1,74 @@
+package aadlbook::integration
+
+public
+
+with aadlbook::devices;
+with aadlbook::software::image_acquisition;
+with aadlbook::software::obstacle_detection;
+with aadlbook::software::panel_control;
+with aadlbook::software::speed_controller;
+with aadlbook::software::speed_voter;
+with aadlbook::software::entertainment;
+with aadlbook::platform;
+
+system integration
+end integration;
+
+--
+--  This is the functional system. This system is designed to be independent
+--  of the underlying deployment platform. It contains all components
+--  without associating connections or processes to processors.
+--
+--  The association to an execution platform is done later, in the
+--  system implementation integration.variation1 and integration.variation2
+--
+
+system implementation integration.functional
+subcomponents
+-- input devices
+	obstacle_camera_dev    : device aadlbook::devices::camera;
+	obstacle_radar_dev     : device aadlbook::devices::radar;
+	wheel_sensor_dev       : device aadlbook::devices::speed_wheel_sensor;
+	laser_sensor_dev       : device aadlbook::devices::speed_laser_sensor;
+	panel_dev              : device aadlbook::devices::panel;
+	tire_pressure_dev      : device aadlbook::devices::tpms;
+	bluetooth_ctrl_dev     : device aadlbook::devices::bluetooth_controller;
+
+-- software and processing elements.
+    image_acquisition  : process aadlbook::software::image_acquisition::image_acquisition.i;
+    obstacle_detection : process aadlbook::software::obstacle_detection::obstacle_detection.i;
+    panel_controller   : process aadlbook::software::panel_control::panel_control.i;
+    speed_voter        : process aadlbook::software::speed_voter::speed_voter.i;
+    speed_ctrl         : process aadlbook::software::speed_controller::speed_controller.i;
+    entertainment      : process aadlbook::software::entertainment::entertainment.i;
+
+-- output devices
+	brake_dev         : device aadlbook::devices::brake;
+	acceleration_dev  : device aadlbook::devices::acceleration;
+	screen_dev        : device aadlbook::devices::screen;
+	speaker_dev       : device aadlbook::devices::speaker;
+connections
+    c00 : port obstacle_camera_dev.picture               -> image_acquisition.picture;
+    c01 : port image_acquisition.obstacle_detected   -> obstacle_detection.camera; 
+    c02 : port obstacle_radar_dev.distance_estimate      -> obstacle_detection.radar;
+    c03 : port obstacle_detection.obstacle_position  -> speed_ctrl.obstacle_position;
+    c04 : port wheel_sensor_dev.speed                    -> speed_voter.wheel_sensor;
+    c05 : port laser_sensor_dev.speed                    -> speed_voter.laser_sensor;
+    c06 : port speed_voter.speed                     -> speed_ctrl.current_speed;
+    -- c07 : port speed_voter.speed                     -> screen_dev.actual_speed;
+    c08 : port speed_ctrl.speed_cmd                  -> acceleration_dev.cmd;
+    c09 : port speed_ctrl.brake_cmd                  -> brake_dev.cmd;
+    c10 : port speed_ctrl.warning                    -> screen_dev.warning;
+    c11 : port panel_dev.increase_speed                  -> panel_controller.increase_speed;
+    c12 : port panel_dev.decrease_speed                  -> panel_controller.decrease_speed;
+    c13 : port panel_controller.desired_speed        -> speed_ctrl.desired_speed;
+    c14 : port speed_voter.speed                     -> panel_controller.current_speed;
+    -- c15 : port panel_controller.desired_speed        -> screen_dev.desired_speed;
+	c16 : port bluetooth_ctrl_dev.contacts               -> entertainment.contacts;
+	c17 : port bluetooth_ctrl_dev.music                  -> entertainment.music_in;
+	c18 : port entertainment.music_out               -> speaker_dev.music;
+	c19 : port entertainment.infos                   -> screen_dev.entertainment_infos;
+	c20 : port panel_controller.tire_pressure_out    -> screen_dev.tire_pressure;
+	c21 : port tire_pressure_dev.pressure                -> panel_controller.tire_pressure_in;
+end integration.functional;
+end aadlbook::integration;

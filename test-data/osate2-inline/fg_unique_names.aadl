@@ -1,0 +1,42 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckFeatureGroupTypeUniqueNames)
+-- Tests: duplicate identifier detection in feature groups,
+--        feature group extends with refinement, prototype conflicts
+package testfguniquenames
+public
+  feature group fg1
+    prototypes
+      af11: feature;
+      dp12: in feature;
+    features
+      dp2: in data port;
+      dp3: in data port;
+      dp4: feature;
+      dp5: feature;
+      dp6: in event port;
+      dp10: in data port;
+      dp11: feature;
+      dp13: in data port;
+  end fg1;
+  feature group fg2 extends fg1
+    prototypes
+      af11: feature;
+      dp11: feature;
+    features
+      dp1: in data port;
+      dp1: in data port;
+      dp2: in data port ;
+      dp3: refined to in data port;
+      dp4: in data port;
+      dp5: refined to in data port;
+      dp6: in data port;
+      dp12: in data port;
+      dp13: refined to in data port;
+  end fg2;
+  feature group fg3 extends fg2
+  end fg3;
+  feature group fg4 extends fg3
+    features
+      dp3: in data port;
+      dp10: in data port;
+  end fg4;
+end testfguniquenames;

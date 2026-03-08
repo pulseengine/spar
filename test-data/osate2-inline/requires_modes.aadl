@@ -1,0 +1,28 @@
+-- Extracted from OSATE2 OtherAadl2ScopeProviderTest.xtend (testModeBindings)
+-- Tests: requires modes, mode bindings (parentMode => derivedMode),
+--        prototype bindings on implementations, subcomponents in modes
+package pack
+public
+  abstract a1
+  prototypes
+    aproto1: abstract a2;
+    aproto2: abstract;
+  end a1;
+
+  abstract implementation a1.i (aproto2 => abstract a2)
+  subcomponents
+    asub1: abstract in modes (m1);
+    asub2: abstract a2 in modes (m1 => m3);
+    asub3: abstract aproto1 in modes (m1 => m3);
+    asub4: abstract aproto2 in modes (m1 => m3);
+  modes
+    m1: initial mode;
+    m2: mode;
+  end a1.i;
+
+  abstract a2
+  requires modes
+    m3: mode;
+    m4: mode;
+  end a2;
+end pack;

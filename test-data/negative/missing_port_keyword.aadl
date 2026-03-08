@@ -1,0 +1,8 @@
+-- ERROR: Missing 'port' keyword after 'data' in feature
+package missing_port_keyword
+public
+    system s
+    features
+        p1: in data;
+    end s;
+end missing_port_keyword;

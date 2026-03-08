@@ -1,0 +1,13 @@
+[package]
+name = "spar-annex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pluggable annex parser framework for AADL annexes (EMV2, BA, etc.)"
+
+[dependencies]
+spar-syntax.workspace = true
+rowan.workspace = true
+
+[dev-dependencies]

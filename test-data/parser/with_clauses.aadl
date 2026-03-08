@@ -1,0 +1,6 @@
+package With_Test
+public
+  with A;
+  with B, C;
+  with D::E;
+end With_Test;

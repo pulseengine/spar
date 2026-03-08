@@ -1,0 +1,14 @@
+-- Test public and private sections
+package Sections_Test
+public
+  system Public_System
+  end Public_System;
+
+private
+  system Private_System
+  end Private_System;
+
+  system implementation Private_System.impl
+  end Private_System.impl;
+
+end Sections_Test;

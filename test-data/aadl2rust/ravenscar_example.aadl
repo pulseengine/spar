@@ -1,0 +1,256 @@
+package Ravenscar_Example
+public
+  with Data_Model;
+  -- with Systems;
+  -- with processors;
+
+  data Workload
+  properties
+    Data_Model::Data_Representation => Integer;
+  end Workload;
+
+  data Interrupt_Counter
+  properties
+    Data_Model::Data_Representation => Integer;
+  end Interrupt_Counter;
+  
+  subprogram Regular_Producer_Op
+  features
+    add_load : out parameter Workload;
+  properties
+    Source_Language => (C);
+    Source_Name     => "regular_producer_operation";
+    Source_Text     => ("ravenscar_example.c");
+  end Regular_Producer_Op;
+
+  -- On Call Producer Logic
+  subprogram On_Call_Producer_Op
+  features
+    load_in : in parameter Workload;
+  properties
+    Source_Language => (C);
+    Source_Name     => "on_call_producer_operation";
+    Source_Text     => ("ravenscar_example.c");
+  end On_Call_Producer_Op;
+
+  -- External Event Server Logic (Split)
+  subprogram Delegate_Ext_Event_Set_Depository
+  features
+    depository_in : in parameter Interrupt_Counter;
+  properties
+    Source_Language => (C);
+    Source_Name     => "delegate_ext_event_set_depository";
+    Source_Text     => ("ravenscar_example.c");
+  end Delegate_Ext_Event_Set_Depository;
+
+  subprogram Delegate_Ext_Event_Get_Interrupt
+  features
+    interrupt_out : out parameter Interrupt_Counter;
+  properties
+    Source_Language => (C);
+    Source_Name     => "delegate_ext_event_get_interrupt";
+    Source_Text     => ("ravenscar_example.c");
+  end Delegate_Ext_Event_Get_Interrupt;
+
+  -- Activation Log Reader Logic
+  subprogram On_Signal_Op
+  features
+    interrupt_in : in parameter Interrupt_Counter;
+  properties
+    Source_Language => (C);
+    Source_Name     => "on_signal";
+    Source_Text     => ("ravenscar_example.c");
+  end On_Signal_Op;
+
+  -- External Event Source Logic
+  subprogram Event_Source_Init
+  properties
+    Source_Language => (C);
+    Source_Name     => "event_source_init";
+    Source_Text     => ("ravenscar_example.c");
+  end Event_Source_Init;
+
+  subprogram Event_Source_Op
+  features
+    interrupt_out : out parameter Interrupt_Counter;
+  properties
+    Source_Language => (C);
+    Source_Name     => "new_external_event";
+    Source_Text     => ("ravenscar_example.c");
+  end Event_Source_Op;
+
+  thread Regular_Producer
+  features
+    additional_workload : out event data port Workload;
+
+    handle_external_interrupt  : out event data port Workload;
+
+  end Regular_Producer;
+
+  thread implementation Regular_Producer.Impl
+  calls
+    MyCalls : { Spg : subprogram Regular_Producer_Op; };
+  connections
+    c1 : parameter Spg.add_load -> additional_workload;
+  properties
+    -- Compute_Entrypoint_Source_Text     => "Work.Regular_Producer_Operation";
+    Dispatch_Protocol                  => Periodic;
+    Period                             => 1000 ms;
+    Deadline                           => 500 ms;
+    Compute_Execution_Time             => 0 ms .. 498 ms;
+    Priority                           => 7;
+  end Regular_Producer.Impl;
+
+  thread On_Call_Producer
+  features
+    additional_workload_depository : in event data port Workload;
+    -- {Queue_Size                     => 5;
+    -- Compute_Entrypoint_Source_Text => "Work.On_Call_Producer_Operation";};
+
+  end On_Call_Producer;
+
+  thread implementation On_Call_Producer.Impl
+  calls
+    MyCalls : { Spg : subprogram On_Call_Producer_Op; };
+  connections
+    c1 : parameter additional_workload_depository -> Spg.load_in;
+  properties
+    Dispatch_Protocol                  => Sporadic;
+    Period                             => 1000 ms;
+    Deadline                           => 800 ms;
+    Compute_Execution_Time             => 0 ms .. 250 ms;
+    Priority                           => 5;
+    Queue_Size                         => 5;
+  end On_Call_Producer.Impl;
+
+  thread External_Event_Server
+  features
+    external_interrupt_depository : in event data port Interrupt_Counter;
+    -- {Queue_Size                     => 1;
+    -- Compute_Entrypoint_Source_Text => "Events.Delegate_External_Event";};
+
+    external_interrupt : out data port Interrupt_Counter;
+
+  end External_Event_Server;
+
+  thread implementation External_Event_Server.Impl
+  calls
+    MyCalls : { 
+      Set_Dep : subprogram Delegate_Ext_Event_Set_Depository;
+      Get_Int : subprogram Delegate_Ext_Event_Get_Interrupt;
+    };
+  connections
+    c1 : parameter external_interrupt_depository -> Set_Dep.depository_in;
+    c2 : parameter Get_Int.interrupt_out -> external_interrupt;
+  properties
+    Dispatch_Protocol                  => Sporadic;
+    Period                             => 5000 ms;
+    Deadline                           => 100 ms;
+    Compute_Execution_Time             => 0 ms .. 2 ms;
+    Priority                           => 11;
+    Queue_Size                         => 1;
+  end External_Event_Server.Impl;
+
+  thread Activation_Log_Reader
+  features
+    external_interrupt_depository : in data port Interrupt_Counter;
+
+    signal : in event data port Interrupt_Counter;
+    -- {Queue_Size                     => 1;
+    -- Compute_Entrypoint_Source_Text => "Logs.On_Signal";};
+
+  end Activation_Log_Reader;
+
+  thread implementation Activation_Log_Reader.Impl
+  calls
+    MyCalls : { Spg : subprogram On_Signal_Op; };
+  connections
+    c1 : parameter External_Interrupt_Depository -> Spg.interrupt_in;
+  properties
+    Dispatch_Protocol                  => Sporadic;
+    Period                             => 1000 ms;
+    Deadline                           => 1000 ms;
+    Compute_Execution_Time             => 0 ms .. 125 ms;
+    Priority                           => 3;
+    Queue_Size                         => 1;
+  end Activation_Log_Reader.Impl;
+
+  thread External_Event_Source
+  features
+    external_interrupt : out event data port Interrupt_Counter;
+
+  end External_Event_Source;
+
+  thread implementation External_Event_Source.Impl
+  calls
+    MyCalls : { Spg : subprogram Event_Source_Op; };
+  connections
+    c1 : parameter Spg.interrupt_out -> External_Interrupt;
+  properties
+    -- Initialize_Entrypoint_Source_Text  => "Event_Source.Init";
+    -- Compute_Entrypoint_Source_Text     => "Event_Source.New_External_Event";
+    Dispatch_Protocol                  => Periodic;
+    Period                             => 5000 ms;
+    Deadline                           => 100 ms;
+    Compute_Execution_Time             => 0 ms .. 10 ms;
+    Priority                           => 11;
+  end External_Event_Source.Impl;
+
+  process Workload_Manager
+  features
+    external_interrupt_depository : in event data port Interrupt_Counter;
+  end Workload_Manager;
+
+  process implementation Workload_Manager.Impl
+  subcomponents
+    regular_producer      : thread Regular_Producer.Impl;
+    on_call_producer      : thread On_Call_Producer.Impl;
+    external_event_server : thread External_Event_Server.Impl;
+    activation_log_reader : thread Activation_Log_Reader.Impl;
+
+  connections
+    C1:port external_interrupt_depository
+    -> external_event_server.external_interrupt_depository;
+    C2:port regular_producer.additional_workload
+    -> on_call_producer.additional_workload_depository;
+    C3:port regular_producer.handle_external_interrupt
+    -> activation_log_reader.Signal;
+    C4:port external_event_server.external_interrupt
+    -> activation_log_reader.external_interrupt_depository;
+  end Workload_Manager.Impl;
+
+  process Interrupt_Simulator
+  features
+    external_interrupt : out event data port Interrupt_Counter;
+  end Interrupt_Simulator;
+
+  process implementation Interrupt_Simulator.Impl
+  subcomponents
+    external_event_source : thread External_Event_Source;
+
+  connections
+    C5:port external_event_source.external_interrupt
+    -> external_interrupt;
+  end Interrupt_Simulator.Impl;
+
+  processor The_Processor -- extends processors::leon2
+  properties
+    Scheduling_Protocol => (POSIX_1003_HIGHEST_PRIORITY_FIRST_PROTOCOL);
+  end The_Processor;
+
+  system Case_Study -- extends Systems::Ravenscar_System
+  end Case_Study;
+
+  system implementation Case_Study.LEON_Local
+  subcomponents
+    WoM : process Ravenscar_Example::Workload_Manager.Impl;
+    Sim : process Ravenscar_Example::Interrupt_Simulator.Impl;
+    CPU_1 : processor The_Processor;
+  connections
+    C_Glob : port Sim.External_Interrupt -> WoM.External_Interrupt_Depository;
+  properties
+    Actual_Processor_Binding => reference (CPU_1) applies to WoM;
+    Actual_Processor_Binding => reference (CPU_1) applies to Sim;
+  end Case_Study.LEON_Local;
+
+end Ravenscar_Example;

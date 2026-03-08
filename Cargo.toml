@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/spar-parser",
+    "crates/spar-syntax",
+    "crates/spar-annex",
+    "crates/spar-base-db",
+    "crates/spar-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/pulseengine/spar"
+
+[workspace.dependencies]
+spar-parser = { path = "crates/spar-parser" }
+spar-syntax = { path = "crates/spar-syntax" }
+spar-annex = { path = "crates/spar-annex" }
+spar-base-db = { path = "crates/spar-base-db" }
+rowan = "0.16"
+salsa = "0.26"

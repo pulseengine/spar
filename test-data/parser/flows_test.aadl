@@ -1,0 +1,45 @@
+-- Test flow specifications and implementations
+package Flows_Test
+public
+
+  system Router
+    features
+      input1 : in data port;
+      input2 : in data port;
+      output1 : out data port;
+      output2 : out data port;
+    flows
+      -- Flow source
+      f_src : flow source output1;
+      -- Flow sink
+      f_sink : flow sink input1;
+      -- Flow path
+      f_path : flow path input1 -> output1;
+      f_path2 : flow path input2 -> output2;
+  end Router;
+
+  system implementation Router.impl
+    subcomponents
+      proc : process Data_Processor.impl;
+    connections
+      c1 : port input1 -> proc.p_in;
+      c2 : port proc.p_out -> output1;
+    flows
+      f_path : flow path input1 -> c1 -> proc.internal -> c2 -> output1;
+      -- End to end flow
+      e2e : end to end flow proc.f1 -> c2 -> output1;
+  end Router.impl;
+
+  process Data_Processor
+    features
+      p_in : in data port;
+      p_out : out data port;
+    flows
+      internal : flow path p_in -> p_out;
+      f1 : flow source p_out;
+  end Data_Processor;
+
+  process implementation Data_Processor.impl
+  end Data_Processor.impl;
+
+end Flows_Test;

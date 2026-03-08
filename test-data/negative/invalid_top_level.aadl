@@ -1,0 +1,3 @@
+-- ERROR: Top level must start with 'package' or 'property set'
+system invalid_start
+end invalid_start;

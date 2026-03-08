@@ -1,0 +1,8 @@
+use types ErrorLibrary;
+use behavior ErrorLibrary::FailStop;
+
+composite error behavior
+	states
+		[BTCU_Error_Root.FailedPermanent]-> FailStop;
+		[IO.FailStop]-> FailStop;
+end composite;

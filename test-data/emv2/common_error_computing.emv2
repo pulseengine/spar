@@ -1,0 +1,10 @@
+use types ErrorLibrary;
+
+error propagations
+	valuein: in propagation {LateDelivery};
+	valueout1: out propagation {ServiceError};
+	valueout2: out propagation {ServiceError};
+	flows
+		ef0: error path valuein {LateDelivery} -> valueout1 {ServiceError};
+		ef1: error path valuein {LateDelivery} -> valueout2 {ServiceError};
+end propagations;

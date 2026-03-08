@@ -1,0 +1,31 @@
+-- Extracted from OSATE2 Issue448Test.xtend
+-- Tests: array subcomponents with dimensions, connection patterns,
+--        refined to connection, extends on implementation,
+--        properties with applies to
+package issue448
+public
+  system test_sys
+  end test_sys;
+
+  system implementation test_sys.impl
+    subcomponents
+      sc1: system example;
+      sca: system example [5];
+    connections
+      c1: port sc1.odps -> sca.idps;
+    properties
+      Connection_Pattern => ((One_To_All)) applies to c1;
+  end test_sys.impl;
+
+  system implementation test_sys.impl2 extends test_sys.impl
+    connections
+      c1: refined to port;
+  end test_sys.impl2;
+
+  system example
+    features
+      idps: in data port;
+      odps: out data port;
+  end example;
+
+end issue448;

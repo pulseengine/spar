@@ -1,0 +1,9 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testArraySizeIsAadlintegerNoUnits)
+-- Tests: array dimension using a property reference (Max_Time)
+package testArraySize
+public
+  abstract a
+  features
+    p: in data port [Max_Time];
+  end a;
+end testArraySize;

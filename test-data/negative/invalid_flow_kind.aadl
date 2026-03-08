@@ -1,0 +1,10 @@
+-- ERROR: Invalid flow kind ('input' is not source/sink/path)
+package invalid_flow_kind
+public
+    system s
+    features
+        p1: in data port;
+    flows
+        f1: flow input p1;
+    end s;
+end invalid_flow_kind;

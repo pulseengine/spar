@@ -1,0 +1,4 @@
+-- ERROR: Missing semicolon after 'end Name'
+package missing_end_semicolon
+public
+end missing_end_semicolon

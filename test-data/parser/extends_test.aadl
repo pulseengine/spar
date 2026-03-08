@@ -1,0 +1,26 @@
+-- Test type extension and implementation extension
+package Extends_Test
+public
+
+  system Base_System
+    features
+      p1 : in data port;
+  end Base_System;
+
+  system Extended_System extends Base_System
+    features
+      p2 : out data port;
+  end Extended_System;
+
+  system implementation Base_System.basic
+  end Base_System.basic;
+
+  system implementation Extended_System.full extends Base_System.basic
+    subcomponents
+      sub1 : process Worker;
+  end Extended_System.full;
+
+  process Worker
+  end Worker;
+
+end Extends_Test;

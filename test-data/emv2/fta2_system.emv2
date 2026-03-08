@@ -1,0 +1,18 @@
+use types ErrorModelLibrary;
+use behavior ErrorModelLibrary::Simple;
+
+error propagations
+	datain: in propagation {BadValue};
+	externalEffect: out propagation {BadValue};
+	flows
+		f0: error sink datain {BadValue};
+end propagations;
+
+component error behavior
+	transitions
+		t0: Operational -[datain {BadValue}]-> Failed;
+end component;
+
+propagation paths
+	externalEffect: propagation point;
+end paths;

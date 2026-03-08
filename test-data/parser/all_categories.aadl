@@ -1,0 +1,47 @@
+-- Test all 14 AADL component categories
+package All_Categories
+public
+
+  abstract A_Type
+  end A_Type;
+
+  system S_Type
+  end S_Type;
+
+  process P_Type
+  end P_Type;
+
+  thread T_Type
+  end T_Type;
+
+  thread group TG_Type
+  end TG_Type;
+
+  subprogram SP_Type
+  end SP_Type;
+
+  subprogram group SPG_Type
+  end SPG_Type;
+
+  processor Proc_Type
+  end Proc_Type;
+
+  virtual processor VProc_Type
+  end VProc_Type;
+
+  memory Mem_Type
+  end Mem_Type;
+
+  bus Bus_Type
+  end Bus_Type;
+
+  virtual bus VBus_Type
+  end VBus_Type;
+
+  device Dev_Type
+  end Dev_Type;
+
+  data D_Type
+  end D_Type;
+
+end All_Categories;

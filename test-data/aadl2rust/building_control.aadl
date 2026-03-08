@@ -1,0 +1,147 @@
+package BuildingControl
+public
+	with Base_Types, Data_Model;
+
+	system BuildingControlDemo
+		-- features
+		-- 	setpoint: in event data port SetPoint;
+	end BuildingControlDemo;
+
+	system implementation BuildingControlDemo.Impl
+		subcomponents
+			proc: processor TempControlProcessor.Impl;
+			tcp: process TempControlProcess.Impl;
+		-- connections
+		-- 	sp: port setpoint -> tcp.setpoint;
+		properties
+			Actual_Processor_Binding => reference (proc) applies to tcp;
+		-- annex resolute {**
+		-- 	check CASE_Tools
+		-- **};
+
+	end BuildingControlDemo.Impl;
+
+	processor TempControlProcessor
+	end TempControlProcessor;
+
+	processor implementation TempControlProcessor.Impl
+	end TempControlProcessor.Impl;
+
+	process TempControlProcess
+		-- features
+		-- 	setpoint: in event data port SetPoint;
+	end TempControlProcess;
+
+	process implementation TempControlProcess.Impl
+		subcomponents
+			tempsensor: thread TempSensor.Impl;
+			tempcontrol: thread TempControl.Impl;
+			fan: thread Fan.Impl;
+			driver: thread SetPointDriver.Impl;
+		connections
+			sp: port driver.setpoint -> tempcontrol.setpoint;
+			ct: port tempsensor.currenttemp -> tempcontrol.currenttemp;
+			tc: port tempsensor.tempchanged -> tempcontrol.tempchanged;
+			fc: port tempcontrol.fancmd -> fan.fancmd;
+			fa: port fan.fanack -> tempcontrol.fanack;
+	end TempControlProcess.Impl;
+
+	thread TempSensor
+		features
+			currenttemp: out data port Temperature;
+			tempchanged: out event port;
+	end TempSensor;
+
+	thread implementation TempSensor.Impl
+		properties
+			Dispatch_Protocol => Periodic;
+			Period => 1000 ms;
+			Stack_Size => 114688 Bytes;
+			Priority => 1;
+	end TempSensor.Impl;
+
+	thread Fan
+		features
+			fancmd: in event data port FanCmd;
+			fanack: out event data port FanAck;		
+	end Fan;
+
+	thread implementation Fan.Impl
+		properties
+			Dispatch_Protocol => Sporadic;
+			Period => 1000 ms;
+			Stack_Size => 114688 Bytes;	
+			Priority => 1;
+	end Fan.Impl;
+
+	thread TempControl
+		features
+			currenttemp: in data port Temperature;
+			tempchanged: in event port;
+			fanack: in event data port FanAck;
+			setpoint: in event data port SetPoint;
+			fancmd: out event data port FanCmd;		
+	end TempControl;
+
+	thread implementation TempControl.Impl
+		properties
+			Dispatch_Protocol => Sporadic;
+			Period => 1000 ms;
+			Stack_Size => 114688 Bytes;	
+			Priority => 1;
+	end TempControl.Impl;
+
+	thread SetPointDriver
+		features
+			setpoint: out event data port SetPoint;
+	end SetPointDriver;
+
+	thread implementation SetPointDriver.Impl
+		properties
+			Dispatch_Protocol => Periodic;
+			Period => 5000 ms;
+			Stack_Size => 114688 Bytes;
+			Priority => 1;
+	end SetPointDriver.Impl;
+
+	data Temperature
+		properties
+			Data_Model::Data_Representation => Struct;
+	end Temperature;
+
+	data implementation Temperature.Impl
+		subcomponents
+			degrees: data Base_Types::Float_32;
+			unit: data TempUnit;
+	end Temperature.Impl;
+
+	data SetPoint
+		properties
+			Data_Model::Data_Representation => Struct;
+	end SetPoint;
+
+	data implementation SetPoint.Impl
+		subcomponents
+			low: data Temperature;
+			high: data Temperature;
+	end SetPoint.Impl;
+
+	data TempUnit
+		properties
+			Data_Model::Data_Representation => Enum;
+			Data_Model::Enumerators => ("Fahrenheit", "Celsius", "Kelvin");
+	end TempUnit;
+
+	data FanAck
+		properties
+			Data_Model::Data_Representation => Enum;
+			Data_Model::Enumerators => ("Ok", "Error");
+	end FanAck;
+
+	data FanCmd
+		properties
+			Data_Model::Data_Representation => Enum;
+			Data_Model::Enumerators => ("On", "Off");
+	end FanCmd;
+
+end BuildingControl;

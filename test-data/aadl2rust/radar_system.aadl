@@ -1,0 +1,437 @@
+-- Radar system - (AADL Model - V 1.4)
+-- --
+-- Created on March 23, 2009 by Nader KHAMMASSI (Virtualys - http://www.virtualys.com/)
+-- This AADL model of a portion of a Radar system was created by Virtualys
+--  and incorporated 
+-- as part of Sysim project to test the robustness of the Embeded system Simulator
+--  based on 
+-- AADL model modeling language and the capacities of the syntaxic and semantic
+--  analyser provided
+-- by Sysim.
+-- --
+-- Modified on May 6, 2009 by Pierre Dissaux (Ellidiss)
+-- . adding "decorative" bus and memory components
+-- . adding ports to main process, in port to aerial device and corresponding
+--  connections
+-- . adding a transmitter thread and inter-threads connections
+-- --
+-- Modified on May 7, 2009 by Nader KHAMMASSI (Virtualys - http://www.virtualys.com/)
+-- . Adding screen as a device to display the output data commig from the thread
+--  "Display"
+-- . Adding out data port to the main process and another one to thread Display
+-- . Adding corresponding connections:
+-- 	Thread to process : Display_out->Main_out
+-- 	 Main process to device: Main_out -> Screen_in
+-- --
+-- Modified on May 13, 2009 by Jerome Hugues (Telecom ParisTech)
+-- . changed pentium processor with leon2
+-- . changed Scheduling_Protocol
+-- . added implementations of threads
+-- --
+-- Modified on May 15, 2009 by Nader KHAMMASSI (Virtualys - http://www.virtualys.com/)
+-- . Adding Motor as a device to rotate constantly antenna and return angle
+--  rotation value
+-- . Adding new thread controller and its implementation to the main process
+-- . Adding corresponding connections:
+-- 	Thread Controller to the main process : controller_in -> get_angle;
+-- 	Main process to device: get_angle -> motor_out
+-- --
+-- Modified on May 17, 2009 by Jerome Hugues (Telecom ParisTech)
+-- . Bug fixes
+-- . Minor reformatting
+-- --
+-- Modified on May 22, 2009 by Jerome Hugues (Telecom ParisTech)
+-- . Added data types and subprograms, complete code generation fornative case
+-- . Added Cheddar priority, fake values for now
+-- . Replace event ports with data ports whenever required
+
+package radar_system
+public
+  with radar_types;
+  -- with processors;
+  -- with buses::VME;
+  -- with memories;
+
+system radar
+end radar;
+
+-- system implementation is composed by physical devices (Hardware entity):
+--  antenna + processor + memory + bus
+-- and software entity : running processes and threads + operating system functionalities
+--  (scheduling)
+-- implemented in the processor that represent a part of execution platform
+--  and physical devices in the 
+-- same time.
+system implementation radar.simple
+subcomponents
+  -- aerial : DEVICE antenna;
+  -- rotor : DEVICE motor;
+  -- monitor : DEVICE screen;
+  main : process processing.others;
+  cpu : processor cpu_leon2;
+  -- VME : BUS VME;
+  -- RAM : MEMORY RAM;
+-- connections
+  -- A1:port aerial.antenna_out -> main.receive_pulse;
+  -- A2:port rotor.motor_out -> main.get_angle;
+  -- A3:port main.send_pulse -> aerial.antenna_in;
+  -- A4:port main.to_screen -> monitor.screen_in;
+  -- A5:BUS ACCESS VME -> aerial.VME;
+  -- A6:BUS ACCESS VME -> rotor.VME;
+  -- A7:BUS ACCESS VME -> monitor.VME;
+  -- A8:BUS ACCESS VME -> cpu.VME;
+  -- A9:BUS ACCESS VME -> RAM.VME;
+properties
+  -- Actual_Memory_Binding => (reference (ram)) applies to main;
+  Actual_Processor_Binding => reference (cpu) applies to main;
+end radar.simple;
+
+-- The antenna device simulates radar environment.
+-- Direct pulse is triggered by receiving a signal from the transmitter.
+-- Internal logics evaluates echo pulse delay and triggers signal sending to
+--  the receiver.
+
+-- DEVICE antenna
+-- features
+--   antenna_in : in event port;
+--   -- The port being connected to the main process: signal processing
+--   antenna_out : out data port radar_types::Target_Distance;
+--   VME : REQUIRES BUS ACCESS VME;
+-- properties
+--   Compute_Execution_Time => 1 ms .. 2 ms;
+--   Deadline => 1 ms;
+--   Period => 1 ms;
+-- end antenna;
+
+-- DEVICE motor
+-- features
+--   motor_out : out data port radar_types::Motor_Position;
+--   VME : REQUIRES BUS ACCESS VME;
+-- properties
+--   Compute_Execution_Time => 1 ms .. 2 ms;
+--   Deadline => 1 ms;
+--   Period => 1 ms;
+-- end motor;
+
+-- DEVICE screen
+-- features
+--   screen_in : in event port;
+--   VME : REQUIRES BUS ACCESS VME;
+-- properties
+--   Compute_Execution_Time => 1 ms .. 2 ms;
+--   Deadline => 1 ms;
+--   Period => 1 ms;
+-- end screen;
+
+-- The main process is responsible for signals processing :
+-- General pattern: transmitter -> antenna -> receiver -> analyser -> display
+
+process processing
+-- features
+--   to_screen : out event port;
+--   send_pulse : out event port;
+--   receive_pulse : in data port radar_types::Target_Distance;
+--   get_angle : in data port radar_types::Motor_Position;
+end processing;
+
+process implementation processing.others
+subcomponents
+  receive : thread receiver.impl;
+  analyse : thread analyser.impl;
+  display : thread display_panel.impl;
+  transmit : thread transmitter.impl;
+  control_angle : thread controller.impl;
+connections
+--  A10:port receive_pulse -> receive.receiver_in;
+--  A11:port display.display_out -> to_screen;
+--  A12:port transmit.transmitter_out -> send_pulse;
+--  A13:port get_angle -> control_angle.controller_in;
+ A14:port receive.receiver_out -> analyse.from_receiver;
+--  A15:port analyse.analyser_out -> display.display_in;
+--  A16:port transmit.transmitter_out -> analyse.from_transmitter;
+ A17:port control_angle.controller_out -> analyse.from_controller;
+ A15_Dist:port analyse.dist_out -> display.dist_in;
+ A15_Ang:port analyse.angle_out -> display.angle_in;
+end processing.others;
+
+-- This thread receives radar echos from the antenna.
+
+thread receiver
+features
+  receiver_out : out data port radar_types::Target_Distance;
+  -- receiver_in : in data port radar_types::Target_Distance;
+end receiver;
+
+thread implementation receiver.impl
+calls CS : {
+  RS : subprogram Receiver_Spg;
+};
+connections
+  A18:parameter RS.receiver_out -> receiver_out;
+  -- A19:parameter receiver_in -> RS.receiver_in;
+properties
+  Priority => 63;
+  Dispatch_Protocol => Periodic;
+  Compute_Execution_Time => 10 ms .. 20 ms;
+  Deadline => 150 ms;
+  Period => 1500 ms;
+end receiver.impl;
+
+subprogram Receiver_Spg
+features
+  receiver_out : out parameter radar_types::Target_Distance;
+  -- receiver_in : in parameter radar_types::Target_Distance;
+properties
+  Source_Language => (C);
+  Source_Name => "receiver_spg";
+  Source_Text => ("radar.c");
+end Receiver_Spg;
+
+-- This thread compares transmitted and received signals to perform detection,
+--  localisation and identification.
+
+thread analyser
+features
+  -- from_transmitter : in event port;
+  from_receiver : in data port radar_types::Target_Distance;
+  -- analyser_out : out data port radar_types::Target_Position;
+  from_controller : in data port radar_types::Motor_Position;
+
+  dist_out        : out data port radar_types::Target_Distance;
+  angle_out       : out data port radar_types::Motor_Position;
+end analyser;
+
+thread implementation analyser.impl
+calls CS : {
+  -- AS : subprogram Analyser_Spg;
+  Set_Dist : subprogram Analyser_Spg_Set_Distance;
+  Set_Ang  : subprogram Analyser_Spg_Set_Angle;
+  Do_Comp  : subprogram Analyser_Spg_Do_Compute;
+  Get_D    : subprogram Analyser_Spg_Get_Distance;
+  Get_A    : subprogram Analyser_Spg_Get_Angle;
+};
+connections
+  -- A20:parameter from_receiver -> AS.from_receiver;
+  -- A21:parameter AS.analyser_out -> analyser_out;
+  -- A22:parameter from_controller -> AS.from_controller;
+  A20:parameter from_receiver -> Set_Dist.from_receiver;
+  A22:parameter from_controller -> Set_Ang.from_controller;
+  -- A21:parameter Comp.analyser_out -> analyser_out;
+  A21_D:parameter Get_D.dist_res -> dist_out;
+  A21_A:parameter Get_A.angle_res -> angle_out;
+properties
+  Priority => 62;
+  Dispatch_Protocol => Periodic;
+  Compute_Execution_Time => 40 ms .. 60 ms;
+  Deadline => 500 ms;
+  Period => 5000 ms;
+end analyser.impl;
+
+-- subprogram Analyser_Spg
+-- features
+--   from_receiver : in parameter radar_types::Target_Distance;
+--   analyser_out : out parameter radar_types::Target_Position.Impl;
+--   from_controller : in parameter radar_types::Motor_Position;
+-- properties
+--   Source_Language => (C);
+--   Source_Name => "analyser_spg";
+--   Source_Text => ("radar.c");
+-- end Analyser_Spg;
+
+subprogram Analyser_Spg_Set_Distance
+features
+  from_receiver : in parameter radar_types::Target_Distance;
+properties
+  Source_Language => (C);
+  Source_Name => "analyser_spg_set_distance";
+  Source_Text => ("radar.c");
+end Analyser_Spg_Set_Distance;
+
+subprogram Analyser_Spg_Set_Angle
+features
+  from_controller : in parameter radar_types::Motor_Position;
+properties
+  Source_Language => (C);
+  Source_Name => "analyser_spg_set_angle";
+  Source_Text => ("radar.c");
+end Analyser_Spg_Set_Angle;
+
+-- subprogram Analyser_Spg_Compute
+-- features
+--   -- analyser_out : out parameter radar_types::Target_Position;
+--   dist_res : out parameter radar_types::Target_Distance;
+--   angle_res : out parameter radar_types::Motor_Position;
+-- properties
+--   Source_Language => (C);
+--   Source_Name => "analyser_spg_compute";
+--   Source_Text => ("radar.c");
+-- end Analyser_Spg_Compute;
+
+subprogram Analyser_Spg_Do_Compute
+properties
+  Source_Language => (C);
+  Source_Name => "analyser_spg_do_compute";
+  Source_Text => ("radar.c");
+end Analyser_Spg_Do_Compute;
+
+-- Getter for Distance
+subprogram Analyser_Spg_Get_Distance
+features
+  dist_res : out parameter radar_types::Target_Distance;
+properties
+  Source_Language => (C);
+  Source_Name => "analyser_spg_get_distance";
+  Source_Text => ("radar.c");
+end Analyser_Spg_Get_Distance;
+
+-- Getter for Angle
+subprogram Analyser_Spg_Get_Angle
+features
+  angle_res : out parameter radar_types::Motor_Position;
+properties
+  Source_Language => (C);
+  Source_Name => "analyser_spg_get_angle";
+  Source_Text => ("radar.c");
+end Analyser_Spg_Get_Angle;
+
+-- This thread is responsible for formatting and displaying processed signals
+
+thread display_panel
+features
+  -- display_in : in data port radar_types::Target_Position;
+  dist_in  : in data port radar_types::Target_Distance;
+  angle_in : in data port radar_types::Motor_Position;
+  display_out : out event port;
+end display_panel;
+
+thread implementation display_panel.impl
+calls CS : {
+  -- DS : subprogram Display_Spg;
+  DS_Dist : subprogram Display_Spg_Dist;
+  DS_Ang  : subprogram Display_Spg_Angle;
+};
+connections
+  -- A23:parameter display_in -> DS.display_in;
+  A23_D:parameter dist_in -> DS_Dist.d_in;
+  A23_A:parameter angle_in -> DS_Ang.a_in;
+properties
+  Priority => 60;
+  Dispatch_Protocol => Periodic;
+  Compute_Execution_Time => 10 ms .. 30 ms;
+  Deadline => 200 ms;
+  Period => 2000 ms;
+end display_panel.impl;
+
+-- subprogram Display_Spg
+-- features
+--   display_in : in parameter radar_types::Target_Position;
+-- properties
+--   Source_Language => (C);
+--   Source_Name => "display_spg";
+--   Source_Text => ("radar.c");
+-- end Display_Spg;
+
+subprogram Display_Spg_Dist
+features
+  d_in : in parameter radar_types::Target_Distance;
+properties
+  Source_Language => (C);
+  Source_Name => "display_spg_dist";
+  Source_Text => ("radar.c");
+end Display_Spg_Dist;
+
+subprogram Display_Spg_Angle
+features
+  a_in : in parameter radar_types::Motor_Position;
+properties
+  Source_Language => (C);
+  Source_Name => "display_spg_angle";
+  Source_Text => ("radar.c");
+end Display_Spg_Angle;
+
+-- This thread sends radar signals to the antenna.
+
+thread transmitter
+features
+  transmitter_out : out event port;
+end transmitter;
+
+thread implementation transmitter.impl
+calls CS : {
+  TS : subprogram Transmitter_Spg;
+};
+properties
+  Priority => 71;
+  Dispatch_Protocol => Periodic;
+  Compute_Execution_Time => 10 ms .. 10 ms;
+  -- Compute_Entrypoint_Source_Text => "radar.transmitter";
+  -- Deadline => 50 ms;
+  -- Period => 500 ms;
+end transmitter.impl;
+
+subprogram Transmitter_Spg
+properties
+  Source_Language => (C);
+  Source_Name => "transmitter_spg";
+  Source_Text => ("radar.c");
+end Transmitter_Spg;
+
+thread controller
+features
+  -- controller_in : in data port radar_types::Motor_Position;
+  controller_out : out data port radar_types::Motor_Position;
+end controller;
+
+thread implementation controller.impl
+calls CS1 : {
+  CS : subprogram Controller_Spg;
+};
+connections
+  -- A24:parameter controller_in -> CS.controller_in;
+  A25:parameter CS.controller_out -> controller_out;
+properties
+  Priority => 70;
+  Dispatch_Protocol => Periodic;
+  Compute_Execution_Time => 10 ms .. 10 ms;
+  Deadline => 150 ms;
+  Period => 1500 ms;
+end controller.impl;
+
+subprogram Controller_Spg
+features
+  -- controller_in : in parameter radar_types::Motor_Position;
+  controller_out : out parameter radar_types::Motor_Position;
+properties
+  Source_Language => (C);
+  Source_Name => "controller_spg";
+  Source_Text => ("radar.c");
+end Controller_Spg;
+
+-- The processor represent an abstraction of hardware and software (OS) that
+--  is responsible for 
+-- scheduling and executing the  threads (It may include functionalities provided
+--  by operating systems
+-- such as scheduling protocol in our case).
+
+processor cpu_leon2 -- extends processors::leon2
+-- features
+--   VME : REQUIRES BUS ACCESS VME;
+properties
+  Scheduling_Protocol => (POSIX_1003_HIGHEST_PRIORITY_FIRST_PROTOCOL);
+end cpu_leon2;
+
+-- The bus ensures communications between the antenna and the main process
+--  stored in memory
+
+-- BUS VME extends buses::VME::VME
+-- end VME;
+
+-- The memory hosts the address space of the main process.
+
+-- MEMORY RAM extends memories::RAM
+-- features
+--   VME : REQUIRES BUS ACCESS VME;
+-- end RAM;
+
+
+end radar_system;

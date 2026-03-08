@@ -1,0 +1,17 @@
+-- ERROR: Invalid connection syntax - missing arrow operator
+package invalid_connection_arrow
+public
+    system s
+    features
+        p1: in data port;
+        p2: out data port;
+    end s;
+
+    system implementation s.i
+    subcomponents
+        sub1: system s;
+        sub2: system s;
+    connections
+        c1: port sub1.p2 sub2.p1;
+    end s.i;
+end invalid_connection_arrow;

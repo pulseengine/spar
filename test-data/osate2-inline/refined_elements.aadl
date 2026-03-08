@@ -1,0 +1,123 @@
+-- Extracted from OSATE2 RefinedElementsTest.xtend
+-- Tests: prototype refinement, feature refinement, subcomponent refinement,
+--        connection refinement, flow refinement, e2e flow refinement,
+--        parameters, subprogram features
+package pack
+public
+  abstract a1
+  prototypes
+    proto1: abstract;
+  features
+    dport1: in data port;
+    edport1: in event data port;
+    eport1: in event port;
+    fg1: feature group;
+    suba1: provides subprogram access;
+    subga1: provides subprogram group access;
+    ba1: provides bus access;
+    da1: provides data access;
+    af1: feature;
+  flows
+    fsource1: flow source af1;
+    fsink1: flow sink af1;
+  end a1;
+
+  abstract a2 extends a1
+  prototypes
+    proto1: refined to abstract;
+  features
+    dport1: refined to in data port;
+    edport1: refined to in event data port;
+    eport1: refined to in event port;
+    fg1: refined to feature group;
+    suba1: refined to provides subprogram access;
+    subga1: refined to provides subprogram group access;
+    ba1: refined to provides bus access;
+    da1: refined to provides data access;
+    af1: refined to feature;
+  flows
+    fsource1: refined to flow source;
+    fsource2: flow source af1;
+  end a2;
+
+  feature group fgt1
+  prototypes
+    proto2: abstract;
+  features
+    dport2: in data port;
+    edport2: in event data port;
+    eport2: in event port;
+    fg2: feature group;
+    param1: in parameter;
+    suba2: provides subprogram access;
+    subga2: provides subprogram group access;
+    ba2: provides bus access;
+    da2: provides data access;
+    af2: feature;
+  end fgt1;
+
+  feature group fgt2 extends fgt1
+  prototypes
+    proto2: refined to abstract;
+  features
+    dport2: refined to in data port;
+    edport2: refined to in event data port;
+    eport2: refined to in event port;
+    fg2: refined to feature group;
+    param1: refined to in parameter;
+    suba2: refined to provides subprogram access;
+    subga2: refined to provides subprogram group access;
+    ba2: refined to provides bus access;
+    da2: refined to provides data access;
+    af2: refined to feature;
+  end fgt2;
+
+  abstract implementation a1.i1
+  subcomponents
+    asub1: abstract a1;
+  connections
+    fgconn1: feature group fg1 <-> fg1;
+    fconn1: feature asub1.af1 -> asub1.af1;
+  flows
+    etef1: end to end flow asub1.fsource1 -> fconn1 -> asub1.fsink1;
+  end a1.i1;
+
+  abstract implementation a1.i2 extends a1.i1
+  subcomponents
+    asub1: refined to abstract a1;
+    asub2: abstract;
+  connections
+    fgconn1: refined to feature group;
+    fgconn2: feature group fg1 <-> fg1;
+  flows
+    etef1: refined to end to end flow in modes (m1);
+    etef2: end to end flow asub1.fsource1 -> fconn1 -> asub1.fsink1;
+  modes
+    m1: initial mode;
+    m2: mode;
+  end a1.i2;
+
+  subprogram sub1
+  features
+    edport3: out event data port;
+    eport3: out event port;
+    fg3: feature group;
+    param2: in parameter;
+    suba3: requires subprogram access;
+    subga3: requires subprogram group access;
+    da3: requires data access;
+    af3: feature;
+  end sub1;
+
+  subprogram sub2 extends sub1
+  features
+    edport3: refined to out event data port;
+    eport3: refined to out event port;
+    fg3: refined to feature group;
+    param2: refined to in parameter;
+    suba3: refined to requires subprogram access;
+    subga3: refined to requires subprogram group access;
+    da3: refined to requires data access;
+    af3: refined to feature;
+  end sub2;
+end pack;

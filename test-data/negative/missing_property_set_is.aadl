@@ -1,0 +1,4 @@
+-- ERROR: Missing 'is' keyword after property set name
+property set MyProps
+    p1: aadlinteger applies to (all);
+end MyProps;

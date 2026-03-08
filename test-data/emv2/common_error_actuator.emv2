@@ -1,0 +1,13 @@
+use types ErrorLibrary;
+use behavior ErrorLibrary::FailStop;
+
+error propagations
+	valuein: in propagation {ServiceError};
+	flows
+		ef0: error sink valuein {ServiceError};
+end propagations;
+
+component error behavior
+	transitions
+		t0: operational -[valuein {ServiceError}]-> failstop;
+end component;

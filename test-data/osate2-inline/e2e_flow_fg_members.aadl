@@ -1,0 +1,59 @@
+-- Extracted from OSATE2 Issue500Test.xtend (testFlowValidation)
+-- Tests: e2e flows referencing feature group members,
+--        nested feature groups in e2e flow specs,
+--        flow sink referencing fg member
+package pkg1
+public
+  system top
+  end top;
+
+  system implementation top.i
+    subcomponents
+      sub1: system s1;
+      sub2: system s2;
+    connections
+      conn1: feature sub1.fg1 -> sub2.fg2;
+      conn2: feature sub1.p1 -> sub2.fg2.p2;
+      conn3: feature sub1.fg1 -> sub2.fg3;
+      conn4: feature sub1.p1 -> sub2.fg3.p2;
+      conn5: feature sub1.p1 -> sub2.fg4.fg5.p2;
+    flows
+      etef1: end to end flow sub1 -> conn1 -> sub2.sink1;
+      etef2: end to end flow sub1 -> conn1 -> sub2.sink2;
+      etef3: end to end flow sub1 -> conn2 -> sub2.sink1;
+      etef4: end to end flow sub1 -> conn2 -> sub2.sink2;
+      etef5: end to end flow sub1 -> conn1 -> sub2.sink3;
+      etef6: end to end flow sub1 -> conn2 -> sub2.sink3;
+      etef7: end to end flow sub1 -> conn3 -> sub2.sink3;
+      etef8: end to end flow sub1 -> conn4 -> sub2.sink3;
+      etef9: end to end flow sub1 -> conn5 -> sub2.sink2;
+  end top.i;
+
+  system s1
+    features
+      p1: out data port;
+      fg1: feature group;
+  end s1;
+
+  system s2
+    features
+      fg2: feature group fgt1;
+      fg3: feature group fgt1;
+      fg4: feature group fgt2;
+    flows
+      sink1: flow sink fg2;
+      sink2: flow sink fg2.p2;
+      sink3: flow sink fg2.p3;
+  end s2;
+
+  feature group fgt1
+    features
+      p2: in data port;
+      p3: in data port;
+  end fgt1;
+
+  feature group fgt2
+    features
+      fg5: feature group fgt1;
+  end fgt2;
+end pkg1;

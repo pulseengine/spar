@@ -1,0 +1,47 @@
+-- Test all connection types
+package Connections_Test
+public
+
+  system S
+    features
+      p1 : in data port;
+      p2 : out data port;
+      ba : requires bus access;
+      fg1 : feature group;
+  end S;
+
+  system implementation S.impl
+    subcomponents
+      sub1 : process P1;
+      sub2 : process P2;
+    connections
+      -- Port connections
+      c1 : port p1 -> sub1.inp;
+      c2 : port sub1.outp -> sub2.inp;
+      c3 : port sub2.outp -> p2;
+
+      -- Access connections
+      c4 : bus access ba -> sub1.bus_acc;
+
+      -- Feature group connections
+      c5 : feature group fg1 -> sub1.fg;
+
+      -- Feature connections (generic)
+      c6 : feature p1 -> sub1.inp;
+  end S.impl;
+
+  process P1
+    features
+      inp : in data port;
+      outp : out data port;
+      bus_acc : requires bus access;
+      fg : feature group;
+  end P1;
+
+  process P2
+    features
+      inp : in data port;
+      outp : out data port;
+  end P2;
+
+end Connections_Test;

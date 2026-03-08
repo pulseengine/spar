@@ -1,0 +1,40 @@
+-- Test property associations with various value types
+package Properties_Test
+public
+
+  thread Worker
+    properties
+      -- Enumeration
+      Dispatch_Protocol => Periodic;
+
+      -- Integer with units
+      Period => 100 ms;
+      Deadline => 100 ms;
+
+      -- Range
+      Compute_Execution_Time => 5 ms .. 20 ms;
+
+      -- Real with units
+      SEI::MIPSBudget => 50.0 mips;
+
+      -- String
+      Source_Name => "worker_main";
+
+      -- Boolean
+      Active_Thread_Handling_Protocol => abort;
+
+      -- List
+      Allowed_Processor_Binding_Class => (classifier (processor));
+
+      -- Reference
+      Actual_Processor_Binding => (reference (cpu));
+
+      -- Record-style (property set qualified)
+      Timing_Properties::Clock_Period => 10 ns;
+
+      -- Integer literal
+      Priority => 5;
+
+  end Worker;
+
+end Properties_Test;

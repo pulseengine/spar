@@ -1,0 +1,8 @@
+-- ERROR: Missing colon between feature name and type
+package missing_colon_in_feature
+public
+    system s
+    features
+        p1 in data port;
+    end s;
+end missing_colon_in_feature;

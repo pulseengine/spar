@@ -1,0 +1,13 @@
+[package]
+name = "spar-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "AADL parser — tree-agnostic recursive descent with error recovery"
+
+[dependencies]
+rowan.workspace = true
+
+[dev-dependencies]
+expect-test = "1"

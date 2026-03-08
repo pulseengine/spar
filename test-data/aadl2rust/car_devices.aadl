@@ -1,0 +1,100 @@
+
+package aadlbook::devices
+
+
+public
+
+with aadlbook::Icd;
+with aadlbook::Platform;
+ 
+-----------------------------------
+--  Camera and Object Detection  --
+-----------------------------------
+   
+device camera
+features
+	picture : out data port aadlbook::icd::picture;
+properties 
+	Period => 2000 ms;
+	compute_execution_time => 20 ms .. 50 ms;
+end camera;
+
+device radar
+features
+	distance_estimate : out data port aadlbook::icd::obstacle_position;
+properties 
+	Period => 1000 ms;
+	compute_execution_time => 6 ms .. 8 ms;
+end radar;
+ 
+---------------------
+--  Speed Sensors  --
+---------------------
+
+device speed_wheel_sensor
+features
+	speed : out data port aadlbook::icd::speed;
+properties
+	Period => 1000 ms;
+	compute_execution_time => 6 ms .. 9 ms;
+end speed_wheel_sensor;
+
+device speed_laser_sensor
+features
+	speed : out data port aadlbook::icd::speed;
+properties
+	Period => 1000 ms;
+	compute_execution_time => 6 ms .. 9 ms;
+end speed_laser_sensor;
+
+
+-------------
+--  Brake  --
+-------------
+
+device brake 
+features
+	cmd : in data port aadlbook::icd::brake_cmd;
+properties
+	Period => 100 ms; 
+end brake;
+
+device acceleration
+features
+	cmd : in data port aadlbook::icd::speed_cmd;
+properties
+	Period => 100 ms;
+end acceleration;
+
+device panel
+features
+	increase_speed : out data port aadlbook::icd::speed;
+	decrease_speed : out data port aadlbook::icd::speed;
+end panel;
+
+device screen
+features
+	tire_pressure : in data port aadlbook::icd::pressure;
+	desired_speed : in data port aadlbook::icd::speed;
+	actual_speed : in data port aadlbook::icd::speed;
+	warning : in data port aadlbook::icd::boolean;
+	entertainment_infos : in data port aadlbook::icd::entertainment_infos;
+end screen;
+
+device tpms
+features
+	pressure : out data port aadlbook::icd::pressure;
+end tpms;
+
+device bluetooth_controller
+features
+	music     : out data port aadlbook::icd::music;
+	contacts  : out data port aadlbook::icd::contacts;
+end bluetooth_controller;
+
+device speaker
+features
+	music  : in data port aadlbook::icd::music;
+end speaker;
+
+end aadlbook::devices;

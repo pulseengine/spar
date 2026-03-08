@@ -1,0 +1,174 @@
+-- Extracted from OSATE2 FeaturesAndSubcomponentsTest.xtend
+-- Tests: all 14 component categories as subcomponents, all feature types,
+--        all prototype kinds, renames for all categories,
+--        feature prototype reference, parameter
+package pack1
+public
+  with pack5;
+
+  renames pack3::all;
+  renamed_package renames package pack4;
+
+  renames abstract pack5::a5;
+  renames system pack5::s5;
+  renames process pack5::p5;
+  renames thread group pack5::tg5;
+  renames thread pack5::t5;
+  renames subprogram pack5::sub5;
+  renames subprogram group pack5::subg5;
+  renames processor pack5::proc5;
+  renames virtual processor pack5::vp5;
+  renames device pack5::dev5;
+  renames memory pack5::m5;
+  renames bus pack5::b5;
+  renames virtual bus pack5::vb5;
+  renames data pack5::d5;
+  renames feature group pack5::fgt5;
+
+  ra renames abstract pack5::a6;
+  rs renames system pack5::s6;
+  rp renames process pack5::p6;
+  rtg renames thread group pack5::tg6;
+  rt renames thread pack5::t6;
+  rsub renames subprogram pack5::sub6;
+  rsubg renames subprogram group pack5::subg6;
+  rproc renames processor pack5::proc6;
+  rvp renames virtual processor pack5::vp6;
+  rdev renames device pack5::dev6;
+  rm renames memory pack5::m6;
+  rb renames bus pack5::b6;
+  rvb renames virtual bus pack5::vb6;
+  rd renames data pack5::d6;
+  rfgt renames feature group pack5::fgt6;
+
+  abstract container
+  prototypes
+    aproto1: abstract;
+    sproto1: system;
+    pproto1: process;
+    tgproto1: thread group;
+    tproto1: thread;
+    subproto1: subprogram;
+    subgproto1: subprogram group;
+    procproto1: processor;
+    vpproto1: virtual processor;
+    devproto1: device;
+    mproto1: memory;
+    bproto1: bus;
+    vbproto1: virtual bus;
+    dproto1: data;
+    fgproto1: feature group;
+    fproto1: feature;
+  features
+    dport1: in data port d1;
+    edport1: in event data port d1;
+    fg1: feature group fgt1;
+    suba1: provides subprogram access sub1;
+    subga1: provides subprogram group access subg1;
+    ba1: provides bus access b1;
+    da1: provides data access d1;
+    af1: prototype fproto1;
+  end container;
+
+  abstract implementation container.i
+  subcomponents
+    asub: abstract a1;
+    ssub: system s1;
+    psub: process p1;
+    tgsub: thread group tg1;
+    tsub: thread t1;
+    subsub: subprogram sub1;
+    subgsub: subprogram group subg1;
+    procsub: processor proc1;
+    vpsub: virtual processor vp1;
+    devsub: device dev1;
+    msub: memory m1;
+    bsub: bus b1;
+    vbsub: virtual bus vb1;
+    dsub: data d1;
+  end container.i;
+
+  subprogram subcontainer
+  prototypes
+    dproto2: data;
+    fproto2: feature;
+  features
+    param1: in parameter d1;
+  end subcontainer;
+
+  feature group fgtcontainer
+  prototypes
+    dproto3: data;
+    fgproto3: feature group;
+    fproto3: feature;
+  features
+    dport2: in data port d1;
+    edport2: in event data port d1;
+    fg2: feature group fgt1;
+    param2: in parameter d1;
+    suba2: provides subprogram access sub1;
+    subga2: provides subprogram group access subg1;
+    ba2: provides bus access b1;
+    da2: provides data access d1;
+    af2: prototype fproto3;
+  end fgtcontainer;
+
+  abstract a1
+  end a1;
+  abstract implementation a1.i
+  end a1.i;
+  system s1
+  end s1;
+  system implementation s1.i
+  end s1.i;
+  process p1
+  end p1;
+  process implementation p1.i
+  end p1.i;
+  thread group tg1
+  end tg1;
+  thread group implementation tg1.i
+  end tg1.i;
+  thread t1
+  end t1;
+  thread implementation t1.i
+  end t1.i;
+  subprogram sub1
+  end sub1;
+  subprogram implementation sub1.i
+  end sub1.i;
+  subprogram group subg1
+  end subg1;
+  subprogram group implementation subg1.i
+  end subg1.i;
+  processor proc1
+  end proc1;
+  processor implementation proc1.i
+  end proc1.i;
+  virtual processor vp1
+  end vp1;
+  virtual processor implementation vp1.i
+  end vp1.i;
+  device dev1
+  end dev1;
+  device implementation dev1.i
+  end dev1.i;
+  memory m1
+  end m1;
+  memory implementation m1.i
+  end m1.i;
+  bus b1
+  end b1;
+  bus implementation b1.i
+  end b1.i;
+  virtual bus vb1
+  end vb1;
+  virtual bus implementation vb1.i
+  end vb1.i;
+  data d1
+  end d1;
+  data implementation d1.i
+  end d1.i;
+  feature group fgt1
+  end fgt1;
+end pack1;

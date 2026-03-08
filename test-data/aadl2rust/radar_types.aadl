@@ -1,0 +1,32 @@
+package radar_types
+public
+  with data_model;
+
+  -- Defines the angular position of the motor, in range 0 .. 359
+
+  data Motor_Position
+  properties
+    data_Model::data_Representation => integer;
+  end Motor_Position;
+
+  -- Define the distance of the target being echoed by the radar pulse
+
+  data Target_Distance
+  properties
+    data_Model::data_Representation => integer;
+  end Target_Distance;
+
+  -- Define the exact position of the target, in polar coordinates
+
+  -- data Target_Position
+  -- end Target_Position;
+
+  -- data implementation Target_Position.impl
+  -- subcomponents
+  --   theta : data radar_types::Motor_Position;
+  --   rho : data radar_types::Target_Distance;
+  -- properties
+  --   data_Model::data_Representation => struct;
+  -- end Target_Position.impl;
+
+end radar_types;

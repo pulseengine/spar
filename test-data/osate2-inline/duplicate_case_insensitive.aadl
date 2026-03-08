@@ -1,0 +1,9 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testDuplicateElementIgnoreCase)
+-- Tests: duplicate classifier names with different casing (case-insensitive)
+package duplicateTest
+public
+  bus b
+  end b;
+  bus B
+  end B;
+end duplicateTest;

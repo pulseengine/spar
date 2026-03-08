@@ -1,0 +1,275 @@
+package pathfinder_software
+public
+
+  -------------------------------------------------------------------
+  -----------------------processes-------------------------------------
+  -------------------------------------------------------------------
+
+  -- abstract bus_interface
+  -- features
+  --   -- interface between VME bus and 1533 bus
+  --   camera_control 	: in out data port camera_control;
+  --   emission_data 	: in out data port emission_data;
+  --   control_data 	: in out data port control_data;
+
+  --   reception_data 	: in out data port reception_data;
+  --   images_data 	: in out data port images_data;
+  --   measured_data 	: in out data port measured_data;
+  -- end bus_interface;
+
+  -- abstract implementation bus_interface.impl
+  -- end bus_interface.impl;
+
+  process prs_PSC -- extends bus_interface
+  end prs_PSC;
+
+  process implementation prs_PSC.impl -- extends bus_interface.impl
+  subcomponents
+    bus_scheduling 	: thread bus_scheduling.impl;
+    data_distribution	: thread data_distribution.impl;
+    control_task 	: thread control_task.impl;
+    radio_task 		: thread radio_task.impl;
+    camera_task 	: thread camera_task.impl;
+    mesure_task 	: thread mesure_task.impl;
+    meteo_task 		: thread meteo_task.impl;
+
+    data_rw : data data_rw; -- critical ressource
+
+    image_sim       : thread image_producer.impl;
+    radio_sim       : thread radio_producer.impl;
+    sensor_sim      : thread sensor_producer.impl;
+  connections
+    --by default access is required for the duration of the thread execution
+    C1: data access data_rw <-> data_distribution.req_data_rw ;
+    C2: data access data_rw <-> control_task.req_data_rw;
+    C3: data access data_rw <-> mesure_task.req_data_rw;
+    C4: data access data_rw <-> meteo_task.req_data_rw;
+
+    -- C5: port bus_scheduling.control_data -> control_data;
+    -- C6: port camera_task.camera_control -> camera_control;
+    -- C7: port radio_task.emission_data -> emission_data ;
+
+    -- C8: port images_data -> camera_task.images_data;
+    -- C9: port reception_data -> radio_task.reception_data;
+    -- C10:port measured_data -> data_distribution.measured_data;
+
+    C_Img: port image_sim.images_data -> camera_task.images_data;
+    C_Radio: port radio_sim.reception_data -> radio_task.reception_data;
+    C_Sensor: port sensor_sim.measured_data -> data_distribution.measured_data;
+  end prs_PSC.impl;
+
+  -------------------------------------------------------------------
+  -----------------------threads-------------------------------------
+  -------------------------------------------------------------------
+
+  thread image_producer
+  features
+    images_data : out data port images_data;
+  end image_producer;
+
+  thread implementation image_producer.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 10 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    priority => 10; -- High priority to ensure data availability
+  end image_producer.impl;
+
+  thread radio_producer
+  features
+    reception_data : out data port reception_data;
+  end radio_producer;
+
+  thread implementation radio_producer.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 10 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    priority => 10;
+  end radio_producer.impl;
+
+  thread sensor_producer
+  features
+    measured_data : out data port measured_data;
+  end sensor_producer;
+
+  thread implementation sensor_producer.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 5 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    priority => 10;
+  end sensor_producer.impl;
+
+  thread bus_scheduling
+    -- bus control task
+  features
+    control_data : out data port control_data;
+  end bus_scheduling;
+
+  thread implementation bus_scheduling.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 5 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    deadline => 5 ms;
+    priority => 7;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end bus_scheduling.impl;
+
+  thread data_distribution
+    -- 1553 bus control
+  features
+    req_data_rw : requires data access data_rw;
+    measured_data : in data port measured_data;
+  end data_distribution;
+
+  thread implementation data_distribution.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 5 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    deadline => 5 ms;
+    priority => 6;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end data_distribution.impl;
+
+  thread control_task
+    -- rover control task
+  features
+    req_data_rw : requires data access data_rw;
+
+  end control_task;
+
+  thread implementation control_task.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 10 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    deadline => 10 ms;
+    priority => 5;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end control_task.impl;
+
+  thread radio_task
+    -- radio communication management task
+  features
+    reception_data : in data port reception_data;
+    emission_data : out data port emission_data;
+
+  end radio_task;
+
+  thread implementation radio_task.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 10 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    deadline => 10 ms;
+    priority => 4;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end radio_task.impl;
+
+  thread camera_task
+    -- camera control task
+  features
+    images_data : in data port images_data;
+    camera_control : out data port camera_control;
+  end camera_task;
+
+  thread implementation camera_task.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 10 ms;
+    compute_execution_time => 1 ms .. 1 ms;
+    deadline => 10 ms;
+    priority => 3;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end camera_task.impl;
+
+  thread mesure_task
+    -- mesurement task
+  features
+    req_data_rw : requires data access data_rw;
+  end mesure_task;
+
+  thread implementation mesure_task.impl
+  properties
+    Dispatch_protocol => Periodic;
+    period => 200 ms;
+    compute_execution_time => 2 ms .. 2 ms;
+    deadline => 200 ms;
+    priority => 2;
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+  end mesure_task.impl;
+
+  thread meteo_task
+    -- meteorological data task
+  features
+    req_data_rw : requires data access data_rw;
+
+  end meteo_task;
+
+  thread implementation meteo_task.impl
+  properties
+    -- POSIX_Scheduling_Policy => SCHED_FIFO;
+    Dispatch_protocol => Periodic;
+    priority => 1;
+    period => 200 ms;
+    deadline => 200 ms;
+    compute_execution_time => 3 ms .. 3 ms;
+  end meteo_task.impl;
+
+  -----------------------------------------------------------------
+  ---------------------------datas---------------------------------
+  -----------------------------------------------------------------
+
+  data data_rw
+    -- critical resource
+  properties
+    -- Concurrency_Control_Protocol => None_Specified;
+    -- Priority => 6;
+    -- to analysis with
+    -- Concurrency_Control_Protocol => Priority_Inheritance;
+    -- Concurrency_Control_Protocol => Priority_Ceiling;
+    Data_Model::Data_Representation => Struct;
+  end data_rw;
+
+  data implementation data_rw.impl
+  subcomponents
+    value : data Base_Types::Integer;
+  properties
+    -- Concurrency_Control_Protocol => None_Specified;
+    Priority => 6;
+  end data_rw.impl;
+
+  data control_data
+  properties
+    Data_Model::Data_Representation => Integer;
+  end control_data;
+
+  data images_data
+  properties
+    Data_Model::Data_Representation => Integer;
+  end images_data;
+
+  data camera_control
+  properties
+    Data_Model::Data_Representation => Integer;
+  end camera_control;
+
+  data reception_data
+  properties
+    Data_Model::Data_Representation => Integer;
+  end reception_data;
+
+  data emission_data
+  properties
+    Data_Model::Data_Representation => Integer;
+  end emission_data;
+
+  data measured_data
+  properties
+    Data_Model::Data_Representation => Integer;
+  end measured_data;
+
+end pathfinder_software;

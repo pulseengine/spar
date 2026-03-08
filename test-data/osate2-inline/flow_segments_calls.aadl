@@ -1,0 +1,150 @@
+-- Extracted from OSATE2 FlowSegmentsTest.xtend
+-- Tests: flow source/sink implementations with call segments, prototype-typed
+--        features, parameter with classifier, subprogram calls from various
+--        contexts (subcomponent, access, prototype, feature group member),
+--        e2e flows through call data access, subprogram group prototypes
+package flowSegmentScopeTest
+public
+  abstract a1
+  prototypes
+    fgproto1: feature group fgt1;
+    aproto1: abstract a2.i;
+    subpproto1: subprogram subp1.i;
+    subpgproto1: subprogram group subpg1;
+  features
+    af1: feature;
+    da1: provides data access;
+    subpa1: provides subprogram access subp1.i;
+    subpa2: provides subprogram access subpproto1;
+    subpga1: provides subprogram group access subpg1;
+    subpga2: provides subprogram group access subpgproto1;
+    dp1: in data port;
+    edp1: in event data port;
+    fg1: feature group fgt1;
+    fg2: feature group fgproto1;
+  flows
+    fsource1: flow source af1;
+    fsource2: flow source af1;
+    fsource3: flow source af1;
+    fsource4: flow source af1;
+    fsource5: flow source af1;
+    fsource6: flow source af1;
+    fsource7: flow source af1;
+    fsource8: flow source af1;
+    fsource9: flow source af1;
+    fsource10: flow source af1;
+    fsource11: flow source af1;
+    fsource12: flow source af1;
+    fsource13: flow source af1;
+    fsource17: flow source af1;
+    fsource18: flow source af1;
+  end a1;
+
+  abstract implementation a1.i
+  subcomponents
+    asub1: abstract a2.i;
+    asub2: abstract aproto1;
+    subpsub1: subprogram subp1.i;
+    subpsub2: subprogram subpproto1;
+    subpgsub1: subprogram group subpg1;
+    subpgsub2: subprogram group subpg1 (subpproto5 => subprogram subp1.i);
+    subpgsub3: subprogram group subpgproto1;
+  calls sequence1: {
+    call1: subprogram subp1.i;
+    call2: subprogram subpsub1;
+    call3: subprogram subpsub2;
+    call4: subprogram subpproto1;
+    call5: subprogram subpa1;
+    call6: subprogram subpa2;
+    call7: subprogram subp1.subpa4;
+    call8: subprogram fg1.subpa3;
+    call12: subprogram subpgsub1.subpa5;
+    call13: subprogram subpgsub2.subpa6;
+  };
+  connections
+    fconn1: feature asub1.af2 -> af1;
+    fconn2: feature asub1.af2 -> asub1.af2;
+  flows
+    fsource1: flow source asub1 -> fconn1 -> af1;
+    fsource2: flow source fg1.da3 -> fconn1 -> af1;
+    fsource3: flow source fg2.da3 -> fconn1 -> af1;
+    fsource4: flow source asub1.fsource20 -> fconn1 -> af1;
+    fsource5: flow source asub2.fsource20 -> fconn1 -> af1;
+    fsource6: flow source call1.da4 -> fconn1 -> af1;
+    fsource7: flow source call2.da4 -> fconn1 -> af1;
+    fsource8: flow source call3.da4 -> fconn1 -> af1;
+    fsource9: flow source call4.da4 -> fconn1 -> af1;
+    fsource10: flow source call5.da4 -> fconn1 -> af1;
+    fsource11: flow source call6.da4 -> fconn1 -> af1;
+    fsource12: flow source call7.da4 -> fconn1 -> af1;
+    fsource13: flow source call8.da4 -> fconn1 -> af1;
+    fsource17: flow source call12.da4 -> fconn1 -> af1;
+    fsource18: flow source call13.da4 -> fconn1 -> af1;
+
+    etef1: end to end flow asub1.fsource20 -> fconn2 -> asub2.fsink1;
+  end a1.i;
+
+  abstract a2
+  features
+    af2: feature;
+    da2: provides data access;
+  flows
+    fsource20: flow source af2;
+    fsink1: flow sink af2;
+  end a2;
+
+  abstract implementation a2.i
+  subcomponents
+    asub3: abstract a2;
+  connections
+    fconn3: feature af2 -> asub3.af2;
+    fconn4: feature asub3.af2 -> asub3.af2;
+  flows
+    etef18: end to end flow asub3.fsource20 -> fconn4 -> asub3.fsink1;
+  end a2.i;
+
+  feature group fgt1
+  prototypes
+    subpproto2: subprogram subp1.i;
+  features
+    da3: provides data access;
+    subpa3: provides subprogram access subpproto2;
+  end fgt1;
+
+  subprogram subp1
+  prototypes
+    aproto2: abstract a2.i;
+    subpproto3: subprogram subp1.i;
+  features
+    af3: feature;
+    da4: requires data access;
+    subpa4: requires subprogram access subpproto3;
+    param1: in parameter a2.i;
+    param2: in parameter aproto2;
+  flows
+    fsource21: flow source af3;
+    fsource22: flow source af3;
+  end subp1;
+
+  subprogram implementation subp1.i
+  subcomponents
+    asub4: abstract a2.i;
+  connections
+    fconn5: feature asub4.af2 -> af3;
+    fconn6: feature asub4.af2 -> asub4.af2;
+  flows
+    fsource21: flow source param1.da2 -> fconn5 -> af3;
+    fsource22: flow source param2.da2 -> fconn5 -> af3;
+    etef19: end to end flow param1.da2 -> fconn6 -> asub4.fsink1;
+    etef20: end to end flow param2.da2 -> fconn6 -> asub4.fsink1;
+  end subp1.i;
+
+  subprogram group subpg1
+  prototypes
+    subpproto4: subprogram subp1.i;
+    subpproto5: subprogram;
+  features
+    subpa5: provides subprogram access subpproto4;
+    subpa6: provides subprogram access subpproto5;
+  end subpg1;
+end flowSegmentScopeTest;

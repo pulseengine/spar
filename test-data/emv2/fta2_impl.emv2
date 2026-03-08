@@ -1,0 +1,16 @@
+use types ErrorModelLibrary;
+use behavior ErrorModelLibrary::Simple;
+
+error propagations
+	externalEffect: out propagation {BadValue};
+end propagations;
+
+composite error behavior
+	states
+		[(s1.Failed or sens1.Failed) and (s2.Failed or sens2.Failed)]-> Failed;
+end composite;
+
+propagation paths
+	externalEffect: propagation point;
+	s1.externalEffect -> externalEffect;
+end paths;

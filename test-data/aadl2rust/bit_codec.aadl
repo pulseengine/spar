@@ -1,0 +1,195 @@
+package Bit_Codec
+public
+	with Base_Types, Data_Model;
+
+	-- data Latitude extends Base_Types::Integer_32
+	-- end Latitude;
+
+	data Latitude
+	properties
+		Data_Model::Data_Representation => Integer;
+		Data_Model::Base_Type => (classifier (Base_Types::Integer_32));
+	end Latitude;
+
+	-- data Longitude extends Base_Types::Integer_32
+	-- properties
+	-- 	Data_Size => 30 bits; -- change the default data_size
+	-- end Longitude;
+
+	data Longitude
+		properties
+			Data_Model::Data_Representation => Integer;
+			Data_Model::Base_Type => (classifier (Base_Types::Integer_32));
+			Data_Size => 30 bits; 
+	end Longitude;
+
+	data Coordinate
+		-- properties
+		-- 	HAMR::Bit_Codec_Max_Size => 70 bits;
+	properties
+		Data_Model::Data_Representation => Struct;
+	end Coordinate;
+
+	data implementation Coordinate.Impl
+		subcomponents
+			latitude: data Latitude;
+			longitude: data Longitude;
+			altitude: data Base_Types::Integer_32;
+		-- properties
+		-- 	HAMR::Bit_Codec_Max_Size => 60 bits; -- refine bit size	
+	end Coordinate.Impl;
+
+	data Mission
+		properties
+			Data_Model::Data_Representation => Array;
+			Data_Model::Base_Type => (classifier (Coordinate.Impl));
+			Data_Model::Dimension => (3);
+
+			-- HAMR::Bit_Codec_Spec => "data/Mission.sc";
+			-- HAMR::Bit_Codec_Max_Size => 288 Bits;
+	end Mission;
+
+	processor CPU
+	end CPU;
+
+	processor implementation CPU.Impl
+	properties
+		Scheduling_Protocol => (Posix_1003_Highest_Priority_First_Protocol);
+	end CPU.Impl;
+
+	system Bit_Codec_Sys
+	end Bit_Codec_Sys;
+
+	system implementation Bit_Codec_Sys.Impl
+		subcomponents
+			proc: process Bit_Codec_Proc.Impl;
+		-- properties
+		-- 	HAMR::Platform => (JVM, Cygwin, Linux, macOS, seL4);
+		-- 	HAMR::HW => (x86, amd64, QEMU);
+
+		-- 	HAMR::Default_Bit_Width => 32;
+		-- 	HAMR::Default_Max_Sequence_Size => 1;
+		-- 	HAMR::Max_String_Size => 256;
+
+		-- 	HAMR::Bit_Codec_Raw_Connections => true;
+			CPU : processor CPU.Impl;
+		properties
+     		Actual_processor_binding => reference (CPU) applies to proc;
+	end Bit_Codec_Sys.Impl;
+
+	process Bit_Codec_Proc
+	end Bit_Codec_Proc;
+
+	process implementation Bit_Codec_Proc.Impl
+		subcomponents
+			producer: thread Producer.Impl;
+			filter: thread Filter.Impl;
+			consumer: thread Consumer.Impl;
+		connections
+			c1: port producer.to_filter_mission -> filter.from_producer_mission;
+			c2: port filter.to_consumer_mission -> consumer.from_filter_mission;
+
+			--c3: port producer.to_filter_bool -> filter.from_producer_bool;
+			--c4: port filter.to_consumer_bool -> consumer.from_filter_bool;
+			c5: port producer.to_filter_u32 -> filter.from_producer_u32;
+			c6: port filter.to_consumer_u32 -> consumer.from_filter_u32;
+
+			--c7: port producer.to_filter_string -> filter.from_producer_string;
+			--c8: port filter.to_consumer_string -> consumer.from_filter_string;
+			c9: port producer.to_filter_event -> filter.from_producer_event;
+			c10: port filter.to_consumer_event -> consumer.from_filter_event;
+
+			c11: port producer.to_filter_latitude -> filter.from_producer_latitude;
+			c12: port filter.to_consumer_latitude -> consumer.from_filter_latitude;
+
+			c13: port producer.to_filter_longitude -> filter.from_producer_longitude;
+			c14: port filter.to_consumer_longitude -> consumer.from_filter_longitude;
+			
+			c15: port producer.to_filter_coordinate -> filter.from_producer_coordinate;
+			c16: port filter.to_consumer_coordinate -> consumer.from_filter_coordinate;
+	end Bit_Codec_Proc.Impl;
+
+	thread Producer
+		features
+			to_filter_event: out event port;
+			to_filter_mission: out event data port Mission;
+			--to_filter_bool: out data port Base_Types::Boolean;
+			to_filter_u32: out data port Base_Types::Unsigned_32;
+			--to_filter_string: out data port Base_Types::String; 
+			to_filter_latitude: out data port Latitude;
+			to_filter_longitude: out data port Longitude;
+			to_filter_coordinate: out data port Coordinate;
+		-- properties
+		-- 	Dispatch_Protocol => Periodic;
+		-- 	Period => 1000ms;
+
+		-- 	Stack_Size => 131072 Bytes;
+	end Producer;
+
+	thread implementation Producer.Impl
+		properties
+			Dispatch_Protocol => Periodic;
+			Period => 1000ms;
+			Priority => 3;
+			Stack_Size => 131072 Bytes;
+	end Producer.impl;
+
+	thread Filter
+		features
+			from_producer_event: in event port;
+			from_producer_mission: in event data port Mission;
+			--from_producer_bool: in data port Base_Types::Boolean;
+			from_producer_u32: in data port Base_Types::Unsigned_32;
+			--from_producer_string: in data port Base_Types::String;
+			from_producer_latitude: in data port Latitude;
+			from_producer_longitude: in data port Longitude;
+			from_producer_coordinate: in data port Coordinate;
+
+			to_consumer_event: out event port;
+			to_consumer_mission: out event data port Mission;
+			--to_consumer_bool: out data port Base_Types::Boolean;
+			to_consumer_u32: out data port Base_Types::Unsigned_32;
+			--to_consumer_string: out data port Base_Types::String;
+			to_consumer_latitude: out data port Latitude;
+			to_consumer_longitude: out data port Longitude;
+			to_consumer_coordinate: out data port Coordinate;
+		-- properties
+		-- 	Dispatch_Protocol => Sporadic;
+		-- 	Period => 1000ms;
+
+		-- 	Stack_Size => 131072 Bytes;
+	end Filter;
+
+	thread implementation Filter.Impl
+		properties
+			Dispatch_Protocol => Sporadic;
+			Period => 1000ms;
+			Priority => 2;
+			Stack_Size => 131072 Bytes;
+	end Filter.impl;
+
+	thread Consumer
+		features
+			from_filter_event: in event port;
+			from_filter_mission: in event data port Mission;
+			--from_filter_bool: in data port Base_Types::Boolean;
+			from_filter_u32: in data port Base_Types::Unsigned_32;
+			--from_filter_string: in data port Base_Types::String;
+			from_filter_latitude: in data port Latitude;
+			from_filter_longitude: in data port Longitude;
+			from_filter_coordinate: in data port Coordinate;
+		-- properties
+		-- 	Dispatch_Protocol => Periodic;
+		-- 	Period => 1000ms;
+
+		-- 	Stack_Size => 131072 Bytes;
+	end Consumer;
+
+	thread implementation Consumer.Impl
+		properties
+			Dispatch_Protocol => Periodic;
+			Period => 1000ms;
+			Priority => 1;
+			Stack_Size => 131072 Bytes;
+	end Consumer.impl;
+end Bit_Codec;

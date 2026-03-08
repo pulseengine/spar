@@ -1,0 +1,80 @@
+-- Simple vehicle control system
+package Vehicle_Control
+public
+  with Data_Types;
+  with Buses;
+
+  system Vehicle
+    features
+      brake_cmd : in event data port Data_Types::Brake_Command;
+      speed_out : out data port Data_Types::Speed;
+      can_access : requires bus access Buses::CAN;
+    flows
+      brake_response : flow path brake_cmd -> speed_out;
+    properties
+      SEI::MIPSBudget => 100.0 mips;
+  end Vehicle;
+
+  system implementation Vehicle.impl
+    subcomponents
+      ecu : processor ECU_Processor;
+      brake_ctrl : process Brake_Controller.impl;
+      speed_sensor : device Speed_Sensor;
+    connections
+      c1 : port brake_cmd -> brake_ctrl.cmd_in;
+      c2 : port speed_sensor.speed -> brake_ctrl.speed_in;
+      c3 : port brake_ctrl.speed_out -> speed_out;
+    flows
+      brake_response : flow path brake_cmd -> c1 -> brake_ctrl.process_brake -> c3 -> speed_out;
+    properties
+      Actual_Processor_Binding => (reference (ecu)) applies to brake_ctrl;
+  end Vehicle.impl;
+
+  process Brake_Controller
+    features
+      cmd_in : in event data port Data_Types::Brake_Command;
+      speed_in : in data port Data_Types::Speed;
+      speed_out : out data port Data_Types::Speed;
+    flows
+      process_brake : flow path cmd_in -> speed_out;
+  end Brake_Controller;
+
+  process implementation Brake_Controller.impl
+    subcomponents
+      control_thread : thread Brake_Control_Thread.impl;
+    connections
+      tc1 : port cmd_in -> control_thread.cmd;
+      tc2 : port speed_in -> control_thread.speed;
+      tc3 : port control_thread.output -> speed_out;
+  end Brake_Controller.impl;
+
+  thread Brake_Control_Thread
+    features
+      cmd : in event data port Data_Types::Brake_Command;
+      speed : in data port Data_Types::Speed;
+      output : out data port Data_Types::Speed;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 20 ms;
+      Compute_Execution_Time => 2 ms .. 5 ms;
+      Deadline => 20 ms;
+  end Brake_Control_Thread;
+
+  thread implementation Brake_Control_Thread.impl
+  end Brake_Control_Thread.impl;
+
+  device Speed_Sensor
+    features
+      speed : out data port Data_Types::Speed;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 10 ms;
+  end Speed_Sensor;
+
+  processor ECU_Processor
+    properties
+      SEI::MIPSCapacity => 200.0 mips;
+      Scheduling_Protocol => (Round_Robin_Protocol);
+  end ECU_Processor;
+
+end Vehicle_Control;

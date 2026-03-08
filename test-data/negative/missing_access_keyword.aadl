@@ -1,0 +1,8 @@
+-- ERROR: Missing 'access' keyword after 'data' in feature access
+package missing_access_keyword
+public
+    system s
+    features
+        d1: provides data;
+    end s;
+end missing_access_keyword;

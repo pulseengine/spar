@@ -1,0 +1,61 @@
+
+package aadlbook::software::obstacle_detection
+
+public
+
+with aadlbook::icd; 
+--with sei;
+
+--------------------------
+--  Obstacle Detection  --
+--------------------------
+
+process obstacle_detection
+features
+	camera : in data port aadlbook::icd::obstacle_position;
+	radar : in data port aadlbook::icd::obstacle_position;
+	obstacle_position : out data port aadlbook::icd::obstacle_position;
+end obstacle_detection;
+
+process implementation obstacle_detection.i
+subcomponents
+	obst_thr : thread obstacle_detection_thr.i;
+connections
+	c0 : port camera -> obst_thr.camera;
+	c1 : port radar -> obst_thr.radar;
+	c2 : port obst_thr.obstacle_detected -> obstacle_position;
+end obstacle_detection.i;
+
+thread obstacle_detection_thr
+features
+	camera : in data port aadlbook::icd::obstacle_position;
+	radar : in data port aadlbook::icd::obstacle_position;
+	obstacle_detected : out data port aadlbook::icd::obstacle_position;
+properties
+	Dispatch_Protocol => Periodic;
+	Period            => 100 ms;
+	Compute_Execution_Time => 20 ms .. 50 ms; 
+	--sei::mipsbudget   => 10.0 MIPS; 
+	--sei::instructionsperdispatch => 0.9 kipd .. 0.98 mipd; 
+end obstacle_detection_thr;
+
+thread implementation obstacle_detection_thr.i
+annex Behavior_specification {**
+	 states
+	 s0 : initial complete final state;
+	 s1 : state;
+	 transitions
+	 s0 -[camera]-> s0 {
+		obstacle_detected ! (true)
+	 };
+	 s0 -[not camera]-> s1;
+	 s1 -[radar]-> s0 {
+		obstacle_detected ! (true)
+	 };
+	 s1 -[not radar]-> s0 {
+		obstacle_detected ! (false)
+	 };
+	**};
+end obstacle_detection_thr.i;
+
+end aadlbook::software::obstacle_detection;

@@ -1,0 +1,25 @@
+-- Test feature group type declarations
+package Feature_Group_Test
+public
+
+  feature group Sensor_Interface
+    features
+      reading : out data port;
+      status : out event port;
+      calibrate : in event port;
+  end Sensor_Interface;
+
+  feature group Sensor_Interface_Inverse inverse of Sensor_Interface
+  end Sensor_Interface_Inverse;
+
+  system Sensor
+    features
+      intf : feature group Sensor_Interface;
+  end Sensor;
+
+  system Controller
+    features
+      sensor_port : feature group inverse of Sensor_Interface;
+  end Controller;
+
+end Feature_Group_Test;

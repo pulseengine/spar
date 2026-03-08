@@ -1,0 +1,100 @@
+package Arrays
+public
+	with Base_Types, Data_Model;
+
+	processor PC_Processor
+	end PC_Processor;
+
+	processor implementation PC_Processor.Impl
+	end PC_Processor.Impl;
+
+	data Coordinate
+	properties
+		Data_Model::Data_Representation => Struct;
+	end Coordinate;
+
+	data implementation Coordinate.Impl
+		subcomponents
+			latitude: data Base_Types::Integer_32;
+			longitude: data Base_Types::Integer_32;
+			altitude: data Base_Types::Integer_32;
+	end Coordinate.Impl;
+
+	data Array_of_Mission
+		properties
+			Data_Model::Data_Representation => Array;
+			Data_Model::Base_Type => (classifier (Coordinate.Impl));
+			Data_Model::Dimension => (3);
+	end Array_of_Mission;
+	
+	data Larger_Array_of_Mission
+		properties
+			Data_Model::Data_Representation => Array;
+			Data_Model::Base_Type => (classifier (Coordinate.Impl));
+			Data_Model::Dimension => (4);
+	end Larger_Array_of_Mission;
+	
+	data Array_of_Integer
+		properties
+			Data_Model::Data_Representation => Array;
+			Data_Model::Base_Type => (classifier (Base_Types::Integer));
+			Data_Model::Dimension => (1);
+	end Array_of_Integer;
+
+	system PC_Sys
+	end PC_Sys;
+
+	system implementation PC_Sys.Impl
+		subcomponents
+			proc: process PC_Proc.Impl;
+			proc_hw: processor PC_Processor.Impl;
+		properties
+     		Actual_processor_binding => reference (proc_hw) applies to proc;
+	end PC_Sys.Impl;
+
+	process PC_Proc
+	end PC_Proc;
+
+	process implementation PC_Proc.Impl
+		subcomponents
+			producer: thread Producer.Impl;
+			consumer: thread Consumer.Impl;
+		connections
+			c1: port producer.missions_to_consumer -> consumer.missions_from_producer;
+			c2: port producer.integers_to_consumer -> consumer.integers_from_producer;
+			c3: port producer.larger_missions_to_consumer -> consumer.larger_missions_from_producer;
+	end PC_Proc.Impl;
+
+	thread Producer
+		features
+			--to_filter: out event data port Mission;
+			missions_to_consumer: out event data port Array_of_Mission;
+			larger_missions_to_consumer: out event data port Larger_Array_of_Mission;
+			integers_to_consumer: out event data port Array_of_Integer;
+		properties
+			Thread_Properties::Dispatch_Protocol => Periodic;
+			Timing_Properties::Period => 1000ms;
+	end Producer;
+
+	thread implementation Producer.Impl
+		properties
+			Thread_Properties::Dispatch_Protocol => Periodic;
+			Timing_Properties::Period => 1000ms;
+			Priority => 2;
+	end Producer.Impl;
+
+	thread Consumer
+		features
+			missions_from_producer: in event data port Array_of_Mission;
+			larger_missions_from_producer: in event data port Larger_Array_of_Mission;
+			integers_from_producer: in event data port Array_of_Integer;
+		properties
+			Thread_Properties::Dispatch_Protocol => Sporadic;
+	end Consumer;
+
+	thread implementation Consumer.Impl
+		properties
+			Thread_Properties::Dispatch_Protocol => Sporadic;
+			Priority => 1;
+	end Consumer.Impl;
+end Arrays;

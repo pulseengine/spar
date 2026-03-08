@@ -1,0 +1,61 @@
+-- Extracted from OSATE2 OtherAadl2ScopeProviderTest.xtend (testRenamesInClassifierReferenceScope)
+-- Tests: renames (package, all, individual classifiers), prototypes with
+--        bindings, internal features (event data), processor features (port, subprogram proxy)
+package pack1
+public
+  with pack5;
+
+  renames pack3::all;
+  renamed_package renames package pack4;
+
+  renames abstract pack5::a6;
+  renames data pack5::d5;
+  renames subprogram pack5::subp5;
+  renames feature group pack5::fgt5;
+
+  renamed_abstract renames abstract pack5::a7;
+  renamed_data renames data pack5::d6;
+  renamed_subprogram renames subprogram pack5::subp6;
+  renamed_feature_group renames feature group pack5::fgt5;
+
+  abstract a1
+    prototypes
+      proto1: abstract a2;
+      proto2: feature a2;
+      proto3: feature group;
+      proto4: feature;
+      proto5: feature;
+      proto6: data;
+  end a1;
+
+  abstract a2 extends a1 (
+    proto3 => feature group fgt1,
+    proto4 => in data port d1,
+    proto5 => provides data access d1,
+    proto6 => data d1
+  )
+  end a2;
+
+  abstract implementation a2.i
+  internal features
+    eds1: event data d1;
+  processor features
+    pp1: port d1;
+    sp1: subprogram subp1;
+  end a2.i;
+
+  feature group fgt1
+  end fgt1;
+
+  data d1
+  end d1;
+
+  data implementation d1.i
+  end d1.i;
+
+  subprogram subp1
+  end subp1;
+
+  subprogram implementation subp1.i
+  end subp1.i;
+end pack1;

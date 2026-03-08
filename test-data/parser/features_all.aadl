@@ -1,0 +1,40 @@
+-- Test all feature types
+package Features_Test
+public
+  with Types;
+
+  system Full_Features
+    features
+      -- Data ports
+      dp_in : in data port Types::Int;
+      dp_out : out data port Types::Int;
+      dp_inout : in out data port;
+
+      -- Event ports
+      ep_in : in event port;
+      ep_out : out event port;
+
+      -- Event data ports
+      edp_in : in event data port Types::Msg;
+      edp_out : out event data port Types::Msg;
+
+      -- Access features
+      ba : requires bus access Types::CAN;
+      ba2 : provides bus access;
+      da : requires data access Types::Buffer;
+      da2 : provides data access Types::Buffer;
+      spa : requires subprogram access Types::Compute;
+      spa2 : provides subprogram access;
+      spga : requires subprogram group access;
+      spga2 : provides subprogram group access;
+
+      -- Feature group
+      fg : feature group Types::Sensor_Interface;
+
+      -- Abstract feature
+      af : feature;
+
+      -- Parameters (for subprograms)
+  end Full_Features;
+
+end Features_Test;

@@ -1,0 +1,15 @@
+-- ERROR: Missing 'subprogram' keyword in call sequence
+package missing_call_subprogram
+public
+    subprogram sp
+    end sp;
+
+    system s
+    end s;
+
+    system implementation s.i
+    calls seq1: {
+        call1: sp;
+    };
+    end s.i;
+end missing_call_subprogram;

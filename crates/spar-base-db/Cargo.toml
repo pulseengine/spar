@@ -1,0 +1,13 @@
+[package]
+name = "spar-base-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Salsa incremental computation database for AADL analysis"
+
+[dependencies]
+spar-syntax.workspace = true
+spar-annex.workspace = true
+salsa.workspace = true
+rowan.workspace = true

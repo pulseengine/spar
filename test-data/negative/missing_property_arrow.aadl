@@ -1,0 +1,8 @@
+-- ERROR: Missing '=>' in property association
+package missing_property_arrow
+public
+    system s
+    properties
+        Period 100 ms;
+    end s;
+end missing_property_arrow;

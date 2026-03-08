@@ -1,0 +1,9 @@
+-- ERROR: Missing closing brace in property block
+package unclosed_property_block
+public
+    system s
+    features
+        p1: in data port {
+            Period => 100 ms;
+    end s;
+end unclosed_property_block;

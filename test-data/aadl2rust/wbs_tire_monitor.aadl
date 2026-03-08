@@ -1,0 +1,159 @@
+package wms
+public
+	with Base_Types;
+	-- with HAMR;
+	-- with CASE_Scheduling;
+	-- with CASE_Properties;
+
+	------------------------------------------------
+	data SensorPacket
+		properties
+			Data_Model::Data_Representation => Struct;
+	end SensorPacket;
+
+	data implementation SensorPacket.impl
+		subcomponents
+			pressure: data Base_Types::Float_32;
+		-- properties
+		-- 	HAMR::Bit_Codec_Max_Size => 32 bits;			
+	end SensorPacket.impl;
+
+	data MonitorPacket
+		properties
+			Data_Model::Data_Representation => Struct;
+	end MonitorPacket;
+
+	data implementation MonitorPacket.impl
+		subcomponents
+			shouldInflate: data Base_Types::Boolean;
+		-- properties
+		-- 	HAMR::Bit_Codec_Max_Size => 1 bits;
+	end MonitorPacket.impl;
+
+	------------------------------------------------
+	-- abstract PeriodicThread
+	-- 	properties
+	-- 		Dispatch_Protocol => Periodic;
+	-- 		Period => 1 sec;
+
+	-- 		Stack_Size => 61440 Bytes;
+
+	-- 		Compute_Execution_Time => 10ms .. 10ms;
+	-- end PeriodicThread;
+	thread PeriodicThread
+	properties
+		Dispatch_Protocol => Periodic;
+		Period => 1000 ms;
+		Stack_Size => 61440 Bytes;
+		Compute_Execution_Time => 10ms .. 10ms;
+	end PeriodicThread;
+
+	------------------------------------------------	
+	system wms
+	end wms;
+
+	system implementation wms.impl
+		subcomponents
+			proc: processor proc.impl;
+			-- tire_p: process tire_monitor_process.impl {
+			-- 	CASE_Scheduling::Domain => 2;
+			-- };
+			-- front_p: process sensor_process.impl {
+			-- 	CASE_Scheduling::Domain => 3;
+			-- };
+			-- rear_p: process sensor_process.impl {
+			-- 	CASE_Scheduling::Domain => 4;
+			-- };
+			tire_p: process tire_monitor_process.impl;
+			front_p: process sensor_process.impl;
+			rear_p: process sensor_process.impl;
+		connections
+			c0: port front_p.pressure -> tire_p.front_pressure;
+			c1: port rear_p.pressure -> tire_p.rear_pressure;
+
+			c2: port tire_p.front_inflate -> front_p.inflate;
+			c3: port tire_p.rear_inflate -> rear_p.inflate;
+		properties
+			-- Actual_Processor_Binding => reference (proc) applies to tire_p, front_p, rear_p;
+			Actual_Processor_Binding => reference (proc) applies to tire_p;
+			Actual_Processor_Binding => reference (proc) applies to front_p;
+			Actual_Processor_Binding => reference (proc) applies to rear_p;
+			-- HAMR::Platform => (JVM, Linux, seL4);
+			-- HAMR::Default_Bit_Width => 32;
+			-- HAMR::Default_Max_Sequence_Size => 1;
+			-- HAMR::Max_String_Size => 256;
+			
+			-- HAMR::Bit_Codec_Raw_Connections => true;
+	end wms.impl;
+
+	processor proc
+	end proc;
+
+	processor implementation proc.impl
+		properties
+			Frame_Period => 1000ms;
+			Clock_Period => 2ms;
+			-- CASE_Scheduling::Max_Domain => 4;
+	end proc.impl;
+
+	------------------------------------------------
+	process tire_monitor_process
+		features
+			front_pressure: in data port SensorPacket;
+			rear_pressure: in data port SensorPacket;
+
+			front_inflate: out data port MonitorPacket;
+			rear_inflate: out data port MonitorPacket;
+	end tire_monitor_process;
+
+	process implementation tire_monitor_process.impl
+		subcomponents
+			monitor: thread tire_monitor.impl;
+		connections
+			c0: port front_pressure -> monitor.front_pressure;
+			c1: port rear_pressure -> monitor.rear_pressure;
+			c2: port monitor.front_inflate -> front_inflate;
+			c3: port monitor.rear_inflate -> rear_inflate;
+	end tire_monitor_process.impl;
+
+	thread tire_monitor extends PeriodicThread
+		features
+			front_pressure: in data port SensorPacket;
+			rear_pressure: in data port SensorPacket;
+
+			front_inflate: out data port MonitorPacket;
+			rear_inflate: out data port MonitorPacket;
+		-- properties
+		-- 	CASE_Properties::Component_Language => CakeML;
+	end tire_monitor;
+
+	thread implementation tire_monitor.impl
+	end tire_monitor.impl;
+
+	------------------------------------------------
+	process sensor_process
+		features
+			inflate: in data port MonitorPacket;
+
+			pressure: out data port SensorPacket;
+	end sensor_process;
+
+	process implementation sensor_process.impl
+		subcomponents
+			sensor: thread sensor.impl;
+		connections
+			c0: port inflate -> sensor.inflate;
+			c1: port sensor.pressure -> pressure;
+	end sensor_process.impl;
+
+	thread sensor extends PeriodicThread
+		features
+			inflate: in data port MonitorPacket;
+
+			pressure: out data port SensorPacket;
+	end sensor;
+
+	thread implementation sensor.impl
+	end sensor.impl;
+
+end wms;

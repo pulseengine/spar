@@ -1,0 +1,146 @@
+-- Complex avionics system exercising many AADL features
+package Avionics_System
+public
+  with Data_Model;
+  with Deployment;
+
+  -- Data types
+  data Altitude
+    properties
+      Data_Model::Data_Representation => Integer;
+  end Altitude;
+
+  data Navigation_Data
+  end Navigation_Data;
+
+  data implementation Navigation_Data.impl
+    subcomponents
+      lat : data Altitude;
+      lon : data Altitude;
+      alt : data Altitude;
+  end Navigation_Data.impl;
+
+  -- Feature group for sensor interface
+  feature group Sensor_Bus
+    features
+      altitude : out data port Altitude;
+      nav_data : out data port Navigation_Data.impl;
+      health : out event port;
+  end Sensor_Bus;
+
+  -- Flight management computer
+  system FMC
+    features
+      sensor_input : feature group inverse of Sensor_Bus;
+      display_out : out data port Navigation_Data.impl;
+      warning : out event port;
+    flows
+      nav_flow : flow path sensor_input -> display_out;
+    properties
+      SEI::MIPSBudget => 500.0 mips;
+  end FMC;
+
+  system implementation FMC.dual
+    subcomponents
+      primary : process Nav_Computer.impl;
+      backup : process Nav_Computer.impl;
+      voter : thread Voter;
+    connections
+      c1 : port sensor_input.nav_data -> primary.input;
+      c2 : port sensor_input.nav_data -> backup.input;
+      c3 : port primary.output -> voter.in1;
+      c4 : port backup.output -> voter.in2;
+      c5 : port voter.result -> display_out;
+    modes
+      normal : initial mode;
+      failover : mode;
+      switch_mode : normal -[warning]-> failover;
+  end FMC.dual;
+
+  -- Navigation computer process
+  process Nav_Computer
+    features
+      input : in data port Navigation_Data.impl;
+      output : out data port Navigation_Data.impl;
+    flows
+      compute : flow path input -> output;
+  end Nav_Computer;
+
+  process implementation Nav_Computer.impl
+    subcomponents
+      nav_thread : thread Nav_Thread.impl;
+    connections
+      tc1 : port input -> nav_thread.nav_in;
+      tc2 : port nav_thread.nav_out -> output;
+    flows
+      compute : flow path input -> tc1 -> nav_thread.process_nav -> tc2 -> output;
+  end Nav_Computer.impl;
+
+  -- Navigation thread
+  thread Nav_Thread
+    features
+      nav_in : in data port Navigation_Data.impl;
+      nav_out : out data port Navigation_Data.impl;
+    flows
+      process_nav : flow path nav_in -> nav_out;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 50 ms;
+      Compute_Execution_Time => 10 ms .. 25 ms;
+      Deadline => 50 ms;
+  end Nav_Thread;
+
+  thread implementation Nav_Thread.impl
+  end Nav_Thread.impl;
+
+  -- Voter thread
+  thread Voter
+    features
+      in1 : in data port Navigation_Data.impl;
+      in2 : in data port Navigation_Data.impl;
+      result : out data port Navigation_Data.impl;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 50 ms;
+  end Voter;
+
+  -- Top-level platform
+  processor Avionics_Processor
+    properties
+      SEI::MIPSCapacity => 1000.0 mips;
+      Scheduling_Protocol => (Rate_Monotonic_Protocol);
+  end Avionics_Processor;
+
+  memory Flight_Memory
+    properties
+      Memory_Size => 256 MByte;
+  end Flight_Memory;
+
+  bus ARINC429
+    properties
+      SEI::BandWidthCapacity => 100.0 KBytesps;
+  end ARINC429;
+
+  -- Full system composition
+  system Avionics_Platform
+    features
+      sensor_bus : feature group inverse of Sensor_Bus;
+      display : out data port Navigation_Data.impl;
+  end Avionics_Platform;
+
+  system implementation Avionics_Platform.deployed
+    subcomponents
+      fmc : system FMC.dual;
+      cpu : processor Avionics_Processor;
+      mem : memory Flight_Memory;
+      arinc : bus ARINC429;
+    connections
+      ext1 : feature group sensor_bus -> fmc.sensor_input;
+      ext2 : port fmc.display_out -> display;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to fmc;
+      Actual_Memory_Binding => (reference (mem)) applies to fmc;
+      Actual_Connection_Binding => (reference (arinc)) applies to ext1;
+  end Avionics_Platform.deployed;
+
+end Avionics_System;

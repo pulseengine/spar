@@ -1,0 +1,8 @@
+-- ERROR: Missing 'end Name;' for the system type
+package missing_component_end
+public
+    system my_system
+    features
+        p1: in data port;
+    -- Missing 'end my_system;' here
+end missing_component_end;

@@ -1,0 +1,6 @@
+-- ERROR: 'virtual' must be followed by 'bus' or 'processor'
+package invalid_virtual_category
+public
+    virtual system vs
+    end vs;
+end invalid_virtual_category;

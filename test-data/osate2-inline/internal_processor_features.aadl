@@ -1,0 +1,25 @@
+-- Extracted from OSATE2 OtherAadl2JavaValidatorTest.xtend (testCheckReferencesToInternalFeatures)
+-- Tests: internal features (event data source), processor features (port proxy),
+--        self/processor keyword in connections
+package pkgTestInternalProcessorFeatures
+public
+  abstract a
+  end a;
+  abstract a2
+    features
+      dp2: in data port;
+  end a2;
+  abstract implementation a.i
+    subcomponents
+      asub1: abstract a2;
+    internal features
+      eds1: event data;
+    processor features
+      pp1: port;
+    connections
+      conn1: port self.eds1 -> asub1.dp2;
+      conn2: port processor.eds1 -> asub1.dp2;
+      conn3: port processor.pp1 -> asub1.dp2;
+      conn4: port self.pp1 -> asub1.dp2;
+  end a.i;
+end pkgTestInternalProcessorFeatures;

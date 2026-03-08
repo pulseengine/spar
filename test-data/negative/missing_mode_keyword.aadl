@@ -1,0 +1,9 @@
+-- ERROR: Missing 'mode' keyword in mode declaration
+package missing_mode_keyword
+public
+    system s
+    modes
+        m1: initial;
+        m2:;
+    end s;
+end missing_mode_keyword;

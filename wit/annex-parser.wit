@@ -1,0 +1,211 @@
+/// WIT interface for pluggable AADL annex parsers.
+///
+/// AADL annexes contain domain-specific sublanguages embedded in
+/// `annex Name {** ... **};` blocks. This interface allows annex
+/// parsers to be implemented as WASM components.
+///
+/// == Known AADL Annexes ==
+///
+/// Standardized (SAE AS5506):
+///   A - Code Generation Annex    (AS-5506/1) — property sets only, no parser needed
+///   B - Data Modeling Annex      (AS-5506/1) — property sets only, no parser needed
+///   C - Error Model V2 (EMV2)    (AS-5506/1, AS-5506/3) — sublanguage: `annex EMV2`
+///   D - Behavior Model Annex     (AS-5506/2) — sublanguage: `annex behavior_specification`
+///   E - Mini Annexes             (AS-5506)   — small sublanguage extensions
+///
+/// Community/Research:
+///   AGREE    — Assume-Guarantee Reasoning (Loonwerks/Collins) — `annex agree`
+///   Resolute — Assurance Case Automation  (Loonwerks/Collins) — `annex Resolute`
+///   BLESS    — Formal Behavioral Specs    (Kansas State Univ) — `annex BLESS`
+///   Security — DARPA CASE program         (experimental)      — `annex security`
+///
+/// ARINC653 is a property set, not an annex sublanguage.
+///
+/// Only EMV2 and behavior_specification require sublanguage parsers in practice.
+/// AGREE, Resolute, BLESS, and security are third-party plugin annexes.
+
+package spar:annex@0.1.0;
+
+/// Shared types for annex parsing and property sets.
+interface types {
+    /// A byte range in the annex source text.
+    record span {
+        start: u32,
+        end: u32,
+    }
+
+    /// Severity level for diagnostics.
+    enum severity {
+        error,
+        warning,
+        hint,
+    }
+
+    /// A diagnostic message from the annex parser.
+    record diagnostic {
+        span: span,
+        message: string,
+        severity: severity,
+    }
+
+    /// A node in the annex parse tree.
+    ///
+    /// Annex parsers return a flat list of nodes (pre-order traversal)
+    /// rather than a recursive tree, for WASM component model compatibility.
+    /// Each node has an index, and children reference their parent by index.
+    ///
+    /// Built-in parsers (EMV2, BA) also produce Rowan CSTs internally
+    /// for IDE features. This flat format is the WASM serialization layer.
+    record annex-node {
+        /// Node kind (annex-specific, e.g. "TYPE_DEFINITION", "ERROR_BEHAVIOR_SM").
+        kind: string,
+        /// Byte span in the annex source text.
+        span: span,
+        /// Parent node index, or -1 for the root.
+        parent: s32,
+        /// Leaf text content (empty for branch nodes).
+        text: string,
+    }
+
+    /// Result of parsing an annex.
+    record parse-result {
+        /// Flat list of nodes in pre-order traversal.
+        nodes: list<annex-node>,
+        /// Diagnostics (errors, warnings) from parsing.
+        diagnostics: list<diagnostic>,
+    }
+
+    // -- Property set types --
+
+    /// AADL property type kinds.
+    ///
+    /// Property types in AADL (AS-5506 §11): aadlboolean, aadlstring,
+    /// aadlinteger, aadlreal, enumeration, range, classifier, reference,
+    /// record, list. Plugins declare the type of each property so the
+    /// host can validate property values without loading AADL property
+    /// set files.
+    enum property-type-kind {
+        aadlboolean,
+        aadlstring,
+        aadlinteger,
+        aadlreal,
+        enumeration,
+        range-of-integer,
+        range-of-real,
+        classifier,
+        reference,
+        record,
+        list,
+    }
+
+    /// Categories of model elements a property can apply to.
+    enum applies-to-category {
+        all,
+        system,
+        process,
+        thread,
+        thread-group,
+        processor,
+        virtual-processor,
+        memory,
+        bus,
+        virtual-bus,
+        device,
+        subprogram,
+        subprogram-group,
+        data,
+        abstract,
+        feature,
+        connection,
+        flow,
+        mode,
+    }
+
+    /// Description of a single property in a property set.
+    record property-descriptor {
+        /// Property name (e.g., "OccurrenceDistribution").
+        name: string,
+        /// Property type kind.
+        type-kind: property-type-kind,
+        /// Applicable element categories (empty means `applies to (all)`).
+        applies-to: list<applies-to-category>,
+        /// Default value as AADL text, if any.
+        default-value: option<string>,
+        /// Brief description.
+        description: string,
+    }
+
+    /// Description of a property set contributed by an annex plugin.
+    ///
+    /// Annexes like EMV2, Data Modeling, and ARINC653 define companion
+    /// property sets. A WASM plugin can declare these so the host
+    /// registers them without needing separate `.aadl` property set files.
+    record property-set-descriptor {
+        /// Property set name (e.g., "EMV2", "Data_Model").
+        name: string,
+        /// Properties in this set.
+        properties: list<property-descriptor>,
+    }
+}
+
+/// The parser interface that annex components export.
+interface parser {
+    use types.{parse-result};
+
+    /// Return the annex name(s) this parser handles.
+    /// Names are case-insensitive (e.g., ["EMV2"], ["behavior_specification"]).
+    names: func() -> list<string>;
+
+    /// Parse annex text content.
+    ///
+    /// `name` is the annex name as it appeared in the AADL source.
+    /// `source` is the text between `{**` and `**}`.
+    /// Returns a structured parse result.
+    parse: func(name: string, source: string) -> parse-result;
+}
+
+/// Property set declarations exported by annex plugins.
+///
+/// Annex plugins can declare companion property sets (e.g., EMV2 declares
+/// `EMV2::OccurrenceDistribution`). The host registers these property sets
+/// so that property validation works without separate `.aadl` files.
+///
+/// This interface is optional — plugins that only parse annex sublanguages
+/// without introducing new properties need not export it.
+interface properties {
+    use types.{property-set-descriptor};
+
+    /// Return property set descriptors contributed by this plugin.
+    ///
+    /// Called once when the plugin is loaded. Returns zero or more
+    /// property sets that the annex introduces.
+    ///
+    /// Example: an EMV2 plugin would return a property set named "EMV2"
+    /// containing properties like OccurrenceDistribution, Hazards, etc.
+    property-sets: func() -> list<property-set-descriptor>;
+}
+
+/// The world for annex sublanguage parser plugins.
+///
+/// Plugins that parse annex sublanguages (EMV2, BA, AGREE, etc.)
+/// export the `parser` interface.
+world annex-parser-plugin {
+    export parser;
+}
+
+/// The world for annex property set plugins.
+///
+/// Plugins that contribute property sets without a sublanguage
+/// (Data_Model, ARINC653, Code_Generation) export only `properties`.
+world annex-property-plugin {
+    export properties;
+}
+
+/// The full annex plugin world: both parsing and property sets.
+///
+/// Plugins like EMV2 that have both a sublanguage AND companion
+/// property sets export both interfaces.
+world annex-plugin {
+    export parser;
+    export properties;
+}

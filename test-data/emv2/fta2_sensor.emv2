@@ -1,0 +1,8 @@
+use types ErrorModelLibrary;
+use behavior ErrorModelLibrary::Simple;
+
+error propagations
+	dataout: out propagation {BadValue};
+	flows
+		f0: error source dataout {BadValue};
+end propagations;

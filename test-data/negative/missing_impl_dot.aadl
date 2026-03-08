@@ -1,0 +1,9 @@
+-- ERROR: Missing dot between type name and implementation name
+package missing_impl_dot
+public
+    system s
+    end s;
+
+    system implementation s i
+    end s.i;
+end missing_impl_dot;

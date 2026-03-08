@@ -1,0 +1,104 @@
+package Base_Types::Example_Types
+public
+	with Data_Model;
+	with Base_Types;
+
+
+data One_Dimension_Array
+	properties
+		Data_Model::Data_Representation => Array;
+		Data_Model::Base_Type => classifier (Base_Types::Integer);
+		Data_Model::Dimension => 42;
+end One_Dimension_Array;
+
+
+data Two_Dimensions_Array
+	properties
+		Data_Model::Data_Representation => Array;
+		Data_Model::Base_Type => classifier (Base_Types::Integer);
+		Data_Model::Dimension => (74, 75);
+end Two_Dimensions_Array;
+
+
+data A_Struct1
+	properties
+		Data_Model::Data_Representation => Struct;
+		Data_Model::Base_Type => (classifier (Base_Types::Float),
+			classifier (Base_Types::Character));
+		Data_Model::Element_Names => ("f1", "c2");
+end A_Struct1; 
+
+data A_Struct2
+	properties
+		Data_Model::Data_Representation => Struct;
+end A_Struct2;
+
+data implementation A_Struct2.impl
+	subcomponents
+		f1: data Base_Types::Float;
+		c2: data Base_Types::Character;
+end A_Struct2.impl;
+
+
+data A_Union1
+	properties
+		Data_Model::Data_Representation => Union;
+		Data_Model::Base_Type => (classifier (Base_Types::Integer),
+			classifier (Base_Types::Character));
+		Data_Model::Element_Names => ("f1", "c2");
+end A_Union1;
+
+data A_Union2
+	properties
+		Data_Model::Data_Representation => Union;
+end A_Union2;
+
+data implementation A_Union2.impl
+	subcomponents
+		f1: data Base_Types::Float;
+		c2: data Base_Types::Character;
+end A_Union2.impl;
+
+data A_Tagged_Union
+	properties
+		Data_Model::Data_Representation => TaggedUnion;
+		Data_Model::Base_Type => (classifier (Base_Types::Float),
+			classifier (Base_Types::Character));
+		Data_Model::Element_Names => ("f1", "f2");
+end A_Tagged_Union;
+
+data A_Tagged_Union2
+	properties
+		Data_Model::Data_Representation => TaggedUnion;
+end A_Tagged_Union2;
+
+data implementation A_Tagged_Union2.impl
+	subcomponents
+		f1: data Base_Types::Float;
+		c2: data Base_Types::Character;
+end A_Tagged_Union2.impl;
+
+
+data An_Enum
+	properties
+		Data_Model::Data_Representation => Enum;
+		Data_Model::Enumerators => ("foo", "bar");
+		Data_Model::Representation => ("00", "11");
+end An_Enum;
+
+
+-- data A_Fixed_Point
+-- 	properties
+-- 		Data_Model::Data_Representation => Fixed;
+-- 		Data_Model::Data_Digits => 18;
+-- 		Data_Model::Data_Scale => 8;
+-- end A_Fixed_Point;
+
+
+data C_Type
+	properties
+		Source_Language => (C);
+		Source_Text => ("types.h");
+		Type_Source_Name => "the_type";
+end C_Type;
+end Base_Types::Example_Types;

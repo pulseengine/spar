@@ -1,0 +1,44 @@
+-- Extracted from OSATE2 Issue277Test.xtend
+-- Tests: feature group extends with inverse of, multi-level extends,
+--        refined to in feature groups, abstract features (in/out feature)
+package issue277
+public
+  system TestSys
+    features
+      fg1: feature group TestExtendedFeatureGroup;
+      fg2: feature group TestInvExtendedFeatureGroup;
+  end TestSys;
+
+  system TestSubSys
+  end TestSubSys;
+
+  system implementation TestSys.Impl
+  end TestSys.Impl;
+
+  feature group BaseFG
+    features
+      q: feature;
+  end BaseFG;
+
+  feature group TestFeatureGroup extends BaseFG
+    features
+      i: in feature;
+      p: in feature;
+  end TestFeatureGroup;
+
+  feature group TestExtendedFeatureGroup extends TestFeatureGroup
+    features
+      p: refined to in data port;
+  end TestExtendedFeatureGroup;
+
+  feature group TestInvFeatureGroup
+    features
+      o: out feature;
+      r: out feature;
+    inverse of TestFeatureGroup
+  end TestInvFeatureGroup;
+
+  feature group TestInvExtendedFeatureGroup extends TestInvFeatureGroup
+    inverse of TestExtendedFeatureGroup
+  end TestInvExtendedFeatureGroup;
+end issue277;
