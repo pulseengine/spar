@@ -31,4 +31,5 @@ rowan = "0.16"
 salsa = "0.26"
 la-arena = "0.3"
 rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
 smol_str = "0.3"

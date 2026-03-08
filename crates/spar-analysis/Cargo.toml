@@ -10,3 +10,4 @@ description = "Pluggable analysis framework for AADL models"
 spar-hir-def.workspace = true
 la-arena.workspace = true
 rustc-hash = "2"
+serde.workspace = true

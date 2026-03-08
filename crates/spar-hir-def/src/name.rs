@@ -1,5 +1,6 @@
 //! Interned name types for AADL identifiers.
 
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::fmt;
 
@@ -7,7 +8,7 @@ use std::fmt;
 ///
 /// AADL identifiers are case-insensitive per the spec (AS5506 §3.1).
 /// We store the original text but compare case-insensitively.
-#[derive(Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Name(SmolStr);
 
 impl Name {
@@ -50,7 +51,7 @@ impl From<String> for Name {
 }
 
 /// A qualified classifier reference: `Package::Type` or `Package::Type.Impl`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ClassifierRef {
     /// Package qualifier (if any).
     pub package: Option<Name>,
@@ -105,7 +106,7 @@ impl fmt::Display for ClassifierRef {
 }
 
 /// A property reference: `PropertySet::PropertyName`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PropertyRef {
     /// Property set qualifier (if any).
     pub property_set: Option<Name>,

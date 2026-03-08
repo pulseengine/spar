@@ -13,4 +13,5 @@ salsa.workspace = true
 rowan.workspace = true
 la-arena = "0.3"
 rustc-hash = "2"
-smol_str = "0.3"
+serde.workspace = true
+smol_str = { version = "0.3", features = ["serde"] }

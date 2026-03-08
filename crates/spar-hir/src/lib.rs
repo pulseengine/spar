@@ -1159,6 +1159,19 @@ end E2EPkg;
     }
 
     #[test]
+    fn units_type_parsing() {
+        let db = make_db(
+            r#"
+            property set Time_Props is
+              Time_Units: type units (ps, ns => ps * 1000, us => ns * 1000, ms => us * 1000, sec => ms * 1000, min => sec * 60, hr => min * 60);
+            end Time_Props;
+            "#,
+        );
+        // Verify no panic during parsing — property sets parse at tree level
+        let _pkgs = db.packages();
+    }
+
+    #[test]
     fn access_features() {
         let db = make_db(
             r#"
