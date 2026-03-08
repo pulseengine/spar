@@ -47,6 +47,7 @@ pub use spar_hir_def::item_tree::{
 };
 pub use spar_hir_def::item_tree::PropertyExpr;
 
+use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 
 use spar_hir_def::item_tree::{
@@ -173,7 +174,7 @@ impl std::fmt::Debug for Database {
 // ── Package ────────────────────────────────────────────────────────
 
 /// A named AADL package with its declarations.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub with_clauses: Vec<String>,
@@ -185,7 +186,7 @@ pub struct Package {
 // ── ComponentType ──────────────────────────────────────────────────
 
 /// A component type declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentType {
     pub name: String,
     pub category: ComponentCategory,
@@ -200,7 +201,7 @@ pub struct ComponentType {
 // ── ComponentImpl ──────────────────────────────────────────────────
 
 /// A component implementation declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentImpl {
     /// Full dotted name: `TypeName.ImplName`.
     pub name: String,
@@ -222,7 +223,7 @@ pub struct ComponentImpl {
 // ── FeatureGroupType ───────────────────────────────────────────────
 
 /// A feature group type declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeatureGroupType {
     pub name: String,
     pub extends: Option<String>,
@@ -233,7 +234,7 @@ pub struct FeatureGroupType {
 // ── Feature ────────────────────────────────────────────────────────
 
 /// A port, access, or feature group declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Feature {
     pub name: String,
     pub kind: FeatureKind,
@@ -247,7 +248,7 @@ pub struct Feature {
 // ── Subcomponent ───────────────────────────────────────────────────
 
 /// A subcomponent declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subcomponent {
     pub name: String,
     pub category: ComponentCategory,
@@ -260,7 +261,7 @@ pub struct Subcomponent {
 // ── Connection ─────────────────────────────────────────────────────
 
 /// A connection declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub name: String,
     pub kind: ConnectionKind,
@@ -277,7 +278,7 @@ pub struct Connection {
 // ── FlowSpec ───────────────────────────────────────────────────────
 
 /// A flow specification declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowSpec {
     pub name: String,
     pub kind: FlowKind,
@@ -292,7 +293,7 @@ pub struct FlowSpec {
 // ── EndToEndFlow ───────────────────────────────────────────────────
 
 /// An end-to-end flow declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndToEndFlow {
     pub name: String,
     pub segments: Vec<String>,
@@ -303,7 +304,7 @@ pub struct EndToEndFlow {
 // ── Mode ───────────────────────────────────────────────────────────
 
 /// A mode declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mode {
     pub name: String,
     pub is_initial: bool,
@@ -312,7 +313,7 @@ pub struct Mode {
 // ── ModeTransition ─────────────────────────────────────────────────
 
 /// A mode transition declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModeTransition {
     pub name: Option<String>,
     pub source: String,
@@ -323,7 +324,7 @@ pub struct ModeTransition {
 // ── PropertyAssociation ────────────────────────────────────────────
 
 /// A property association (`prop => value` or `prop +=> value`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyAssociation {
     /// Fully qualified property name (e.g. `"Timing_Properties::Period"`).
     pub name: String,
@@ -342,7 +343,7 @@ pub struct PropertyAssociation {
 // ── Classifier ─────────────────────────────────────────────────────
 
 /// A resolved classifier: either a type, implementation, or feature group type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Classifier {
     Type(ComponentType),
     Implementation(ComponentImpl),
@@ -1132,6 +1133,73 @@ end E2EPkg;
         let inst = db.instantiate("D::S.I").unwrap();
         // No diagnostics for a trivial model.
         assert!(inst.diagnostics().is_empty() || !inst.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn serde_round_trip_packages() {
+        let db = make_db(
+            r#"
+            package Nav
+            public
+              system GPS
+                features
+                  pos_out: out data port;
+              end GPS;
+            end Nav;
+            "#,
+        );
+        let pkgs = db.packages();
+        let json = serde_json::to_string_pretty(&pkgs).expect("serialize");
+        assert!(json.contains("GPS"));
+        assert!(json.contains("pos_out"));
+        let round: Vec<Package> = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round.len(), 1);
+        assert_eq!(round[0].name, "Nav");
+        assert_eq!(round[0].component_types[0].name, "GPS");
+    }
+
+    #[test]
+    fn serde_round_trip_classifier() {
+        let db = make_db(
+            r#"
+            package Sys
+            public
+              system Top end Top;
+              system implementation Top.Impl
+                subcomponents
+                  cpu: processor;
+              end Top.Impl;
+            end Sys;
+            "#,
+        );
+        let cls = db.find_classifier("Sys::Top.Impl").unwrap();
+        let json = serde_json::to_string(&cls).unwrap();
+        assert!(json.contains("Top.Impl"));
+        let round: Classifier = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, cls);
+    }
+
+    #[test]
+    fn serde_property_expressions() {
+        let db = make_db(
+            r#"
+            package Props
+            public
+              thread Worker
+                properties
+                  Dispatch_Protocol => Periodic;
+                  Period => 10 ms;
+              end Worker;
+            end Props;
+            "#,
+        );
+        let pkgs = db.packages();
+        let json = serde_json::to_string_pretty(&pkgs).unwrap();
+        assert!(json.contains("Dispatch_Protocol"));
+        assert!(json.contains("10"));
+        let round: Vec<Package> = serde_json::from_str(&json).unwrap();
+        assert_eq!(round[0].component_types[0].properties.len(),
+                   pkgs[0].component_types[0].properties.len());
     }
 
     #[test]
