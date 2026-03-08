@@ -27,7 +27,7 @@
 //! | Name | Standard | Annex Letter | Status |
 //! |------|----------|-------------|--------|
 //! | `EMV2` | SAE AS-5506/1, AS-5506/3 | C | **Implemented** |
-//! | `behavior_specification` | SAE AS-5506/2 | D | Planned |
+//! | `behavior_specification` | SAE AS-5506/2 | D | **Implemented** |
 //! | `agree` | Non-standard (Loonwerks/Collins) | — | Opaque only |
 //! | `Resolute` | Non-standard (Loonwerks/Collins) | — | Opaque only |
 //! | `BLESS` | Non-standard (Kansas State Univ) | — | Opaque only |
@@ -36,6 +36,7 @@
 mod registry;
 mod types;
 pub mod emv2;
+pub mod ba;
 
 pub use registry::AnnexRegistry;
 pub use types::*;
