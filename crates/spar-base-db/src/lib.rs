@@ -148,6 +148,7 @@ pub fn parse_file(db: &dyn Db, file: SourceFile) -> ParseResult {
 fn default_annex_registry() -> spar_annex::AnnexRegistry {
     let mut registry = spar_annex::AnnexRegistry::new();
     registry.register(Arc::new(spar_annex::emv2::Emv2AnnexParser));
+    registry.register(Arc::new(spar_annex::ba::BaAnnexParser));
     registry
 }
 
