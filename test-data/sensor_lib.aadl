@@ -1,0 +1,20 @@
+-- Sensor library for vehicle ECU
+package SensorLib
+public
+  system GPSSensor
+    features
+      position : out data port;
+      status : out event port;
+  end GPSSensor;
+
+  system implementation GPSSensor.basic
+  end GPSSensor.basic;
+
+  system TempSensor
+    features
+      reading : out data port;
+  end TempSensor;
+
+  system implementation TempSensor.basic
+  end TempSensor.basic;
+end SensorLib;

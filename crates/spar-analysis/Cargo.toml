@@ -1,0 +1,12 @@
+[package]
+name = "spar-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pluggable analysis framework for AADL models"
+
+[dependencies]
+spar-hir-def.workspace = true
+la-arena.workspace = true
+rustc-hash = "2"

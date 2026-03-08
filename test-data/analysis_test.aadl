@@ -1,0 +1,45 @@
+-- Test file for spar analyze command
+-- Contains deliberate issues for analysis detection
+package AnalysisTest
+public
+
+  -- A sensor with ports that will be left unconnected
+  system Sensor
+    features
+      data_out : out data port;
+      status : out event port;
+  end Sensor;
+
+  system implementation Sensor.basic
+  end Sensor.basic;
+
+  -- A controller with an input that won't be connected
+  system Controller
+    features
+      data_in : in data port;
+      cmd_out : out data port;
+  end Controller;
+
+  system implementation Controller.basic
+  end Controller.basic;
+
+  -- An actuator with no implementation provided
+  system Actuator
+    features
+      cmd_in : in data port;
+  end Actuator;
+
+  -- Top-level system that ties things together (with deliberate gaps)
+  system TopLevel
+  end TopLevel;
+
+  system implementation TopLevel.Demo
+    subcomponents
+      sensor : system Sensor.basic;
+      controller : system Controller.basic;
+      actuator : system Actuator;
+    connections
+      c1 : port sensor.data_out -> controller.data_in;
+  end TopLevel.Demo;
+
+end AnalysisTest;

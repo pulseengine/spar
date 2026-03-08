@@ -5,6 +5,8 @@ members = [
     "crates/spar-syntax",
     "crates/spar-annex",
     "crates/spar-base-db",
+    "crates/spar-hir-def",
+    "crates/spar-analysis",
     "crates/spar-cli",
 ]
 
@@ -19,5 +21,10 @@ spar-parser = { path = "crates/spar-parser" }
 spar-syntax = { path = "crates/spar-syntax" }
 spar-annex = { path = "crates/spar-annex" }
 spar-base-db = { path = "crates/spar-base-db" }
+spar-hir-def = { path = "crates/spar-hir-def" }
+spar-analysis = { path = "crates/spar-analysis" }
 rowan = "0.16"
 salsa = "0.26"
+la-arena = "0.3"
+rustc-hash = "2"
+smol_str = "0.3"
