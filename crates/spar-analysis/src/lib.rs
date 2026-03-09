@@ -19,6 +19,7 @@ pub mod category_check;
 pub mod completeness;
 pub mod connectivity;
 pub mod direction_rules;
+pub mod emv2_analysis;
 pub mod flow_check;
 pub mod hierarchy;
 pub mod latency;
