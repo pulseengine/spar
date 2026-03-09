@@ -1,0 +1,22 @@
+[package]
+name = "spar-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WASM component for AADL parsing, analysis, and SVG rendering"
+
+[dependencies]
+spar-parser.workspace = true
+spar-syntax.workspace = true
+spar-base-db.workspace = true
+spar-hir-def.workspace = true
+spar-hir.workspace = true
+spar-analysis.workspace = true
+serde.workspace = true
+serde_json = "1"
+petgraph = "0.6"
+la-arena = "0.3"
+
+[dev-dependencies]
+rustc-hash.workspace = true
