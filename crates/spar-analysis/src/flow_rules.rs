@@ -416,6 +416,7 @@ mod tests {
                 flows: Vec::new(),
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
+                array_index: None,
             })
         }
 
@@ -431,6 +432,9 @@ mod tests {
                 kind,
                 direction: Some(dir),
                 owner,
+                classifier: None,
+                access_kind: None,
+                array_index: None,
             });
             self.components[owner].features.push(idx);
         }
