@@ -222,6 +222,8 @@ mod tests {
                 kind,
                 direction: Some(dir),
                 owner,
+                classifier: None,
+                access_kind: None,
             });
             self.components[owner].features.push(idx);
         }

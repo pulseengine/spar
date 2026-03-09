@@ -223,6 +223,8 @@ mod tests {
                 kind,
                 direction,
                 owner,
+                classifier: None,
+                access_kind: None,
             });
             self.components[owner].features.push(idx);
             idx

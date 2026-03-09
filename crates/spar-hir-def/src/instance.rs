@@ -12,7 +12,7 @@ use la_arena::{Arena, Idx};
 use rustc_hash::FxHashMap;
 
 use crate::feature_group::{expand_feature_group, ExpandedFeature};
-use crate::item_tree::{ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
+use crate::item_tree::{AccessKind, ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
 use crate::name::{ClassifierRef, Name};
 use crate::properties::PropertyMap;
 use crate::resolver::{GlobalScope, ResolvedClassifier};
@@ -83,6 +83,10 @@ pub struct FeatureInstance {
     pub kind: FeatureKind,
     pub direction: Option<Direction>,
     pub owner: ComponentInstanceIdx,
+    /// Classifier reference for the feature's data type (if any).
+    pub classifier: Option<ClassifierRef>,
+    /// For access features: provides or requires.
+    pub access_kind: Option<AccessKind>,
 }
 
 /// A connection instance.
@@ -926,6 +930,8 @@ impl<'a> Builder<'a> {
                             kind: feat.kind,
                             direction: feat.direction,
                             owner: idx,
+                            classifier: feat.classifier.clone(),
+                            access_kind: feat.access_kind,
                         });
                         feat_indices.push(fi);
                     }
