@@ -11,6 +11,7 @@
 pub mod lower;
 
 use la_arena::{Arena, Idx};
+use serde::{Deserialize, Serialize};
 
 use crate::name::{ClassifierRef, Name, PropertyRef};
 
@@ -68,7 +69,8 @@ pub struct ItemTree {
 // ── Top-level items ────────────────────────────────────────────────
 
 /// AADL component category.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ComponentCategory {
     System,
     Process,
@@ -197,7 +199,7 @@ pub struct PropertySetItem {
 // ── Nested items ───────────────────────────────────────────────────
 
 /// Direction of a port or access feature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Direction {
     In,
     Out,
@@ -215,7 +217,7 @@ impl std::fmt::Display for Direction {
 }
 
 /// Kind of feature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FeatureKind {
     DataPort,
     EventPort,
@@ -247,7 +249,7 @@ impl std::fmt::Display for FeatureKind {
 }
 
 /// Access kind: provides or requires.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccessKind {
     Provides,
     Requires,
@@ -294,7 +296,7 @@ pub struct SubcomponentItem {
 }
 
 /// Kind of connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ConnectionKind {
     Port,
     Access,
@@ -329,7 +331,7 @@ pub struct ConnectionItem {
 }
 
 /// Kind of flow specification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FlowKind {
     Source,
     Sink,
@@ -453,7 +455,7 @@ pub struct SubprogramCallItem {
 // ── Renames ────────────────────────────────────────────────────────
 
 /// Kind of renames declaration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RenamesKind {
     /// `alias renames package Other_Package;`
     Package,
@@ -497,7 +499,7 @@ pub enum ArraySize {
 // ── Property expression types (T3: typed property values) ──────────
 
 /// A typed property expression, replacing opaque string values.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyExpr {
     /// Integer literal, possibly with units.
     Integer(i64, Option<Name>),
@@ -532,7 +534,7 @@ pub enum PropertyExpr {
 }
 
 /// Property type definition as declared in a property set.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertyTypeDef {
     /// `aadlinteger [range low .. high] [units UnitType]`
     AadlInteger {
@@ -579,7 +581,7 @@ pub struct PropertyDefItem {
 }
 
 /// What a property definition applies to.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AppliesToKind {
     All,
     Category(ComponentCategory),

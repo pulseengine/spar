@@ -28,6 +28,7 @@ pub mod naming_rules;
 pub mod resource_budget;
 pub mod scheduling;
 
+use serde::Serialize;
 use spar_hir_def::instance::SystemInstance;
 
 /// A single analysis that can be run on an AADL system instance.
@@ -40,7 +41,7 @@ pub trait Analysis {
 }
 
 /// A diagnostic produced by an analysis pass.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnalysisDiagnostic {
     pub severity: Severity,
     pub message: String,
@@ -51,7 +52,8 @@ pub struct AnalysisDiagnostic {
 }
 
 /// Severity level for an analysis diagnostic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Error,
     Warning,

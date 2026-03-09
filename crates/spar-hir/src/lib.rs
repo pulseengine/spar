@@ -47,6 +47,7 @@ pub use spar_hir_def::item_tree::{
 };
 pub use spar_hir_def::item_tree::PropertyExpr;
 
+use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 
 use spar_hir_def::item_tree::{
@@ -173,7 +174,7 @@ impl std::fmt::Debug for Database {
 // ── Package ────────────────────────────────────────────────────────
 
 /// A named AADL package with its declarations.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub with_clauses: Vec<String>,
@@ -185,7 +186,7 @@ pub struct Package {
 // ── ComponentType ──────────────────────────────────────────────────
 
 /// A component type declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentType {
     pub name: String,
     pub category: ComponentCategory,
@@ -200,7 +201,7 @@ pub struct ComponentType {
 // ── ComponentImpl ──────────────────────────────────────────────────
 
 /// A component implementation declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ComponentImpl {
     /// Full dotted name: `TypeName.ImplName`.
     pub name: String,
@@ -222,7 +223,7 @@ pub struct ComponentImpl {
 // ── FeatureGroupType ───────────────────────────────────────────────
 
 /// A feature group type declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeatureGroupType {
     pub name: String,
     pub extends: Option<String>,
@@ -233,7 +234,7 @@ pub struct FeatureGroupType {
 // ── Feature ────────────────────────────────────────────────────────
 
 /// A port, access, or feature group declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Feature {
     pub name: String,
     pub kind: FeatureKind,
@@ -247,7 +248,7 @@ pub struct Feature {
 // ── Subcomponent ───────────────────────────────────────────────────
 
 /// A subcomponent declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Subcomponent {
     pub name: String,
     pub category: ComponentCategory,
@@ -260,7 +261,7 @@ pub struct Subcomponent {
 // ── Connection ─────────────────────────────────────────────────────
 
 /// A connection declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Connection {
     pub name: String,
     pub kind: ConnectionKind,
@@ -277,7 +278,7 @@ pub struct Connection {
 // ── FlowSpec ───────────────────────────────────────────────────────
 
 /// A flow specification declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowSpec {
     pub name: String,
     pub kind: FlowKind,
@@ -292,7 +293,7 @@ pub struct FlowSpec {
 // ── EndToEndFlow ───────────────────────────────────────────────────
 
 /// An end-to-end flow declaration within a component implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EndToEndFlow {
     pub name: String,
     pub segments: Vec<String>,
@@ -303,7 +304,7 @@ pub struct EndToEndFlow {
 // ── Mode ───────────────────────────────────────────────────────────
 
 /// A mode declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Mode {
     pub name: String,
     pub is_initial: bool,
@@ -312,7 +313,7 @@ pub struct Mode {
 // ── ModeTransition ─────────────────────────────────────────────────
 
 /// A mode transition declaration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModeTransition {
     pub name: Option<String>,
     pub source: String,
@@ -323,7 +324,7 @@ pub struct ModeTransition {
 // ── PropertyAssociation ────────────────────────────────────────────
 
 /// A property association (`prop => value` or `prop +=> value`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PropertyAssociation {
     /// Fully qualified property name (e.g. `"Timing_Properties::Period"`).
     pub name: String,
@@ -342,7 +343,7 @@ pub struct PropertyAssociation {
 // ── Classifier ─────────────────────────────────────────────────────
 
 /// A resolved classifier: either a type, implementation, or feature group type.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Classifier {
     Type(ComponentType),
     Implementation(ComponentImpl),
@@ -357,6 +358,40 @@ pub enum Classifier {
 /// arena indices.
 pub struct Instance {
     inner: spar_hir_def::instance::SystemInstance,
+}
+
+/// A serializable tree representation of an AADL instance model.
+///
+/// Flattens the arena-based `SystemInstance` into a JSON-friendly tree.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstanceNode {
+    pub name: String,
+    pub category: ComponentCategory,
+    pub package: String,
+    pub type_name: String,
+    pub impl_name: Option<String>,
+    pub features: Vec<InstanceFeature>,
+    pub connections: Vec<InstanceConnection>,
+    pub children: Vec<InstanceNode>,
+    pub diagnostics: Vec<String>,
+}
+
+/// A feature in the serializable instance tree.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstanceFeature {
+    pub name: String,
+    pub kind: FeatureKind,
+    pub direction: Option<Direction>,
+}
+
+/// A connection in the serializable instance tree.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstanceConnection {
+    pub name: String,
+    pub kind: ConnectionKind,
+    pub is_bidirectional: bool,
+    pub source: Option<String>,
+    pub destination: Option<String>,
 }
 
 impl Instance {
@@ -421,6 +456,61 @@ impl Instance {
     /// (e.g. passing to analysis passes).
     pub fn inner(&self) -> &spar_hir_def::instance::SystemInstance {
         &self.inner
+    }
+
+    /// Convert the instance model to a serializable tree.
+    pub fn to_serializable(&self) -> InstanceNode {
+        self.build_node(self.inner.root)
+    }
+
+    fn build_node(&self, idx: spar_hir_def::instance::ComponentInstanceIdx) -> InstanceNode {
+        let comp = self.inner.component(idx);
+
+        let features = comp.features.iter().map(|&fi| {
+            let f = &self.inner.features[fi];
+            InstanceFeature {
+                name: f.name.as_str().to_string(),
+                kind: f.kind,
+                direction: f.direction,
+            }
+        }).collect();
+
+        let connections = comp.connections.iter().map(|&ci| {
+            let c = &self.inner.connections[ci];
+            InstanceConnection {
+                name: c.name.as_str().to_string(),
+                kind: c.kind,
+                is_bidirectional: c.is_bidirectional,
+                source: c.src.as_ref().map(|e| {
+                    match &e.subcomponent {
+                        Some(sub) => format!("{}.{}", sub, e.feature),
+                        None => e.feature.as_str().to_string(),
+                    }
+                }),
+                destination: c.dst.as_ref().map(|e| {
+                    match &e.subcomponent {
+                        Some(sub) => format!("{}.{}", sub, e.feature),
+                        None => e.feature.as_str().to_string(),
+                    }
+                }),
+            }
+        }).collect();
+
+        let children = comp.children.iter()
+            .map(|&child_idx| self.build_node(child_idx))
+            .collect();
+
+        InstanceNode {
+            name: comp.name.as_str().to_string(),
+            category: comp.category,
+            package: comp.package.as_str().to_string(),
+            type_name: comp.type_name.as_str().to_string(),
+            impl_name: comp.impl_name.as_ref().map(|n| n.as_str().to_string()),
+            features,
+            connections,
+            children,
+            diagnostics: vec![],
+        }
     }
 }
 
@@ -1135,6 +1225,73 @@ end E2EPkg;
     }
 
     #[test]
+    fn serde_round_trip_packages() {
+        let db = make_db(
+            r#"
+            package Nav
+            public
+              system GPS
+                features
+                  pos_out: out data port;
+              end GPS;
+            end Nav;
+            "#,
+        );
+        let pkgs = db.packages();
+        let json = serde_json::to_string_pretty(&pkgs).expect("serialize");
+        assert!(json.contains("GPS"));
+        assert!(json.contains("pos_out"));
+        let round: Vec<Package> = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round.len(), 1);
+        assert_eq!(round[0].name, "Nav");
+        assert_eq!(round[0].component_types[0].name, "GPS");
+    }
+
+    #[test]
+    fn serde_round_trip_classifier() {
+        let db = make_db(
+            r#"
+            package Sys
+            public
+              system Top end Top;
+              system implementation Top.Impl
+                subcomponents
+                  cpu: processor;
+              end Top.Impl;
+            end Sys;
+            "#,
+        );
+        let cls = db.find_classifier("Sys::Top.Impl").unwrap();
+        let json = serde_json::to_string(&cls).unwrap();
+        assert!(json.contains("Top.Impl"));
+        let round: Classifier = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, cls);
+    }
+
+    #[test]
+    fn serde_property_expressions() {
+        let db = make_db(
+            r#"
+            package Props
+            public
+              thread Worker
+                properties
+                  Dispatch_Protocol => Periodic;
+                  Period => 10 ms;
+              end Worker;
+            end Props;
+            "#,
+        );
+        let pkgs = db.packages();
+        let json = serde_json::to_string_pretty(&pkgs).unwrap();
+        assert!(json.contains("Dispatch_Protocol"));
+        assert!(json.contains("10"));
+        let round: Vec<Package> = serde_json::from_str(&json).unwrap();
+        assert_eq!(round[0].component_types[0].properties.len(),
+                   pkgs[0].component_types[0].properties.len());
+    }
+
+    #[test]
     fn subcomponent_with_modes() {
         let db = make_db(
             r#"
@@ -1156,6 +1313,56 @@ end E2EPkg;
         let ci = &db.packages()[0].component_impls[0];
         assert_eq!(ci.subcomponents[0].in_modes, vec!["active", "standby"]);
         assert_eq!(ci.modes.len(), 2);
+    }
+
+    #[test]
+    fn units_type_parsing() {
+        let db = make_db(
+            r#"
+            property set Time_Props is
+              Time_Units: type units (ps, ns => ps * 1000, us => ns * 1000, ms => us * 1000, sec => ms * 1000, min => sec * 60, hr => min * 60);
+            end Time_Props;
+            "#,
+        );
+        // Verify no panic during parsing — property sets parse at tree level
+        let _pkgs = db.packages();
+    }
+
+    #[test]
+    fn serde_instance_tree() {
+        let db = make_db(
+            r#"
+            package IMA
+            public
+              system Platform
+                features
+                  eth: in out data port;
+              end Platform;
+
+              processor CPU end CPU;
+
+              system implementation Platform.Dual
+                subcomponents
+                  cpu1: processor CPU;
+                  cpu2: processor CPU;
+              end Platform.Dual;
+            end IMA;
+            "#,
+        );
+        let inst = db.instantiate("IMA::Platform.Dual").unwrap();
+        let tree = inst.to_serializable();
+        let json = serde_json::to_string_pretty(&tree).expect("serialize instance");
+        assert!(json.contains("Platform"));
+        assert!(json.contains("cpu1"));
+        assert!(json.contains("cpu2"));
+        assert_eq!(tree.children.len(), 2);
+        assert_eq!(tree.name, "Platform.Dual");
+        assert_eq!(tree.category, ComponentCategory::System);
+        assert_eq!(tree.package, "IMA");
+
+        // Round-trip
+        let round: InstanceNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, tree);
     }
 
     #[test]

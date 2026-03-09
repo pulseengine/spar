@@ -1,0 +1,124 @@
+/// WIT interface for rivet adapters.
+///
+/// Adapters are the extension points for rivet. Each adapter handles
+/// a specific external format or protocol. Adapters can be compiled-in Rust
+/// or loaded as WebAssembly components at runtime.
+///
+/// This interface mirrors the `rivet_core::adapter::Adapter` trait.
+/// A WASM component implementing `rivet-adapter` can be loaded by the host
+/// and used identically to a built-in adapter.
+
+package pulseengine:rivet@0.1.0;
+
+interface types {
+    /// A lifecycle artifact (requirement, hazard, test case, etc.)
+    record artifact {
+        id: string,
+        artifact-type: string,
+        title: string,
+        description: option<string>,
+        status: option<string>,
+        tags: list<string>,
+        links: list<link>,
+        fields: list<field-entry>,
+    }
+
+    /// A typed, directional link between artifacts
+    record link {
+        link-type: string,
+        target: string,
+    }
+
+    /// A key-value pair for artifact fields
+    record field-entry {
+        key: string,
+        value: field-value,
+    }
+
+    /// Dynamically typed field value
+    variant field-value {
+        text(string),
+        number(f64),
+        boolean(bool),
+        text-list(list<string>),
+    }
+
+    /// Configuration passed to adapter operations
+    record adapter-config {
+        entries: list<config-entry>,
+    }
+
+    record config-entry {
+        key: string,
+        value: string,
+    }
+
+    /// Errors returned by adapter operations
+    variant adapter-error {
+        parse-error(string),
+        validation-error(string),
+        io-error(string),
+        not-supported(string),
+    }
+}
+
+/// The adapter interface that WASM components implement.
+///
+/// Each adapter handles import/export for a specific format:
+/// - stpa-yaml: STPA analysis YAML files
+/// - generic-yaml: Generic artifact YAML
+/// - reqif: ReqIF 1.2 XML
+/// - oslc: OSLC REST resources (RM, QM, CM, AM)
+/// - junit-xml: JUnit XML test results
+interface adapter {
+    use types.{artifact, adapter-config, adapter-error};
+
+    /// Unique identifier (e.g., "stpa-yaml", "reqif")
+    id: func() -> string;
+
+    /// Human-readable name
+    name: func() -> string;
+
+    /// Artifact types this adapter can produce/consume
+    supported-types: func() -> list<string>;
+
+    /// Import artifacts from raw bytes
+    %import: func(source: list<u8>, config: adapter-config) -> result<list<artifact>, adapter-error>;
+
+    /// Export artifacts to raw bytes
+    %export: func(artifacts: list<artifact>, config: adapter-config) -> result<list<u8>, adapter-error>;
+}
+
+/// World for a rivet adapter component
+world rivet-adapter {
+    export adapter;
+}
+
+/// Interface for rendering AADL instance models to SVG.
+///
+/// A `renderer` implementation parses AADL sources, instantiates
+/// from the given root component implementation, lays out the
+/// architecture, and returns an SVG string.
+interface renderer {
+    /// Errors returned by renderer operations
+    variant render-error {
+        parse-error(string),
+        no-root(string),
+        layout-error(string),
+    }
+
+    /// Render an AADL instance tree rooted at `root` (e.g. "Pkg::Impl").
+    ///
+    /// `highlight` is an optional list of component paths to visually
+    /// emphasise in the output (e.g. flow participants).
+    ///
+    /// Returns the SVG document as a UTF-8 string, or a `render-error`.
+    render: func(root: string, highlight: list<string>) -> result<string, render-error>;
+}
+
+/// World for a spar WASM component that can both adapt AADL artifacts
+/// for rivet and render instance-model diagrams.
+world spar-component {
+    export adapter;
+    export renderer;
+}

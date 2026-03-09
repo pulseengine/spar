@@ -12,5 +12,7 @@ spar-base-db.workspace = true
 spar-hir-def.workspace = true
 salsa.workspace = true
 smol_str = "0.3"
+serde.workspace = true
 
 [dev-dependencies]
+serde_json = "1"

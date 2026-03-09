@@ -2,6 +2,17 @@ mod lsp;
 
 use std::{env, fs, process};
 
+use serde::Serialize;
+
+/// Top-level JSON output for `spar analyze --format json`.
+#[derive(Serialize)]
+struct AnalyzeJsonOutput {
+    root: String,
+    packages: Vec<spar_hir::Package>,
+    instance: Option<spar_hir::InstanceNode>,
+    diagnostics: Vec<spar_analysis::AnalysisDiagnostic>,
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -35,9 +46,9 @@ fn print_usage() {
     eprintln!();
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
-    eprintln!("  items    <file...>");
+    eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--analyze] <file...>");
-    eprintln!("  analyze  --root Package::Type.Impl <file...>");
+    eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
 }
 
 fn cmd_lsp() {
@@ -90,10 +101,46 @@ fn cmd_parse(args: &[String]) {
 }
 
 fn cmd_items(args: &[String]) {
-    let files = collect_files(args);
-    let db = spar_hir_def::HirDefDatabase::default();
+    let mut format = None;
+    let mut file_args = Vec::new();
 
-    for file_path in &files {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json)");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => file_args.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    if file_args.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    if format.as_deref() == Some("json") {
+        let sources: Vec<_> = file_args.iter().map(|f| (f.clone(), read_file(f))).collect();
+        let hir_db = spar_hir::Database::from_aadl(&sources);
+        let pkgs = hir_db.packages();
+        println!("{}", serde_json::to_string_pretty(&pkgs).unwrap());
+        return;
+    }
+
+    // Existing text output path
+    let db = spar_hir_def::HirDefDatabase::default();
+    for file_path in &file_args {
         let source = read_file(file_path);
         let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
         let tree = spar_hir_def::file_item_tree(&db, sf);
@@ -258,6 +305,7 @@ fn cmd_instance(args: &[String]) {
 fn cmd_analyze(args: &[String]) {
     let mut root = None;
     let mut files = Vec::new();
+    let mut format = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -268,6 +316,15 @@ fn cmd_analyze(args: &[String]) {
                     root = Some(args[i].clone());
                 } else {
                     eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json)");
                     process::exit(1);
                 }
             }
@@ -339,6 +396,22 @@ fn cmd_analyze(args: &[String]) {
 
     // Run instance-level analyses
     diagnostics.extend(run_all_analyses(&inst));
+
+    // JSON output path
+    if format.as_deref() == Some("json") {
+        // Build HIR database for package data
+        let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+        let hir_db = spar_hir::Database::from_aadl(&sources);
+        let instance_tree = hir_db.instantiate(&root).map(|i| i.to_serializable());
+        let output = AnalyzeJsonOutput {
+            root: root.clone(),
+            packages: hir_db.packages(),
+            instance: instance_tree,
+            diagnostics: diagnostics.clone(),
+        };
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        return;
+    }
 
     if diagnostics.is_empty() {
         eprintln!("No diagnostics. Model is clean.");
@@ -498,15 +571,3 @@ fn read_file(path: &str) -> String {
     })
 }
 
-fn collect_files(args: &[String]) -> Vec<String> {
-    let files: Vec<String> = args
-        .iter()
-        .filter(|a| !a.starts_with('-'))
-        .cloned()
-        .collect();
-    if files.is_empty() {
-        eprintln!("Missing file argument(s)");
-        process::exit(1);
-    }
-    files
-}
