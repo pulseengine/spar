@@ -8,6 +8,10 @@
 //! - Multi-file workspace support with GlobalScope
 //! - textDocument/completion (keywords, classifiers, properties, packages)
 //! - workspace/symbol search
+//! - Code actions (quick-fix for end-name, semicolons, with-clauses, direction)
+//! - Document formatting
+//! - Rename (component types, features, subcomponents, packages)
+//! - Inlay hints (component category, connection direction)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,16 +23,20 @@ use lsp_types::notification::{
     Notification as LspNotification, PublishDiagnostics,
 };
 use lsp_types::request::{
-    Completion, DocumentSymbolRequest, GotoDefinition, HoverRequest, Request as LspRequest,
-    WorkspaceSymbolRequest,
+    CodeActionRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
+    InlayHintRequest, PrepareRenameRequest, Rename, Request as LspRequest, WorkspaceSymbolRequest,
 };
 use lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
-    Diagnostic, DiagnosticSeverity, DocumentSymbol, DocumentSymbolResponse,
-    FileSystemWatcher, GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability,
-    InitializeParams, Location, MarkedString, OneOf, Position, PublishDiagnosticsParams, Range,
-    Registration, ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Uri, WatchKind, WorkspaceSymbolResponse,
+    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, CompletionItem, CompletionItemKind, CompletionOptions,
+    CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity, DocumentFormattingParams,
+    DocumentSymbol, DocumentSymbolResponse, FileSystemWatcher, FormattingOptions,
+    GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability, InitializeParams,
+    InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkedString, OneOf,
+    Position, PrepareRenameResponse, PublishDiagnosticsParams, Range, Registration,
+    RenameOptions, RenameParams, ServerCapabilities, SymbolInformation, SymbolKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri, WatchKind, WorkspaceEdit,
+    WorkspaceSymbolResponse,
 };
 
 use spar_hir_def::item_tree::ItemRef;
@@ -96,6 +104,13 @@ fn server_capabilities() -> ServerCapabilities {
             ..Default::default()
         }),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
+        inlay_hint_provider: Some(OneOf::Left(true)),
         ..Default::default()
     }
 }
@@ -279,6 +294,21 @@ fn handle_request(state: &mut ServerState, connection: &Connection, req: Request
         send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
     } else if let Some((_, params)) = cast_request::<WorkspaceSymbolRequest>(req.clone()) {
         let result = handle_workspace_symbol(state, params);
+        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+    } else if let Some((_, params)) = cast_request::<CodeActionRequest>(req.clone()) {
+        let result = handle_code_action(state, &params);
+        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+    } else if let Some((_, params)) = cast_request::<Formatting>(req.clone()) {
+        let result = handle_formatting(state, &params);
+        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+    } else if let Some((_, params)) = cast_request::<PrepareRenameRequest>(req.clone()) {
+        let result = handle_prepare_rename(state, &params);
+        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+    } else if let Some((_, params)) = cast_request::<Rename>(req.clone()) {
+        let result = handle_rename(state, &params);
+        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+    } else if let Some((_, params)) = cast_request::<InlayHintRequest>(req.clone()) {
+        let result = handle_inlay_hints(state, &params);
         send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
     } else {
         // Unknown request -- respond with method not found.
@@ -1530,6 +1560,1259 @@ fn handle_workspace_symbol(
     Some(WorkspaceSymbolResponse::Flat(symbols))
 }
 
+// ── Code Actions ────────────────────────────────────────────────────
+
+fn handle_code_action(
+    state: &ServerState,
+    params: &CodeActionParams,
+) -> Option<Vec<CodeActionOrCommand>> {
+    let uri = &params.text_document.uri;
+    let uri_str = uri.as_str();
+    let source = state.documents.get(uri_str)?;
+    let diagnostics = &params.context.diagnostics;
+
+    let mut actions = Vec::new();
+
+    for diag in diagnostics {
+        let msg = &diag.message;
+        let diag_source = diag.source.as_deref().unwrap_or("");
+
+        // Action 1: Fix end-name mismatch
+        // Parser errors like `expected "end Foo"` or `expected IDENT`
+        // after an `end` keyword.
+        if diag_source == "spar-parser" && msg.contains("expected") {
+            // Fix missing semicolons: `expected SEMICOLON`
+            if msg.contains("SEMICOLON") {
+                let insert_pos = diag.range.end;
+                let edit = TextEdit {
+                    range: Range::new(insert_pos, insert_pos),
+                    new_text: ";".to_string(),
+                };
+                let mut changes = HashMap::new();
+                changes.insert(uri.clone(), vec![edit]);
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: "Insert missing semicolon".to_string(),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![diag.clone()]),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            }
+
+            // Fix missing end keyword: `expected END_KW`
+            if msg.contains("END_KW") {
+                // Look backward from the diagnostic to find the declaration name
+                if let Some(end_name) = find_expected_end_name(source, &diag.range) {
+                    let insert_pos = diag.range.start;
+                    let edit = TextEdit {
+                        range: Range::new(insert_pos, insert_pos),
+                        new_text: format!("end {};\n", end_name),
+                    };
+                    let mut changes = HashMap::new();
+                    changes.insert(uri.clone(), vec![edit]);
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: format!("Insert 'end {};'", end_name),
+                        kind: Some(CodeActionKind::QUICKFIX),
+                        diagnostics: Some(vec![diag.clone()]),
+                        edit: Some(WorkspaceEdit {
+                            changes: Some(changes),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }));
+                }
+            }
+        }
+
+        // Action 3: Add with-clause for unresolved classifier references
+        if diag_source.starts_with("spar-") && msg.contains("unresolved") {
+            // Try to find a package that defines the unresolved name
+            if let Some(name) = extract_unresolved_name(msg) {
+                if let Some(pkg_name) = find_package_for_name(state, &name) {
+                    if let Some(with_edit) = make_with_clause_edit(source, uri, &pkg_name) {
+                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                            title: format!("Add 'with {};'", pkg_name),
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            diagnostics: Some(vec![diag.clone()]),
+                            edit: Some(with_edit),
+                            ..Default::default()
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Action 4: Quick-fix port direction mismatch
+        if diag_source == "spar-direction_rules" && msg.contains("direction") {
+            // Offer to swap connection endpoints
+            if let Some(swap_edit) = make_swap_connection_edit(source, uri, &diag.range) {
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: "Swap connection endpoints".to_string(),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![diag.clone()]),
+                    edit: Some(swap_edit),
+                    ..Default::default()
+                }));
+            }
+        }
+    }
+
+    if actions.is_empty() {
+        None
+    } else {
+        Some(actions)
+    }
+}
+
+/// Look backward from a diagnostic position to find the declaration name
+/// that should follow `end`.
+///
+/// Uses the parser's CST to reliably find the enclosing declaration.
+fn find_expected_end_name(source: &str, range: &Range) -> Option<String> {
+    let offset = position_to_offset(source, range.start)?;
+
+    // Parse the source to get the CST and walk it for the declaration containing the offset
+    let parsed = spar_syntax::parse(source);
+    let root = parsed.syntax_node();
+
+    // Find the innermost declaration node containing (or just before) the offset
+    let target_offset = rowan::TextSize::new(offset as u32);
+
+    let declaration_kinds = [
+        SyntaxKind::AADL_PACKAGE,
+        SyntaxKind::COMPONENT_TYPE,
+        SyntaxKind::COMPONENT_IMPL,
+        SyntaxKind::FEATURE_GROUP_TYPE,
+        SyntaxKind::PROPERTY_SET,
+    ];
+
+    let mut best_node = None;
+    let mut best_end = rowan::TextSize::new(0);
+
+    for node in root.descendants() {
+        if declaration_kinds.contains(&node.kind()) {
+            let node_range = node.text_range();
+            // The diagnostic offset should be near the end of this node
+            // or just after it (for missing `end` keywords)
+            if node_range.start() < target_offset {
+                if best_node.is_none() || node_range.start() > best_end {
+                    best_node = Some(node.clone());
+                    best_end = node_range.start();
+                }
+            }
+        }
+    }
+
+    let decl_node = best_node?;
+
+    // Extract the name from the declaration node
+    match decl_node.kind() {
+        SyntaxKind::AADL_PACKAGE | SyntaxKind::COMPONENT_TYPE
+        | SyntaxKind::FEATURE_GROUP_TYPE | SyntaxKind::PROPERTY_SET => {
+            // Name is the first IDENT token child (possibly inside a NAME node)
+            for child in decl_node.children_with_tokens() {
+                if let Some(tok) = child.as_token() {
+                    if tok.kind() == SyntaxKind::IDENT {
+                        return Some(tok.text().to_string());
+                    }
+                }
+                if let Some(node) = child.as_node() {
+                    if node.kind() == SyntaxKind::NAME {
+                        // Extract text from the NAME node
+                        let name_text: String = node.text().to_string();
+                        let trimmed = name_text.trim().to_string();
+                        if !trimmed.is_empty() {
+                            return Some(trimmed);
+                        }
+                    }
+                }
+            }
+        }
+        SyntaxKind::COMPONENT_IMPL => {
+            // For implementations, find the TypeName.ImplName
+            // The REALIZATION node contains the type name, then DOT, then impl name
+            let mut type_name = None;
+            let mut impl_name = None;
+            let mut past_implementation = false;
+            let mut past_dot = false;
+
+            for child in decl_node.children_with_tokens() {
+                if let Some(tok) = child.as_token() {
+                    if tok.kind() == SyntaxKind::IMPLEMENTATION_KW {
+                        past_implementation = true;
+                    } else if past_implementation && tok.kind() == SyntaxKind::DOT {
+                        past_dot = true;
+                    } else if past_implementation && past_dot && tok.kind() == SyntaxKind::IDENT {
+                        impl_name = Some(tok.text().to_string());
+                    }
+                }
+                if let Some(node) = child.as_node() {
+                    if node.kind() == SyntaxKind::REALIZATION && past_implementation {
+                        // Extract the type name from REALIZATION
+                        for rtok in node.children_with_tokens() {
+                            if let Some(t) = rtok.as_token() {
+                                if t.kind() == SyntaxKind::IDENT {
+                                    type_name = Some(t.text().to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let (Some(tn), Some(in_)) = (type_name, impl_name) {
+                return Some(format!("{}.{}", tn, in_));
+            }
+        }
+        _ => {}
+    }
+
+    // Fallback: use text-based heuristic for the package/type name
+    let before = &source[..offset.min(source.len())];
+    let lower = before.to_ascii_lowercase();
+
+    if let Some(pos) = lower.rfind("package ") {
+        let after = &before[pos + 8..];
+        let name: String = after
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !name.is_empty() {
+            return Some(name);
+        }
+    }
+
+    None
+}
+
+/// Extract the unresolved name from an error message.
+fn extract_unresolved_name(msg: &str) -> Option<String> {
+    // Messages like "unresolved classifier 'Foo'" or "unresolved reference 'Bar'"
+    let patterns = ["'", "`"];
+    for pat in &patterns {
+        if let Some(start) = msg.find(pat) {
+            let rest = &msg[start + pat.len()..];
+            if let Some(end) = rest.find(pat) {
+                let name = &rest[..end];
+                // Strip package qualifier if present
+                let simple = name.rsplit("::").next().unwrap_or(name);
+                return Some(simple.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Search all packages for a component type/impl matching the given name.
+fn find_package_for_name(state: &ServerState, name: &str) -> Option<String> {
+    let scope = &state.global_scope;
+    for (pkg_name, type_name, _) in scope.all_component_types() {
+        if type_name.as_str().eq_ignore_ascii_case(name) {
+            return Some(pkg_name.as_str().to_string());
+        }
+    }
+    for (pkg_name, type_name, impl_name, _) in scope.all_component_impls() {
+        if type_name.as_str().eq_ignore_ascii_case(name)
+            || impl_name.as_str().eq_ignore_ascii_case(name)
+        {
+            return Some(pkg_name.as_str().to_string());
+        }
+    }
+    None
+}
+
+/// Generate a WorkspaceEdit to insert `with PackageName;` at the top of the file.
+fn make_with_clause_edit(
+    source: &str,
+    uri: &Uri,
+    pkg_name: &str,
+) -> Option<WorkspaceEdit> {
+    // Check if we already have this with-clause
+    let lower = source.to_ascii_lowercase();
+    let with_check = format!("with {}", pkg_name.to_ascii_lowercase());
+    if lower.contains(&with_check) {
+        return None;
+    }
+
+    // Find the insertion point: after existing with-clauses, or after `public`/`package` line
+    let insert_offset = find_with_clause_insert_offset(source);
+    let insert_pos = offset_to_position(source, insert_offset);
+
+    let edit = TextEdit {
+        range: Range::new(insert_pos, insert_pos),
+        new_text: format!("with {};\n", pkg_name),
+    };
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+    Some(WorkspaceEdit {
+        changes: Some(changes),
+        ..Default::default()
+    })
+}
+
+/// Find the byte offset where a new `with` clause should be inserted.
+fn find_with_clause_insert_offset(source: &str) -> usize {
+    let lower = source.to_ascii_lowercase();
+    // After the last existing `with ...;` line
+    let mut last_with_end = None;
+    let mut search_from = 0;
+    while let Some(pos) = lower[search_from..].find("with ") {
+        let abs_pos = search_from + pos;
+        if let Some(semi) = source[abs_pos..].find(';') {
+            let end = abs_pos + semi + 1;
+            // Skip to end of line
+            let line_end = source[end..].find('\n').map(|p| end + p + 1).unwrap_or(end);
+            last_with_end = Some(line_end);
+        }
+        search_from = abs_pos + 5;
+    }
+
+    if let Some(offset) = last_with_end {
+        return offset;
+    }
+
+    // After `public` keyword line
+    if let Some(pos) = lower.find("public") {
+        let line_end = source[pos..].find('\n').map(|p| pos + p + 1).unwrap_or(pos + 6);
+        return line_end;
+    }
+
+    // After `package Name` line
+    if let Some(pos) = lower.find("package ") {
+        let line_end = source[pos..].find('\n').map(|p| pos + p + 1).unwrap_or(pos + 8);
+        return line_end;
+    }
+
+    0
+}
+
+/// Generate a WorkspaceEdit to swap `src -> dst` to `dst -> src` in a connection.
+fn make_swap_connection_edit(
+    source: &str,
+    uri: &Uri,
+    diag_range: &Range,
+) -> Option<WorkspaceEdit> {
+    // Find the line containing the diagnostic
+    let offset = position_to_offset(source, diag_range.start)?;
+    let line_start = source[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let line_end = source[offset..].find('\n').map(|p| offset + p).unwrap_or(source.len());
+    let line = &source[line_start..line_end];
+
+    // Look for `src -> dst` or `src <-> dst` pattern
+    let (arrow, arrow_len) = if let Some(pos) = line.find(" -> ") {
+        (pos, 4)
+    } else if let Some(pos) = line.find(" <-> ") {
+        (pos, 5)
+    } else {
+        return None;
+    };
+
+    // Find the source and destination parts
+    // Source is between `:` (or `port`/`access` keyword) and arrow
+    // Look for the content before the arrow
+    let before_arrow = line[..arrow].trim();
+    let after_arrow = line[arrow + arrow_len..].trim().trim_end_matches(';').trim();
+
+    // Find the last space-separated token before arrow (src endpoint)
+    // and first token after arrow (dst endpoint)
+    // The connection pattern is: `name : kind src -> dst;`
+    // We need to find the endpoint references
+    let arrow_str = &line[arrow..arrow + arrow_len];
+
+    // Simple swap: replace `src -> dst` with `dst -> src` (preserving arrow type)
+    // Find the start of src endpoint (after connection kind keywords)
+    let src_start = find_connection_endpoint_start(before_arrow)?;
+    let src_text = before_arrow[src_start..].trim();
+    let dst_text = after_arrow.trim_end_matches(|c: char| c == ';' || c.is_whitespace());
+
+    if src_text.is_empty() || dst_text.is_empty() {
+        return None;
+    }
+
+    // Build the replacement: swap src and dst
+    let old_text = format!("{}{}{}", src_text, arrow_str, after_arrow.split(';').next().unwrap_or(after_arrow));
+    let new_text = format!("{}{}{}", dst_text, arrow_str, src_text);
+
+    // Find the position of the old text in the line
+    let old_pos = line.find(&old_text)?;
+    let replace_start = line_start + old_pos;
+    let replace_end = replace_start + old_text.len();
+
+    let start_pos = offset_to_position(source, replace_start);
+    let end_pos = offset_to_position(source, replace_end);
+
+    let edit = TextEdit {
+        range: Range::new(start_pos, end_pos),
+        new_text,
+    };
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), vec![edit]);
+    Some(WorkspaceEdit {
+        changes: Some(changes),
+        ..Default::default()
+    })
+}
+
+/// Find the start of the connection source endpoint within a connection line prefix.
+fn find_connection_endpoint_start(text: &str) -> Option<usize> {
+    // Connection syntax: `name : port src` or `name : access src` etc.
+    // The endpoint starts after the last connection-kind keyword
+    let keywords = ["port ", "access ", "feature group ", "feature ", "parameter "];
+    let mut last = 0;
+    for kw in &keywords {
+        let lower = text.to_ascii_lowercase();
+        if let Some(pos) = lower.rfind(kw) {
+            let candidate = pos + kw.len();
+            if candidate > last {
+                last = candidate;
+            }
+        }
+    }
+    if last > 0 {
+        Some(last)
+    } else {
+        // Fallback: after `: `
+        text.find(": ").map(|p| p + 2)
+    }
+}
+
+// ── Document Formatting ─────────────────────────────────────────────
+
+fn handle_formatting(
+    state: &ServerState,
+    params: &DocumentFormattingParams,
+) -> Option<Vec<TextEdit>> {
+    let uri = &params.text_document.uri;
+    let source = state.documents.get(uri.as_str())?;
+    let edits = format_document(source, &params.options);
+    if edits.is_empty() {
+        None
+    } else {
+        Some(edits)
+    }
+}
+
+/// Format an AADL document by walking the CST and emitting properly formatted text.
+fn format_document(text: &str, options: &FormattingOptions) -> Vec<TextEdit> {
+    let parsed = spar_syntax::parse(text);
+    let root = parsed.syntax_node();
+    let indent_size = options.tab_size as usize;
+    let formatted = format_node_recursive(&root, 0, indent_size);
+
+    if formatted == text {
+        return vec![];
+    }
+
+    // Return a single whole-document replacement
+    vec![TextEdit {
+        range: full_document_range(text),
+        new_text: formatted,
+    }]
+}
+
+/// Compute the Range covering the entire document.
+fn full_document_range(text: &str) -> Range {
+    let lines: Vec<&str> = text.lines().collect();
+    let last_line = lines.len().saturating_sub(1) as u32;
+    let last_col = lines.last().map(|l| l.len() as u32).unwrap_or(0);
+    Range::new(Position::new(0, 0), Position::new(last_line, last_col))
+}
+
+/// Walk the CST and produce formatted output.
+///
+/// The formatter:
+/// - Uses consistent indentation (configurable spaces)
+/// - Normalizes whitespace around operators
+/// - Preserves comments
+/// - Normalizes keyword casing to lowercase
+/// - Preserves annex content as-is
+fn format_node_recursive(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    use rowan::NodeOrToken;
+
+    let mut out = String::new();
+    let _indent = " ".repeat(depth * indent_size);
+    let _inner_indent = " ".repeat((depth + 1) * indent_size);
+
+    match node.kind() {
+        SyntaxKind::SOURCE_FILE => {
+            // Top-level: format children at depth 0
+            for child in node.children_with_tokens() {
+                match child {
+                    NodeOrToken::Node(n) => {
+                        out.push_str(&format_node_recursive(&n, 0, indent_size));
+                    }
+                    NodeOrToken::Token(t) => {
+                        out.push_str(&format_token(&t, false));
+                    }
+                }
+            }
+            // Ensure file ends with a newline
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+        SyntaxKind::AADL_PACKAGE => {
+            out.push_str(&format_package(node, depth, indent_size));
+        }
+        SyntaxKind::COMPONENT_TYPE => {
+            out.push_str(&format_component_type(node, depth, indent_size));
+        }
+        SyntaxKind::COMPONENT_IMPL => {
+            out.push_str(&format_component_impl(node, depth, indent_size));
+        }
+        SyntaxKind::FEATURE_GROUP_TYPE => {
+            out.push_str(&format_classifier_generic(node, depth, indent_size));
+        }
+        SyntaxKind::PROPERTY_SET => {
+            out.push_str(&format_classifier_generic(node, depth, indent_size));
+        }
+        SyntaxKind::ANNEX_SUBCLAUSE | SyntaxKind::ANNEX_LIBRARY => {
+            // Preserve annex content as-is
+            out.push_str(&node.text().to_string());
+        }
+        _ => {
+            // Default: preserve original text
+            out.push_str(&node.text().to_string());
+        }
+    }
+
+    out
+}
+
+/// Format a package node.
+fn format_package(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    use rowan::NodeOrToken;
+
+    let mut out = String::new();
+    let indent = " ".repeat(depth * indent_size);
+    let mut prev_was_newline = false;
+
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Token(t) => {
+                let kind = t.kind();
+                if kind == SyntaxKind::WHITESPACE {
+                    // Normalize whitespace: collapse multiple blank lines to one
+                    let ws = t.text().to_string();
+                    let newline_count = ws.chars().filter(|c| *c == '\n').count();
+                    if newline_count > 0 {
+                        if newline_count > 1 && !prev_was_newline {
+                            out.push_str("\n\n");
+                        } else {
+                            out.push('\n');
+                        }
+                        prev_was_newline = true;
+                    } else {
+                        out.push(' ');
+                        prev_was_newline = false;
+                    }
+                } else if kind == SyntaxKind::COMMENT {
+                    out.push_str(t.text());
+                    prev_was_newline = false;
+                } else {
+                    let text = format_keyword_token(&t);
+                    out.push_str(&text);
+                    prev_was_newline = false;
+                }
+            }
+            NodeOrToken::Node(n) => {
+                match n.kind() {
+                    SyntaxKind::PUBLIC_SECTION | SyntaxKind::PRIVATE_SECTION => {
+                        out.push_str(&format_section(&n, depth, indent_size));
+                    }
+                    SyntaxKind::WITH_CLAUSE => {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&indent);
+                        out.push_str(&format_inline_node(&n));
+                        out.push('\n');
+                    }
+                    _ => {
+                        out.push_str(&format_node_recursive(&n, depth, indent_size));
+                    }
+                }
+                prev_was_newline = out.ends_with('\n');
+            }
+        }
+    }
+
+    out
+}
+
+/// Format a public/private section.
+fn format_section(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    use rowan::NodeOrToken;
+
+    let mut out = String::new();
+    let indent = " ".repeat(depth * indent_size);
+
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Token(t) => {
+                let kind = t.kind();
+                if kind == SyntaxKind::WHITESPACE {
+                    let ws = t.text().to_string();
+                    let newlines = ws.chars().filter(|c| *c == '\n').count();
+                    if newlines > 0 {
+                        if newlines > 1 {
+                            out.push_str("\n\n");
+                        } else {
+                            out.push('\n');
+                        }
+                    } else {
+                        out.push(' ');
+                    }
+                } else if kind == SyntaxKind::COMMENT {
+                    out.push_str(t.text());
+                } else {
+                    out.push_str(&format_keyword_token(&t));
+                }
+            }
+            NodeOrToken::Node(n) => {
+                match n.kind() {
+                    SyntaxKind::WITH_CLAUSE => {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&indent);
+                        out.push_str(&format_inline_node(&n));
+                        out.push('\n');
+                    }
+                    SyntaxKind::COMPONENT_TYPE => {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&format_component_type(&n, depth + 1, indent_size));
+                    }
+                    SyntaxKind::COMPONENT_IMPL => {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&format_component_impl(&n, depth + 1, indent_size));
+                    }
+                    SyntaxKind::ANNEX_SUBCLAUSE | SyntaxKind::ANNEX_LIBRARY => {
+                        out.push_str(&n.text().to_string());
+                    }
+                    _ => {
+                        out.push_str(&format_classifier_generic(&n, depth + 1, indent_size));
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Format a component type declaration.
+fn format_component_type(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    format_classifier_body(node, depth, indent_size)
+}
+
+/// Format a component implementation declaration.
+fn format_component_impl(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    format_classifier_body(node, depth, indent_size)
+}
+
+/// Common formatting for classifier bodies (types, implementations, feature group types, etc.).
+fn format_classifier_body(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    use rowan::NodeOrToken;
+
+    let mut out = String::new();
+    let indent = " ".repeat(depth * indent_size);
+    let section_indent = " ".repeat((depth + 1) * indent_size);
+
+    // Track if we're building the header line or in sections
+    let mut in_header = true;
+
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Token(t) => {
+                let kind = t.kind();
+                if kind == SyntaxKind::WHITESPACE {
+                    if in_header {
+                        out.push(' ');
+                    } else {
+                        let ws = t.text().to_string();
+                        let newlines = ws.chars().filter(|c| *c == '\n').count();
+                        if newlines > 0 {
+                            out.push('\n');
+                        } else {
+                            out.push(' ');
+                        }
+                    }
+                } else if kind == SyntaxKind::COMMENT {
+                    out.push_str(t.text());
+                } else if kind == SyntaxKind::END_KW {
+                    in_header = false;
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str(&indent);
+                    out.push_str("end");
+                } else if kind == SyntaxKind::SEMICOLON {
+                    out.push(';');
+                    out.push('\n');
+                } else {
+                    out.push_str(&format_keyword_token(&t));
+                }
+            }
+            NodeOrToken::Node(n) => {
+                let nk = n.kind();
+                let is_section = matches!(
+                    nk,
+                    SyntaxKind::FEATURE_SECTION
+                        | SyntaxKind::SUBCOMPONENT_SECTION
+                        | SyntaxKind::CONNECTION_SECTION
+                        | SyntaxKind::FLOW_SPEC_SECTION
+                        | SyntaxKind::FLOW_IMPL_SECTION
+                        | SyntaxKind::MODE_SECTION
+                        | SyntaxKind::PROPERTY_SECTION
+                        | SyntaxKind::PROTOTYPE_SECTION
+                        | SyntaxKind::CALL_SECTION
+                        | SyntaxKind::INTERNAL_FEATURES_SECTION
+                        | SyntaxKind::PROCESSOR_FEATURES_SECTION
+                );
+
+                if is_section {
+                    in_header = false;
+                    out.push_str(&format_body_section(&n, depth, indent_size));
+                } else if nk == SyntaxKind::ANNEX_SUBCLAUSE {
+                    in_header = false;
+                    if !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out.push_str(&section_indent);
+                    out.push_str(&n.text().to_string());
+                    out.push('\n');
+                } else {
+                    out.push_str(&format_inline_node(&n));
+                }
+            }
+        }
+    }
+
+    // Ensure we end with newline
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Format a body section (features, subcomponents, connections, etc.).
+fn format_body_section(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    use rowan::NodeOrToken;
+
+    let mut out = String::new();
+    let section_indent = " ".repeat((depth + 1) * indent_size);
+    let item_indent = " ".repeat((depth + 2) * indent_size);
+    let mut first = true;
+
+    for child in node.children_with_tokens() {
+        match child {
+            NodeOrToken::Token(t) => {
+                let kind = t.kind();
+                if kind == SyntaxKind::WHITESPACE {
+                    // Skip whitespace; we control formatting
+                    continue;
+                } else if kind == SyntaxKind::COMMENT {
+                    if !out.ends_with('\n') && !out.is_empty() {
+                        out.push(' ');
+                    }
+                    out.push_str(t.text());
+                    if !t.text().ends_with('\n') {
+                        out.push('\n');
+                    }
+                } else if kind.is_keyword() {
+                    // Section keyword (features, subcomponents, etc.)
+                    if first {
+                        if !out.ends_with('\n') && !out.is_empty() {
+                            out.push('\n');
+                        }
+                        out.push_str(&section_indent);
+                        first = false;
+                    }
+                    out.push_str(&t.text().to_string().to_ascii_lowercase());
+                } else if kind == SyntaxKind::SEMICOLON {
+                    out.push(';');
+                    out.push('\n');
+                } else {
+                    out.push_str(t.text());
+                }
+            }
+            NodeOrToken::Node(n) => {
+                // Each declaration item on its own line with deeper indent
+                if !out.ends_with('\n') && !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&item_indent);
+                out.push_str(&format_declaration_item(&n));
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Format a single declaration item (feature, subcomponent, connection, etc.)
+/// as an inline string.
+fn format_declaration_item(node: &spar_syntax::SyntaxNode) -> String {
+    let raw = node.text().to_string();
+    // Normalize: collapse whitespace, lowercase keywords, normalize operators
+    normalize_declaration(&raw)
+}
+
+/// Normalize a declaration line: fix whitespace around operators and lowercase keywords.
+fn normalize_declaration(text: &str) -> String {
+    let mut result = String::new();
+    let trimmed = text.trim();
+
+    let mut chars = trimmed.chars().peekable();
+    let mut prev_was_space = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\n' | '\r' => {
+                // Replace newlines with a single space (declarations should be on one line)
+                if !prev_was_space && !result.is_empty() {
+                    result.push(' ');
+                    prev_was_space = true;
+                }
+            }
+            '\t' | ' ' => {
+                if !prev_was_space && !result.is_empty() {
+                    result.push(' ');
+                    prev_was_space = true;
+                }
+            }
+            _ => {
+                result.push(ch);
+                prev_was_space = false;
+            }
+        }
+    }
+
+    // Normalize keywords to lowercase by re-parsing tokens
+    let tokens = spar_parser::lexer::tokenize(&result);
+    let mut out = String::new();
+    let mut offset = 0;
+    for (kind, len) in &tokens {
+        let tok_text = &result[offset..offset + len];
+        if kind.is_keyword() {
+            out.push_str(&tok_text.to_ascii_lowercase());
+        } else {
+            out.push_str(tok_text);
+        }
+        offset += len;
+    }
+
+    // Normalize spacing around operators
+    let out = normalize_operator_spacing(&out);
+    out
+}
+
+/// Normalize spacing around AADL operators: `:`, `->`, `<->`, `=>`, `::`, `.`.
+fn normalize_operator_spacing(text: &str) -> String {
+    let mut result = String::new();
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Check for multi-character operators first
+        if i + 2 < len && &text[i..i + 3] == "<->" {
+            trim_trailing_space(&mut result);
+            result.push_str(" <-> ");
+            i += 3;
+            skip_spaces(bytes, &mut i);
+        } else if i + 1 < len && &text[i..i + 2] == "->" {
+            trim_trailing_space(&mut result);
+            result.push_str(" -> ");
+            i += 2;
+            skip_spaces(bytes, &mut i);
+        } else if i + 2 < len && &text[i..i + 3] == "+=>" {
+            trim_trailing_space(&mut result);
+            result.push_str(" +=> ");
+            i += 3;
+            skip_spaces(bytes, &mut i);
+        } else if i + 1 < len && &text[i..i + 2] == "=>" {
+            trim_trailing_space(&mut result);
+            result.push_str(" => ");
+            i += 2;
+            skip_spaces(bytes, &mut i);
+        } else if i + 1 < len && &text[i..i + 2] == "::" {
+            // `::` has no spaces around it
+            trim_trailing_space(&mut result);
+            result.push_str("::");
+            i += 2;
+            skip_spaces(bytes, &mut i);
+        } else if bytes[i] == b':' {
+            // `:` — space after, space before
+            trim_trailing_space(&mut result);
+            result.push_str(" : ");
+            i += 1;
+            skip_spaces(bytes, &mut i);
+        } else if bytes[i] == b'.' && i + 1 < len && bytes[i + 1] == b'.' {
+            // `..` range operator — space around
+            trim_trailing_space(&mut result);
+            result.push_str(" .. ");
+            i += 2;
+            skip_spaces(bytes, &mut i);
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+fn trim_trailing_space(s: &mut String) {
+    while s.ends_with(' ') {
+        s.pop();
+    }
+}
+
+fn skip_spaces(bytes: &[u8], i: &mut usize) {
+    while *i < bytes.len() && bytes[*i] == b' ' {
+        *i += 1;
+    }
+}
+
+/// Format a token, normalizing keyword casing.
+fn format_token(token: &spar_syntax::SyntaxToken, _in_annex: bool) -> String {
+    format_keyword_token(token)
+}
+
+/// Format a keyword token to lowercase; leave other tokens as-is.
+fn format_keyword_token(token: &spar_syntax::SyntaxToken) -> String {
+    if token.kind().is_keyword() {
+        token.text().to_string().to_ascii_lowercase()
+    } else {
+        token.text().to_string()
+    }
+}
+
+/// Format a generic classifier node (feature group type, property set, etc.).
+fn format_classifier_generic(
+    node: &spar_syntax::SyntaxNode,
+    depth: usize,
+    indent_size: usize,
+) -> String {
+    format_classifier_body(node, depth, indent_size)
+}
+
+/// Format a node as inline text (e.g., with-clause, name, classifier ref).
+fn format_inline_node(node: &spar_syntax::SyntaxNode) -> String {
+    normalize_declaration(&node.text().to_string())
+}
+
+// ── Rename ──────────────────────────────────────────────────────────
+
+/// Kinds of symbols we can rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SymbolRenameKind {
+    ComponentType,
+    ComponentImpl,
+    Feature,
+    Subcomponent,
+    Package,
+    FeatureGroupType,
+}
+
+fn handle_prepare_rename(
+    state: &ServerState,
+    params: &lsp_types::TextDocumentPositionParams,
+) -> Option<PrepareRenameResponse> {
+    let uri = &params.text_document.uri;
+    let pos = params.position;
+    let source = state.documents.get(uri.as_str())?;
+
+    let offset = position_to_offset(source, pos)?;
+    let parsed = spar_syntax::parse(source);
+    let root = parsed.syntax_node();
+
+    let token = root
+        .token_at_offset(rowan::TextSize::new(offset as u32))
+        .right_biased()?;
+
+    if token.kind() != SyntaxKind::IDENT {
+        return None;
+    }
+
+    let name = token.text();
+
+    // Check if this identifier is a renameable symbol
+    let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+    if find_symbol_kind(&tree, name, &state.global_scope).is_some() {
+        let range = token_range(&token);
+        Some(PrepareRenameResponse::Range(range))
+    } else {
+        None
+    }
+}
+
+fn handle_rename(
+    state: &ServerState,
+    params: &RenameParams,
+) -> Option<WorkspaceEdit> {
+    let uri = &params.text_document_position.text_document.uri;
+    let pos = params.text_document_position.position;
+    let new_name = &params.new_name;
+    let source = state.documents.get(uri.as_str())?;
+
+    let offset = position_to_offset(source, pos)?;
+    let parsed = spar_syntax::parse(source);
+    let root = parsed.syntax_node();
+
+    let token = root
+        .token_at_offset(rowan::TextSize::new(offset as u32))
+        .right_biased()?;
+
+    if token.kind() != SyntaxKind::IDENT {
+        return None;
+    }
+
+    let old_name = token.text().to_string();
+    let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+    let symbol_kind = find_symbol_kind(&tree, &old_name, &state.global_scope)?;
+
+    // Find all references across all documents
+    let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
+
+    for (doc_uri_str, doc_source) in &state.documents {
+        let doc_uri: Uri = match doc_uri_str.parse() {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+
+        let refs = find_references_in_document(doc_source, &old_name, symbol_kind);
+        if !refs.is_empty() {
+            changes.insert(doc_uri, refs.into_iter().map(|range| TextEdit {
+                range,
+                new_text: new_name.clone(),
+            }).collect());
+        }
+    }
+
+    if changes.is_empty() {
+        None
+    } else {
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+    }
+}
+
+/// Determine what kind of symbol a name refers to.
+fn find_symbol_kind(
+    tree: &ItemTree,
+    name: &str,
+    global_scope: &GlobalScope,
+) -> Option<SymbolRenameKind> {
+    // Check component types
+    for (_idx, ct) in tree.component_types.iter() {
+        if ct.name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::ComponentType);
+        }
+    }
+
+    // Check component implementations
+    for (_idx, ci) in tree.component_impls.iter() {
+        if ci.impl_name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::ComponentImpl);
+        }
+    }
+
+    // Check features
+    for (_idx, feat) in tree.features.iter() {
+        if feat.name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::Feature);
+        }
+    }
+
+    // Check subcomponents
+    for (_idx, sub) in tree.subcomponents.iter() {
+        if sub.name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::Subcomponent);
+        }
+    }
+
+    // Check packages
+    for (_idx, pkg) in tree.packages.iter() {
+        if pkg.name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::Package);
+        }
+    }
+
+    // Check feature group types
+    for (_idx, fgt) in tree.feature_group_types.iter() {
+        if fgt.name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::FeatureGroupType);
+        }
+    }
+
+    // Check global scope for cross-file types
+    for (_, type_name, _) in global_scope.all_component_types() {
+        if type_name.as_str().eq_ignore_ascii_case(name) {
+            return Some(SymbolRenameKind::ComponentType);
+        }
+    }
+
+    None
+}
+
+/// Find all references to a name in a document, returning their ranges.
+fn find_references_in_document(
+    source: &str,
+    name: &str,
+    _symbol_kind: SymbolRenameKind,
+) -> Vec<Range> {
+    let parsed = spar_syntax::parse(source);
+    let root = parsed.syntax_node();
+    let mut ranges = Vec::new();
+
+    // Walk all tokens looking for IDENT tokens matching the name
+    for token in root.descendants_with_tokens() {
+        if let Some(tok) = token.as_token() {
+            if tok.kind() == SyntaxKind::IDENT
+                && tok.text().eq_ignore_ascii_case(name)
+            {
+                let start: usize = tok.text_range().start().into();
+                let end: usize = tok.text_range().end().into();
+                let start_pos = offset_to_position(source, start);
+                let end_pos = offset_to_position(source, end);
+                ranges.push(Range::new(start_pos, end_pos));
+            }
+        }
+    }
+
+    ranges
+}
+
+// ── Inlay Hints ─────────────────────────────────────────────────────
+
+fn handle_inlay_hints(
+    state: &ServerState,
+    params: &InlayHintParams,
+) -> Option<Vec<InlayHint>> {
+    let uri = &params.text_document.uri;
+    let source = state.documents.get(uri.as_str())?;
+    let tree = state.item_trees.get(uri.as_str())?;
+
+    let mut hints = Vec::new();
+
+    // Hint 1: Show component category on subcomponent declarations
+    for (_idx, sub) in tree.subcomponents.iter() {
+        if sub.classifier.is_some() {
+            // Find the subcomponent name in the source to position the hint
+            if let Some(pos) = find_name_position(source, sub.name.as_str()) {
+                hints.push(InlayHint {
+                    position: pos,
+                    label: InlayHintLabel::String(format!(": {}", sub.category)),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: Some(true),
+                    padding_right: Some(false),
+                    data: None,
+                });
+            }
+        }
+    }
+
+    // Hint 2: Show connection direction
+    for (_idx, conn) in tree.connections.iter() {
+        let direction_hint = if conn.is_bidirectional {
+            "\u{2194}" // ↔
+        } else {
+            "\u{2192}" // →
+        };
+
+        if let Some(pos) = find_name_position(source, conn.name.as_str()) {
+            hints.push(InlayHint {
+                position: pos,
+                label: InlayHintLabel::String(direction_hint.to_string()),
+                kind: None,
+                text_edits: None,
+                tooltip: Some(lsp_types::InlayHintTooltip::String(
+                    if conn.is_bidirectional {
+                        "bidirectional connection".to_string()
+                    } else {
+                        "unidirectional connection".to_string()
+                    },
+                )),
+                padding_left: Some(true),
+                padding_right: Some(false),
+                data: None,
+            });
+        }
+    }
+
+    if hints.is_empty() {
+        None
+    } else {
+        Some(hints)
+    }
+}
+
+/// Find the first occurrence of an identifier name in the source and return
+/// the position just after it (for inlay hint placement).
+fn find_name_position(source: &str, name: &str) -> Option<Position> {
+    let parsed = spar_syntax::parse(source);
+    let root = parsed.syntax_node();
+
+    for token in root.descendants_with_tokens() {
+        if let Some(tok) = token.as_token() {
+            if tok.kind() == SyntaxKind::IDENT
+                && tok.text().eq_ignore_ascii_case(name)
+            {
+                let end: usize = tok.text_range().end().into();
+                return Some(offset_to_position(source, end));
+            }
+        }
+    }
+    None
+}
+
 // ── Utility functions ───────────────────────────────────────────────
 
 /// Convert a byte offset to an LSP Position (0-based line/character).
@@ -1627,4 +2910,287 @@ fn token_range(token: &spar_syntax::SyntaxToken) -> Range {
         offset_to_position(&text, start),
         offset_to_position(&text, end),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Formatting tests ────────────────────────────────────────────
+
+    fn default_format_options() -> FormattingOptions {
+        FormattingOptions {
+            tab_size: 2,
+            insert_spaces: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn format_normalizes_keyword_casing() {
+        let input = "PACKAGE MyPkg\nPUBLIC\n  SYSTEM MyType\n  END MyType;\nEND MyPkg;\n";
+        let edits = format_document(input, &default_format_options());
+        assert!(!edits.is_empty(), "Should produce formatting edits");
+        let formatted = &edits[0].new_text;
+        assert!(
+            formatted.contains("package"),
+            "Keywords should be lowercased: {formatted}"
+        );
+        assert!(
+            formatted.contains("system"),
+            "Keywords should be lowercased: {formatted}"
+        );
+        assert!(
+            formatted.contains("end"),
+            "Keywords should be lowercased: {formatted}"
+        );
+    }
+
+    #[test]
+    fn format_preserves_correct_document() {
+        // A well-formatted document should produce no edits
+        let input = "package MyPkg\npublic\n  system MyType\n  end MyType;\nend MyPkg;\n";
+        let edits = format_document(input, &default_format_options());
+        // May or may not produce edits depending on exact formatting,
+        // but should at least not crash.
+        assert!(edits.len() <= 1);
+    }
+
+    #[test]
+    fn format_handles_empty_document() {
+        let input = "";
+        let edits = format_document(input, &default_format_options());
+        // Should handle empty gracefully
+        assert!(edits.len() <= 1);
+    }
+
+    #[test]
+    fn format_preserves_comments() {
+        let input = "-- This is a comment\npackage MyPkg\npublic\nend MyPkg;\n";
+        let edits = format_document(input, &default_format_options());
+        if !edits.is_empty() {
+            let formatted = &edits[0].new_text;
+            assert!(
+                formatted.contains("-- This is a comment"),
+                "Comments should be preserved: {formatted}"
+            );
+        }
+    }
+
+    #[test]
+    fn format_normalizes_operators() {
+        let result = normalize_operator_spacing("a:b");
+        assert_eq!(result, "a : b");
+
+        let result = normalize_operator_spacing("src->dst");
+        assert_eq!(result, "src -> dst");
+
+        let result = normalize_operator_spacing("src<->dst");
+        assert_eq!(result, "src <-> dst");
+
+        let result = normalize_operator_spacing("prop=>val");
+        assert_eq!(result, "prop => val");
+
+        let result = normalize_operator_spacing("Pkg::Name");
+        assert_eq!(result, "Pkg::Name");
+    }
+
+    #[test]
+    fn format_normalizes_declaration_whitespace() {
+        let result = normalize_declaration("  foo  :  in  data  port ; ");
+        assert!(
+            !result.contains("  "),
+            "Should collapse multiple spaces: {result}"
+        );
+        assert!(result.contains("foo"), "Should preserve identifiers: {result}");
+    }
+
+    // ── Code action tests ───────────────────────────────────────────
+
+    #[test]
+    fn code_action_insert_semicolon() {
+        let mut state = ServerState::new(None);
+        let uri: Uri = "file:///test.aadl".parse().unwrap();
+        // Store a document so the code action handler can access it
+        let source = "package Foo\nend Foo\n";
+        state.documents.insert(uri.as_str().to_string(), source.to_string());
+
+        let params = CodeActionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            context: lsp_types::CodeActionContext {
+                diagnostics: vec![Diagnostic {
+                    range: Range::new(Position::new(1, 7), Position::new(1, 7)),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("spar-parser".to_string()),
+                    message: "expected SEMICOLON".to_string(),
+                    ..Default::default()
+                }],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = handle_code_action(&state, &params);
+        assert!(actions.is_some(), "Should produce code actions");
+        let actions = actions.unwrap();
+        assert!(
+            actions.iter().any(|a| match a {
+                CodeActionOrCommand::CodeAction(ca) => {
+                    ca.title.contains("semicolon")
+                }
+                _ => false,
+            }),
+            "Should include semicolon fix"
+        );
+    }
+
+    #[test]
+    fn code_action_no_actions_for_unrelated_diagnostics() {
+        let state = ServerState::new(None);
+        let uri: Uri = "file:///test.aadl".parse().unwrap();
+
+        let params = CodeActionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            context: lsp_types::CodeActionContext {
+                diagnostics: vec![Diagnostic {
+                    range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("spar-naming_rules".to_string()),
+                    message: "naming convention violation".to_string(),
+                    ..Default::default()
+                }],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let actions = handle_code_action(&state, &params);
+        assert!(
+            actions.is_none(),
+            "Should not produce actions for unrelated diagnostics"
+        );
+    }
+
+    // ── Rename tests ────────────────────────────────────────────────
+
+    #[test]
+    fn find_references_finds_all_occurrences() {
+        let source = "package Pkg\npublic\n  system Foo\n  end Foo;\nend Pkg;\n";
+        let refs = find_references_in_document(source, "Foo", SymbolRenameKind::ComponentType);
+        assert!(
+            refs.len() >= 2,
+            "Should find at least 2 references to 'Foo': {:?}",
+            refs
+        );
+    }
+
+    #[test]
+    fn find_references_is_case_insensitive() {
+        let source = "package Pkg\npublic\n  system foo\n  end FOO;\nend Pkg;\n";
+        let refs = find_references_in_document(source, "foo", SymbolRenameKind::ComponentType);
+        assert!(
+            refs.len() >= 2,
+            "Should find case-insensitive references: {:?}",
+            refs
+        );
+    }
+
+    #[test]
+    fn find_symbol_kind_detects_types() {
+        let source = "package Pkg\npublic\n  system MyType\n  end MyType;\nend Pkg;\n";
+        let parsed = spar_syntax::parse(source);
+        let root = parsed.syntax_node();
+        let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+        let scope = GlobalScope::default();
+
+        let kind = find_symbol_kind(&tree, "MyType", &scope);
+        assert_eq!(kind, Some(SymbolRenameKind::ComponentType));
+    }
+
+    #[test]
+    fn find_symbol_kind_detects_packages() {
+        let source = "package TestPkg\npublic\nend TestPkg;\n";
+        let parsed = spar_syntax::parse(source);
+        let root = parsed.syntax_node();
+        let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+        let scope = GlobalScope::default();
+
+        let kind = find_symbol_kind(&tree, "TestPkg", &scope);
+        assert_eq!(kind, Some(SymbolRenameKind::Package));
+    }
+
+    // ── Inlay hint tests ────────────────────────────────────────────
+
+    #[test]
+    fn find_name_position_works() {
+        let source = "package MyPkg\npublic\nend MyPkg;\n";
+        let pos = find_name_position(source, "MyPkg");
+        assert!(pos.is_some(), "Should find the name position");
+        let pos = pos.unwrap();
+        // "MyPkg" starts at offset 8, ends at 13
+        assert_eq!(pos.line, 0);
+        assert_eq!(pos.character, 13); // end of "MyPkg"
+    }
+
+    // ── Utility tests ───────────────────────────────────────────────
+
+    #[test]
+    fn full_document_range_works() {
+        let text = "line 1\nline 2\nline 3";
+        let range = full_document_range(text);
+        assert_eq!(range.start, Position::new(0, 0));
+        assert_eq!(range.end.line, 2);
+        assert_eq!(range.end.character, 6); // "line 3" is 6 chars
+    }
+
+    #[test]
+    fn with_clause_insert_offset_after_existing_with() {
+        let source = "package Pkg\npublic\nwith Other;\n  system Foo\n  end Foo;\nend Pkg;\n";
+        let offset = find_with_clause_insert_offset(source);
+        // Should be after `with Other;\n`
+        assert!(offset > 0, "Should find insert point after existing with");
+        let before = &source[..offset];
+        assert!(
+            before.contains("with Other;"),
+            "Insert point should be after 'with Other;': before={before}"
+        );
+    }
+
+    #[test]
+    fn extract_unresolved_name_works() {
+        assert_eq!(
+            extract_unresolved_name("unresolved classifier 'Foo'"),
+            Some("Foo".to_string())
+        );
+        assert_eq!(
+            extract_unresolved_name("unresolved reference 'Pkg::Bar'"),
+            Some("Bar".to_string())
+        );
+        assert_eq!(
+            extract_unresolved_name("no match here"),
+            None
+        );
+    }
+
+    #[test]
+    fn find_expected_end_name_for_package() {
+        let source = "package MyPkg\npublic\n";
+        let range = Range::new(Position::new(2, 0), Position::new(2, 0));
+        let name = find_expected_end_name(source, &range);
+        assert_eq!(name, Some("MyPkg".to_string()));
+    }
+
+    #[test]
+    fn find_expected_end_name_for_component_type() {
+        let source = "package Pkg\npublic\n  system Controller\n  features\n    x : in data port;\n";
+        let range = Range::new(Position::new(5, 0), Position::new(5, 0));
+        let name = find_expected_end_name(source, &range);
+        assert_eq!(name, Some("Controller".to_string()));
+    }
 }

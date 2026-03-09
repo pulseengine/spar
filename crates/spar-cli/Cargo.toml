@@ -11,6 +11,7 @@ name = "spar"
 path = "src/main.rs"
 
 [dependencies]
+spar-parser.workspace = true
 spar-syntax.workspace = true
 spar-base-db.workspace = true
 spar-hir-def.workspace = true
