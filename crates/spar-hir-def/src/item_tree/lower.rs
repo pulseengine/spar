@@ -538,7 +538,9 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
 
     for elem in node.children_with_tokens() {
         if let Some(tok) = elem.as_token() {
-            tokens.push((tok.kind(), tok.text().to_string()));
+            if !tok.kind().is_trivia() {
+                tokens.push((tok.kind(), tok.text().to_string()));
+            }
         }
         if let Some(n) = elem.as_node() {
             child_nodes.push(n.clone());
