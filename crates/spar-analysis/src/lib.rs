@@ -17,6 +17,7 @@
 pub mod arinc653;
 pub mod binding_check;
 pub mod category_check;
+pub mod classifier_match;
 pub mod completeness;
 pub mod connection_rules;
 pub mod connectivity;

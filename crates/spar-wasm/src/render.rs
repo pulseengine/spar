@@ -134,6 +134,7 @@ pub fn analyze_aadl_from_fs(
     runner.register(Box::new(spar_analysis::resource_budget::ResourceBudgetAnalysis));
     runner.register(Box::new(spar_analysis::direction_rules::DirectionRuleAnalysis));
     runner.register(Box::new(spar_analysis::connection_rules::ConnectionRuleAnalysis));
+    runner.register(Box::new(spar_analysis::classifier_match::ClassifierMatchAnalysis));
     runner.register(Box::new(spar_analysis::mode_rules::ModeRuleAnalysis));
     runner.register(Box::new(spar_analysis::subcomponent_rules::SubcomponentRuleAnalysis));
     runner.register(Box::new(spar_analysis::emv2_analysis::Emv2Analysis));

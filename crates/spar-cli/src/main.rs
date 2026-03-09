@@ -431,6 +431,7 @@ fn run_all_analyses(
 ) -> Vec<spar_analysis::AnalysisDiagnostic> {
     use spar_analysis::arinc653::Arinc653Analysis;
     use spar_analysis::binding_check::BindingCheckAnalysis;
+    use spar_analysis::classifier_match::ClassifierMatchAnalysis;
     use spar_analysis::completeness::CompletenessAnalysis;
     use spar_analysis::connectivity::ConnectivityAnalysis;
     use spar_analysis::direction_rules::DirectionRuleAnalysis;
@@ -448,6 +449,7 @@ fn run_all_analyses(
     runner.register(Box::new(HierarchyAnalysis));
     runner.register(Box::new(CompletenessAnalysis));
     runner.register(Box::new(DirectionRuleAnalysis));
+    runner.register(Box::new(ClassifierMatchAnalysis));
     runner.register(Box::new(BindingCheckAnalysis));
     runner.register(Box::new(FlowCheckAnalysis));
     runner.register(Box::new(ModeCheckAnalysis));
