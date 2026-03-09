@@ -433,6 +433,7 @@ fn run_all_analyses(
     use spar_analysis::completeness::CompletenessAnalysis;
     use spar_analysis::connectivity::ConnectivityAnalysis;
     use spar_analysis::direction_rules::DirectionRuleAnalysis;
+    use spar_analysis::emv2_analysis::Emv2Analysis;
     use spar_analysis::flow_check::FlowCheckAnalysis;
     use spar_analysis::hierarchy::HierarchyAnalysis;
     use spar_analysis::latency::LatencyAnalysis;
@@ -452,6 +453,7 @@ fn run_all_analyses(
     runner.register(Box::new(SchedulingAnalysis));
     runner.register(Box::new(LatencyAnalysis));
     runner.register(Box::new(ResourceBudgetAnalysis));
+    runner.register(Box::new(Emv2Analysis));
     runner.run_all(inst)
 }
 
