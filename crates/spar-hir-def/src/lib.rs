@@ -2769,7 +2769,6 @@ end MyProps;
     // ── Units declaration lowering tests ───────────────────────
 
     #[test]
-    #[ignore = "units conversion factor parsing needs token-level fix"]
     fn property_type_decl_units() {
         let src = r#"property set MyProps is
   Size_Units : type units (bits, Bytes => bits * 8, KByte => Bytes * 1024);
@@ -2796,6 +2795,84 @@ end MyProps;
                 let (base2, factor2) = units[2].1.as_ref().unwrap();
                 assert_eq!(base2.as_str(), "Bytes");
                 assert_eq!(factor2, "1024");
+            }
+            other => panic!("expected UnitsType, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn property_type_decl_units_time_chain() {
+        // Verify full AADL time units chain: each derived unit references
+        // its predecessor, with the correct factor.
+        let src = r#"property set TimeProps is
+  Time_Units : type units (ps, ns => ps * 1000, us => ns * 1000, ms => us * 1000, sec => ms * 1000, min => sec * 60, hr => min * 60);
+end TimeProps;
+"#;
+        let tree = lower_first_property_set(src);
+        let ps = &tree.property_sets[tree.property_sets.iter().next().unwrap().0];
+        assert_eq!(ps.property_type_defs.len(), 1);
+        let td = &ps.property_type_defs[0];
+        assert_eq!(td.name.as_str(), "Time_Units");
+        match &td.type_def {
+            Some(item_tree::PropertyTypeDef::UnitsType(units)) => {
+                assert_eq!(units.len(), 7);
+                // ps — base unit
+                assert_eq!(units[0].0.as_str(), "ps");
+                assert!(units[0].1.is_none());
+                // ns => ps * 1000
+                assert_eq!(units[1].0.as_str(), "ns");
+                let (base, factor) = units[1].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "ps");
+                assert_eq!(factor, "1000");
+                // us => ns * 1000
+                assert_eq!(units[2].0.as_str(), "us");
+                let (base, factor) = units[2].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "ns");
+                assert_eq!(factor, "1000");
+                // ms => us * 1000
+                assert_eq!(units[3].0.as_str(), "ms");
+                let (base, factor) = units[3].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "us");
+                assert_eq!(factor, "1000");
+                // sec => ms * 1000
+                assert_eq!(units[4].0.as_str(), "sec");
+                let (base, factor) = units[4].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "ms");
+                assert_eq!(factor, "1000");
+                // min => sec * 60
+                assert_eq!(units[5].0.as_str(), "min");
+                let (base, factor) = units[5].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "sec");
+                assert_eq!(factor, "60");
+                // hr => min * 60
+                assert_eq!(units[6].0.as_str(), "hr");
+                let (base, factor) = units[6].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "min");
+                assert_eq!(factor, "60");
+            }
+            other => panic!("expected UnitsType, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn property_type_decl_units_simple_conversion() {
+        // Simple case: only one derived unit
+        let src = r#"property set P is
+  MyUnits : type units (base, derived => base * 10);
+end P;
+"#;
+        let tree = lower_first_property_set(src);
+        let ps = &tree.property_sets[tree.property_sets.iter().next().unwrap().0];
+        let td = &ps.property_type_defs[0];
+        match &td.type_def {
+            Some(item_tree::PropertyTypeDef::UnitsType(units)) => {
+                assert_eq!(units.len(), 2);
+                assert_eq!(units[0].0.as_str(), "base");
+                assert!(units[0].1.is_none());
+                assert_eq!(units[1].0.as_str(), "derived");
+                let (base, factor) = units[1].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "base");
+                assert_eq!(factor, "10");
             }
             other => panic!("expected UnitsType, got {:?}", other),
         }
