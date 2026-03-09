@@ -46,6 +46,7 @@ pub use spar_hir_def::item_tree::{
     AccessKind, ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind,
 };
 pub use spar_hir_def::item_tree::PropertyExpr;
+pub use spar_hir_def::property_eval::{resolve_property_expr, lookup_property, eval_numeric, eval_range};
 
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
