@@ -50,16 +50,14 @@ pub fn build_graph(
 
     // Add connection edges.
     for (_conn_idx, conn) in instance.connections.iter() {
-        let owner_comp = &instance.components[conn.owner];
-
         // Resolve source component: if subcomponent is Some, find the child;
         // otherwise the endpoint is on the owner itself.
+        // Supports array names: if the connection refers to `sub` and children
+        // are `sub[1]`, `sub[2]`, etc., match the first array element.
         let src_comp_idx = conn.src.as_ref().and_then(|end| {
             match &end.subcomponent {
                 Some(sub_name) => {
-                    owner_comp.children.iter().find(|&&child_idx| {
-                        instance.components[child_idx].name.eq_ci(sub_name)
-                    }).copied()
+                    find_child_by_name(instance, conn.owner, sub_name)
                 }
                 None => Some(conn.owner),
             }
@@ -69,9 +67,7 @@ pub fn build_graph(
         let dst_comp_idx = conn.dst.as_ref().and_then(|end| {
             match &end.subcomponent {
                 Some(sub_name) => {
-                    owner_comp.children.iter().find(|&&child_idx| {
-                        instance.components[child_idx].name.eq_ci(sub_name)
-                    }).copied()
+                    find_child_by_name(instance, conn.owner, sub_name)
                 }
                 None => Some(conn.owner),
             }
@@ -93,6 +89,43 @@ pub fn build_graph(
     }
 
     (graph, index_map)
+}
+
+/// Find a child component by name, supporting array element matching.
+///
+/// First tries exact match, then falls back to matching array elements
+/// whose base name (before `[`) matches the given name.
+fn find_child_by_name(
+    instance: &SystemInstance,
+    owner: ComponentInstanceIdx,
+    sub_name: &spar_hir_def::name::Name,
+) -> Option<ComponentInstanceIdx> {
+    let owner_comp = &instance.components[owner];
+    let name_str = sub_name.as_str();
+
+    // Exact match first.
+    let exact = owner_comp.children.iter().find(|&&child_idx| {
+        instance.components[child_idx].name.eq_ci(sub_name)
+    }).copied();
+
+    if exact.is_some() {
+        return exact;
+    }
+
+    // Array base name match (broadcast: return first element).
+    if !name_str.contains('[') {
+        owner_comp.children.iter().find(|&&child_idx| {
+            let child_name = instance.components[child_idx].name.as_str();
+            if let Some(pos) = child_name.find('[') {
+                child_name[..pos].eq_ignore_ascii_case(name_str)
+                    && instance.components[child_idx].array_index.is_some()
+            } else {
+                false
+            }
+        }).copied()
+    } else {
+        None
+    }
 }
 
 /// Recursively add a component instance and all its children as graph nodes,
@@ -178,6 +211,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         // Child process
@@ -194,6 +228,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         // Link child to root
@@ -256,6 +291,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         // Two child components
@@ -272,6 +308,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         let controller_idx = components.alloc(ComponentInstance {
@@ -287,6 +324,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         components[root_idx].children.push(sensor_idx);
@@ -368,6 +406,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         let child_idx = components.alloc(ComponentInstance {
@@ -383,6 +422,7 @@ mod tests {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         components[root_idx].children.push(child_idx);
@@ -436,5 +476,80 @@ mod tests {
             conn_edge.is_some(),
             "expected connection edge c_in from root to child"
         );
+    }
+
+    #[test]
+    fn test_graph_includes_array_elements() {
+        // An array subcomponent `sub[3]` should produce 3 nodes in the graph.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root_idx = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let mut child_indices = Vec::new();
+        for i in 1..=3u64 {
+            let child = components.alloc(ComponentInstance {
+                name: Name::new(&format!("sub[{}]", i)),
+                category: ComponentCategory::Process,
+                type_name: Name::new("P"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root_idx),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(i),
+            });
+            child_indices.push(child);
+        }
+        components[root_idx].children = child_indices.clone();
+
+        let instance = SystemInstance {
+            root: root_idx,
+            components,
+            features: Arena::default(),
+            connections: Arena::default(),
+            flow_instances: Arena::default(),
+            end_to_end_flows: Arena::default(),
+            mode_instances: Arena::default(),
+            mode_transition_instances: Arena::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        };
+
+        let (graph, index_map) = build_graph(&instance);
+
+        // 1 root + 3 array elements = 4 nodes
+        assert_eq!(graph.node_count(), 4);
+        // 3 "contains" edges
+        assert_eq!(graph.edge_count(), 3);
+        // All 4 are in the index map
+        assert_eq!(index_map.len(), 4);
+
+        // Verify array node labels
+        for (i, &child_idx) in child_indices.iter().enumerate() {
+            let node_idx = index_map[&child_idx];
+            let node = &graph[node_idx];
+            assert_eq!(node.label, format!("sub[{}]", i + 1));
+            assert_eq!(node.id, format!("AADL-Pkg-sub[{}]", i + 1));
+        }
     }
 }

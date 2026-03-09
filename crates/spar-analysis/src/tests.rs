@@ -54,6 +54,7 @@ impl TestInstanceBuilder {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         })
     }
 
@@ -69,6 +70,7 @@ impl TestInstanceBuilder {
             kind,
             direction,
             owner,
+            array_index: None,
         });
         self.components[owner].features.push(idx);
         idx

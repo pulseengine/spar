@@ -12,7 +12,7 @@ use la_arena::{Arena, Idx};
 use rustc_hash::FxHashMap;
 
 use crate::feature_group::{expand_feature_group, ExpandedFeature};
-use crate::item_tree::{ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
+use crate::item_tree::{ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
 use crate::name::{ClassifierRef, Name};
 use crate::properties::PropertyMap;
 use crate::resolver::{GlobalScope, ResolvedClassifier};
@@ -74,6 +74,8 @@ pub struct ComponentInstance {
     pub flows: Vec<FlowInstanceIdx>,
     pub modes: Vec<ModeInstanceIdx>,
     pub mode_transitions: Vec<ModeTransitionInstanceIdx>,
+    /// Array index for array subcomponents: None for non-array, Some(1..N) for array elements.
+    pub array_index: Option<u64>,
 }
 
 /// A feature instance.
@@ -83,6 +85,8 @@ pub struct FeatureInstance {
     pub kind: FeatureKind,
     pub direction: Option<Direction>,
     pub owner: ComponentInstanceIdx,
+    /// Array index for array features: None for non-array, Some(1..N) for array elements.
+    pub array_index: Option<u64>,
 }
 
 /// A connection instance.
@@ -407,34 +411,31 @@ impl SystemInstance {
             match (&src.subcomponent, &dst.subcomponent) {
                 // ── Across connection: sub_a.port -> sub_b.port ──
                 (Some(src_sub_name), Some(dst_sub_name)) => {
-                    let owner = &self.components[conn_owner];
-                    let src_idx = owner.children.iter().find(|&&child_idx| {
-                        self.components[child_idx].name.as_str() == src_sub_name.as_str()
-                    }).copied();
-                    let dst_idx = owner.children.iter().find(|&&child_idx| {
-                        self.components[child_idx].name.as_str() == dst_sub_name.as_str()
-                    }).copied();
+                    let src_matches = self.find_children_by_name(conn_owner, src_sub_name);
+                    let dst_matches = self.find_children_by_name(conn_owner, dst_sub_name);
 
-                    if let (Some(src_component), Some(dst_component)) = (src_idx, dst_idx) {
-                        let mut path = vec![*conn_idx];
+                    for &src_component in &src_matches {
+                        for &dst_component in &dst_matches {
+                            let mut path = vec![*conn_idx];
 
-                        // Trace source deeper: look for up connections inside
-                        // the source subcomponent that feed this port.
-                        let ultimate_src =
-                            self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
+                            // Trace source deeper: look for up connections inside
+                            // the source subcomponent that feed this port.
+                            let ultimate_src =
+                                self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
 
-                        // Trace destination deeper: look for down connections inside
-                        // the destination subcomponent that distribute from this port.
-                        let ultimate_dst =
-                            self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
+                            // Trace destination deeper: look for down connections inside
+                            // the destination subcomponent that distribute from this port.
+                            let ultimate_dst =
+                                self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
 
-                        semantic.push(SemanticConnection {
-                            name: conn_name,
-                            kind: conn_kind,
-                            ultimate_source: ultimate_src,
-                            ultimate_destination: ultimate_dst,
-                            connection_path: path,
-                        });
+                            semantic.push(SemanticConnection {
+                                name: conn_name.clone(),
+                                kind: conn_kind,
+                                ultimate_source: ultimate_src,
+                                ultimate_destination: ultimate_dst,
+                                connection_path: path,
+                            });
+                        }
                     }
                 }
 
@@ -447,17 +448,15 @@ impl SystemInstance {
                 (Some(src_sub_name), None) => {
                     let owner = &self.components[conn_owner];
                     if owner.parent.is_none() {
-                        let src_idx = owner.children.iter().find(|&&child_idx| {
-                            self.components[child_idx].name.as_str() == src_sub_name.as_str()
-                        }).copied();
+                        let src_matches = self.find_children_by_name(conn_owner, src_sub_name);
 
-                        if let Some(src_component) = src_idx {
+                        for &src_component in &src_matches {
                             let mut path = vec![*conn_idx];
                             let ultimate_src =
                                 self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
 
                             semantic.push(SemanticConnection {
-                                name: conn_name,
+                                name: conn_name.clone(),
                                 kind: conn_kind,
                                 ultimate_source: ultimate_src,
                                 ultimate_destination: (conn_owner, dst.feature.clone()),
@@ -474,17 +473,15 @@ impl SystemInstance {
                 (None, Some(dst_sub_name)) => {
                     let owner = &self.components[conn_owner];
                     if owner.parent.is_none() {
-                        let dst_idx = owner.children.iter().find(|&&child_idx| {
-                            self.components[child_idx].name.as_str() == dst_sub_name.as_str()
-                        }).copied();
+                        let dst_matches = self.find_children_by_name(conn_owner, dst_sub_name);
 
-                        if let Some(dst_component) = dst_idx {
+                        for &dst_component in &dst_matches {
                             let mut path = vec![*conn_idx];
                             let ultimate_dst =
                                 self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
 
                             semantic.push(SemanticConnection {
-                                name: conn_name,
+                                name: conn_name.clone(),
                                 kind: conn_kind,
                                 ultimate_source: (conn_owner, src.feature.clone()),
                                 ultimate_destination: ultimate_dst,
@@ -587,7 +584,8 @@ impl SystemInstance {
 
     /// Resolve the component index for a connection endpoint.
     ///
-    /// If `subcomponent` is Some, look for a child with that name.
+    /// If `subcomponent` is Some, look for a child with that name (exact match
+    /// first, then array base-name match returning the first element).
     /// If None, return the owner itself.
     fn resolve_endpoint_component(
         &self,
@@ -596,10 +594,8 @@ impl SystemInstance {
     ) -> Option<ComponentInstanceIdx> {
         match subcomponent {
             Some(sub_name) => {
-                let owner_comp = &self.components[owner];
-                owner_comp.children.iter().find(|&&child_idx| {
-                    self.components[child_idx].name.eq_ci(sub_name)
-                }).copied()
+                let matches = self.find_children_by_name(owner, sub_name);
+                matches.into_iter().next()
             }
             None => Some(owner),
         }
@@ -655,6 +651,52 @@ impl SystemInstance {
         None
     }
 
+    /// Find child component instances matching a subcomponent name.
+    ///
+    /// Supports both exact match (`sub` matches `sub`) and array broadcast
+    /// (`sub` matches `sub[1]`, `sub[2]`, etc.). If the name itself contains
+    /// brackets (e.g., `sub[2]`), only exact match is used.
+    fn find_children_by_name(
+        &self,
+        owner: ComponentInstanceIdx,
+        sub_name: &Name,
+    ) -> Vec<ComponentInstanceIdx> {
+        let owner_comp = &self.components[owner];
+        let name_str = sub_name.as_str();
+
+        // First try exact match.
+        let exact: Vec<_> = owner_comp
+            .children
+            .iter()
+            .filter(|&&child_idx| self.components[child_idx].name.as_str() == name_str)
+            .copied()
+            .collect();
+
+        if !exact.is_empty() {
+            return exact;
+        }
+
+        // If the name doesn't contain brackets, try matching array elements
+        // whose base name matches (broadcast pattern).
+        if !name_str.contains('[') {
+            let matching: Vec<_> = owner_comp
+                .children
+                .iter()
+                .filter(|&&child_idx| {
+                    let child_name = self.components[child_idx].name.as_str();
+                    base_name_of(child_name).eq_ignore_ascii_case(name_str)
+                        && self.components[child_idx].array_index.is_some()
+                })
+                .copied()
+                .collect();
+            if !matching.is_empty() {
+                return matching;
+            }
+        }
+
+        Vec::new()
+    }
+
     /// Trace the ultimate source of a connection by following up connections
     /// inside a subcomponent.
     ///
@@ -693,15 +735,9 @@ impl SystemInstance {
                 if dst.feature.as_str() == feature.as_str() {
                     // Found an up connection feeding this port.
                     // Resolve the source subcomponent.
-                    let inner_sub = self.components[component]
-                        .children
-                        .iter()
-                        .find(|&&child_idx| {
-                            self.components[child_idx].name.as_str() == src_sub_name.as_str()
-                        })
-                        .copied();
+                    let inner_matches = self.find_children_by_name(component, src_sub_name);
 
-                    if let Some(inner_component) = inner_sub {
+                    if let Some(&inner_component) = inner_matches.first() {
                         let src_feature = src.feature.clone();
                         path.push(conn_idx);
                         return self.trace_source(
@@ -757,15 +793,9 @@ impl SystemInstance {
                 if src.feature.as_str() == feature.as_str() {
                     // Found a down connection distributing from this port.
                     // Resolve the destination subcomponent.
-                    let inner_sub = self.components[component]
-                        .children
-                        .iter()
-                        .find(|&&child_idx| {
-                            self.components[child_idx].name.as_str() == dst_sub_name.as_str()
-                        })
-                        .copied();
+                    let inner_matches = self.find_children_by_name(component, dst_sub_name);
 
-                    if let Some(inner_component) = inner_sub {
+                    if let Some(&inner_component) = inner_matches.first() {
                         let dst_feature = dst.feature.clone();
                         path.push(conn_idx);
                         return self.trace_destination(
@@ -840,6 +870,35 @@ fn feature_kind_to_connection_kind(kind: FeatureKind) -> ConnectionKind {
     }
 }
 
+/// Compute the number of array elements from array dimensions.
+///
+/// For non-array items (empty dimensions), returns 1.
+/// For arrays, uses the first dimension's literal size (property constants
+/// are not yet supported and fall back to 1).
+fn array_element_count(dims: &[ArrayDimension]) -> u64 {
+    if dims.is_empty() {
+        return 1;
+    }
+    dims[0]
+        .size
+        .as_ref()
+        .and_then(|s| match s {
+            ArraySize::Literal(n) => Some(*n),
+            _ => None,
+        })
+        .unwrap_or(1)
+}
+
+/// Extract the base name from an array instance name.
+///
+/// If `name` is `"sub[3]"`, returns `"sub"`. If there is no bracket, returns the name as-is.
+fn base_name_of(name: &str) -> &str {
+    match name.find('[') {
+        Some(pos) => &name[..pos],
+        None => name,
+    }
+}
+
 struct Builder<'a> {
     scope: &'a GlobalScope,
     components: Arena<ComponentInstance>,
@@ -910,6 +969,7 @@ impl<'a> Builder<'a> {
             flows: Vec::new(),
             modes: Vec::new(),
             mode_transitions: Vec::new(),
+            array_index: None,
         });
 
         // Build property map: type → impl → subcomponent layering
@@ -921,13 +981,25 @@ impl<'a> Builder<'a> {
                 let mut feat_indices = Vec::new();
                 for &feat_idx in &ct.features {
                     if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
-                        let fi = self.features.alloc(FeatureInstance {
-                            name: feat.name.clone(),
-                            kind: feat.kind,
-                            direction: feat.direction,
-                            owner: idx,
-                        });
-                        feat_indices.push(fi);
+                        let feat_count = array_element_count(&feat.array_dimensions);
+                        let feat_is_array = !feat.array_dimensions.is_empty();
+
+                        for fi_i in 0..feat_count {
+                            let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
+                            let feat_instance_name = if let Some(i) = feat_array_index {
+                                Name::new(&format!("{}[{}]", feat.name, i))
+                            } else {
+                                feat.name.clone()
+                            };
+                            let fi = self.features.alloc(FeatureInstance {
+                                name: feat_instance_name,
+                                kind: feat.kind,
+                                direction: feat.direction,
+                                owner: idx,
+                                array_index: feat_array_index,
+                            });
+                            feat_indices.push(fi);
+                        }
                     }
                 }
                 self.components[idx].features = feat_indices;
@@ -998,6 +1070,7 @@ impl<'a> Builder<'a> {
                                 sub.category,
                                 sub.classifier.clone(),
                                 sub_idx,
+                                sub.array_dimensions.clone(),
                             ))
                         })
                         .collect();
@@ -1064,28 +1137,62 @@ impl<'a> Builder<'a> {
                         .collect();
 
                     let mut child_indices = Vec::new();
-                    for (sub_name, _sub_cat, sub_classifier, sub_idx) in sub_data {
-                        if let Some(cls_ref) = sub_classifier {
-                            // If the classifier has package + type + impl, instantiate recursively
-                            let sub_pkg = cls_ref.package.as_ref().unwrap_or(package);
-                            if let Some(sub_impl) = &cls_ref.impl_name {
-                                let child_idx = self.instantiate_component(
-                                    &sub_name,
-                                    sub_pkg,
-                                    &cls_ref.type_name,
-                                    sub_impl,
-                                    Some(idx),
-                                    Some((loc.tree, sub_idx)),
-                                );
-                                child_indices.push(child_idx);
+                    for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims) in sub_data {
+                        // Determine how many instances to create for this subcomponent.
+                        let count = array_element_count(&array_dims);
+                        let is_array = !array_dims.is_empty();
+
+                        for array_i in 0..count {
+                            let array_index = if is_array { Some(array_i + 1) } else { None };
+                            let instance_name = if let Some(i) = array_index {
+                                Name::new(&format!("{}[{}]", sub_name, i))
                             } else {
-                                // Type-only reference — leaf subcomponent
+                                sub_name.clone()
+                            };
+
+                            if let Some(cls_ref) = &sub_classifier {
+                                // If the classifier has package + type + impl, instantiate recursively
+                                let sub_pkg = cls_ref.package.as_ref().unwrap_or(package);
+                                if let Some(sub_impl) = &cls_ref.impl_name {
+                                    let child_idx = self.instantiate_component(
+                                        &instance_name,
+                                        sub_pkg,
+                                        &cls_ref.type_name,
+                                        sub_impl,
+                                        Some(idx),
+                                        Some((loc.tree, sub_idx)),
+                                    );
+                                    self.components[child_idx].array_index = array_index;
+                                    child_indices.push(child_idx);
+                                } else {
+                                    // Type-only reference — leaf subcomponent
+                                    let child_idx = self.components.alloc(ComponentInstance {
+                                        name: instance_name,
+                                        category: _sub_cat,
+                                        type_name: cls_ref.type_name.clone(),
+                                        impl_name: None,
+                                        package: sub_pkg.clone(),
+                                        parent: Some(idx),
+                                        children: Vec::new(),
+                                        features: Vec::new(),
+                                        connections: Vec::new(),
+                                        flows: Vec::new(),
+                                        modes: Vec::new(),
+                                        mode_transitions: Vec::new(),
+                                        array_index,
+                                    });
+                                    // Build property map for leaf subcomponent (type only)
+                                    self.build_leaf_property_map(child_idx, sub_pkg, &cls_ref.type_name, loc.tree, sub_idx);
+                                    child_indices.push(child_idx);
+                                }
+                            } else {
+                                // No classifier — anonymous subcomponent
                                 let child_idx = self.components.alloc(ComponentInstance {
-                                    name: sub_name,
+                                    name: instance_name,
                                     category: _sub_cat,
-                                    type_name: cls_ref.type_name.clone(),
+                                    type_name: Name::default(),
                                     impl_name: None,
-                                    package: sub_pkg.clone(),
+                                    package: package.clone(),
                                     parent: Some(idx),
                                     children: Vec::new(),
                                     features: Vec::new(),
@@ -1093,30 +1200,12 @@ impl<'a> Builder<'a> {
                                     flows: Vec::new(),
                                     modes: Vec::new(),
                                     mode_transitions: Vec::new(),
+                                    array_index,
                                 });
-                                // Build property map for leaf subcomponent (type only)
-                                self.build_leaf_property_map(child_idx, sub_pkg, &cls_ref.type_name, loc.tree, sub_idx);
+                                // Build property map for anonymous subcomponent
+                                self.build_anon_property_map(child_idx, loc.tree, sub_idx);
                                 child_indices.push(child_idx);
                             }
-                        } else {
-                            // No classifier — anonymous subcomponent
-                            let child_idx = self.components.alloc(ComponentInstance {
-                                name: sub_name,
-                                category: _sub_cat,
-                                type_name: Name::default(),
-                                impl_name: None,
-                                package: package.clone(),
-                                parent: Some(idx),
-                                children: Vec::new(),
-                                features: Vec::new(),
-                                connections: Vec::new(),
-                                flows: Vec::new(),
-                                modes: Vec::new(),
-                                mode_transitions: Vec::new(),
-                            });
-                            // Build property map for anonymous subcomponent
-                            self.build_anon_property_map(child_idx, loc.tree, sub_idx);
-                            child_indices.push(child_idx);
                         }
                     }
                     self.components[idx].children = child_indices;
@@ -1330,5 +1419,511 @@ impl<'a> Builder<'a> {
         if !map.is_empty() {
             self.property_maps.insert(idx, map);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::item_tree::{ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction, FeatureKind};
+    use crate::name::Name;
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+
+    /// Helper: build a minimal SystemInstance with manually specified components.
+    fn make_instance(
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+        root: ComponentInstanceIdx,
+    ) -> SystemInstance {
+        SystemInstance {
+            root,
+            components,
+            features,
+            connections,
+            flow_instances: Arena::default(),
+            end_to_end_flows: Arena::default(),
+            mode_instances: Arena::default(),
+            mode_transition_instances: Arena::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        }
+    }
+
+    // ── array_element_count tests ─────────────────────────────────────
+
+    #[test]
+    fn test_array_element_count_empty_dims() {
+        assert_eq!(array_element_count(&[]), 1);
+    }
+
+    #[test]
+    fn test_array_element_count_literal() {
+        let dims = vec![ArrayDimension {
+            size: Some(ArraySize::Literal(5)),
+        }];
+        assert_eq!(array_element_count(&dims), 5);
+    }
+
+    #[test]
+    fn test_array_element_count_no_size() {
+        let dims = vec![ArrayDimension { size: None }];
+        assert_eq!(array_element_count(&dims), 1);
+    }
+
+    // ── base_name_of tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_base_name_of_no_bracket() {
+        assert_eq!(base_name_of("sub"), "sub");
+    }
+
+    #[test]
+    fn test_base_name_of_with_bracket() {
+        assert_eq!(base_name_of("sub[3]"), "sub");
+    }
+
+    // ── Subcomponent array expansion tests ────────────────────────────
+
+    #[test]
+    fn test_subcomponent_array_expansion() {
+        // Simulate what instantiation produces for `sub[3]: process P;`
+        // by manually creating 3 instances with array naming.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let mut child_indices = Vec::new();
+        for i in 1..=3u64 {
+            let idx = components.alloc(ComponentInstance {
+                name: Name::new(&format!("sub[{}]", i)),
+                category: ComponentCategory::Process,
+                type_name: Name::new("P"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(i),
+            });
+            child_indices.push(idx);
+        }
+        components[root].children = child_indices.clone();
+
+        let instance = make_instance(components, Arena::default(), Arena::default(), root);
+
+        // 3 children with expected names and array indices.
+        assert_eq!(instance.components[root].children.len(), 3);
+        for (i, &child_idx) in child_indices.iter().enumerate() {
+            let child = &instance.components[child_idx];
+            assert_eq!(child.name.as_str(), &format!("sub[{}]", i + 1));
+            assert_eq!(child.array_index, Some(i as u64 + 1));
+        }
+    }
+
+    #[test]
+    fn test_non_array_unchanged() {
+        // A regular (non-array) subcomponent has array_index: None.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let child = components.alloc(ComponentInstance {
+            name: Name::new("sensor"),
+            category: ComponentCategory::Device,
+            type_name: Name::new("Sensor"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+        components[root].children.push(child);
+
+        let instance = make_instance(components, Arena::default(), Arena::default(), root);
+        assert_eq!(instance.components[root].children.len(), 1);
+        assert_eq!(instance.components[child].array_index, None);
+        assert_eq!(instance.components[child].name.as_str(), "sensor");
+    }
+
+    // ── Feature array expansion tests ─────────────────────────────────
+
+    #[test]
+    fn test_feature_array_expansion() {
+        // Simulate `p[2]: in data port;` producing 2 feature instances.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut features: Arena<FeatureInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("comp"),
+            category: ComponentCategory::System,
+            type_name: Name::new("T"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let mut feat_indices = Vec::new();
+        for i in 1..=2u64 {
+            let fi = features.alloc(FeatureInstance {
+                name: Name::new(&format!("p[{}]", i)),
+                kind: FeatureKind::DataPort,
+                direction: Some(Direction::In),
+                owner: root,
+                array_index: Some(i),
+            });
+            feat_indices.push(fi);
+        }
+        components[root].features = feat_indices.clone();
+
+        let instance = make_instance(components, features, Arena::default(), root);
+        assert_eq!(instance.components[root].features.len(), 2);
+        for (i, &fi) in feat_indices.iter().enumerate() {
+            let feat = &instance.features[fi];
+            assert_eq!(feat.name.as_str(), &format!("p[{}]", i + 1));
+            assert_eq!(feat.array_index, Some(i as u64 + 1));
+        }
+    }
+
+    // ── Connection to array (broadcast) tests ─────────────────────────
+
+    #[test]
+    fn test_connection_to_array_broadcast() {
+        // A connection `c: port sub.p -> other.q;` with `sub` being a 2-element
+        // array should create semantic connections to both sub[1] and sub[2].
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        // Two array elements of `sub`
+        let sub1 = components.alloc(ComponentInstance {
+            name: Name::new("sub[1]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(1),
+        });
+
+        let sub2 = components.alloc(ComponentInstance {
+            name: Name::new("sub[2]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(2),
+        });
+
+        // Non-array subcomponent `other`
+        let other = components.alloc(ComponentInstance {
+            name: Name::new("other"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("Q"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        components[root].children = vec![sub1, sub2, other];
+
+        // Connection: sub.p -> other.q (where `sub` is the array base name)
+        let conn_idx = connections.alloc(ConnectionInstance {
+            name: Name::new("c"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("sub")),
+                feature: Name::new("p"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("other")),
+                feature: Name::new("q"),
+            }),
+        });
+        components[root].connections.push(conn_idx);
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.compute_semantic_connections();
+
+        // Should produce 2 semantic connections: sub[1].p -> other.q and sub[2].p -> other.q
+        assert_eq!(
+            instance.semantic_connections.len(),
+            2,
+            "expected 2 semantic connections for broadcast to 2-element array, got {}",
+            instance.semantic_connections.len()
+        );
+
+        // Verify the source components are sub[1] and sub[2].
+        let src_idxs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| sc.ultimate_source.0)
+            .collect();
+        assert!(src_idxs.contains(&sub1));
+        assert!(src_idxs.contains(&sub2));
+
+        // All destinations should be `other`.
+        for sc in &instance.semantic_connections {
+            assert_eq!(sc.ultimate_destination.0, other);
+        }
+    }
+
+    // ── Nested arrays test ────────────────────────────────────────────
+
+    #[test]
+    fn test_nested_array_with_features() {
+        // Array subcomponent with array features.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut features: Arena<FeatureInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        // 2 array elements of `sub`, each with 2 array features
+        let mut child_indices = Vec::new();
+        for sub_i in 1..=2u64 {
+            let sub = components.alloc(ComponentInstance {
+                name: Name::new(&format!("sub[{}]", sub_i)),
+                category: ComponentCategory::Process,
+                type_name: Name::new("P"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(sub_i),
+            });
+
+            let mut feat_indices = Vec::new();
+            for fi in 1..=2u64 {
+                let feat = features.alloc(FeatureInstance {
+                    name: Name::new(&format!("p[{}]", fi)),
+                    kind: FeatureKind::DataPort,
+                    direction: Some(Direction::In),
+                    owner: sub,
+                    array_index: Some(fi),
+                });
+                feat_indices.push(feat);
+            }
+            components[sub].features = feat_indices;
+            child_indices.push(sub);
+        }
+        components[root].children = child_indices.clone();
+
+        let instance = make_instance(components, features, Arena::default(), root);
+
+        // 2 children, each with 2 features = total 4 features, 2 children
+        assert_eq!(instance.components[root].children.len(), 2);
+        for &child_idx in &child_indices {
+            let child = &instance.components[child_idx];
+            assert_eq!(child.features.len(), 2);
+            assert!(child.array_index.is_some());
+            for &fi in &child.features {
+                assert!(instance.features[fi].array_index.is_some());
+            }
+        }
+    }
+
+    // ── find_children_by_name tests ───────────────────────────────────
+
+    #[test]
+    fn test_find_children_exact_match() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let child = components.alloc(ComponentInstance {
+            name: Name::new("sensor"),
+            category: ComponentCategory::Device,
+            type_name: Name::new("S"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+        components[root].children.push(child);
+
+        let instance = make_instance(components, Arena::default(), Arena::default(), root);
+        let result = instance.find_children_by_name(root, &Name::new("sensor"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], child);
+    }
+
+    #[test]
+    fn test_find_children_array_broadcast() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+        });
+
+        let mut children = Vec::new();
+        for i in 1..=3u64 {
+            let child = components.alloc(ComponentInstance {
+                name: Name::new(&format!("sub[{}]", i)),
+                category: ComponentCategory::Process,
+                type_name: Name::new("P"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(i),
+            });
+            children.push(child);
+        }
+        components[root].children = children.clone();
+
+        let instance = make_instance(components, Arena::default(), Arena::default(), root);
+
+        // Looking for "sub" should match all 3 array elements.
+        let result = instance.find_children_by_name(root, &Name::new("sub"));
+        assert_eq!(result.len(), 3);
+
+        // Looking for "sub[2]" should match exactly one.
+        let result2 = instance.find_children_by_name(root, &Name::new("sub[2]"));
+        assert_eq!(result2.len(), 1);
+        assert_eq!(instance.components[result2[0]].name.as_str(), "sub[2]");
+
+        // Looking for "nonexistent" should match none.
+        let result3 = instance.find_children_by_name(root, &Name::new("nonexistent"));
+        assert_eq!(result3.len(), 0);
     }
 }

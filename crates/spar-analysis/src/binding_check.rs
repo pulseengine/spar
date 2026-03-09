@@ -226,6 +226,7 @@ mod tests {
                 flows: Vec::new(),
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
+                array_index: None,
             })
         }
 

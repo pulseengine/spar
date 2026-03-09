@@ -348,6 +348,7 @@ mod tests {
                 flows: Vec::new(),
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
+                array_index: None,
             })
         }
 
@@ -363,6 +364,7 @@ mod tests {
                 kind,
                 direction,
                 owner,
+                array_index: None,
             });
             self.components[owner].features.push(idx);
             idx

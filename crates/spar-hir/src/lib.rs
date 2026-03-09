@@ -371,6 +371,9 @@ pub struct InstanceNode {
     pub package: String,
     pub type_name: String,
     pub impl_name: Option<String>,
+    /// Array index for array subcomponents: None for non-array, Some(1..N) for array elements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub array_index: Option<u64>,
     pub features: Vec<InstanceFeature>,
     pub connections: Vec<InstanceConnection>,
     pub children: Vec<InstanceNode>,
@@ -383,6 +386,9 @@ pub struct InstanceFeature {
     pub name: String,
     pub kind: FeatureKind,
     pub direction: Option<Direction>,
+    /// Array index for array features: None for non-array, Some(1..N) for array elements.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub array_index: Option<u64>,
 }
 
 /// A connection in the serializable instance tree.
@@ -473,6 +479,7 @@ impl Instance {
                 name: f.name.as_str().to_string(),
                 kind: f.kind,
                 direction: f.direction,
+                array_index: f.array_index,
             }
         }).collect();
 
@@ -507,6 +514,7 @@ impl Instance {
             package: comp.package.as_str().to_string(),
             type_name: comp.type_name.as_str().to_string(),
             impl_name: comp.impl_name.as_ref().map(|n| n.as_str().to_string()),
+            array_index: comp.array_index,
             features,
             connections,
             children,
