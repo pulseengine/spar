@@ -17,6 +17,7 @@
 pub mod binding_check;
 pub mod category_check;
 pub mod completeness;
+pub mod connection_rules;
 pub mod connectivity;
 pub mod direction_rules;
 pub mod emv2_analysis;
@@ -25,9 +26,11 @@ pub mod hierarchy;
 pub mod latency;
 pub mod legality;
 pub mod mode_check;
+pub mod mode_rules;
 pub mod naming_rules;
 pub mod resource_budget;
 pub mod scheduling;
+pub mod subcomponent_rules;
 
 use serde::Serialize;
 use spar_hir_def::instance::SystemInstance;
