@@ -16,19 +16,24 @@
 
 pub mod arinc653;
 pub mod binding_check;
+pub mod binding_rules;
 pub mod category_check;
 pub mod completeness;
 pub mod connection_rules;
 pub mod connectivity;
 pub mod direction_rules;
 pub mod emv2_analysis;
+pub mod extends_rules;
 pub mod flow_check;
+pub mod flow_rules;
 pub mod hierarchy;
 pub mod latency;
 pub mod legality;
+pub mod modal_rules;
 pub mod mode_check;
 pub mod mode_rules;
 pub mod naming_rules;
+pub mod property_rules;
 pub mod resource_budget;
 pub mod scheduling;
 pub mod subcomponent_rules;

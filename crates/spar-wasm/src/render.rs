@@ -127,8 +127,12 @@ pub fn analyze_aadl_from_fs(
     runner.register(Box::new(spar_analysis::hierarchy::HierarchyAnalysis));
     runner.register(Box::new(spar_analysis::completeness::CompletenessAnalysis));
     runner.register(Box::new(spar_analysis::flow_check::FlowCheckAnalysis));
+    runner.register(Box::new(spar_analysis::flow_rules::FlowRuleAnalysis));
     runner.register(Box::new(spar_analysis::mode_check::ModeCheckAnalysis));
+    runner.register(Box::new(spar_analysis::modal_rules::ModalRuleAnalysis));
     runner.register(Box::new(spar_analysis::binding_check::BindingCheckAnalysis));
+    runner.register(Box::new(spar_analysis::binding_rules::BindingRuleAnalysis));
+    runner.register(Box::new(spar_analysis::property_rules::PropertyRuleAnalysis));
     runner.register(Box::new(spar_analysis::scheduling::SchedulingAnalysis));
     runner.register(Box::new(spar_analysis::latency::LatencyAnalysis));
     runner.register(Box::new(spar_analysis::resource_budget::ResourceBudgetAnalysis));
