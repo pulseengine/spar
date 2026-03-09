@@ -235,7 +235,7 @@ pub fn render_graph_to_svg(
     write!(
         svg,
         "  <style>\n\
-         \x20   .node rect {{ stroke: #333; stroke-width: 1.5; }}\n\
+         \x20   .node rect, .node polygon, .node path, .node ellipse {{ stroke: #333; stroke-width: 1.5; }}\n\
          \x20   .node text {{ font-family: system-ui, -apple-system, sans-serif; font-size: 13px; \
          fill: #222; text-anchor: middle; dominant-baseline: central; }}\n\
          \x20   .node .sublabel {{ font-size: 11px; fill: #666; }}\n\
@@ -300,35 +300,39 @@ pub fn render_graph_to_svg(
         )
         .unwrap();
 
-        writeln!(
-            svg,
-            "        <rect x=\"{}\" y=\"{}\" width=\"{node_w}\" height=\"{node_h}\" \
-             rx=\"4\" ry=\"4\" fill=\"{fill}\" stroke=\"{stroke_c}\" stroke-width=\"{stroke_w}\" />",
-            pos.x, pos.y,
-        )
-        .unwrap();
+        render_node_shape(
+            &mut svg, pos.x, pos.y, node_w, node_h,
+            node.category, fill, stroke_c, stroke_w,
+        );
+
+        // Adjust text center for 3D shapes (processor, device)
+        let (text_dx, text_dy) = match node.category {
+            ComponentCategory::Processor | ComponentCategory::VirtualProcessor => (-5.0, 5.0),
+            ComponentCategory::Device => (-4.0, 4.0),
+            _ => (0.0, 0.0),
+        };
+        let text_cx = pos.x + node_w / 2.0 + text_dx;
+        let text_cy = pos.y + node_h / 2.0 + text_dy;
 
         // Primary label
         let text_y = if node.sublabel.is_some() {
-            pos.y + node_h / 2.0 - 13.0 * 0.45
+            text_cy - 13.0 * 0.45
         } else {
-            pos.y + node_h / 2.0
+            text_cy
         };
         writeln!(
             svg,
-            "        <text x=\"{}\" y=\"{text_y}\">{}</text>",
-            pos.x + node_w / 2.0,
+            "        <text x=\"{text_cx}\" y=\"{text_y}\">{}</text>",
             xml_escape(&node.label),
         )
         .unwrap();
 
         // Sublabel
         if let Some(ref sub) = node.sublabel {
-            let sub_y = pos.y + node_h / 2.0 + 13.0 * 0.65;
+            let sub_y = text_cy + 13.0 * 0.65;
             writeln!(
                 svg,
-                "        <text class=\"sublabel\" x=\"{}\" y=\"{sub_y}\">{}</text>",
-                pos.x + node_w / 2.0,
+                "        <text class=\"sublabel\" x=\"{text_cx}\" y=\"{sub_y}\">{}</text>",
                 xml_escape(sub),
             )
             .unwrap();
@@ -392,6 +396,239 @@ fn category_css_class(cat: ComponentCategory) -> &'static str {
     }
 }
 
+/// Whether a component category uses a dashed outline (virtual/group/abstract variants).
+fn category_is_dashed(cat: ComponentCategory) -> bool {
+    matches!(
+        cat,
+        ComponentCategory::ThreadGroup
+            | ComponentCategory::VirtualProcessor
+            | ComponentCategory::VirtualBus
+            | ComponentCategory::SubprogramGroup
+            | ComponentCategory::Abstract
+    )
+}
+
+/// Render the AADL-standard graphical shape for a component category.
+///
+/// Writes SVG elements (path, polygon, rect, ellipse) into `svg`, positioned
+/// at `(x, y)` within a bounding box of `(w, h)`.  Each AADL component
+/// category has a distinctive shape per SAE AS5506:
+///
+/// - System: rounded rectangle
+/// - Process/Thread: parallelogram
+/// - ThreadGroup: rounded rectangle (dashed)
+/// - Processor: 3D isometric box
+/// - Memory: cylinder
+/// - Bus: double-headed arrow
+/// - Device: 3D raised rectangle
+/// - Data: rectangle with separator line
+/// - Subprogram: ellipse
+/// - Abstract: rectangle (dashed)
+fn render_node_shape(
+    svg: &mut String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    cat: ComponentCategory,
+    fill: &str,
+    stroke: &str,
+    stroke_w: &str,
+) {
+    let dash = if category_is_dashed(cat) {
+        " stroke-dasharray=\"6 3\""
+    } else {
+        ""
+    };
+    let base = format!(
+        "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{stroke_w}\"{dash}"
+    );
+
+    match cat {
+        // System: rounded rectangle (large radius)
+        ComponentCategory::System => {
+            writeln!(
+                svg,
+                "        <rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
+                 rx=\"12\" ry=\"12\" {base} />"
+            )
+            .unwrap();
+        }
+
+        // Process / Thread: parallelogram (thread is solid, same shape)
+        ComponentCategory::Process | ComponentCategory::Thread => {
+            let s = 15.0;
+            writeln!(
+                svg,
+                "        <polygon points=\"{},{} {},{} {},{} {},{}\" {base} />",
+                x + s, y,
+                x + w, y,
+                x + w - s, y + h,
+                x, y + h,
+            )
+            .unwrap();
+        }
+
+        // Thread Group: rounded rectangle, dashed
+        ComponentCategory::ThreadGroup => {
+            writeln!(
+                svg,
+                "        <rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
+                 rx=\"12\" ry=\"12\" {base} />"
+            )
+            .unwrap();
+        }
+
+        // Processor / Virtual Processor: 3D isometric box (hexagon outline)
+        ComponentCategory::Processor | ComponentCategory::VirtualProcessor => {
+            let d = 10.0;
+            // Outer hexagon
+            writeln!(
+                svg,
+                "        <path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" {base} />",
+                x, y + d,
+                x + d, y,
+                x + w, y,
+                x + w, y + h - d,
+                x + w - d, y + h,
+                x, y + h,
+            )
+            .unwrap();
+            // Internal 3D edges (lighter)
+            writeln!(
+                svg,
+                "        <path d=\"M {},{} L {},{} L {},{} M {},{} L {},{}\" \
+                 fill=\"none\" stroke=\"{stroke}\" stroke-width=\"0.8\" opacity=\"0.5\"{dash} />",
+                x, y + d,
+                x + w - d, y + d,
+                x + w, y,
+                x + w - d, y + d,
+                x + w - d, y + h,
+            )
+            .unwrap();
+        }
+
+        // Memory: cylinder (body + top ellipse cap)
+        ComponentCategory::Memory => {
+            let ry = 8.0;
+            // Body: left side + bottom arc + right side + close
+            writeln!(
+                svg,
+                "        <path d=\"M {},{} L {},{} A {} {} 0 0 0 {},{} L {},{} Z\" {base} />",
+                x, y + ry,
+                x, y + h - ry,
+                w / 2.0, ry, x + w, y + h - ry,
+                x + w, y + ry,
+            )
+            .unwrap();
+            // Top ellipse cap
+            writeln!(
+                svg,
+                "        <ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{ry}\" {base} />",
+                x + w / 2.0,
+                y + ry,
+                w / 2.0,
+            )
+            .unwrap();
+        }
+
+        // Bus / Virtual Bus: double-headed arrow
+        ComponentCategory::Bus | ComponentCategory::VirtualBus => {
+            let aw = 15.0; // arrowhead depth
+            let m = h * 0.25; // body inset
+            writeln!(
+                svg,
+                "        <polygon points=\"{},{} {},{} {},{} {},{} {},{} {},{} {},{} {},{} {},{} {},{}\" {base} />",
+                x, y + h / 2.0,
+                x + aw, y,
+                x + aw, y + m,
+                x + w - aw, y + m,
+                x + w - aw, y,
+                x + w, y + h / 2.0,
+                x + w - aw, y + h,
+                x + w - aw, y + h - m,
+                x + aw, y + h - m,
+                x + aw, y + h,
+            )
+            .unwrap();
+        }
+
+        // Device: 3D raised rectangle (front face + top face + right face)
+        ComponentCategory::Device => {
+            let d = 8.0;
+            // Front face
+            writeln!(
+                svg,
+                "        <rect x=\"{x}\" y=\"{}\" width=\"{}\" height=\"{}\" {base} />",
+                y + d, w - d, h - d,
+            )
+            .unwrap();
+            // Top face (slightly transparent fill)
+            writeln!(
+                svg,
+                "        <polygon points=\"{},{} {},{} {},{} {},{}\" \
+                 fill=\"{fill}\" fill-opacity=\"0.85\" stroke=\"{stroke}\" stroke-width=\"{stroke_w}\"{dash} />",
+                x, y + d,
+                x + d, y,
+                x + w, y,
+                x + w - d, y + d,
+            )
+            .unwrap();
+            // Right face (more transparent)
+            writeln!(
+                svg,
+                "        <polygon points=\"{},{} {},{} {},{} {},{}\" \
+                 fill=\"{fill}\" fill-opacity=\"0.7\" stroke=\"{stroke}\" stroke-width=\"{stroke_w}\"{dash} />",
+                x + w - d, y + d,
+                x + w, y,
+                x + w, y + h - d,
+                x + w - d, y + h,
+            )
+            .unwrap();
+        }
+
+        // Data: plain rectangle with separator line near top
+        ComponentCategory::Data => {
+            writeln!(
+                svg,
+                "        <rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" {base} />"
+            )
+            .unwrap();
+            let sep_y = y + 14.0;
+            writeln!(
+                svg,
+                "        <line x1=\"{x}\" y1=\"{sep_y}\" x2=\"{}\" y2=\"{sep_y}\" \
+                 stroke=\"{stroke}\" stroke-width=\"0.8\" opacity=\"0.4\" />",
+                x + w,
+            )
+            .unwrap();
+        }
+
+        // Subprogram / Subprogram Group: ellipse
+        ComponentCategory::Subprogram | ComponentCategory::SubprogramGroup => {
+            writeln!(
+                svg,
+                "        <ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {base} />",
+                x + w / 2.0,
+                y + h / 2.0,
+                w / 2.0,
+                h / 2.0,
+            )
+            .unwrap();
+        }
+
+        // Abstract: plain rectangle, dashed (dash applied via base attrs)
+        ComponentCategory::Abstract => {
+            writeln!(
+                svg,
+                "        <rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" \
+                 rx=\"2\" ry=\"2\" {base} />"
+            )
+            .unwrap();
+        }
+    }
+}
+
 /// Minimal XML escaping for attribute values and text content.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -429,5 +666,86 @@ mod tests {
         let source = "package Pkg\npublic\n  system S\n  end S;\nend Pkg;";
         let result = render_aadl(source, "Pkg::Nonexistent.Impl", &[]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn aadl_standard_shapes() {
+        // System: rounded rectangle
+        let mut svg = String::new();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::System, "#b3d9ff", "#333", "1.5");
+        assert!(svg.contains("<rect") && svg.contains("rx=\"12\""), "system should be rounded rect");
+
+        // Process: parallelogram (solid)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Process, "#d4edda", "#333", "1.5");
+        assert!(svg.contains("<polygon"), "process should be polygon");
+        assert!(!svg.contains("stroke-dasharray"), "process should be solid");
+
+        // Thread: parallelogram (solid)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Thread, "#fff3cd", "#333", "1.5");
+        assert!(svg.contains("<polygon"), "thread should be polygon");
+        assert!(!svg.contains("stroke-dasharray"), "thread should be solid");
+
+        // ThreadGroup: rounded rect, dashed
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::ThreadGroup, "#fff3cd", "#333", "1.5");
+        assert!(svg.contains("<rect") && svg.contains("rx=\"12\""), "thread group should be rounded rect");
+        assert!(svg.contains("stroke-dasharray"), "thread group should be dashed");
+
+        // Processor: 3D isometric box
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Processor, "#f8d7da", "#333", "1.5");
+        assert!(svg.contains("<path"), "processor should use path");
+        assert!(svg.contains("opacity=\"0.5\""), "processor should have 3D internal lines");
+
+        // VirtualProcessor: 3D box, dashed
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::VirtualProcessor, "#f8d7da", "#333", "1.5");
+        assert!(svg.contains("stroke-dasharray"), "virtual processor should be dashed");
+
+        // Memory: cylinder (path + ellipse)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Memory, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("<path") && svg.contains("<ellipse"), "memory should be cylinder");
+
+        // Bus: double-headed arrow
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Bus, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("<polygon"), "bus should be polygon");
+        assert!(!svg.contains("stroke-dasharray"), "bus should be solid");
+
+        // VirtualBus: dashed
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::VirtualBus, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("stroke-dasharray"), "virtual bus should be dashed");
+
+        // Device: 3D raised rectangle (rect + polygons)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Device, "#e2d5f1", "#333", "1.5");
+        assert!(svg.contains("<rect") && svg.contains("<polygon"), "device should have rect + polygons");
+
+        // Data: rectangle with separator line
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Data, "#fce4ec", "#333", "1.5");
+        assert!(svg.contains("<rect") && svg.contains("<line"), "data should be rect with separator");
+
+        // Subprogram: ellipse (solid)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Subprogram, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("<ellipse"), "subprogram should be ellipse");
+        assert!(!svg.contains("stroke-dasharray"), "subprogram should be solid");
+
+        // SubprogramGroup: ellipse (dashed)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::SubprogramGroup, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("<ellipse"), "subprogram group should be ellipse");
+        assert!(svg.contains("stroke-dasharray"), "subprogram group should be dashed");
+
+        // Abstract: rectangle (dashed)
+        svg.clear();
+        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Abstract, "#e8e8e8", "#333", "1.5");
+        assert!(svg.contains("<rect"), "abstract should be rect");
+        assert!(svg.contains("stroke-dasharray"), "abstract should be dashed");
     }
 }
