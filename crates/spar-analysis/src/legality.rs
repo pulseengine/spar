@@ -6,17 +6,21 @@
 //!
 //! # Rule ID scheme
 //!
-//! | Prefix   | Source                  |
-//! |----------|-------------------------|
-//! | `N-*`    | Naming rules            |
-//! | `C-*`    | Category restriction    |
-//! | `D-*`    | Direction rules         |
-//! | `B-*`    | Binding checks          |
-//! | `F-*`    | Flow checks             |
-//! | `CONN-*` | Connectivity           |
-//! | `H-*`    | Hierarchy              |
-//! | `COMP-*` | Completeness           |
-//! | `L-*`    | Cross-cutting legality |
+//! | Prefix        | Source                      |
+//! |---------------|-----------------------------|
+//! | `N-*`         | Naming rules                |
+//! | `C-*`         | Category restriction        |
+//! | `D-*`         | Direction rules             |
+//! | `B-*`         | Binding checks              |
+//! | `F-*`         | Flow checks                 |
+//! | `CONN-*`      | Connectivity                |
+//! | `CONN-TYPE`   | Connection feature kind     |
+//! | `CONN-SELF`   | Connection self-loop        |
+//! | `H-*`         | Hierarchy                   |
+//! | `COMP-*`      | Completeness                |
+//! | `MODE-*`      | Mode rules                  |
+//! | `SUB-*`       | Subcomponent rules          |
+//! | `L-*`         | Cross-cutting legality      |
 
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ItemTree;
@@ -24,11 +28,14 @@ use spar_hir_def::item_tree::ItemTree;
 use crate::binding_check::BindingCheckAnalysis;
 use crate::category_check::check_category_rules;
 use crate::completeness::CompletenessAnalysis;
+use crate::connection_rules::ConnectionRuleAnalysis;
 use crate::connectivity::ConnectivityAnalysis;
 use crate::direction_rules::DirectionRuleAnalysis;
 use crate::flow_check::FlowCheckAnalysis;
 use crate::hierarchy::HierarchyAnalysis;
+use crate::mode_rules::ModeRuleAnalysis;
 use crate::naming_rules::check_naming_rules;
+use crate::subcomponent_rules::SubcomponentRuleAnalysis;
 use crate::{Analysis, AnalysisDiagnostic, Severity};
 
 // ── Rule descriptor ────────────────────────────────────────────────
@@ -79,6 +86,9 @@ impl LegalityEngine {
             Box::new(ConnectivityAnalysis),
             Box::new(HierarchyAnalysis),
             Box::new(CompletenessAnalysis),
+            Box::new(ConnectionRuleAnalysis),
+            Box::new(ModeRuleAnalysis),
+            Box::new(SubcomponentRuleAnalysis),
         ];
         Self { instance_analyses }
     }
@@ -281,6 +291,54 @@ fn classify_instance_rule(analysis_name: &str, d: &AnalysisDiagnostic) -> Legali
             description: "Model completeness (types, features, classifiers)",
             section: "AS5506 \u{00a7}4",
         },
+        "connection_rules" => {
+            let msg = &d.message;
+            if msg.contains("self-loop") {
+                LegalityRule {
+                    id: "CONN-SELF",
+                    description: "Connection must not loop back to same endpoint",
+                    section: "AS5506 \u{00a7}9",
+                }
+            } else {
+                LegalityRule {
+                    id: "CONN-TYPE",
+                    description: "Connected feature kinds must be compatible",
+                    section: "AS5506 \u{00a7}9",
+                }
+            }
+        }
+        "mode_rules" => {
+            let msg = &d.message;
+            if msg.contains("duplicate mode name") {
+                LegalityRule {
+                    id: "MODE-UNIQUE",
+                    description: "Mode names must be unique within a component",
+                    section: "AS5506 \u{00a7}12",
+                }
+            } else {
+                LegalityRule {
+                    id: "MODE-TRIGGER",
+                    description: "Mode transition triggers should be event ports",
+                    section: "AS5506 \u{00a7}12",
+                }
+            }
+        }
+        "subcomponent_rules" => {
+            let msg = &d.message;
+            if msg.contains("duplicate subcomponent name") {
+                LegalityRule {
+                    id: "SUB-UNIQUE",
+                    description: "Subcomponent names must be unique within a component",
+                    section: "AS5506 \u{00a7}4.4",
+                }
+            } else {
+                LegalityRule {
+                    id: "SUB-CAT",
+                    description: "Subcomponent category must be valid for containing component",
+                    section: "AS5506 \u{00a7}4.5",
+                }
+            }
+        }
         _ => LegalityRule {
             id: "UNKNOWN",
             description: "Unknown analysis rule",
@@ -587,7 +645,7 @@ mod tests {
     #[test]
     fn engine_creates_successfully() {
         let engine = LegalityEngine::new();
-        assert_eq!(engine.instance_analyses.len(), 6);
+        assert_eq!(engine.instance_analyses.len(), 9);
     }
 
     // ── Valid model produces no errors ─────────────────────────────
