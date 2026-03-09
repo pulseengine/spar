@@ -429,6 +429,7 @@ fn cmd_analyze(args: &[String]) {
 fn run_all_analyses(
     inst: &spar_hir_def::instance::SystemInstance,
 ) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    use spar_analysis::arinc653::Arinc653Analysis;
     use spar_analysis::binding_check::BindingCheckAnalysis;
     use spar_analysis::completeness::CompletenessAnalysis;
     use spar_analysis::connectivity::ConnectivityAnalysis;
@@ -454,6 +455,7 @@ fn run_all_analyses(
     runner.register(Box::new(LatencyAnalysis));
     runner.register(Box::new(ResourceBudgetAnalysis));
     runner.register(Box::new(Emv2Analysis));
+    runner.register(Box::new(Arinc653Analysis));
     runner.run_all(inst)
 }
 

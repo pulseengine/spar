@@ -14,6 +14,7 @@
 //! let diagnostics = runner.run_all(&instance);
 //! ```
 
+pub mod arinc653;
 pub mod binding_check;
 pub mod category_check;
 pub mod completeness;
