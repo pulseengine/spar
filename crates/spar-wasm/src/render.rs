@@ -46,6 +46,45 @@ impl std::error::Error for RenderError {}
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Render AADL from filesystem (for WASM component use).
+///
+/// Reads all `.aadl` files in the current directory, parses them,
+/// instantiates from the given `root`, and renders to SVG.
+pub fn render_aadl_from_fs(root: &str, highlight: &[String]) -> Result<String, RenderError> {
+    let mut sources = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(".") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "aadl") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    sources.push((path.display().to_string(), content));
+                }
+            }
+        }
+    }
+    if sources.is_empty() {
+        return Err(RenderError::ParseError("no .aadl files found".into()));
+    }
+
+    let db = Database::from_aadl(
+        &sources.iter().map(|(f, c)| (f.clone(), c.clone())).collect::<Vec<_>>(),
+    );
+
+    let instance = db
+        .instantiate(root)
+        .ok_or_else(|| RenderError::NoRoot(format!("cannot instantiate {}", root)))?;
+
+    if instance.diagnostics().iter().any(|d| d.contains("Unresolved")) {
+        return Err(RenderError::NoRoot(format!(
+            "root {} has unresolved components",
+            root
+        )));
+    }
+
+    let (graph, _) = build_graph(instance.inner());
+    render_graph_to_svg(&graph, highlight)
+}
+
 /// Parse AADL source, instantiate the given root, and render to SVG.
 ///
 /// `source` is the raw AADL text.  `root` is a qualified name such as
