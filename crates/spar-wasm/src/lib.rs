@@ -11,7 +11,7 @@ mod graph;
 mod render;
 
 pub use graph::{ArchEdge, ArchNode, build_graph};
-pub use render::{render_aadl, render_aadl_from_fs, RenderError};
+pub use render::{analyze_aadl_from_fs, render_aadl, render_aadl_from_fs, RenderError};
 
 // ---------------------------------------------------------------------------
 // WIT guest bindings (WASM component only)
@@ -31,20 +31,38 @@ use bindings::exports::pulseengine::rivet::adapter::{
 };
 #[cfg(target_arch = "wasm32")]
 use bindings::exports::pulseengine::rivet::renderer::{
-    Guest as RendererGuest, RenderError as WitRenderError,
+    AnalysisDiagnostic as WitDiagnostic, Guest as RendererGuest, RenderError as WitRenderError,
 };
 
 #[cfg(target_arch = "wasm32")]
 struct SparComponent;
 
 #[cfg(target_arch = "wasm32")]
+fn map_render_err(e: render::RenderError) -> WitRenderError {
+    match e {
+        render::RenderError::ParseError(s) => WitRenderError::ParseError(s),
+        render::RenderError::NoRoot(s) => WitRenderError::NoRoot(s),
+        render::RenderError::LayoutError(s) => WitRenderError::LayoutError(s),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
 impl RendererGuest for SparComponent {
     fn render(root: String, highlight: Vec<String>) -> Result<String, WitRenderError> {
-        render::render_aadl_from_fs(&root, &highlight).map_err(|e| match e {
-            render::RenderError::ParseError(s) => WitRenderError::ParseError(s),
-            render::RenderError::NoRoot(s) => WitRenderError::NoRoot(s),
-            render::RenderError::LayoutError(s) => WitRenderError::LayoutError(s),
-        })
+        render::render_aadl_from_fs(&root, &highlight).map_err(map_render_err)
+    }
+
+    fn analyze(root: String) -> Result<Vec<WitDiagnostic>, WitRenderError> {
+        let diags = render::analyze_aadl_from_fs(&root).map_err(map_render_err)?;
+        Ok(diags
+            .into_iter()
+            .map(|d| WitDiagnostic {
+                severity: format!("{:?}", d.severity).to_lowercase(),
+                message: d.message,
+                component_path: d.path.join("."),
+                analysis_name: d.analysis,
+            })
+            .collect())
     }
 }
 

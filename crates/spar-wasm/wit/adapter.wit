@@ -107,6 +107,18 @@ interface renderer {
         layout-error(string),
     }
 
+    /// A diagnostic produced by an analysis pass.
+    record analysis-diagnostic {
+        /// "error", "warning", or "info"
+        severity: string,
+        /// Human-readable description
+        message: string,
+        /// Dot-separated component path (e.g. "top.cpu.partition1")
+        component-path: string,
+        /// Which analysis produced this (e.g. "connectivity", "emv2_fault_tree")
+        analysis-name: string,
+    }
+
     /// Render an AADL instance tree rooted at `root` (e.g. "Pkg::Impl").
     ///
     /// `highlight` is an optional list of component paths to visually
@@ -114,6 +126,12 @@ interface renderer {
     ///
     /// Returns the SVG document as a UTF-8 string, or a `render-error`.
     render: func(root: string, highlight: list<string>) -> result<string, render-error>;
+
+    /// Run all registered analyses on the AADL instance rooted at `root`.
+    ///
+    /// Returns a list of diagnostics (errors, warnings, info) from all
+    /// analysis passes (connectivity, hierarchy, EMV2, scheduling, etc.).
+    analyze: func(root: string) -> result<list<analysis-diagnostic>, render-error>;
 }
 
 /// World for a spar WASM component that can both adapt AADL artifacts

@@ -85,6 +85,62 @@ pub fn render_aadl_from_fs(root: &str, highlight: &[String]) -> Result<String, R
     render_graph_to_svg(&graph, highlight)
 }
 
+/// Run all analyses on the AADL model from filesystem.
+///
+/// Reads `.aadl` files from the current directory, instantiates the given
+/// root, and runs all registered analysis passes.
+pub fn analyze_aadl_from_fs(
+    root: &str,
+) -> Result<Vec<spar_analysis::AnalysisDiagnostic>, RenderError> {
+    let mut sources = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(".") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "aadl") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    sources.push((path.display().to_string(), content));
+                }
+            }
+        }
+    }
+    if sources.is_empty() {
+        return Err(RenderError::ParseError("no .aadl files found".into()));
+    }
+
+    let db = Database::from_aadl(
+        &sources.iter().map(|(f, c)| (f.clone(), c.clone())).collect::<Vec<_>>(),
+    );
+
+    let instance = db
+        .instantiate(root)
+        .ok_or_else(|| RenderError::NoRoot(format!("cannot instantiate {}", root)))?;
+
+    if instance.diagnostics().iter().any(|d| d.contains("Unresolved")) {
+        return Err(RenderError::NoRoot(format!(
+            "root {} has unresolved components",
+            root
+        )));
+    }
+
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register(Box::new(spar_analysis::connectivity::ConnectivityAnalysis));
+    runner.register(Box::new(spar_analysis::hierarchy::HierarchyAnalysis));
+    runner.register(Box::new(spar_analysis::completeness::CompletenessAnalysis));
+    runner.register(Box::new(spar_analysis::flow_check::FlowCheckAnalysis));
+    runner.register(Box::new(spar_analysis::mode_check::ModeCheckAnalysis));
+    runner.register(Box::new(spar_analysis::binding_check::BindingCheckAnalysis));
+    runner.register(Box::new(spar_analysis::scheduling::SchedulingAnalysis));
+    runner.register(Box::new(spar_analysis::latency::LatencyAnalysis));
+    runner.register(Box::new(spar_analysis::resource_budget::ResourceBudgetAnalysis));
+    runner.register(Box::new(spar_analysis::direction_rules::DirectionRuleAnalysis));
+    runner.register(Box::new(spar_analysis::connection_rules::ConnectionRuleAnalysis));
+    runner.register(Box::new(spar_analysis::mode_rules::ModeRuleAnalysis));
+    runner.register(Box::new(spar_analysis::subcomponent_rules::SubcomponentRuleAnalysis));
+    runner.register(Box::new(spar_analysis::emv2_analysis::Emv2Analysis));
+
+    Ok(runner.run_all(instance.inner()))
+}
+
 /// Parse AADL source, instantiate the given root, and render to SVG.
 ///
 /// `source` is the raw AADL text.  `root` is a qualified name such as
