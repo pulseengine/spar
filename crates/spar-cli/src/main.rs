@@ -376,6 +376,7 @@ fn cmd_analyze(args: &[String]) {
     for tree in &trees {
         diagnostics.extend(spar_analysis::naming_rules::check_naming_rules(tree));
         diagnostics.extend(spar_analysis::category_check::check_category_rules(tree));
+        diagnostics.extend(spar_analysis::extends_rules::check_extends_rules(tree));
     }
 
     // Instantiate root system
@@ -431,15 +432,19 @@ fn run_all_analyses(
 ) -> Vec<spar_analysis::AnalysisDiagnostic> {
     use spar_analysis::arinc653::Arinc653Analysis;
     use spar_analysis::binding_check::BindingCheckAnalysis;
+    use spar_analysis::binding_rules::BindingRuleAnalysis;
     use spar_analysis::classifier_match::ClassifierMatchAnalysis;
     use spar_analysis::completeness::CompletenessAnalysis;
     use spar_analysis::connectivity::ConnectivityAnalysis;
     use spar_analysis::direction_rules::DirectionRuleAnalysis;
     use spar_analysis::emv2_analysis::Emv2Analysis;
     use spar_analysis::flow_check::FlowCheckAnalysis;
+    use spar_analysis::flow_rules::FlowRuleAnalysis;
     use spar_analysis::hierarchy::HierarchyAnalysis;
     use spar_analysis::latency::LatencyAnalysis;
+    use spar_analysis::modal_rules::ModalRuleAnalysis;
     use spar_analysis::mode_check::ModeCheckAnalysis;
+    use spar_analysis::property_rules::PropertyRuleAnalysis;
     use spar_analysis::resource_budget::ResourceBudgetAnalysis;
     use spar_analysis::scheduling::SchedulingAnalysis;
     use spar_analysis::AnalysisRunner;
@@ -451,8 +456,12 @@ fn run_all_analyses(
     runner.register(Box::new(DirectionRuleAnalysis));
     runner.register(Box::new(ClassifierMatchAnalysis));
     runner.register(Box::new(BindingCheckAnalysis));
+    runner.register(Box::new(BindingRuleAnalysis));
     runner.register(Box::new(FlowCheckAnalysis));
+    runner.register(Box::new(FlowRuleAnalysis));
     runner.register(Box::new(ModeCheckAnalysis));
+    runner.register(Box::new(ModalRuleAnalysis));
+    runner.register(Box::new(PropertyRuleAnalysis));
     runner.register(Box::new(SchedulingAnalysis));
     runner.register(Box::new(LatencyAnalysis));
     runner.register(Box::new(ResourceBudgetAnalysis));
