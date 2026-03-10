@@ -7,6 +7,8 @@
 
 pub mod cargo_metadata;
 pub mod rust_crate;
+pub mod wac;
+pub mod wac_parser;
 pub mod wit;
 pub mod wit_parser;
 pub mod wrpc;
