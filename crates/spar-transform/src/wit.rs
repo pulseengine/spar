@@ -7,6 +7,9 @@
 //! | `world Foo`        | `system type FooWorld`                                |
 //! | `interface Bar`    | `subprogram group type BarInterface` with subprograms |
 //! | `func f(...)`      | `subprogram` with parameter features                  |
+//! | `async func f(…)`  | `thread` with event data port features + Aperiodic    |
+//! | `stream<T>`        | `event data port` (inner type as classifier)           |
+//! | `future<T>`        | `event data port` (inner type as classifier)           |
 //! | `record R`         | `data type R`                                         |
 //! | `enum E`           | `data type E` (with enumeration property)             |
 //! | `variant V`        | `data type V`                                         |
@@ -22,6 +25,7 @@
 //! | `system type`          | `world`                |
 //! | `subprogram group`     | `interface`            |
 //! | `subprogram`           | `func`                 |
+//! | `thread (Aperiodic)`   | `async func`           |
 //! | `data type`            | `record` (default)     |
 //! | `requires access`      | `import`               |
 //! | `provides access`      | `export`               |
@@ -157,6 +161,10 @@ impl WitTransform {
                             ComponentCategory::Data => {
                                 // Data types are emitted inline within interfaces
                             }
+                            ComponentCategory::Thread => {
+                                // Threads with Aperiodic dispatch are emitted
+                                // as async functions within interfaces
+                            }
                             ComponentCategory::Subprogram => {
                                 // Subprograms are emitted as functions within interfaces
                             }
@@ -227,12 +235,17 @@ fn lower_interface(iface: &WitInterface, tree: &mut ItemTree) -> Vec<ItemRef> {
         }
     }
 
-    // Create subprogram types for functions
+    // Create subprogram/thread types for functions
     let mut subprogram_features = Vec::new();
     for func in &iface.functions {
-        let subprog_name = wit_parser::kebab_to_pascal(&func.name);
-        let sub_idx = lower_function(func, &subprog_name, tree);
-        items.push(ItemRef::ComponentType(sub_idx));
+        let component_name = wit_parser::kebab_to_pascal(&func.name);
+        if func.is_async {
+            let ct_idx = lower_async_function(func, &component_name, tree);
+            items.push(ItemRef::ComponentType(ct_idx));
+        } else {
+            let sub_idx = lower_function(func, &component_name, tree);
+            items.push(ItemRef::ComponentType(sub_idx));
+        }
 
         // Also create a feature on the interface's subprogram group
         let feat_idx = tree.features.alloc(Feature {
@@ -240,7 +253,7 @@ fn lower_interface(iface: &WitInterface, tree: &mut ItemTree) -> Vec<ItemRef> {
             kind: FeatureKind::SubprogramAccess,
             direction: None,
             access_kind: Some(AccessKind::Provides),
-            classifier: Some(ClassifierRef::type_only(Name::new(&subprog_name))),
+            classifier: Some(ClassifierRef::type_only(Name::new(&component_name))),
             is_refined: false,
             array_dimensions: Vec::new(),
             property_associations: Vec::new(),
@@ -319,11 +332,81 @@ fn lower_function(
     })
 }
 
+/// Lower an async WIT function into an AADL thread component type.
+///
+/// Async functions map to threads with `Dispatch_Protocol => Aperiodic`.
+/// `stream<T>` and `future<T>` parameters become `event data port` features.
+fn lower_async_function(
+    func: &WitFunction,
+    aadl_name: &str,
+    tree: &mut ItemTree,
+) -> spar_hir_def::item_tree::ComponentTypeIdx {
+    let mut features = Vec::new();
+
+    // Parameters → in event data port features
+    for (pname, ptype) in &func.params {
+        let feat_idx = tree.features.alloc(Feature {
+            name: Name::new(&wit_parser::kebab_to_snake(pname)),
+            kind: FeatureKind::EventDataPort,
+            direction: Some(Direction::In),
+            access_kind: None,
+            classifier: wit_type_to_classifier(ptype),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        features.push(feat_idx);
+    }
+
+    // Return type → out event data port feature
+    if let Some(ret_type) = &func.result {
+        let feat_idx = tree.features.alloc(Feature {
+            name: Name::new("return_value"),
+            kind: FeatureKind::EventDataPort,
+            direction: Some(Direction::Out),
+            access_kind: None,
+            classifier: wit_type_to_classifier(ret_type),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        features.push(feat_idx);
+    }
+
+    // Add Dispatch_Protocol => Aperiodic property
+    let dispatch_prop_idx =
+        tree.property_associations
+            .alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Timing_Properties")),
+                    property_name: Name::new("Dispatch_Protocol"),
+                },
+                value: "Aperiodic".to_string(),
+                typed_value: Some(PropertyExpr::Enum(Name::new("Aperiodic"))),
+                is_append: false,
+                applies_to: None,
+                in_modes: Vec::new(),
+            });
+
+    tree.component_types.alloc(ComponentTypeItem {
+        name: Name::new(aadl_name),
+        category: ComponentCategory::Thread,
+        extends: None,
+        features,
+        flow_specs: Vec::new(),
+        modes: Vec::new(),
+        mode_transitions: Vec::new(),
+        prototypes: Vec::new(),
+        property_associations: vec![dispatch_prop_idx],
+        is_public: true,
+    })
+}
+
 /// Lower a WIT world into an AADL system component type.
 fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
     let mut features = Vec::new();
 
-    // Imports → requires subprogram_group access
+    // Imports → requires subprogram_group access (or event data port for async)
     for import in &world.imports {
         match import {
             WitWorldItem::Interface(name) => {
@@ -344,17 +427,31 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
             }
             WitWorldItem::Function(func) => {
                 let func_name = wit_parser::kebab_to_snake(&func.name);
-                let feat_idx = tree.features.alloc(Feature {
-                    name: Name::new(&func_name),
-                    kind: FeatureKind::SubprogramAccess,
-                    direction: None,
-                    access_kind: Some(AccessKind::Requires),
-                    classifier: None,
-                    is_refined: false,
-                    array_dimensions: Vec::new(),
-                    property_associations: Vec::new(),
-                });
-                features.push(feat_idx);
+                if func.is_async {
+                    let feat_idx = tree.features.alloc(Feature {
+                        name: Name::new(&func_name),
+                        kind: FeatureKind::EventDataPort,
+                        direction: Some(Direction::In),
+                        access_kind: None,
+                        classifier: None,
+                        is_refined: false,
+                        array_dimensions: Vec::new(),
+                        property_associations: Vec::new(),
+                    });
+                    features.push(feat_idx);
+                } else {
+                    let feat_idx = tree.features.alloc(Feature {
+                        name: Name::new(&func_name),
+                        kind: FeatureKind::SubprogramAccess,
+                        direction: None,
+                        access_kind: Some(AccessKind::Requires),
+                        classifier: None,
+                        is_refined: false,
+                        array_dimensions: Vec::new(),
+                        property_associations: Vec::new(),
+                    });
+                    features.push(feat_idx);
+                }
             }
             WitWorldItem::Type(name) => {
                 let aadl_name = wit_parser::kebab_to_snake(name);
@@ -373,7 +470,7 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
         }
     }
 
-    // Exports → provides subprogram_group access
+    // Exports → provides subprogram_group access (or event data port for async)
     for export in &world.exports {
         match export {
             WitWorldItem::Interface(name) => {
@@ -394,17 +491,31 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
             }
             WitWorldItem::Function(func) => {
                 let func_name = wit_parser::kebab_to_snake(&func.name);
-                let feat_idx = tree.features.alloc(Feature {
-                    name: Name::new(&func_name),
-                    kind: FeatureKind::SubprogramAccess,
-                    direction: None,
-                    access_kind: Some(AccessKind::Provides),
-                    classifier: None,
-                    is_refined: false,
-                    array_dimensions: Vec::new(),
-                    property_associations: Vec::new(),
-                });
-                features.push(feat_idx);
+                if func.is_async {
+                    let feat_idx = tree.features.alloc(Feature {
+                        name: Name::new(&func_name),
+                        kind: FeatureKind::EventDataPort,
+                        direction: Some(Direction::Out),
+                        access_kind: None,
+                        classifier: None,
+                        is_refined: false,
+                        array_dimensions: Vec::new(),
+                        property_associations: Vec::new(),
+                    });
+                    features.push(feat_idx);
+                } else {
+                    let feat_idx = tree.features.alloc(Feature {
+                        name: Name::new(&func_name),
+                        kind: FeatureKind::SubprogramAccess,
+                        direction: None,
+                        access_kind: Some(AccessKind::Provides),
+                        classifier: None,
+                        is_refined: false,
+                        array_dimensions: Vec::new(),
+                        property_associations: Vec::new(),
+                    });
+                    features.push(feat_idx);
+                }
             }
             WitWorldItem::Type(name) => {
                 let aadl_name = wit_parser::kebab_to_snake(name);
@@ -690,6 +801,8 @@ fn wit_type_to_aadl_name(ty: &WitType) -> String {
         WitType::String_ => "Base_Types::String".into(),
         WitType::List(inner) => format!("List_{}", wit_type_to_aadl_name(inner)),
         WitType::Option_(inner) => format!("Option_{}", wit_type_to_aadl_name(inner)),
+        WitType::Stream(inner) => wit_type_to_aadl_name(inner),
+        WitType::Future(inner) => wit_type_to_aadl_name(inner),
         WitType::Result { .. } => "WIT_Result".into(),
         WitType::Tuple(elems) => {
             let parts: Vec<_> = elems.iter().map(wit_type_to_aadl_name).collect();
@@ -813,25 +926,45 @@ fn emit_interface_from_feature_group(
     out.push_str("}\n\n");
 }
 
-/// Find a subprogram type in the tree and produce a WIT function signature.
+/// Find a subprogram or thread type in the tree and produce a WIT function signature.
 fn find_subprogram_signature(name: &Name, tree: &ItemTree) -> Option<String> {
     for (_, ct) in tree.component_types.iter() {
-        if ct.category == ComponentCategory::Subprogram && ct.name.eq_ci(name) {
+        if (ct.category == ComponentCategory::Subprogram
+            || ct.category == ComponentCategory::Thread)
+            && ct.name.eq_ci(name)
+        {
             return Some(emit_function_signature(ct, tree));
         }
     }
     None
 }
 
-/// Emit a WIT function signature from a subprogram component type.
+/// Check if a component type has `Dispatch_Protocol => Aperiodic`.
+fn has_aperiodic_dispatch(ct: &ComponentTypeItem, tree: &ItemTree) -> bool {
+    ct.property_associations.iter().any(|&prop_idx| {
+        let prop = &tree.property_associations[prop_idx];
+        prop.name.property_name.as_str().eq_ignore_ascii_case("Dispatch_Protocol")
+            && prop.value.eq_ignore_ascii_case("Aperiodic")
+    })
+}
+
+/// Emit a WIT function signature from a subprogram or thread component type.
 fn emit_function_signature(ct: &ComponentTypeItem, tree: &ItemTree) -> String {
     let func_name = wit_parser::to_kebab_case(ct.name.as_str());
+    let is_async = ct.category == ComponentCategory::Thread
+        && has_aperiodic_dispatch(ct, tree);
     let mut params = Vec::new();
     let mut ret_type = None;
 
+    let port_kind = if is_async {
+        FeatureKind::EventDataPort
+    } else {
+        FeatureKind::Parameter
+    };
+
     for &feat_idx in &ct.features {
         let feat = &tree.features[feat_idx];
-        if feat.kind == FeatureKind::Parameter {
+        if feat.kind == port_kind {
             let pname = wit_parser::to_kebab_case(feat.name.as_str());
             let ptype = feat
                 .classifier
@@ -851,9 +984,10 @@ fn emit_function_signature(ct: &ComponentTypeItem, tree: &ItemTree) -> String {
     }
 
     let params_str = params.join(", ");
+    let async_prefix = if is_async { "async " } else { "" };
     match ret_type {
-        Some(ret) => format!("{}: func({}) -> {};\n", func_name, params_str, ret),
-        None => format!("{}: func({});\n", func_name, params_str),
+        Some(ret) => format!("{}: {}func({}) -> {};\n", func_name, async_prefix, params_str, ret),
+        None => format!("{}: {}func({});\n", func_name, async_prefix, params_str),
     }
 }
 
@@ -1622,5 +1756,119 @@ mod tests {
         let feat_ret = &tree.features[sp.features[3]];
         assert_eq!(feat_ret.direction, Some(Direction::Out));
         assert_eq!(feat_ret.name.as_str(), "return_value");
+    }
+
+    #[test]
+    fn async_function_becomes_thread() {
+        let src = r#"
+            interface pipeline {
+                process: async func(input: stream<u32>) -> stream<f64>;
+            }
+        "#;
+        let tree = parse_and_convert(src);
+
+        // Should have a thread type named "Process" (not a subprogram)
+        let thread = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.category == ComponentCategory::Thread);
+        assert!(thread.is_some(), "should have a thread type");
+        let (_, thread) = thread.unwrap();
+        assert_eq!(thread.name.as_str(), "Process");
+
+        // Should have event data port features
+        assert_eq!(thread.features.len(), 2); // input + return_value
+        let feat_input = &tree.features[thread.features[0]];
+        assert_eq!(feat_input.kind, FeatureKind::EventDataPort);
+        assert_eq!(feat_input.direction, Some(Direction::In));
+        assert_eq!(feat_input.name.as_str(), "input");
+
+        let feat_ret = &tree.features[thread.features[1]];
+        assert_eq!(feat_ret.kind, FeatureKind::EventDataPort);
+        assert_eq!(feat_ret.direction, Some(Direction::Out));
+        assert_eq!(feat_ret.name.as_str(), "return_value");
+
+        // Should have Dispatch_Protocol => Aperiodic property
+        assert_eq!(thread.property_associations.len(), 1);
+        let prop = &tree.property_associations[thread.property_associations[0]];
+        assert_eq!(prop.name.property_name.as_str(), "Dispatch_Protocol");
+        assert_eq!(prop.value, "Aperiodic");
+    }
+
+    #[test]
+    fn async_function_roundtrip() {
+        let src = r#"
+            package example:pipeline@1.0.0;
+
+            interface pipeline {
+                process: async func(input: u32) -> f64;
+            }
+        "#;
+
+        // WIT → AADL
+        let doc = wit_parser::parse_wit(src).unwrap();
+        let tree = WitTransform::wit_to_item_tree(&doc);
+
+        // AADL → WIT
+        let roundtrip_wit = WitTransform::item_tree_to_wit(&tree);
+
+        // Should contain async func in the output
+        assert!(
+            roundtrip_wit.contains("async func"),
+            "should have async func in roundtrip: {}",
+            roundtrip_wit
+        );
+        assert!(
+            roundtrip_wit.contains("interface pipeline"),
+            "should have interface: {}",
+            roundtrip_wit
+        );
+    }
+
+    #[test]
+    fn sync_function_stays_subprogram() {
+        let src = r#"
+            interface api {
+                greet: func(name: string) -> string;
+            }
+        "#;
+        let tree = parse_and_convert(src);
+
+        // Should NOT have a thread type
+        let thread = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.category == ComponentCategory::Thread);
+        assert!(thread.is_none(), "should not have a thread type");
+
+        // Should have a subprogram type
+        let sp = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.category == ComponentCategory::Subprogram);
+        assert!(sp.is_some(), "should have a subprogram type");
+    }
+
+    #[test]
+    fn world_with_async_export_becomes_event_data_port() {
+        let src = r#"
+            world processor {
+                export process: async func(input: stream<u32>) -> stream<f64>;
+            }
+        "#;
+        let tree = parse_and_convert(src);
+
+        let sys = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.category == ComponentCategory::System)
+            .unwrap()
+            .1;
+
+        assert_eq!(sys.features.len(), 1);
+        let feat = &tree.features[sys.features[0]];
+        assert_eq!(feat.kind, FeatureKind::EventDataPort);
+        assert_eq!(feat.direction, Some(Direction::Out));
+        assert_eq!(feat.name.as_str(), "process");
     }
 }
