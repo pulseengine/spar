@@ -1,0 +1,325 @@
+# STPA-Derived Safety Requirements for Spar
+#
+# These requirements are derived from the STPA analysis (analysis.yaml).
+# Each addresses one or more Unsafe Control Actions (UCAs) by specifying
+# concrete implementation requirements.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Parser Safety Requirements (from UCA-1, UCA-2, CC-1)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-001
+    type: requirement
+    title: Unrecognized syntax must produce diagnostic
+    description: >
+      When the parser encounters a token sequence that does not match
+      any AADL v2.2 grammar production, it must emit an error diagnostic
+      with the source location (file, offset). The parser must not
+      silently skip tokens without producing a CST error node.
+    status: partial
+    tags: [safety, parser, stpa]
+    traces-to: [CC-1]
+    mitigates: [H-5]
+
+  - id: STPA-REQ-002
+    type: requirement
+    title: Annex content must produce diagnostic when unparseable
+    description: >
+      When annex library or annex subclause content cannot be parsed
+      by the registered annex parser, spar must emit a warning diagnostic
+      indicating which annex was not processed. The annex content must
+      not be silently dropped.
+    status: not-implemented
+    tags: [safety, parser, annex, stpa]
+    traces-to: [CC-1]
+    mitigates: [H-5, H-1]
+
+  - id: STPA-REQ-003
+    type: requirement
+    title: Parser coverage test for all AADL productions
+    description: >
+      The parser test suite must contain at least one test for each
+      AADL v2.2 grammar production rule (approximately 80 productions).
+      Each test must verify that a valid input produces the expected
+      CST structure and that an invalid input produces an error diagnostic.
+    status: partial
+    tags: [safety, parser, testing, stpa]
+    traces-to: [CC-1]
+    mitigates: [H-5]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Model Builder Safety Requirements (from UCA-3, UCA-4, UCA-5, CC-2-4)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-004
+    type: requirement
+    title: Lowering exhaustiveness check
+    description: >
+      The CST-to-ItemTree lowering must match on all SyntaxKind variants
+      that represent semantic AADL constructs. Any unhandled variant must
+      produce a warning diagnostic "unhandled construct: {kind}". This
+      should be enforced via a #[deny(unreachable_patterns)] attribute
+      or explicit wildcard with diagnostic emission.
+    status: not-implemented
+    tags: [safety, model, stpa]
+    traces-to: [CC-2]
+    mitigates: [H-3]
+
+  - id: STPA-REQ-005
+    type: requirement
+    title: Unit conversion factor validation
+    description: >
+      Unit conversion factors in standard_properties.rs must be validated
+      against AS5506 Appendix A values. The test suite must include
+      explicit tests for every unit type (Time, Size, Data_Rate) verifying
+      that conversion between all unit pairs produces correct results.
+      Example: 1 ms = 1_000 us = 1_000_000 ns.
+    status: partial
+    tags: [safety, properties, units, stpa]
+    traces-to: [CC-3]
+    mitigates: [H-6]
+
+  - id: STPA-REQ-006
+    type: requirement
+    title: Property type validation during lowering
+    description: >
+      When lowering a property association, the property expression
+      must be validated against the declared property type. Type
+      mismatches (e.g., string value for integer property) must produce
+      an error diagnostic.
+    status: not-implemented
+    tags: [safety, properties, stpa]
+    traces-to: [CC-3]
+    mitigates: [H-6]
+
+  - id: STPA-REQ-007
+    type: requirement
+    title: Ambiguous name resolution warning
+    description: >
+      When multiple classifiers in different packages match a reference
+      and the reference is not fully qualified, the resolver must emit
+      a warning listing all candidates and which one was selected.
+    status: not-implemented
+    tags: [safety, resolution, stpa]
+    traces-to: [CC-4]
+    mitigates: [H-3]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Instance Builder Safety Requirements (from UCA-6-9, CC-5-8)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-008
+    type: requirement
+    title: Modal subcomponent instantiation completeness
+    description: >
+      All subcomponents must be instantiated regardless of their
+      in_modes filtering. Modal membership must be tracked as metadata
+      on each instance, not used to exclude instances from the tree.
+      Analyses can then filter by mode as needed.
+    status: partial
+    tags: [safety, instance, modes, stpa]
+    traces-to: [CC-5]
+    mitigates: [H-3]
+
+  - id: STPA-REQ-009
+    type: requirement
+    title: Array dimension validation
+    description: >
+      Array dimension expressions must evaluate to positive integers
+      (>= 1). Zero or negative dimensions must produce an error
+      diagnostic. Non-integer dimensions must produce an error.
+    status: not-implemented
+    tags: [safety, instance, arrays, stpa]
+    traces-to: [CC-6]
+    mitigates: [H-3]
+
+  - id: STPA-REQ-010
+    type: requirement
+    title: Array connection index bounds checking
+    description: >
+      Connection patterns referencing array indices (e.g., sub[i] -> sub[i+1])
+      must be validated against the declared array dimension. Out-of-bounds
+      indices must produce an error diagnostic.
+    status: not-implemented
+    tags: [safety, instance, arrays, stpa]
+    traces-to: [CC-6]
+    mitigates: [H-3]
+
+  - id: STPA-REQ-011
+    type: requirement
+    title: Feature group member matching by name
+    description: >
+      When tracing connections through feature groups, members must be
+      matched by name (not by index position). inverse_of must reverse
+      direction but preserve name-based matching.
+    status: not-implemented
+    tags: [safety, instance, connections, stpa]
+    traces-to: [CC-7]
+    mitigates: [H-3, H-1]
+
+  - id: STPA-REQ-012
+    type: requirement
+    title: Circular containment detection
+    description: >
+      Before recursive instantiation, build the classifier reference
+      graph and check for cycles. If a cycle is detected, emit an
+      error diagnostic naming the cycle path and abort instantiation.
+      Maximum recursion depth limit of 100 levels as a backup.
+    status: not-implemented
+    tags: [safety, instance, stpa]
+    traces-to: [CC-8]
+    mitigates: [H-3]
+
+  - id: STPA-REQ-013
+    type: requirement
+    title: Unresolved connection endpoint diagnostic
+    description: >
+      After semantic connection tracing, any connection endpoint that
+      does not resolve to a valid feature instance must produce a
+      warning diagnostic with the connection name and unresolved path.
+    status: partial
+    tags: [safety, instance, connections, stpa]
+    traces-to: [CC-7]
+    mitigates: [H-3]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Analysis Engine Safety Requirements (from UCA-10-13, CC-9-12)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-014
+    type: requirement
+    title: Automatic analysis registration
+    description: >
+      All implemented analysis passes must be registered with
+      AnalysisRunner by default. The register_all() function must use
+      compile-time or inventory-based discovery to prevent omission.
+      An integration test must verify the count of registered analyses
+      matches the count of Analysis trait implementations.
+    status: partial
+    tags: [safety, analysis, stpa]
+    traces-to: [CC-9]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-015
+    type: requirement
+    title: Typed property accessors for analyses
+    description: >
+      Analysis passes must access property values through typed accessor
+      functions (e.g., get_period() -> Option<Duration>) that perform
+      unit conversion and type validation. Direct string parsing of
+      property values in analysis code is prohibited.
+    status: partial
+    tags: [safety, analysis, properties, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1, H-6]
+
+  - id: STPA-REQ-016
+    type: requirement
+    title: Severity assignment criteria documentation
+    description: >
+      Each analysis rule must document its severity assignment rationale
+      in code comments. Error = confirmed standard violation or guaranteed
+      runtime failure. Warning = likely defect. Info = suggestion.
+    status: partial
+    tags: [safety, analysis, stpa]
+    traces-to: [CC-11]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-017
+    type: requirement
+    title: Modal-aware analysis
+    description: >
+      Analyses that read property values (scheduling, latency, resource
+      budget) must evaluate properties per system operation mode when
+      modal property associations exist. The analysis must report
+      the worst-case mode or report per-mode results.
+    status: not-implemented
+    tags: [safety, analysis, modes, stpa]
+    traces-to: [CC-12]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-018
+    type: requirement
+    title: Intentional no-connection annotation
+    description: >
+      Engineers must be able to annotate ports as intentionally
+      unconnected (e.g., via a property SPAR_Properties::Intentionally_Unconnected).
+      Connectivity analysis must suppress warnings for annotated ports
+      to reduce false positives and alert fatigue.
+    status: not-implemented
+    tags: [safety, analysis, false-positive, stpa]
+    traces-to: [CC-12]
+    mitigates: [H-2]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Output Safety Requirements (from UCA-14-16, CC-13-14)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-019
+    type: requirement
+    title: Serialization round-trip test
+    description: >
+      An integration test must serialize every spar-hir public type to
+      JSON, deserialize it back, and verify structural equality. This
+      test must run on a non-trivial AADL model with instances, arrays,
+      modes, properties, and connections.
+    status: partial
+    tags: [safety, output, serde, stpa]
+    traces-to: [CC-13]
+    mitigates: [H-4]
+
+  - id: STPA-REQ-020
+    type: requirement
+    title: No error diagnostic suppression
+    description: >
+      The CLI and WASM output formatters must transmit all error-severity
+      diagnostics to the user. Filtering by severity must only be available
+      via explicit user flag (--min-severity). The default must show all
+      severities.
+    status: implemented
+    tags: [safety, output, stpa]
+    traces-to: [CC-14]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-021
+    type: requirement
+    title: SVG topology verification test
+    description: >
+      An integration test must verify that the SVG graph output contains
+      the correct number of nodes and edges matching the instance model.
+      Node labels must match component instance names. Edge connections
+      must match the connection instances.
+    status: partial
+    tags: [safety, output, rendering, stpa]
+    traces-to: [CC-13]
+    mitigates: [H-4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Cross-Cutting Safety Requirements
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-022
+    type: requirement
+    title: Analysis coverage documentation
+    description: >
+      Spar must maintain a COMPLIANCE.md documenting which AADL standard
+      sections are covered by analyses, which legality rules are implemented,
+      and known gaps. This must be updated when new analyses are added.
+    status: implemented
+    tags: [safety, documentation, stpa]
+    traces-to: [SC-1]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-023
+    type: requirement
+    title: Regression test for each closed issue
+    description: >
+      When a bug or false negative is discovered and fixed, a regression
+      test must be added that reproduces the original defect and verifies
+      the fix. This prevents re-introduction of known-bad behavior.
+    status: partial
+    tags: [safety, testing, stpa]
+    traces-to: [SC-1]
+    mitigates: [H-1]

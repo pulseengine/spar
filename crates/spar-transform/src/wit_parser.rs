@@ -55,6 +55,7 @@ pub struct WitFunction {
     pub name: String,
     pub params: Vec<(String, WitType)>,
     pub result: Option<WitType>,
+    pub is_async: bool,
 }
 
 /// A WIT type.
@@ -80,6 +81,8 @@ pub enum WitType {
         err: Option<Box<WitType>>,
     },
     Tuple(Vec<WitType>),
+    Stream(Box<WitType>),
+    Future(Box<WitType>),
     Named(String),
 }
 
@@ -460,8 +463,10 @@ impl<'a> Parser<'a> {
                 self.pos += 1; // skip ':'
                 self.skip_ws_and_comments();
 
+                let is_async = self.eat_keyword("async");
                 if self.eat_keyword("func") {
-                    let func = self.parse_func_signature(&ident)?;
+                    let mut func = self.parse_func_signature(&ident)?;
+                    func.is_async = is_async;
                     self.eat_char(';');
                     return Some(WitWorldItem::Function(func));
                 }
@@ -573,12 +578,14 @@ impl<'a> Parser<'a> {
             return None;
         }
         self.skip_ws_and_comments();
+        let is_async = self.eat_keyword("async");
         if !self.eat_keyword("func") {
             // Not a function — could be something else. Skip to semicolon.
             self.pos = saved;
             return None;
         }
-        let func = self.parse_func_signature(&name)?;
+        let mut func = self.parse_func_signature(&name)?;
+        func.is_async = is_async;
         self.eat_char(';');
         Some(func)
     }
@@ -608,6 +615,7 @@ impl<'a> Parser<'a> {
             name: name.to_string(),
             params,
             result,
+            is_async: false,
         })
     }
 
@@ -648,6 +656,12 @@ impl<'a> Parser<'a> {
         }
         if self.eat_keyword("tuple") {
             return self.parse_tuple_type();
+        }
+        if self.eat_keyword("stream") {
+            return self.parse_generic_one(|inner| WitType::Stream(Box::new(inner)));
+        }
+        if self.eat_keyword("future") {
+            return self.parse_generic_one(|inner| WitType::Future(Box::new(inner)));
         }
 
         // Primitive types
@@ -1368,5 +1382,64 @@ mod tests {
             WitTypeDef::Resource { name } => assert_eq!(name, "input-stream"),
             other => panic!("expected Resource, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_async_function() {
+        let src = r#"
+            interface pipeline {
+                process: async func(input: stream<u32>) -> stream<f64>;
+            }
+        "#;
+        let doc = parse_wit(src).unwrap();
+        let f = &doc.interfaces[0].functions[0];
+        assert_eq!(f.name, "process");
+        assert!(f.is_async);
+        assert_eq!(f.params.len(), 1);
+        assert_eq!(f.params[0].1, WitType::Stream(Box::new(WitType::U32)));
+        assert_eq!(f.result, Some(WitType::Stream(Box::new(WitType::F64))));
+    }
+
+    #[test]
+    fn parse_future_type() {
+        let src = r#"
+            interface types {
+                classify: async func(sample: future<f64>) -> string;
+            }
+        "#;
+        let doc = parse_wit(src).unwrap();
+        let f = &doc.interfaces[0].functions[0];
+        assert!(f.is_async);
+        assert_eq!(f.params[0].1, WitType::Future(Box::new(WitType::F64)));
+    }
+
+    #[test]
+    fn parse_world_with_async_export() {
+        let src = r#"
+            world processor {
+                export process: async func(input: stream<u32>) -> stream<f64>;
+            }
+        "#;
+        let doc = parse_wit(src).unwrap();
+        let w = &doc.worlds[0];
+        assert_eq!(w.exports.len(), 1);
+        match &w.exports[0] {
+            WitWorldItem::Function(f) => {
+                assert!(f.is_async);
+            }
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn sync_function_not_async() {
+        let src = r#"
+            interface api {
+                greet: func(name: string) -> string;
+            }
+        "#;
+        let doc = parse_wit(src).unwrap();
+        let f = &doc.interfaces[0].functions[0];
+        assert!(!f.is_async);
     }
 }

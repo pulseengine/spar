@@ -1,0 +1,105 @@
+# Spar verification measures — maps to test suites
+
+artifacts:
+
+  - id: TEST-PARSER
+    type: unit-verification
+    title: Parser unit tests
+    description: Test all AADL syntax constructs parse correctly with error recovery.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-parser
+    verifies: [ARCH-PARSER]
+
+  - id: TEST-SYNTAX
+    type: unit-verification
+    title: Syntax tree unit tests
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-syntax
+    verifies: [ARCH-SYNTAX]
+
+  - id: TEST-HIR-DEF
+    type: unit-verification
+    title: HIR definition unit tests
+    description: >
+      Tests for ItemTree lowering, instance model construction,
+      name resolution, and standard property definitions.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-hir-def
+    verifies: [ARCH-HIR-DEF]
+
+  - id: TEST-HIR
+    type: unit-verification
+    title: HIR facade unit tests
+    description: Tests for public API, serde round-trips, and Database queries.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-hir
+    verifies: [ARCH-HIR]
+
+  - id: TEST-ANALYSIS
+    type: unit-verification
+    title: Analysis pass unit tests
+    description: >
+      Tests for all 19+ analysis passes including connectivity, scheduling,
+      latency, resource budget, EMV2, ARINC 653, legality, and classifier matching.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-analysis
+    verifies: [ARCH-ANALYSIS]
+
+  - id: TEST-TRANSFORM
+    type: unit-verification
+    title: Transform unit tests
+    description: WIT-to-AADL and AADL-to-WIT round-trip tests.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-transform
+    verifies: [ARCH-TRANSFORM]
+
+  - id: TEST-CLI
+    type: sw-integration-verification
+    title: CLI integration tests
+    description: >
+      End-to-end tests for CLI subcommands including LSP, format output,
+      code actions, rename, and formatting.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-cli
+    verifies: [ARCH-CLI]
+
+  - id: TEST-WASM
+    type: sw-integration-verification
+    title: WASM component tests
+    description: >
+      Unit and integration tests for the WASM component including
+      render and analyze functions.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-wasm
+    verifies: [ARCH-WASM]
+
+  - id: TEST-WORKSPACE
+    type: sw-verification
+    title: Full workspace test suite
+    description: Run all tests across all 10 crates (962+ tests).
+    method: automated-test
+    steps:
+      - run: cargo test --workspace
+    verifies:
+      - REQ-PARSE-001
+      - REQ-MODEL-001
+      - REQ-INST-001
+      - REQ-ANALYSIS-001
+      - REQ-SERDE-001
+
+  - id: TEST-WASM-BUILD
+    type: sw-verification
+    title: WASM compilation verification
+    description: Verify spar-wasm compiles to wasm32-wasip2 target.
+    method: automated-test
+    steps:
+      - run: cargo build --target wasm32-wasip2 -p spar-wasm --release
+    verifies: [REQ-WASM-001]

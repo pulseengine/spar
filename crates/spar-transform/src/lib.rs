@@ -5,8 +5,13 @@
 //! representation used by the rest of the spar toolchain. It also supports
 //! generating external format text from AADL `ItemTree`s.
 
+pub mod cargo_metadata;
+pub mod rust_crate;
+pub mod wac;
+pub mod wac_parser;
 pub mod wit;
 pub mod wit_parser;
+pub mod wrpc;
 
 /// A bidirectional transform between AADL and another format.
 pub trait Transform {

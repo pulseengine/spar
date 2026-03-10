@@ -1,0 +1,22 @@
+project:
+  name: spar
+  version: "0.1.0"
+  description: >
+    AADL v2.2 toolchain — parser, HIR, analyses, LSP, WASM.
+    Tracks requirements derived from SAE AS5506C, architecture decisions,
+    STPA safety analysis, and verification evidence.
+  schemas:
+    - common
+    - stpa
+    - aadl
+
+sources:
+  - path: artifacts
+    format: generic-yaml
+  - path: safety/stpa
+    format: stpa-yaml
+
+docs:
+  - docs
+
+results: results
