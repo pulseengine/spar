@@ -3,6 +3,10 @@
 # These requirements are derived from the STPA analysis (analysis.yaml).
 # Each addresses one or more Unsafe Control Actions (UCAs) by specifying
 # concrete implementation requirements.
+#
+# Traceability:
+#   analysis.yaml  →  requirements.yaml  →  architecture.yaml  →  validation.yaml
+#   (hazards/UCAs)    (what to implement)    (how implemented)     (proof it works)
 
 artifacts:
 
