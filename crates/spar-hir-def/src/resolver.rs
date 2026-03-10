@@ -597,33 +597,7 @@ impl GlobalScope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::item_tree::*;
     use std::sync::Arc;
-
-    /// Helper: build a tree with package `pkg_name` containing one component type.
-    fn pkg_with_type(pkg_name: &str, type_name: &str, cat: ComponentCategory) -> ItemTree {
-        let mut tree = ItemTree::default();
-        let ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new(type_name),
-            category: cat,
-            is_public: true,
-            extends: None,
-            features: Vec::new(),
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        tree.packages.alloc(Package {
-            name: Name::new(pkg_name),
-            with_clauses: Vec::new(),
-            public_items: vec![ItemRef::ComponentType(ct)],
-            private_items: Vec::new(),
-            renames: Vec::new(),
-        });
-        tree
-    }
 
     #[test]
     fn ambiguous_unqualified_reference_warns() {
