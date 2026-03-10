@@ -32,6 +32,20 @@ impl Analysis for ResourceBudgetAnalysis {
         check_memory_budgets(instance, &mut diags);
         check_bandwidth_budgets(instance, &mut diags);
 
+        // STPA-REQ-017: Note modal awareness
+        if !instance.system_operation_modes.is_empty() {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "{} analysis used default property values; {} system operation mode(s) exist but modal property evaluation is not yet fully supported",
+                    self.name(),
+                    instance.system_operation_modes.len()
+                ),
+                path: vec!["root".to_string()],
+                analysis: self.name().to_string(),
+            });
+        }
+
         diags
     }
 }

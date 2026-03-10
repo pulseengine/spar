@@ -30,6 +30,7 @@ pub mod flow_rules;
 pub mod hierarchy;
 pub mod latency;
 pub mod legality;
+pub mod modal;
 pub mod modal_rules;
 pub mod mode_check;
 pub mod mode_rules;

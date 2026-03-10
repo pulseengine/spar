@@ -37,6 +37,22 @@ pub type CallSequenceIdx = Idx<CallSequenceItem>;
 pub type SubprogramCallIdx = Idx<SubprogramCallItem>;
 pub type RenamesIdx = Idx<RenamesItem>;
 
+// ── Lowering diagnostics ──────────────────────────────────────────
+
+/// Diagnostic produced during CST→ItemTree lowering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweringDiagnostic {
+    pub message: String,
+    pub severity: LoweringSeverity,
+}
+
+/// Severity for lowering diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoweringSeverity {
+    Warning,
+    Error,
+}
+
 // ── Item Tree ──────────────────────────────────────────────────────
 
 /// The item tree for a single source file.
@@ -64,6 +80,8 @@ pub struct ItemTree {
     pub call_sequences: Arena<CallSequenceItem>,
     pub subprogram_calls: Arena<SubprogramCallItem>,
     pub renames: Arena<RenamesItem>,
+    /// Diagnostics produced during lowering (STPA-REQ-002, STPA-REQ-004).
+    pub diagnostics: Vec<LoweringDiagnostic>,
 }
 
 // ── Top-level items ────────────────────────────────────────────────

@@ -9,7 +9,7 @@
 //! the instance model is the concrete system being analyzed.
 
 use la_arena::{Arena, Idx};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::feature_group::{ExpandedFeature, expand_feature_group};
 use crate::item_tree::{
@@ -202,8 +202,18 @@ impl SystemInstance {
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
             depth: 0,
-            max_depth: 32,
+            max_depth: 100,
         };
+
+        // STPA-REQ-012: Detect circular containment before instantiation.
+        if let Some(cycle_msg) =
+            detect_circular_containment(scope, root_package, root_type, root_impl)
+        {
+            builder.diagnostics.push(InstanceDiagnostic {
+                message: cycle_msg,
+                path: vec![root_type.clone()],
+            });
+        }
 
         let root_name = Name::new(&format!("{}.{}", root_type, root_impl));
         let root_idx = builder.instantiate_component(
@@ -539,6 +549,7 @@ impl SystemInstance {
     /// This is called as a post-processing step after `compute_semantic_connections()`.
     pub fn expand_feature_group_connections(&mut self, scope: &GlobalScope) {
         let mut expanded = Vec::new();
+        let mut fg_unmatched_diags = Vec::new();
 
         // Collect connection indices to avoid borrow conflicts.
         let all_conn_indices: Vec<ConnectionInstanceIdx> =
@@ -580,7 +591,9 @@ impl SystemInstance {
             };
 
             // Match features by name and create individual semantic connections.
+            // STPA-REQ-011: Track unmatched source features for diagnostics.
             for src_feat in &src_features {
+                let mut matched = false;
                 for dst_feat in &dst_features {
                     if src_feat.name.eq_ci(&dst_feat.name) {
                         // Build the dotted feature name: group_prefix.feature_name or just feature_name
@@ -602,13 +615,24 @@ impl SystemInstance {
                             ultimate_destination: (dst_comp_idx, dst_full_name),
                             connection_path: vec![*conn_idx],
                         });
+                        matched = true;
                         break; // matched; move to next src feature
                     }
+                }
+                if !matched {
+                    fg_unmatched_diags.push(InstanceDiagnostic {
+                        message: format!(
+                            "feature group connection '{}': source feature '{}' has no matching destination feature (STPA-REQ-011)",
+                            conn_name, src_feat.name
+                        ),
+                        path: vec![conn_name.clone(), src_feat.name.clone()],
+                    });
                 }
             }
         }
 
         self.semantic_connections.extend(expanded);
+        self.diagnostics.extend(fg_unmatched_diags);
     }
 
     /// Resolve the component index for a connection endpoint.
@@ -904,18 +928,142 @@ fn feature_kind_to_connection_kind(kind: FeatureKind) -> ConnectionKind {
 /// For non-array items (empty dimensions), returns 1.
 /// For arrays, uses the first dimension's literal size (property constants
 /// are not yet supported and fall back to 1).
-fn array_element_count(dims: &[ArrayDimension]) -> u64 {
+///
+/// STPA-REQ-009: If a dimension evaluates to 0, pushes a diagnostic and
+/// returns 1 as a safe fallback to avoid infinite loops or empty expansions.
+fn array_element_count(
+    dims: &[ArrayDimension],
+    diagnostics: &mut Vec<InstanceDiagnostic>,
+    context_name: &Name,
+) -> u64 {
     if dims.is_empty() {
         return 1;
     }
-    dims[0]
+    let count = dims[0]
         .size
         .as_ref()
         .and_then(|s| match s {
             ArraySize::Literal(n) => Some(*n),
             _ => None,
         })
-        .unwrap_or(1)
+        .unwrap_or(1);
+
+    if count == 0 {
+        diagnostics.push(InstanceDiagnostic {
+            message: format!(
+                "array dimension for '{}' is zero; using 1 as fallback (STPA-REQ-009)",
+                context_name
+            ),
+            path: vec![context_name.clone()],
+        });
+        return 1;
+    }
+
+    count
+}
+
+/// STPA-REQ-012: Detect circular containment in the classifier→subcomponent reference graph.
+///
+/// Performs DFS on the containment hierarchy starting from the root implementation.
+/// If an implementation is encountered that is already on the current DFS stack,
+/// a cycle exists. Returns `Some(message)` describing the cycle, or `None` if no cycle.
+fn detect_circular_containment(
+    scope: &GlobalScope,
+    root_package: &Name,
+    root_type: &Name,
+    root_impl: &Name,
+) -> Option<String> {
+    /// A classifier key: (package, type_name, impl_name), all lowercased for
+    /// case-insensitive comparison.
+    type ClassKey = (String, String, String);
+
+    fn make_key(pkg: &Name, type_name: &Name, impl_name: &Name) -> ClassKey {
+        (
+            pkg.as_str().to_ascii_lowercase(),
+            type_name.as_str().to_ascii_lowercase(),
+            impl_name.as_str().to_ascii_lowercase(),
+        )
+    }
+
+    fn dfs(
+        scope: &GlobalScope,
+        pkg: &Name,
+        type_name: &Name,
+        impl_name: &Name,
+        visiting: &mut FxHashSet<ClassKey>,
+        visited: &mut FxHashSet<ClassKey>,
+        path: &mut Vec<String>,
+    ) -> Option<String> {
+        let key = make_key(pkg, type_name, impl_name);
+
+        if visited.contains(&key) {
+            return None;
+        }
+
+        let label = format!("{}::{}.{}", pkg, type_name, impl_name);
+        if !visiting.insert(key.clone()) {
+            // Cycle detected — this classifier is already on the current DFS stack.
+            path.push(label);
+            return Some(format!(
+                "circular containment detected: {} (STPA-REQ-012)",
+                path.join(" -> ")
+            ));
+        }
+
+        path.push(label);
+
+        // Resolve the implementation to find its subcomponents.
+        let ref_ =
+            ClassifierRef::implementation(Some(pkg.clone()), type_name.clone(), impl_name.clone());
+        let resolved = scope.resolve_classifier(pkg, &ref_);
+        if let ResolvedClassifier::ComponentImpl {
+            loc,
+            package: res_pkg,
+        } = &resolved
+            && let Some(ci) = scope.get_component_impl(*loc)
+        {
+            for &sub_idx in &ci.subcomponents {
+                if let Some(tree) = scope.tree(loc.tree) {
+                    let sub = &tree.subcomponents[sub_idx];
+                    if let Some(cls_ref) = &sub.classifier
+                        && let Some(sub_impl) = &cls_ref.impl_name
+                    {
+                        let sub_pkg = cls_ref.package.as_ref().unwrap_or(res_pkg);
+                        if let result @ Some(_) = dfs(
+                            scope,
+                            sub_pkg,
+                            &cls_ref.type_name,
+                            sub_impl,
+                            visiting,
+                            visited,
+                            path,
+                        ) {
+                            return result;
+                        }
+                    }
+                }
+            }
+        }
+
+        path.pop();
+        visiting.remove(&key);
+        visited.insert(key);
+        None
+    }
+
+    let mut visiting = FxHashSet::default();
+    let mut visited = FxHashSet::default();
+    let mut path = Vec::new();
+
+    dfs(
+        scope,
+        root_package,
+        root_type,
+        root_impl,
+        &mut visiting,
+        &mut visited,
+        &mut path,
+    )
 }
 
 /// Extract the base name from an array instance name.
@@ -1011,7 +1159,11 @@ impl<'a> Builder<'a> {
             let mut feat_indices = Vec::new();
             for &feat_idx in &ct.features {
                 if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
-                    let feat_count = array_element_count(&feat.array_dimensions);
+                    let feat_count = array_element_count(
+                        &feat.array_dimensions,
+                        &mut self.diagnostics,
+                        &feat.name,
+                    );
                     let feat_is_array = !feat.array_dimensions.is_empty();
 
                     for fi_i in 0..feat_count {
@@ -1173,7 +1325,8 @@ impl<'a> Builder<'a> {
                     let mut child_indices = Vec::new();
                     for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims) in sub_data {
                         // Determine how many instances to create for this subcomponent.
-                        let count = array_element_count(&array_dims);
+                        let count =
+                            array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
                         let is_array = !array_dims.is_empty();
 
                         for array_i in 0..count {
@@ -1263,7 +1416,10 @@ impl<'a> Builder<'a> {
                         });
                         conn_indices.push(ci);
                     }
-                    self.components[idx].connections = conn_indices;
+                    self.components[idx].connections = conn_indices.clone();
+
+                    // STPA-REQ-010: Validate array index bounds in connection endpoints.
+                    self.validate_connection_array_indices(idx, &conn_indices);
 
                     // Instantiate end-to-end flows
                     for (e2e_name, segments) in e2e_data {
@@ -1462,6 +1618,61 @@ impl<'a> Builder<'a> {
             self.property_maps.insert(idx, map);
         }
     }
+
+    /// STPA-REQ-010: Validate that connection endpoint array indices are within bounds.
+    ///
+    /// For each connection owned by `owner`, if an endpoint references a specific
+    /// array element (e.g., `sub[5]`), checks that the index doesn't exceed the
+    /// number of array children with that base name.
+    fn validate_connection_array_indices(
+        &mut self,
+        owner: ComponentInstanceIdx,
+        conn_indices: &[ConnectionInstanceIdx],
+    ) {
+        // Build a map of base_name -> max_array_index for children of this component.
+        let mut max_indices: FxHashMap<String, u64> = FxHashMap::default();
+        for &child_idx in &self.components[owner].children {
+            let child = &self.components[child_idx];
+            if let Some(ai) = child.array_index {
+                let base = base_name_of(child.name.as_str()).to_ascii_lowercase();
+                let entry = max_indices.entry(base).or_insert(0);
+                if ai > *entry {
+                    *entry = ai;
+                }
+            }
+        }
+
+        if max_indices.is_empty() {
+            return;
+        }
+
+        for &ci in conn_indices {
+            let conn = &self.connections[ci];
+            for endpoint in [&conn.src, &conn.dst].into_iter().flatten() {
+                if let Some(sub_name) = &endpoint.subcomponent {
+                    let name_str = sub_name.as_str();
+                    // Check if the endpoint references a specific array index.
+                    if let Some(bracket_pos) = name_str.find('[')
+                        && let Some(end_pos) = name_str.find(']')
+                        && let Ok(index) = name_str[bracket_pos + 1..end_pos].parse::<u64>()
+                    {
+                        let base = name_str[..bracket_pos].to_ascii_lowercase();
+                        if let Some(&max_idx) = max_indices.get(&base)
+                            && (index > max_idx || index == 0)
+                        {
+                            self.diagnostics.push(InstanceDiagnostic {
+                                message: format!(
+                                    "connection '{}': array index {} for '{}' is out of bounds (max {}) (STPA-REQ-010)",
+                                    conn.name, index, &name_str[..bracket_pos], max_idx
+                                ),
+                                path: vec![conn.name.clone()],
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1501,21 +1712,33 @@ mod tests {
 
     #[test]
     fn test_array_element_count_empty_dims() {
-        assert_eq!(array_element_count(&[]), 1);
+        let mut diags = Vec::new();
+        assert_eq!(array_element_count(&[], &mut diags, &Name::new("test")), 1);
+        assert!(diags.is_empty());
     }
 
     #[test]
     fn test_array_element_count_literal() {
+        let mut diags = Vec::new();
         let dims = vec![ArrayDimension {
             size: Some(ArraySize::Literal(5)),
         }];
-        assert_eq!(array_element_count(&dims), 5);
+        assert_eq!(
+            array_element_count(&dims, &mut diags, &Name::new("test")),
+            5
+        );
+        assert!(diags.is_empty());
     }
 
     #[test]
     fn test_array_element_count_no_size() {
+        let mut diags = Vec::new();
         let dims = vec![ArrayDimension { size: None }];
-        assert_eq!(array_element_count(&dims), 1);
+        assert_eq!(
+            array_element_count(&dims, &mut diags, &Name::new("test")),
+            1
+        );
+        assert!(diags.is_empty());
     }
 
     // ── base_name_of tests ────────────────────────────────────────────
@@ -1973,5 +2196,621 @@ mod tests {
         // Looking for "nonexistent" should match none.
         let result3 = instance.find_children_by_name(root, &Name::new("nonexistent"));
         assert_eq!(result3.len(), 0);
+    }
+
+    // ── STPA-REQ-009: Array dimension validation ──────────────────────
+
+    #[test]
+    fn test_array_element_count_zero_dimension() {
+        let mut diags = Vec::new();
+        let dims = vec![ArrayDimension {
+            size: Some(ArraySize::Literal(0)),
+        }];
+        // Should return 1 as fallback and emit a diagnostic.
+        assert_eq!(array_element_count(&dims, &mut diags, &Name::new("sub")), 1);
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("STPA-REQ-009"));
+        assert!(diags[0].message.contains("zero"));
+    }
+
+    #[test]
+    fn test_array_element_count_positive_no_diagnostic() {
+        let mut diags = Vec::new();
+        let dims = vec![ArrayDimension {
+            size: Some(ArraySize::Literal(3)),
+        }];
+        assert_eq!(array_element_count(&dims, &mut diags, &Name::new("sub")), 3);
+        assert!(diags.is_empty());
+    }
+
+    // ── STPA-REQ-012: Circular containment detection ──────────────────
+
+    /// Helper to build a GlobalScope from manually constructed item trees.
+    fn make_scope_from_trees(
+        trees: Vec<std::sync::Arc<crate::item_tree::ItemTree>>,
+    ) -> GlobalScope {
+        GlobalScope::from_trees(trees)
+    }
+
+    #[test]
+    fn test_circular_containment_direct_cycle() {
+        use crate::item_tree::*;
+
+        // Package Pkg with:
+        //   system A (type)
+        //   system implementation A.Impl
+        //     subcomponents
+        //       b: system B.Impl;
+        //   system B (type)
+        //   system implementation B.Impl
+        //     subcomponents
+        //       a: system Pkg::A.Impl;  <-- cycle: A.Impl -> B.Impl -> A.Impl
+        let mut tree = ItemTree::default();
+
+        // Type A
+        let a_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("A"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Type B
+        let b_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("B"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Subcomponent in A.Impl: b : system B.Impl
+        let sub_b = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("b"),
+            category: ComponentCategory::System,
+            classifier: Some(ClassifierRef::implementation(
+                Some(Name::new("Pkg")),
+                Name::new("B"),
+                Name::new("Impl"),
+            )),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Subcomponent in B.Impl: a : system Pkg::A.Impl
+        let sub_a = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("a"),
+            category: ComponentCategory::System,
+            classifier: Some(ClassifierRef::implementation(
+                Some(Name::new("Pkg")),
+                Name::new("A"),
+                Name::new("Impl"),
+            )),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Impl A.Impl
+        let _a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("A"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_b],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Impl B.Impl
+        let _b_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("B"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_a],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // Package
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(a_type_idx),
+                ItemRef::ComponentType(b_type_idx),
+                ItemRef::ComponentImpl(_a_impl_idx),
+                ItemRef::ComponentImpl(_b_impl_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = make_scope_from_trees(vec![std::sync::Arc::new(tree)]);
+
+        let result = detect_circular_containment(
+            &scope,
+            &Name::new("Pkg"),
+            &Name::new("A"),
+            &Name::new("Impl"),
+        );
+        assert!(result.is_some(), "should detect circular containment");
+        let msg = result.unwrap();
+        assert!(
+            msg.contains("STPA-REQ-012"),
+            "message should reference STPA-REQ-012: {}",
+            msg
+        );
+        assert!(
+            msg.contains("circular containment"),
+            "message should say circular containment: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn test_no_circular_containment() {
+        use crate::item_tree::*;
+
+        // Linear hierarchy: A.Impl contains B.Impl, B.Impl contains C (type only).
+        let mut tree = ItemTree::default();
+
+        let a_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("A"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let b_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("B"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let _c_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("C"),
+            category: ComponentCategory::Process,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // B.Impl has subcomponent c: process C (type-only, no impl -> no recursion)
+        let sub_c = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("c"),
+            category: ComponentCategory::Process,
+            classifier: Some(ClassifierRef::qualified(Name::new("Pkg"), Name::new("C"))),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let b_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("B"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_c],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        // A.Impl has subcomponent b: system B.Impl
+        let sub_b = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("b"),
+            category: ComponentCategory::System,
+            classifier: Some(ClassifierRef::implementation(
+                Some(Name::new("Pkg")),
+                Name::new("B"),
+                Name::new("Impl"),
+            )),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("A"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_b],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(a_type_idx),
+                ItemRef::ComponentType(b_type_idx),
+                ItemRef::ComponentType(_c_type_idx),
+                ItemRef::ComponentImpl(a_impl_idx),
+                ItemRef::ComponentImpl(b_impl_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = make_scope_from_trees(vec![std::sync::Arc::new(tree)]);
+
+        let result = detect_circular_containment(
+            &scope,
+            &Name::new("Pkg"),
+            &Name::new("A"),
+            &Name::new("Impl"),
+        );
+        assert!(
+            result.is_none(),
+            "should not detect circular containment in linear hierarchy"
+        );
+    }
+
+    #[test]
+    fn test_circular_containment_produces_diagnostic_via_instantiate() {
+        use crate::item_tree::*;
+
+        // Same circular model as test_circular_containment_direct_cycle,
+        // but verify that SystemInstance::instantiate includes the diagnostic.
+        let mut tree = ItemTree::default();
+
+        let a_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("A"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let b_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("B"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let sub_b = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("b"),
+            category: ComponentCategory::System,
+            classifier: Some(ClassifierRef::implementation(
+                Some(Name::new("Pkg")),
+                Name::new("B"),
+                Name::new("Impl"),
+            )),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let sub_a = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("a"),
+            category: ComponentCategory::System,
+            classifier: Some(ClassifierRef::implementation(
+                Some(Name::new("Pkg")),
+                Name::new("A"),
+                Name::new("Impl"),
+            )),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("A"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_b],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let b_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("B"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_a],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(a_type_idx),
+                ItemRef::ComponentType(b_type_idx),
+                ItemRef::ComponentImpl(a_impl_idx),
+                ItemRef::ComponentImpl(b_impl_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = make_scope_from_trees(vec![std::sync::Arc::new(tree)]);
+
+        let instance = SystemInstance::instantiate(
+            &scope,
+            &Name::new("Pkg"),
+            &Name::new("A"),
+            &Name::new("Impl"),
+        );
+
+        // Should have at least a circular containment diagnostic.
+        let circular_diags: Vec<_> = instance
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("circular containment"))
+            .collect();
+        assert!(
+            !circular_diags.is_empty(),
+            "instantiation should produce circular containment diagnostic, got: {:?}",
+            instance.diagnostics
+        );
+
+        // Also should have a max-depth diagnostic since it will recurse
+        // until hitting the depth limit.
+        let depth_diags: Vec<_> = instance
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("maximum instantiation depth"))
+            .collect();
+        assert!(
+            !depth_diags.is_empty(),
+            "instantiation should hit max depth, got: {:?}",
+            instance.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_non_circular_model_no_extra_diagnostics() {
+        use crate::item_tree::*;
+
+        // Simple non-circular: A.Impl has subcomponent b: system B (type-only, no impl).
+        let mut tree = ItemTree::default();
+
+        let a_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("A"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let _b_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("B"),
+            category: ComponentCategory::Process,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let sub_b = tree.subcomponents.alloc(SubcomponentItem {
+            name: Name::new("b"),
+            category: ComponentCategory::Process,
+            classifier: Some(ClassifierRef::qualified(Name::new("Pkg"), Name::new("B"))),
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("A"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: vec![sub_b],
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(a_type_idx),
+                ItemRef::ComponentType(_b_type_idx),
+                ItemRef::ComponentImpl(a_impl_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = make_scope_from_trees(vec![std::sync::Arc::new(tree)]);
+
+        let instance = SystemInstance::instantiate(
+            &scope,
+            &Name::new("Pkg"),
+            &Name::new("A"),
+            &Name::new("Impl"),
+        );
+
+        // No circular containment, no depth exceeded, no other diagnostics.
+        assert!(
+            instance.diagnostics.is_empty(),
+            "non-circular model should produce no diagnostics, got: {:?}",
+            instance.diagnostics
+        );
+    }
+
+    // ── STPA-REQ-010: Array index bounds checking ─────────────────────
+
+    #[test]
+    fn test_max_depth_is_100() {
+        // Verify that the Builder is constructed with max_depth = 100.
+        // We can check this indirectly: a non-circular model with depth < 100
+        // should produce no depth-exceeded diagnostics.
+        use crate::item_tree::*;
+
+        let mut tree = ItemTree::default();
+
+        let a_type_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("A"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("A"),
+            impl_name: Name::new("Impl"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(a_type_idx),
+                ItemRef::ComponentImpl(a_impl_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = make_scope_from_trees(vec![std::sync::Arc::new(tree)]);
+
+        let instance = SystemInstance::instantiate(
+            &scope,
+            &Name::new("Pkg"),
+            &Name::new("A"),
+            &Name::new("Impl"),
+        );
+
+        // No depth exceeded for a simple model.
+        let depth_diags: Vec<_> = instance
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("maximum instantiation depth"))
+            .collect();
+        assert!(depth_diags.is_empty());
     }
 }

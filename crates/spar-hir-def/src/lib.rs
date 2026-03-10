@@ -22,6 +22,7 @@ pub mod instance;
 pub mod item_tree;
 pub mod name;
 pub mod properties;
+pub mod property_check;
 pub mod property_eval;
 pub mod property_value;
 pub mod prototype;

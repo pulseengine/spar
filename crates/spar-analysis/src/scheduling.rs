@@ -166,6 +166,20 @@ impl Analysis for SchedulingAnalysis {
             });
         }
 
+        // STPA-REQ-017: Note modal awareness
+        if !instance.system_operation_modes.is_empty() {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "{} analysis used default property values; {} system operation mode(s) exist but modal property evaluation is not yet fully supported",
+                    self.name(),
+                    instance.system_operation_modes.len()
+                ),
+                path: vec!["root".to_string()],
+                analysis: self.name().to_string(),
+            });
+        }
+
         diags
     }
 }
@@ -562,6 +576,100 @@ mod tests {
             infos[0].message.contains("50.0%"),
             "should be 50%: {}",
             infos[0].message
+        );
+    }
+
+    #[test]
+    fn modal_awareness_diagnostic_when_soms_present() {
+        // STPA-REQ-017: When SOMs exist, analysis should note it used default values
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        // Build with SOMs present
+        let mut inst = b.build(root);
+        inst.system_operation_modes = vec![
+            spar_hir_def::instance::SystemOperationMode {
+                name: "nominal".to_string(),
+                mode_selections: Vec::new(),
+            },
+            spar_hir_def::instance::SystemOperationMode {
+                name: "degraded".to_string(),
+                mode_selections: Vec::new(),
+            },
+        ];
+
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let modal_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("system operation mode"))
+            .collect();
+        assert_eq!(
+            modal_diags.len(),
+            1,
+            "should emit exactly one modal awareness diagnostic: {:?}",
+            diags
+        );
+        assert_eq!(modal_diags[0].severity, Severity::Info);
+        assert!(
+            modal_diags[0]
+                .message
+                .contains("2 system operation mode(s)"),
+            "should mention count of SOMs: {}",
+            modal_diags[0].message
+        );
+        assert!(
+            modal_diags[0].message.contains("default property values"),
+            "should mention default values: {}",
+            modal_diags[0].message
+        );
+    }
+
+    #[test]
+    fn no_modal_diagnostic_without_soms() {
+        // When no SOMs exist, no modal awareness diagnostic should be emitted
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let modal_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("system operation mode"))
+            .collect();
+        assert!(
+            modal_diags.is_empty(),
+            "should not emit modal diagnostic without SOMs: {:?}",
+            modal_diags
         );
     }
 

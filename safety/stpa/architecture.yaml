@@ -1,0 +1,255 @@
+# STPA Architecture & Design Decisions
+#
+# Documents HOW each STPA-derived safety requirement is satisfied.
+# Each architecture decision traces to one or more requirements
+# and identifies the specific code implementing the decision.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Workstream A: Lowering Safety (STPA-REQ-002, STPA-REQ-004)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-001
+    type: architecture-decision
+    title: LoweringDiagnostic infrastructure in ItemTree
+    description: >
+      Added LoweringDiagnostic and LoweringSeverity types to the ItemTree
+      module. ItemTree gains a diagnostics: Vec<LoweringDiagnostic> field
+      populated during CST→ItemTree lowering. This allows the lowering
+      pass to report issues without aborting — diagnostics are collected
+      and surfaced through the normal diagnostic pipeline.
+    rationale: >
+      Diagnostics are collected rather than emitted immediately because
+      lowering must complete to provide a usable (if incomplete) ItemTree
+      for downstream processing. This follows the existing pattern where
+      SystemInstance.diagnostics collects instance-level issues.
+    implements: [STPA-REQ-002, STPA-REQ-004]
+    source-files:
+      - crates/spar-hir-def/src/item_tree/mod.rs  # LoweringDiagnostic, LoweringSeverity, diagnostics field
+      - crates/spar-hir-def/src/item_tree/lower.rs # Threading through lower_file/lower_package/lower_section
+
+  - id: ARCH-002
+    type: design-decision
+    title: Annex library warning on encounter
+    description: >
+      When lower_section_with_visibility encounters SyntaxKind::ANNEX_LIBRARY,
+      it pushes a Warning-severity diagnostic stating the annex content was
+      not processed. The AnnexLibrary item reference is still added to the
+      item list so downstream code knows the annex exists.
+    rationale: >
+      Current architecture does not integrate annex parsers at the ItemTree
+      level (annex parsing happens later via spar-annex). Warning (not error)
+      because the annex may be processed downstream — the diagnostic alerts
+      that the lowering layer itself did not process it.
+    implements: [STPA-REQ-002]
+    source-files:
+      - crates/spar-hir-def/src/item_tree/lower.rs:147-155  # ANNEX_LIBRARY arm
+
+  - id: ARCH-003
+    type: design-decision
+    title: Explicit match arms replace wildcard in section lowering
+    description: >
+      The match in lower_section_with_visibility now explicitly lists all
+      non-semantic SyntaxKind variants (ERROR, WHITESPACE, COMMENT, NAME,
+      END_KW, SEMICOLON, PACKAGE_PROPERTIES, ANNEX_SUBCLAUSE) as no-ops.
+      The catch-all arm emits a warning with the unhandled kind name.
+    rationale: >
+      The wildcard _ => {} silently swallowed any SyntaxKind not explicitly
+      handled. If a new semantic construct is added to the parser, it would
+      be silently dropped by the lowering. Explicit arms ensure that only
+      known non-semantic kinds are ignored; any genuinely new semantic kind
+      triggers a diagnostic that can be caught in testing.
+    implements: [STPA-REQ-004]
+    source-files:
+      - crates/spar-hir-def/src/item_tree/lower.rs:161-179  # Explicit arms + catch-all
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Workstream B: Property & Resolution (STPA-REQ-006, STPA-REQ-007)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-004
+    type: architecture-decision
+    title: Standalone property_check module for type validation
+    description: >
+      Created crates/spar-hir-def/src/property_check.rs as a new module
+      containing validate_property_type() and supporting types. The module
+      validates PropertyExpr against PropertyTypeDef using recursive match.
+      It handles all expression/type combinations including nested structures
+      (List, Range, Record, UnitValue).
+    rationale: >
+      Separated from lower.rs and properties.rs because property type
+      validation is a cross-cutting concern. The property_check module
+      takes already-lowered types as input and produces PropertyTypeDiagnostic
+      values, keeping it independent of the lowering pipeline.
+    implements: [STPA-REQ-006]
+    source-files:
+      - crates/spar-hir-def/src/property_check.rs  # Module with validate_property_type
+      - crates/spar-hir-def/src/lib.rs              # pub mod property_check
+
+  - id: ARCH-005
+    type: design-decision
+    title: Recursive expression/type matching with skip for opaque values
+    description: >
+      The check_expr function matches (PropertyExpr, PropertyTypeDef) pairs.
+      Compatible pairs are no-ops. Incompatible pairs push diagnostics.
+      Opaque and ComputedValue expressions skip validation (cannot be
+      type-checked statically). UnitValue delegates to inner expression.
+      TypeRef skips validation (type not resolved at this level).
+    rationale: >
+      Opaque values contain unparsed text (e.g., from annex expressions).
+      ComputedValue references runtime computation. Neither can be validated
+      against a declared type at lowering time. Flagging them would produce
+      false positives.
+    implements: [STPA-REQ-006]
+    source-files:
+      - crates/spar-hir-def/src/property_check.rs:31-136  # check_expr function
+
+  - id: ARCH-006
+    type: architecture-decision
+    title: resolve_classifier_with_diagnostics for ambiguity detection
+    description: >
+      Added resolve_classifier_with_diagnostics() to GlobalScope. It wraps
+      the existing resolve_classifier() and additionally checks for ambiguity
+      when an unqualified reference resolves via imports. It iterates all
+      imported packages to count candidates.
+    rationale: >
+      The existing resolver is deterministic (first import wins) but does
+      not warn when the result depends on import order. This method preserves
+      the deterministic resolution but adds a diagnostic return channel for
+      ambiguous cases. Kept as a separate method to avoid changing the
+      existing resolve_classifier contract.
+    implements: [STPA-REQ-007]
+    source-files:
+      - crates/spar-hir-def/src/resolver.rs  # resolve_classifier_with_diagnostics method
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Workstream C: Instance Builder Safety (STPA-REQ-009-012)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-007
+    type: architecture-decision
+    title: Pre-instantiation cycle detection via DFS
+    description: >
+      Added detect_circular_containment() function that performs DFS on
+      the classifier reference graph before instantiation begins. Uses
+      FxHashSet for visiting/visited sets with (package, type, impl)
+      tuple keys. If a cycle is found, returns a diagnostic message
+      with the cycle path.
+    rationale: >
+      Cycle detection must happen BEFORE recursive expansion to prevent
+      stack overflow. The max_depth limit (now 100) serves as a backup
+      but produces a less informative error. Pre-checking enables a
+      clear "circular containment: A → B → A" diagnostic.
+    implements: [STPA-REQ-012]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # detect_circular_containment function
+
+  - id: ARCH-008
+    type: design-decision
+    title: Increase max_depth from 32 to 100
+    description: >
+      Changed Builder max_depth from 32 to 100 to support legitimately
+      deep hierarchies (e.g., partitioned avionics systems with 4+ levels
+      of containment). The value 100 is well within stack limits while
+      being large enough for realistic AADL models.
+    rationale: >
+      32 was too conservative for real-world AADL models. ARINC 653
+      systems with partitions, processes, thread groups, and threads
+      can easily reach 5-6 levels. 100 provides ample headroom while
+      the cycle detection prevents infinite recursion.
+    implements: [STPA-REQ-012]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # Builder max_depth field
+
+  - id: ARCH-009
+    type: design-decision
+    title: Zero-dimension array fallback to 1
+    description: >
+      Modified array_element_count to validate dimensions >= 1. When a
+      dimension evaluates to 0, a diagnostic is pushed and the function
+      returns 1 as a safe fallback. This prevents infinite loops (0-element
+      expansion) or empty subcomponent arrays.
+    rationale: >
+      Returning 1 instead of aborting allows the rest of the model to be
+      instantiated and analyzed. The diagnostic clearly identifies the
+      problem. Aborting would lose all other analysis results for a
+      localized issue.
+    implements: [STPA-REQ-009]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # array_element_count function
+
+  - id: ARCH-010
+    type: design-decision
+    title: Connection array index bounds validation
+    description: >
+      Added validate_connection_array_indices() to Builder. After
+      connections are instantiated, it builds a map of child name to
+      max array dimension, then checks each connection endpoint for
+      out-of-bounds array index references.
+    rationale: >
+      Bounds checking is done post-expansion (not during connection
+      instantiation) because the array dimensions are needed from the
+      subcomponent declarations. This approach avoids threading dimension
+      info through the connection tracing logic.
+    implements: [STPA-REQ-010]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # validate_connection_array_indices method
+
+  - id: ARCH-011
+    type: design-decision
+    title: Feature group unmatched member diagnostics
+    description: >
+      Modified expand_feature_group_connections to track which source
+      features were matched to destination features. After the matching
+      loop, unmatched source features produce diagnostics identifying
+      the connection name and unmatched member name.
+    rationale: >
+      Feature group connections should match by name per AS5506.
+      Unmatched members indicate either a modeling error or an
+      incompatible feature group pair. Warning (not error) because
+      partial connections may be intentional in some designs.
+    implements: [STPA-REQ-011]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # expand_feature_group_connections
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Workstream D: Modal-Aware Analysis (STPA-REQ-017)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-012
+    type: architecture-decision
+    title: Modal analysis helper module
+    description: >
+      Created crates/spar-analysis/src/modal.rs with has_modes() and
+      mode_names() helper functions. These provide a clean API for
+      analyses to query SOM status without directly accessing
+      SystemInstance internals.
+    rationale: >
+      Centralizes modal awareness logic so all analyses use the same
+      checks. When full per-mode property evaluation is implemented
+      later, only this module needs updating — analysis code stays stable.
+    implements: [STPA-REQ-017]
+    source-files:
+      - crates/spar-analysis/src/modal.rs  # has_modes, mode_names
+      - crates/spar-analysis/src/lib.rs    # pub mod modal
+
+  - id: ARCH-013
+    type: design-decision
+    title: SOM awareness info diagnostic in analyses
+    description: >
+      Each analysis (scheduling, latency, resource_budget) now checks
+      instance.system_operation_modes at the end of analyze(). If SOMs
+      exist, an Info-severity diagnostic is emitted stating that default
+      (non-modal) property values were used and how many SOMs exist.
+    rationale: >
+      Info severity (not Warning) because the analysis results are still
+      valid for the default mode — they're just not mode-specific. The
+      diagnostic alerts the engineer that per-mode analysis would provide
+      more precise results. This is infrastructure for future per-mode
+      property evaluation.
+    implements: [STPA-REQ-017]
+    source-files:
+      - crates/spar-analysis/src/scheduling.rs       # SOM check in analyze()
+      - crates/spar-analysis/src/latency.rs           # SOM check in analyze()
+      - crates/spar-analysis/src/resource_budget.rs   # SOM check in analyze()
