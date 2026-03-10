@@ -9,6 +9,7 @@ pub mod cargo_metadata;
 pub mod rust_crate;
 pub mod wit;
 pub mod wit_parser;
+pub mod wrpc;
 
 /// A bidirectional transform between AADL and another format.
 pub trait Transform {

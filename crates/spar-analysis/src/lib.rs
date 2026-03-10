@@ -38,6 +38,7 @@ pub mod property_rules;
 pub mod resource_budget;
 pub mod scheduling;
 pub mod subcomponent_rules;
+pub mod wrpc_binding;
 
 use serde::Serialize;
 use spar_hir_def::instance::SystemInstance;
