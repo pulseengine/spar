@@ -639,8 +639,8 @@ end P;
 // ====================================================================
 
 fn check_file_no_errors(path: &str) {
-    let input = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    let input =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     let result = parse(&input);
     let errors = result.errors();
     assert!(
@@ -749,8 +749,14 @@ macro_rules! osate2_test {
     };
 }
 
-osate2_test!(osate2_aircraft_safety, "AircraftSafetyExample_AOADiscrepancy.aadl");
-osate2_test!(osate2_automated_flight_guidance, "AutomatedFlightGuidance.aadl");
+osate2_test!(
+    osate2_aircraft_safety,
+    "AircraftSafetyExample_AOADiscrepancy.aadl"
+);
+osate2_test!(
+    osate2_automated_flight_guidance,
+    "AutomatedFlightGuidance.aadl"
+);
 osate2_test!(osate2_bad_access_connections, "BadAccessConnections.aadl");
 osate2_test!(osate2_basic_access, "BasicAccess.aadl");
 osate2_test!(osate2_basic_binding, "BasicBinding.aadl");
@@ -781,8 +787,14 @@ osate2_test!(osate2_issue1564, "issue1564.aadl");
 osate2_test!(osate2_issue1616, "Issue1616.aadl");
 osate2_test!(osate2_issue1954, "Issue1954_test.aadl");
 osate2_test!(osate2_issue2722c, "Issue2722C.aadl");
-osate2_test!(osate2_issue_flow_instantiation, "issue_flow_instantiation.aadl");
-osate2_test!(osate2_issue_flow_refined_conn, "issue_flow_refined_conn.aadl");
+osate2_test!(
+    osate2_issue_flow_instantiation,
+    "issue_flow_instantiation.aadl"
+);
+osate2_test!(
+    osate2_issue_flow_refined_conn,
+    "issue_flow_refined_conn.aadl"
+);
 osate2_test!(osate2_multi_modal_ping_pong, "multiModalPingPong.aadl");
 osate2_test!(osate2_navigation, "Navigation.aadl");
 osate2_test!(osate2_ports, "ports.aadl");
@@ -792,10 +804,19 @@ osate2_test!(osate2_resource_budgets, "resourcebudgets.aadl");
 osate2_test!(osate2_simple_control_system, "SimpleControlSystem.aadl");
 osate2_test!(osate2_software, "software.aadl");
 osate2_test!(osate2_stop_and_go, "StopAndGo.aadl");
-osate2_test!(osate2_subprogram_with_subprogram, "SubprogramWithSubprogram.aadl");
+osate2_test!(
+    osate2_subprogram_with_subprogram,
+    "SubprogramWithSubprogram.aadl"
+);
 osate2_test!(osate2_super_basic, "SuperBasic.aadl");
-osate2_test!(osate2_test_abstract_classifier, "TestAbstractClassifier.aadl");
-osate2_test!(osate2_test_abstract_feature_refinement, "TestAbstractFeatureRefinement.aadl");
+osate2_test!(
+    osate2_test_abstract_classifier,
+    "TestAbstractClassifier.aadl"
+);
+osate2_test!(
+    osate2_test_abstract_feature_refinement,
+    "TestAbstractFeatureRefinement.aadl"
+);
 osate2_test!(osate2_wbs_simple, "wbs_simple.aadl");
 
 // ====================================================================
@@ -805,8 +826,8 @@ osate2_test!(osate2_wbs_simple, "wbs_simple.aadl");
 /// Read a file and assert the parser produces at least one error.
 /// Also verify losslessness (the tree must still round-trip).
 fn check_file_has_errors(path: &str) {
-    let input = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
+    let input =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {path}: {e}"));
     let result = parse(&input);
     let errors = result.errors();
     assert!(
@@ -835,9 +856,15 @@ negative_test!(neg_missing_package_name, "missing_package_name.aadl");
 negative_test!(neg_missing_end_semicolon, "missing_end_semicolon.aadl");
 negative_test!(neg_missing_end_keyword, "missing_end_keyword.aadl");
 negative_test!(neg_missing_component_end, "missing_component_end.aadl");
-negative_test!(neg_missing_colon_in_feature, "missing_colon_in_feature.aadl");
+negative_test!(
+    neg_missing_colon_in_feature,
+    "missing_colon_in_feature.aadl"
+);
 negative_test!(neg_missing_port_keyword, "missing_port_keyword.aadl");
-negative_test!(neg_invalid_connection_arrow, "invalid_connection_arrow.aadl");
+negative_test!(
+    neg_invalid_connection_arrow,
+    "invalid_connection_arrow.aadl"
+);
 negative_test!(neg_missing_impl_dot, "missing_impl_dot.aadl");
 negative_test!(neg_invalid_flow_kind, "invalid_flow_kind.aadl");
 negative_test!(neg_missing_property_arrow, "missing_property_arrow.aadl");
@@ -845,9 +872,15 @@ negative_test!(neg_invalid_top_level, "invalid_top_level.aadl");
 negative_test!(neg_missing_connection_kind, "missing_connection_kind.aadl");
 negative_test!(neg_missing_access_keyword, "missing_access_keyword.aadl");
 negative_test!(neg_unclosed_property_block, "unclosed_property_block.aadl");
-negative_test!(neg_missing_subcomponent_category, "missing_subcomponent_category.aadl");
+negative_test!(
+    neg_missing_subcomponent_category,
+    "missing_subcomponent_category.aadl"
+);
 negative_test!(neg_missing_mode_keyword, "missing_mode_keyword.aadl");
-negative_test!(neg_invalid_virtual_category, "invalid_virtual_category.aadl");
+negative_test!(
+    neg_invalid_virtual_category,
+    "invalid_virtual_category.aadl"
+);
 negative_test!(neg_missing_with_semicolon, "missing_with_semicolon.aadl");
 negative_test!(neg_missing_property_set_is, "missing_property_set_is.aadl");
 negative_test!(neg_missing_call_subprogram, "missing_call_subprogram.aadl");
@@ -869,7 +902,10 @@ inline_test!(inline_all_14_categories, "all_14_categories.aadl");
 inline_test!(inline_array_size_property, "array_size_property.aadl");
 inline_test!(inline_array_subcomponents, "array_subcomponents.aadl");
 inline_test!(inline_deep_fg_connections, "deep_fg_connections.aadl");
-inline_test!(inline_duplicate_case_insensitive, "duplicate_case_insensitive.aadl");
+inline_test!(
+    inline_duplicate_case_insensitive,
+    "duplicate_case_insensitive.aadl"
+);
 inline_test!(inline_e2e_flow_fg_members, "e2e_flow_fg_members.aadl");
 inline_test!(inline_fg_flow_impl, "fg_flow_impl.aadl");
 inline_test!(inline_fg_flows_inverse, "fg_flows_inverse.aadl");
@@ -882,7 +918,10 @@ inline_test!(inline_flow_path_fg, "flow_path_fg.aadl");
 inline_test!(inline_flow_segments_calls, "flow_segments_calls.aadl");
 inline_test!(inline_impl_reference_list, "impl_reference_list.aadl");
 inline_test!(inline_in_modes_and_flows, "in_modes_and_flows.aadl");
-inline_test!(inline_internal_processor_features, "internal_processor_features.aadl");
+inline_test!(
+    inline_internal_processor_features,
+    "internal_processor_features.aadl"
+);
 inline_test!(inline_modal_property_values, "modal_property_values.aadl");
 inline_test!(inline_mode_transitions_scope, "mode_transitions_scope.aadl");
 inline_test!(inline_nested_fg_connections, "nested_fg_connections.aadl");

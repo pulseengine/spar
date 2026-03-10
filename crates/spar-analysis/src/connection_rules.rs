@@ -12,7 +12,7 @@ use spar_hir_def::instance::{
 use spar_hir_def::item_tree::FeatureKind;
 use spar_hir_def::name::Name;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates connection legality rules on the instance model.
 ///
@@ -339,7 +339,9 @@ mod tests {
         let diags = ConnectionRuleAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("feature kinds must match"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("feature kinds must match")
+            })
             .collect();
         assert_eq!(
             errors.len(),
@@ -357,7 +359,12 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let a = b.add_component("a", ComponentCategory::System, Some(root));
         let bb = b.add_component("b", ComponentCategory::System, Some(root));
-        b.add_feature("out1", FeatureKind::AbstractFeature, Some(Direction::Out), a);
+        b.add_feature(
+            "out1",
+            FeatureKind::AbstractFeature,
+            Some(Direction::Out),
+            a,
+        );
         b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), bb);
         b.add_connection(
             "c1",

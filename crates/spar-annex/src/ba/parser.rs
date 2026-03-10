@@ -18,7 +18,9 @@ pub(crate) enum Event {
         n_raw_tokens: u8,
     },
     Finish,
-    Error { msg: String },
+    Error {
+        msg: String,
+    },
     Tombstone,
 }
 
@@ -31,7 +33,10 @@ pub(crate) struct Marker {
 
 impl Marker {
     fn new(pos: u32) -> Self {
-        Marker { pos, completed: false }
+        Marker {
+            pos,
+            completed: false,
+        }
     }
 
     pub(crate) fn complete(mut self, p: &mut Parser<'_>, kind: BaKind) -> CompletedMarker {
@@ -49,7 +54,10 @@ impl Marker {
         let idx = self.pos as usize;
         if idx == p.events.len() - 1 {
             match p.events.pop() {
-                Some(Event::Start { kind: BaKind::TOMBSTONE, forward_parent: None }) => {}
+                Some(Event::Start {
+                    kind: BaKind::TOMBSTONE,
+                    forward_parent: None,
+                }) => {}
                 _ => unreachable!(),
             }
         } else {
@@ -89,6 +97,7 @@ impl CompletedMarker {
 
 // -- Parser --
 
+#[allow(dead_code)]
 pub(crate) struct Parser<'t> {
     all_tokens: &'t [(BaKind, usize)],
     non_trivia: Vec<usize>,
@@ -147,6 +156,7 @@ impl<'t> Parser<'t> {
     }
 
     /// Get the source text of the current token.
+    #[allow(dead_code)]
     pub(crate) fn current_text(&self) -> &str {
         if self.at_end() {
             return "";
@@ -160,7 +170,12 @@ impl<'t> Parser<'t> {
     // -- Token consumption --
 
     pub(crate) fn bump(&mut self, kind: BaKind) {
-        assert!(self.at(kind), "expected {:?}, got {:?}", kind, self.current());
+        assert!(
+            self.at(kind),
+            "expected {:?}, got {:?}",
+            kind,
+            self.current()
+        );
         self.do_bump(kind);
     }
 
@@ -225,18 +240,22 @@ impl<'t> Parser<'t> {
 
     // -- Accessors for tree builder --
 
+    #[allow(dead_code)]
     pub(crate) fn all_tokens(&self) -> &[(BaKind, usize)] {
         self.all_tokens
     }
 
+    #[allow(dead_code)]
     pub(crate) fn non_trivia_indices(&self) -> &[usize] {
         &self.non_trivia
     }
 
+    #[allow(dead_code)]
     pub(crate) fn token_starts(&self) -> &[usize] {
         &self.token_starts
     }
 
+    #[allow(dead_code)]
     pub(crate) fn source(&self) -> &str {
         self.source
     }

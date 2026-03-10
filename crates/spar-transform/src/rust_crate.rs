@@ -342,8 +342,16 @@ mod tests {
         assert_eq!(tree.packages.iter().count(), 3);
 
         let pkg_names: Vec<&str> = tree.packages.iter().map(|(_, p)| p.name.as_str()).collect();
-        assert!(pkg_names.contains(&"MyCore"), "missing MyCore: {:?}", pkg_names);
-        assert!(pkg_names.contains(&"MyApp"), "missing MyApp: {:?}", pkg_names);
+        assert!(
+            pkg_names.contains(&"MyCore"),
+            "missing MyCore: {:?}",
+            pkg_names
+        );
+        assert!(
+            pkg_names.contains(&"MyApp"),
+            "missing MyApp: {:?}",
+            pkg_names
+        );
         // Workspace package
         assert!(
             pkg_names.iter().any(|n| n.contains("Workspace")),
@@ -434,9 +442,21 @@ mod tests {
             .iter()
             .map(|idx| tree.modes[*idx].name.as_str())
             .collect();
-        assert!(mode_names.contains(&"default"), "missing default mode: {:?}", mode_names);
-        assert!(mode_names.contains(&"std"), "missing std mode: {:?}", mode_names);
-        assert!(mode_names.contains(&"no_std"), "missing no_std mode: {:?}", mode_names);
+        assert!(
+            mode_names.contains(&"default"),
+            "missing default mode: {:?}",
+            mode_names
+        );
+        assert!(
+            mode_names.contains(&"std"),
+            "missing std mode: {:?}",
+            mode_names
+        );
+        assert!(
+            mode_names.contains(&"no_std"),
+            "missing no_std mode: {:?}",
+            mode_names
+        );
 
         // "default" should be the initial mode
         let default_mode = core_ct
@@ -511,8 +531,16 @@ mod tests {
             .iter()
             .map(|idx| tree.subcomponents[*idx].name.as_str())
             .collect();
-        assert!(sub_names.contains(&"my_core"), "missing my_core subcomponent: {:?}", sub_names);
-        assert!(sub_names.contains(&"my_app"), "missing my_app subcomponent: {:?}", sub_names);
+        assert!(
+            sub_names.contains(&"my_core"),
+            "missing my_core subcomponent: {:?}",
+            sub_names
+        );
+        assert!(
+            sub_names.contains(&"my_app"),
+            "missing my_app subcomponent: {:?}",
+            sub_names
+        );
     }
 
     #[test]

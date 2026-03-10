@@ -75,11 +75,7 @@ mod tests {
 
     #[test]
     fn multiple_kinds() {
-        let set = TokenSet::new(&[
-            SyntaxKind::SEMICOLON,
-            SyntaxKind::COLON,
-            SyntaxKind::COMMA,
-        ]);
+        let set = TokenSet::new(&[SyntaxKind::SEMICOLON, SyntaxKind::COLON, SyntaxKind::COMMA]);
         assert!(set.contains(SyntaxKind::SEMICOLON));
         assert!(set.contains(SyntaxKind::COLON));
         assert!(set.contains(SyntaxKind::COMMA));

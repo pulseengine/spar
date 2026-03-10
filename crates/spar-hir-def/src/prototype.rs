@@ -95,15 +95,13 @@ pub fn validate_prototype_bindings(resolved: &[ResolvedPrototype]) -> Vec<String
     for proto in resolved {
         // If the formal has a category constraint and the binding
         // provides an explicit category, they must match.
-        if let (Some(formal_cat), Some(actual_cat)) =
-            (proto.formal_category, proto.actual_category)
+        if let (Some(formal_cat), Some(actual_cat)) = (proto.formal_category, proto.actual_category)
+            && formal_cat != actual_cat
         {
-            if formal_cat != actual_cat {
-                errors.push(format!(
-                    "prototype '{}': expected category '{}', got '{}'",
-                    proto.formal_name, formal_cat, actual_cat,
-                ));
-            }
+            errors.push(format!(
+                "prototype '{}': expected category '{}', got '{}'",
+                proto.formal_name, formal_cat, actual_cat,
+            ));
         }
     }
 

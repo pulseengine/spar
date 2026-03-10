@@ -116,10 +116,26 @@ mod tests {
     fn all_types_are_empty_shells() {
         let tree = wrpc_standard_library();
         for (_, ct) in tree.component_types.iter() {
-            assert!(ct.features.is_empty(), "{} should have no features", ct.name);
-            assert!(ct.extends.is_none(), "{} should not extend anything", ct.name);
-            assert!(ct.flow_specs.is_empty(), "{} should have no flow specs", ct.name);
-            assert!(ct.prototypes.is_empty(), "{} should have no prototypes", ct.name);
+            assert!(
+                ct.features.is_empty(),
+                "{} should have no features",
+                ct.name
+            );
+            assert!(
+                ct.extends.is_none(),
+                "{} should not extend anything",
+                ct.name
+            );
+            assert!(
+                ct.flow_specs.is_empty(),
+                "{} should have no flow specs",
+                ct.name
+            );
+            assert!(
+                ct.prototypes.is_empty(),
+                "{} should have no prototypes",
+                ct.name
+            );
         }
     }
 }

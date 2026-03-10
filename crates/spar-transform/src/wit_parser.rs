@@ -203,10 +203,8 @@ impl<'a> Parser<'a> {
             self.pos += ch.len_utf8();
             true
         } else {
-            self.errors.push(format!(
-                "expected '{}' at position {}",
-                ch, self.pos
-            ));
+            self.errors
+                .push(format!("expected '{}' at position {}", ch, self.pos));
             false
         }
     }
@@ -225,13 +223,12 @@ impl<'a> Parser<'a> {
     fn eat_keyword(&mut self, kw: &str) -> bool {
         self.skip_ws_and_comments();
         let rem = self.remaining();
-        if rem.starts_with(kw) {
-            // Make sure it's a whole word (next char is not alphanumeric or hyphen)
-            let after = &rem[kw.len()..];
-            if after.is_empty() || !is_ident_continue(after.as_bytes()[0]) {
-                self.pos += kw.len();
-                return true;
-            }
+        if let Some(after) = rem.strip_prefix(kw)
+            && (after.is_empty() || !is_ident_continue(after.as_bytes()[0]))
+        {
+            // Whole word match (next char is not alphanumeric or hyphen)
+            self.pos += kw.len();
+            return true;
         }
         false
     }
@@ -309,8 +306,7 @@ impl<'a> Parser<'a> {
                     && self.source.as_bytes()[self.pos + 1] == b'/' =>
                 {
                     // Skip line comment
-                    while self.pos < self.source.len()
-                        && self.source.as_bytes()[self.pos] != b'\n'
+                    while self.pos < self.source.len() && self.source.as_bytes()[self.pos] != b'\n'
                     {
                         self.pos += 1;
                     }
@@ -715,10 +711,8 @@ impl<'a> Parser<'a> {
             return WitType::Named("_".into());
         }
 
-        self.errors.push(format!(
-            "expected type at position {}",
-            self.pos
-        ));
+        self.errors
+            .push(format!("expected type at position {}", self.pos));
         WitType::Named("unknown".into())
     }
 
@@ -809,11 +803,11 @@ impl<'a> Parser<'a> {
             if self.is_eof() {
                 break;
             }
-            if let Some(fname) = self.parse_ident() {
-                if self.eat_char(':') {
-                    let ty = self.parse_type();
-                    fields.push((fname, ty));
-                }
+            if let Some(fname) = self.parse_ident()
+                && self.eat_char(':')
+            {
+                let ty = self.parse_type();
+                fields.push((fname, ty));
             }
             self.eat_char(',');
         }

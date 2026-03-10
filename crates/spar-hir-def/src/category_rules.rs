@@ -209,21 +209,11 @@ const PROCESS_SUBCOMPONENTS: &[ComponentCategory] = &[
 
 const THREAD_SUBCOMPONENTS: &[ComponentCategory] = &[Data, Subprogram, Abstract];
 
-const THREAD_GROUP_SUBCOMPONENTS: &[ComponentCategory] = &[
-    Thread,
-    ThreadGroup,
-    Data,
-    Subprogram,
-    Abstract,
-];
+const THREAD_GROUP_SUBCOMPONENTS: &[ComponentCategory] =
+    &[Thread, ThreadGroup, Data, Subprogram, Abstract];
 
-const PROCESSOR_SUBCOMPONENTS: &[ComponentCategory] = &[
-    Memory,
-    Bus,
-    VirtualProcessor,
-    VirtualBus,
-    Abstract,
-];
+const PROCESSOR_SUBCOMPONENTS: &[ComponentCategory] =
+    &[Memory, Bus, VirtualProcessor, VirtualBus, Abstract];
 
 const VIRTUAL_PROCESSOR_SUBCOMPONENTS: &[ComponentCategory] =
     &[VirtualProcessor, VirtualBus, Abstract];

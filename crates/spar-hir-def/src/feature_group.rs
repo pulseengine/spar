@@ -173,12 +173,7 @@ mod tests {
     fn build_fg_tree(
         pkg_name: &str,
         fg_name: &str,
-        features: Vec<(
-            &str,
-            FeatureKind,
-            Option<Direction>,
-            Option<ClassifierRef>,
-        )>,
+        features: Vec<(&str, FeatureKind, Option<Direction>, Option<ClassifierRef>)>,
         inverse_of: Option<ClassifierRef>,
     ) -> ItemTree {
         let mut tree = ItemTree::default();
@@ -226,8 +221,18 @@ mod tests {
             "Sensors",
             "SensorData",
             vec![
-                ("temperature", FeatureKind::DataPort, Some(Direction::Out), None),
-                ("pressure", FeatureKind::DataPort, Some(Direction::Out), None),
+                (
+                    "temperature",
+                    FeatureKind::DataPort,
+                    Some(Direction::Out),
+                    None,
+                ),
+                (
+                    "pressure",
+                    FeatureKind::DataPort,
+                    Some(Direction::Out),
+                    None,
+                ),
                 ("status", FeatureKind::EventPort, Some(Direction::Out), None),
             ],
             None,
@@ -265,20 +270,26 @@ mod tests {
             "P",
             "SensorData",
             vec![
-                ("temperature", FeatureKind::DataPort, Some(Direction::Out), None),
+                (
+                    "temperature",
+                    FeatureKind::DataPort,
+                    Some(Direction::Out),
+                    None,
+                ),
                 ("pressure", FeatureKind::DataPort, Some(Direction::In), None),
-                ("bus_io", FeatureKind::DataPort, Some(Direction::InOut), None),
+                (
+                    "bus_io",
+                    FeatureKind::DataPort,
+                    Some(Direction::InOut),
+                    None,
+                ),
             ],
             None,
         );
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let expanded = expand_feature_group(
-            &scope,
-            &Name::new("P"),
-            &Name::new("SensorData"),
-            true,
-        );
+        let expanded =
+            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorData"), true);
 
         assert_eq!(expanded.len(), 3);
 
@@ -359,12 +370,8 @@ mod tests {
 
         // SensorInput is declared as inverse of SensorOutput,
         // so expanding it (not inverse) should flip the directions.
-        let expanded = expand_feature_group(
-            &scope,
-            &Name::new("P"),
-            &Name::new("SensorInput"),
-            false,
-        );
+        let expanded =
+            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorInput"), false);
 
         assert_eq!(expanded.len(), 2);
         // SensorOutput had Out, inverse flips to In
@@ -457,12 +464,7 @@ mod tests {
         });
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let expanded = expand_feature_group(
-            &scope,
-            &Name::new("P"),
-            &Name::new("OuterFG"),
-            false,
-        );
+        let expanded = expand_feature_group(&scope, &Name::new("P"), &Name::new("OuterFG"), false);
 
         // status (direct) + temp, pressure (from InnerFG via readings)
         assert_eq!(expanded.len(), 3);
@@ -509,19 +511,12 @@ mod tests {
         let tree = build_fg_tree(
             "P",
             "FG",
-            vec![
-                ("f1", FeatureKind::AbstractFeature, None, None),
-            ],
+            vec![("f1", FeatureKind::AbstractFeature, None, None)],
             None,
         );
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let expanded = expand_feature_group(
-            &scope,
-            &Name::new("P"),
-            &Name::new("FG"),
-            false,
-        );
+        let expanded = expand_feature_group(&scope, &Name::new("P"), &Name::new("FG"), false);
 
         assert_eq!(expanded.len(), 1);
         assert_eq!(expanded[0].name.as_str(), "f1");
@@ -533,19 +528,12 @@ mod tests {
         let tree = build_fg_tree(
             "P",
             "FG",
-            vec![
-                ("f1", FeatureKind::AbstractFeature, None, None),
-            ],
+            vec![("f1", FeatureKind::AbstractFeature, None, None)],
             None,
         );
 
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let expanded = expand_feature_group(
-            &scope,
-            &Name::new("P"),
-            &Name::new("FG"),
-            true,
-        );
+        let expanded = expand_feature_group(&scope, &Name::new("P"), &Name::new("FG"), true);
 
         assert_eq!(expanded.len(), 1);
         // No direction to flip — stays None
@@ -560,9 +548,7 @@ mod tests {
         let types_tree = build_fg_tree(
             "Types",
             "SensorData",
-            vec![
-                ("reading", FeatureKind::DataPort, Some(Direction::Out), None),
-            ],
+            vec![("reading", FeatureKind::DataPort, Some(Direction::Out), None)],
             None,
         );
 
@@ -576,21 +562,11 @@ mod tests {
             renames: Vec::new(),
         });
 
-        let scope = GlobalScope::from_trees(vec![
-            Arc::new(types_tree),
-            Arc::new(user_tree),
-        ]);
+        let scope = GlobalScope::from_trees(vec![Arc::new(types_tree), Arc::new(user_tree)]);
 
         // Expand Types::SensorData from the User package context
         let class_ref = ClassifierRef::qualified(Name::new("Types"), Name::new("SensorData"));
-        let expanded = expand_from_ref(
-            &scope,
-            &Name::new("User"),
-            &class_ref,
-            false,
-            None,
-            0,
-        );
+        let expanded = expand_from_ref(&scope, &Name::new("User"), &class_ref, false, None, 0);
 
         assert_eq!(expanded.len(), 1);
         assert_eq!(expanded[0].name.as_str(), "reading");

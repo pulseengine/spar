@@ -35,16 +35,15 @@ pub fn resolve_property_expr(
             if let Some(assoc) = associations
                 .iter()
                 .find(|a| a.name.property_name.eq_ci(ref_name))
+                && let Some(ref typed) = assoc.typed_value
             {
-                if let Some(ref typed) = assoc.typed_value {
-                    return resolve_property_expr(typed, associations, definitions);
-                }
+                return resolve_property_expr(typed, associations, definitions);
             }
             // Fall back to default from definition
-            if let Some(def) = definitions.iter().find(|d| d.name.eq_ci(ref_name)) {
-                if let Some(ref default) = def.default_value {
-                    return resolve_property_expr(default, associations, definitions);
-                }
+            if let Some(def) = definitions.iter().find(|d| d.name.eq_ci(ref_name))
+                && let Some(ref default) = def.default_value
+            {
+                return resolve_property_expr(default, associations, definitions);
             }
             expr.clone()
         }
@@ -57,7 +56,12 @@ pub fn resolve_property_expr(
         PropertyExpr::Record(fields) => PropertyExpr::Record(
             fields
                 .iter()
-                .map(|(n, v)| (n.clone(), resolve_property_expr(v, associations, definitions)))
+                .map(|(n, v)| {
+                    (
+                        n.clone(),
+                        resolve_property_expr(v, associations, definitions),
+                    )
+                })
                 .collect(),
         ),
         PropertyExpr::Range { min, max, delta } => PropertyExpr::Range {
@@ -90,16 +94,15 @@ pub fn lookup_property(
     if let Some(assoc) = associations
         .iter()
         .find(|a| a.name.property_name.eq_ci(prop_name))
+        && let Some(ref typed) = assoc.typed_value
     {
-        if let Some(ref typed) = assoc.typed_value {
-            return Some(resolve_property_expr(typed, associations, definitions));
-        }
+        return Some(resolve_property_expr(typed, associations, definitions));
     }
     // Fall back to default
-    if let Some(def) = definitions.iter().find(|d| d.name.eq_ci(prop_name)) {
-        if let Some(ref default) = def.default_value {
-            return Some(resolve_property_expr(default, associations, definitions));
-        }
+    if let Some(def) = definitions.iter().find(|d| d.name.eq_ci(prop_name))
+        && let Some(ref default) = def.default_value
+    {
+        return Some(resolve_property_expr(default, associations, definitions));
     }
     None
 }
@@ -308,15 +311,15 @@ mod tests {
     #[test]
     fn eval_numeric_real() {
         let expr = PropertyExpr::Real("3.14".to_string(), None);
-        assert_eq!(eval_numeric(&expr), Some(3.14));
+        #[allow(clippy::approx_constant)]
+        let expected = 3.14;
+        assert_eq!(eval_numeric(&expr), Some(expected));
     }
 
     #[test]
     fn eval_numeric_unit_value() {
-        let expr = PropertyExpr::UnitValue(
-            Box::new(PropertyExpr::Integer(10, None)),
-            Name::new("ms"),
-        );
+        let expr =
+            PropertyExpr::UnitValue(Box::new(PropertyExpr::Integer(10, None)), Name::new("ms"));
         assert_eq!(eval_numeric(&expr), Some(10.0));
     }
 

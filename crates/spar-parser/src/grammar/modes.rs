@@ -25,8 +25,7 @@ pub(crate) fn mode_section(p: &mut Parser) {
 
 /// Check if we're at an unnamed mode transition: `source -[...]-> dest ;`
 fn at_unnamed_transition(p: &Parser) -> bool {
-    (p.at(SyntaxKind::IDENT) || p.current().is_keyword())
-        && p.nth(1) == SyntaxKind::DASH_BRACKET
+    (p.at(SyntaxKind::IDENT) || p.current().is_keyword()) && p.nth(1) == SyntaxKind::DASH_BRACKET
 }
 
 /// Parse a mode declaration or mode transition.
@@ -130,10 +129,8 @@ fn mode_or_mapping(p: &mut Parser) {
     if p.at(SyntaxKind::IDENT) || p.current().is_keyword() {
         p.bump_any();
         // Optional mode mapping: `=> target_mode`
-        if p.eat(SyntaxKind::FAT_ARROW) {
-            if p.at(SyntaxKind::IDENT) || p.current().is_keyword() {
-                p.bump_any();
-            }
+        if p.eat(SyntaxKind::FAT_ARROW) && (p.at(SyntaxKind::IDENT) || p.current().is_keyword()) {
+            p.bump_any();
         }
     }
 }

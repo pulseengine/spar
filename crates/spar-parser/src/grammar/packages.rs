@@ -9,11 +9,12 @@
 //!   'end' Name ';'
 //! ```
 
+use super::{component_category, name, properties};
 use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
 use crate::token_set::TokenSet;
-use super::{component_category, name, properties};
 
+#[allow(dead_code)]
 const SECTION_RECOVERY: TokenSet = TokenSet::new(&[
     SyntaxKind::PUBLIC_KW,
     SyntaxKind::PRIVATE_KW,

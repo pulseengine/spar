@@ -132,7 +132,7 @@ fn lower_wac(doc: &WacDocument) -> ItemTree {
     }
 
     // Create the system type
-    let type_name = format!("{}", comp_name);
+    let type_name = comp_name.to_string();
     let sys_type_idx = tree.component_types.alloc(ComponentTypeItem {
         name: Name::new(&type_name),
         category: ComponentCategory::System,
@@ -290,7 +290,7 @@ fn generate_wac(tree: &ItemTree) -> String {
     let mut out = String::new();
 
     // Derive package declaration from the first AADL package name
-    for (_, pkg) in tree.packages.iter() {
+    if let Some((_, pkg)) = tree.packages.iter().next() {
         let pkg_name = pkg.name.as_str();
         let base = pkg_name
             .strip_suffix("_WAC")
@@ -310,7 +310,6 @@ fn generate_wac(tree: &ItemTree) -> String {
         } else {
             out.push_str(&format!("package local:{};\n\n", kebab));
         }
-        break;
     }
 
     // Emit imports from system type features (requires access)
@@ -344,34 +343,33 @@ fn generate_wac(tree: &ItemTree) -> String {
             let comp_path = sub
                 .classifier
                 .as_ref()
-                .map(|c| classifier_to_wac_path(c))
+                .map(classifier_to_wac_path)
                 .unwrap_or_else(|| format!("local:{}", sub_name));
 
             // Collect connections that target this subcomponent
             let mut args = Vec::new();
             for &conn_idx in &ci.connections {
                 let conn = &tree.connections[conn_idx];
-                if let Some(ref dst) = conn.dst {
-                    if let Some(ref dst_sub) = dst.subcomponent {
-                        if dst_sub.as_str() == sub.name.as_str() {
-                            // This connection targets our subcomponent
-                            let key = dst.feature.as_str().replace('_', "-");
-                            let value = if let Some(ref src) = conn.src {
-                                if let Some(ref src_sub) = src.subcomponent {
-                                    format!(
-                                        "{}.{}",
-                                        src_sub.as_str().replace('_', "-"),
-                                        src.feature.as_str().replace('_', "-")
-                                    )
-                                } else {
-                                    src.feature.as_str().replace('_', "-")
-                                }
-                            } else {
-                                "unknown".to_string()
-                            };
-                            args.push(format!("    {}: {}", key, value));
+                if let Some(ref dst) = conn.dst
+                    && let Some(ref dst_sub) = dst.subcomponent
+                    && dst_sub.as_str() == sub.name.as_str()
+                {
+                    // This connection targets our subcomponent
+                    let key = dst.feature.as_str().replace('_', "-");
+                    let value = if let Some(ref src) = conn.src {
+                        if let Some(ref src_sub) = src.subcomponent {
+                            format!(
+                                "{}.{}",
+                                src_sub.as_str().replace('_', "-"),
+                                src.feature.as_str().replace('_', "-")
+                            )
+                        } else {
+                            src.feature.as_str().replace('_', "-")
                         }
-                    }
+                    } else {
+                        "unknown".to_string()
+                    };
+                    args.push(format!("    {}: {}", key, value));
                 }
             }
 

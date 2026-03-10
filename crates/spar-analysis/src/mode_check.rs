@@ -8,7 +8,7 @@
 
 use spar_hir_def::instance::SystemInstance;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates mode declarations and mode transitions in the instance model.
 ///
@@ -65,8 +65,11 @@ impl Analysis for ModeCheckAnalysis {
                         analysis: self.name().to_string(),
                     });
                 } else if initial_count > 1 {
-                    let initial_names: Vec<&str> =
-                        modes.iter().filter(|m| m.is_initial).map(|m| m.name.as_str()).collect();
+                    let initial_names: Vec<&str> = modes
+                        .iter()
+                        .filter(|m| m.is_initial)
+                        .map(|m| m.name.as_str())
+                        .collect();
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
                         message: format!(
@@ -92,14 +95,14 @@ impl Analysis for ModeCheckAnalysis {
                     .as_ref()
                     .map(|n| n.as_str().to_string())
                     .unwrap_or_else(|| {
-                        format!("{}-[]->{}",
-                            mt.source.as_str(),
-                            mt.destination.as_str())
+                        format!("{}-[]->{}", mt.source.as_str(), mt.destination.as_str())
                     });
 
                 // Source must reference a declared mode
                 if has_modes
-                    && !mode_names.iter().any(|n| n.eq_ignore_ascii_case(mt.source.as_str()))
+                    && !mode_names
+                        .iter()
+                        .any(|n| n.eq_ignore_ascii_case(mt.source.as_str()))
                 {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
@@ -115,7 +118,9 @@ impl Analysis for ModeCheckAnalysis {
 
                 // Destination must reference a declared mode
                 if has_modes
-                    && !mode_names.iter().any(|n| n.eq_ignore_ascii_case(mt.destination.as_str()))
+                    && !mode_names
+                        .iter()
+                        .any(|n| n.eq_ignore_ascii_case(mt.destination.as_str()))
                 {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
@@ -230,12 +235,7 @@ mod tests {
             self.components[owner].features.push(idx);
         }
 
-        fn add_mode(
-            &mut self,
-            name: &str,
-            is_initial: bool,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_mode(&mut self, name: &str, is_initial: bool, owner: ComponentInstanceIdx) {
             let idx = self.mode_instances.alloc(ModeInstance {
                 name: Name::new(name),
                 is_initial,
@@ -252,13 +252,15 @@ mod tests {
             triggers: Vec<&str>,
             owner: ComponentInstanceIdx,
         ) {
-            let idx = self.mode_transition_instances.alloc(ModeTransitionInstance {
-                name: name.map(Name::new),
-                source: Name::new(source),
-                destination: Name::new(destination),
-                triggers: triggers.into_iter().map(Name::new).collect(),
-                owner,
-            });
+            let idx = self
+                .mode_transition_instances
+                .alloc(ModeTransitionInstance {
+                    name: name.map(Name::new),
+                    source: Name::new(source),
+                    destination: Name::new(destination),
+                    triggers: triggers.into_iter().map(Name::new).collect(),
+                    owner,
+                });
             self.components[owner].mode_transitions.push(idx);
         }
 
@@ -301,8 +303,15 @@ mod tests {
 
         let inst = b.build(root);
         let diags = ModeCheckAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "valid modes should produce no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "valid modes should produce no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -320,7 +329,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("2 initial modes"))
             .collect();
-        assert_eq!(errors.len(), 1, "should error on two initial modes: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "should error on two initial modes: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -338,7 +352,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("no initial mode"))
             .collect();
-        assert_eq!(errors.len(), 1, "should error on zero initial modes: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "should error on zero initial modes: {:?}",
+            diags
+        );
     }
 
     // ── Mode transition endpoint validation ─────────────────────────
@@ -358,9 +377,16 @@ mod tests {
         let diags = ModeCheckAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("destination mode 'running'"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("destination mode 'running'")
+            })
             .collect();
-        assert_eq!(errors.len(), 1, "should error on undeclared destination mode: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "should error on undeclared destination mode: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -378,9 +404,16 @@ mod tests {
         let diags = ModeCheckAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("source mode 'nonexistent'"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("source mode 'nonexistent'")
+            })
             .collect();
-        assert_eq!(errors.len(), 1, "should error on undeclared source mode: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "should error on undeclared source mode: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -395,8 +428,15 @@ mod tests {
 
         let inst = b.build(root);
         let diags = ModeCheckAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "valid transition should have no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "valid transition should have no errors: {:?}",
+            errors
+        );
     }
 
     // ── Mode transition trigger validation ──────────────────────────
@@ -418,7 +458,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("trigger"))
             .collect();
-        assert!(warnings.is_empty(), "matching trigger should produce no warning: {:?}", warnings);
+        assert!(
+            warnings.is_empty(),
+            "matching trigger should produce no warning: {:?}",
+            warnings
+        );
     }
 
     #[test]
@@ -439,7 +483,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("trigger 'go'"))
             .collect();
-        assert_eq!(warnings.len(), 1, "unmatched trigger should warn: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "unmatched trigger should warn: {:?}",
+            diags
+        );
     }
 
     // ── Transitions without modes ───────────────────────────────────
@@ -459,7 +508,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no modes declared"))
             .collect();
-        assert_eq!(warnings.len(), 1, "transitions without modes should warn: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "transitions without modes should warn: {:?}",
+            diags
+        );
     }
 
     // ── No modes at all: clean ──────────────────────────────────────
@@ -492,9 +546,16 @@ mod tests {
         let diags = ModeCheckAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("source mode 'missing'"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("source mode 'missing'")
+            })
             .collect();
-        assert_eq!(errors.len(), 1, "unnamed transition should still report errors: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "unnamed transition should still report errors: {:?}",
+            diags
+        );
         // The label should use the fallback format
         assert!(
             errors[0].message.contains("missing-[]->idle"),

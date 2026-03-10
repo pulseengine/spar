@@ -230,11 +230,7 @@ pub(crate) fn tokenize(source: &str) -> Vec<(BaKind, usize)> {
                     i += 1;
                 }
                 let mut kind = BaKind::INT_LIT;
-                if i < len
-                    && bytes[i] == b'.'
-                    && i + 1 < len
-                    && bytes[i + 1].is_ascii_digit()
-                {
+                if i < len && bytes[i] == b'.' && i + 1 < len && bytes[i + 1].is_ascii_digit() {
                     kind = BaKind::REAL_LIT;
                     i += 1;
                     while i < len && bytes[i].is_ascii_digit() {
@@ -294,7 +290,12 @@ mod tests {
     fn lex_variable_decl() {
         assert_eq!(
             kinds("tmp : number;"),
-            vec![BaKind::IDENT, BaKind::COLON, BaKind::IDENT, BaKind::SEMICOLON]
+            vec![
+                BaKind::IDENT,
+                BaKind::COLON,
+                BaKind::IDENT,
+                BaKind::SEMICOLON
+            ]
         );
     }
 
@@ -388,9 +389,18 @@ mod tests {
         assert_eq!(
             kinds("a = b != c < d <= e > f >= g"),
             vec![
-                BaKind::IDENT, BaKind::EQ, BaKind::IDENT, BaKind::BANG_EQ,
-                BaKind::IDENT, BaKind::L_ANGLE, BaKind::IDENT, BaKind::L_ANGLE_EQ,
-                BaKind::IDENT, BaKind::R_ANGLE, BaKind::IDENT, BaKind::R_ANGLE_EQ,
+                BaKind::IDENT,
+                BaKind::EQ,
+                BaKind::IDENT,
+                BaKind::BANG_EQ,
+                BaKind::IDENT,
+                BaKind::L_ANGLE,
+                BaKind::IDENT,
+                BaKind::L_ANGLE_EQ,
+                BaKind::IDENT,
+                BaKind::R_ANGLE,
+                BaKind::IDENT,
+                BaKind::R_ANGLE_EQ,
                 BaKind::IDENT,
             ]
         );
@@ -432,7 +442,11 @@ mod tests {
     fn lex_case_insensitive() {
         assert_eq!(
             kinds("Variables STATES Transitions"),
-            vec![BaKind::VARIABLES_KW, BaKind::STATES_KW, BaKind::TRANSITIONS_KW]
+            vec![
+                BaKind::VARIABLES_KW,
+                BaKind::STATES_KW,
+                BaKind::TRANSITIONS_KW
+            ]
         );
     }
 
@@ -472,8 +486,10 @@ mod tests {
         assert_eq!(
             kinds("p!< p!>"),
             vec![
-                BaKind::IDENT, BaKind::BANG_L_ANGLE,
-                BaKind::IDENT, BaKind::BANG_R_ANGLE,
+                BaKind::IDENT,
+                BaKind::BANG_L_ANGLE,
+                BaKind::IDENT,
+                BaKind::BANG_R_ANGLE,
             ]
         );
     }

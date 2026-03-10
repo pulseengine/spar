@@ -14,7 +14,7 @@
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 // ── Fault tree types ────────────────────────────────────────────────
 
@@ -78,10 +78,7 @@ impl FaultTree {
             }
             FaultTreeNode::Or { children, .. } => {
                 // Union of all children's cut sets
-                children
-                    .iter()
-                    .flat_map(|c| Self::cut_sets_recursive(c))
-                    .collect()
+                children.iter().flat_map(Self::cut_sets_recursive).collect()
             }
             FaultTreeNode::And { children, .. } => {
                 // Cross-product of children's cut sets
@@ -343,17 +340,8 @@ mod tests {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self
-                .property_maps
-                .entry(comp)
-                .or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
                     property_set: if set.is_empty() {
@@ -418,7 +406,12 @@ mod tests {
         let cs = tree.minimal_cut_sets();
         assert_eq!(cs.len(), 3, "OR gate: each child is independent: {:?}", cs);
         for set in &cs {
-            assert_eq!(set.len(), 1, "each cut set should have 1 element: {:?}", set);
+            assert_eq!(
+                set.len(),
+                1,
+                "each cut set should have 1 element: {:?}",
+                set
+            );
         }
     }
 
@@ -451,7 +444,12 @@ mod tests {
 
         let cs = tree.minimal_cut_sets();
         assert_eq!(cs.len(), 1, "AND gate: one combined cut set: {:?}", cs);
-        assert_eq!(cs[0].len(), 3, "cut set should contain all 3 events: {:?}", cs[0]);
+        assert_eq!(
+            cs[0].len(),
+            3,
+            "cut set should contain all 3 events: {:?}",
+            cs[0]
+        );
     }
 
     #[test]
@@ -489,7 +487,12 @@ mod tests {
 
         let cs = tree.minimal_cut_sets();
         assert_eq!(cs.len(), 1, "superset {{a,b}} should be removed: {:?}", cs);
-        assert_eq!(cs[0], vec!["a.Err"], "only {{a.Err}} should remain: {:?}", cs);
+        assert_eq!(
+            cs[0],
+            vec!["a.Err"],
+            "only {{a.Err}} should remain: {:?}",
+            cs
+        );
     }
 
     #[test]

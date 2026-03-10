@@ -145,6 +145,10 @@ mod tests {
     fn parse_error_on_invalid_json() {
         let result = parse_cargo_metadata("not json");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("failed to parse cargo metadata"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("failed to parse cargo metadata")
+        );
     }
 }

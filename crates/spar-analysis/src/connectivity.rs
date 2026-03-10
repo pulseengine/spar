@@ -8,7 +8,7 @@ use rustc_hash::FxHashSet;
 use spar_hir_def::instance::{FeatureInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::Direction;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Analyzes connection completeness across the instance model.
 ///

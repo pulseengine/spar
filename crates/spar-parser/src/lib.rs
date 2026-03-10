@@ -12,13 +12,13 @@
 //! * [`marker`] — marker/completed-marker system for building the event stream.
 //! * [`parser`] — the `Parser` struct that grammar functions call into.
 
-pub mod syntax_kind;
 pub mod event;
-pub mod token_set;
 pub mod marker;
 pub mod parser;
+pub mod syntax_kind;
+pub mod token_set;
 
-pub mod lexer;
 pub mod grammar;
+pub mod lexer;
 
 pub use syntax_kind::SyntaxKind;

@@ -4,14 +4,14 @@ use spar_annex::emv2;
 
 fn parse_ok(source: &str) -> emv2::Emv2Parse {
     let result = emv2::parse(source);
-    assert!(
-        result.ok(),
-        "parse errors: {:?}",
-        result.errors()
-    );
+    assert!(result.ok(), "parse errors: {:?}", result.errors());
     // Verify lossless round-trip
     let root = result.syntax_node();
-    assert_eq!(root.text().to_string(), source, "lossless round-trip failed");
+    assert_eq!(
+        root.text().to_string(),
+        source,
+        "lossless round-trip failed"
+    );
     result
 }
 
@@ -21,8 +21,8 @@ fn parse_file(name: &str) -> emv2::Emv2Parse {
         env!("CARGO_MANIFEST_DIR").trim_end_matches("/crates/spar-annex"),
         name
     );
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"));
     parse_ok(&source)
 }
 

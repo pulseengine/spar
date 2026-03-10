@@ -9,7 +9,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates extended binding rules on the instance model.
 ///
@@ -144,11 +144,7 @@ fn check_binding_target(
     // BIND-TARGET-EXISTS: Try to find the target
     let mut found = false;
     for (_idx, comp) in instance.all_components() {
-        if comp
-            .name
-            .as_str()
-            .eq_ignore_ascii_case(target_name)
-        {
+        if comp.name.as_str().eq_ignore_ascii_case(target_name) {
             found = true;
 
             // BIND-TARGET-CATEGORY: Check that the category is appropriate
@@ -208,7 +204,6 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
-    use spar_hir_def::item_tree::*;
     use spar_hir_def::name::{Name, PropertyRef};
     use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
@@ -260,17 +255,8 @@ mod tests {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self
-                .property_maps
-                .entry(comp)
-                .or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
                     property_set: if set.is_empty() {
@@ -321,7 +307,8 @@ mod tests {
             .iter()
             .filter(|d| {
                 d.severity == Severity::Error
-                    && d.message.contains("missing required Actual_Processor_Binding")
+                    && d.message
+                        .contains("missing required Actual_Processor_Binding")
             })
             .collect();
         assert_eq!(
@@ -512,9 +499,7 @@ mod tests {
         let diags = BindingRuleAnalysis.analyze(&inst);
         let exists_errs: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Error && d.message.contains("does not exist")
-            })
+            .filter(|d| d.severity == Severity::Error && d.message.contains("does not exist"))
             .collect();
         assert_eq!(
             exists_errs.len(),
@@ -571,10 +556,7 @@ mod tests {
         let diags = BindingRuleAnalysis.analyze(&inst);
         let cat_errs: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("expected one of")
-            })
+            .filter(|d| d.severity == Severity::Error && d.message.contains("expected one of"))
             .collect();
         assert!(
             cat_errs.is_empty(),

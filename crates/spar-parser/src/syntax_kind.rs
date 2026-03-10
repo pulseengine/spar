@@ -5,6 +5,7 @@
 /// nodes with a COMPONENT_CATEGORY child, rather than per-category variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
+#[allow(clippy::manual_non_exhaustive)]
 #[repr(u16)]
 pub enum SyntaxKind {
     // === Tombstone / Error ===
@@ -425,15 +426,13 @@ impl SyntaxKind {
     /// Returns true if this is a keyword.
     #[inline]
     pub fn is_keyword(self) -> bool {
-        (self as u16) >= (Self::PACKAGE_KW as u16)
-            && (self as u16) <= (Self::SELF_KW as u16)
+        (self as u16) >= (Self::PACKAGE_KW as u16) && (self as u16) <= (Self::SELF_KW as u16)
     }
 
     /// Returns true if this is a punctuation token.
     #[inline]
     pub fn is_punct(self) -> bool {
-        (self as u16) >= (Self::SEMICOLON as u16)
-            && (self as u16) <= (Self::BRACKET_ARROW as u16)
+        (self as u16) >= (Self::SEMICOLON as u16) && (self as u16) <= (Self::BRACKET_ARROW as u16)
     }
 
     /// Returns true if this is a literal token.
@@ -560,8 +559,14 @@ mod tests {
 
     #[test]
     fn keyword_roundtrip() {
-        assert_eq!(SyntaxKind::from_keyword("package"), Some(SyntaxKind::PACKAGE_KW));
-        assert_eq!(SyntaxKind::from_keyword("system"), Some(SyntaxKind::SYSTEM_KW));
+        assert_eq!(
+            SyntaxKind::from_keyword("package"),
+            Some(SyntaxKind::PACKAGE_KW)
+        );
+        assert_eq!(
+            SyntaxKind::from_keyword("system"),
+            Some(SyntaxKind::SYSTEM_KW)
+        );
         assert_eq!(SyntaxKind::from_keyword("my_ident"), None);
     }
 

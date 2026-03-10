@@ -8,7 +8,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::FeatureKind;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates mode legality rules on the instance model.
 ///
@@ -89,13 +89,7 @@ fn check_transition_trigger_kinds(
             .name
             .as_ref()
             .map(|n| n.as_str().to_string())
-            .unwrap_or_else(|| {
-                format!(
-                    "{}-[]->{}",
-                    mt.source.as_str(),
-                    mt.destination.as_str()
-                )
-            });
+            .unwrap_or_else(|| format!("{}-[]->{}", mt.source.as_str(), mt.destination.as_str()));
 
         for trigger in &mt.triggers {
             // Find the feature matching this trigger name
@@ -198,12 +192,7 @@ mod tests {
             self.components[owner].features.push(idx);
         }
 
-        fn add_mode(
-            &mut self,
-            name: &str,
-            is_initial: bool,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_mode(&mut self, name: &str, is_initial: bool, owner: ComponentInstanceIdx) {
             let idx = self.mode_instances.alloc(ModeInstance {
                 name: Name::new(name),
                 is_initial,
@@ -220,13 +209,15 @@ mod tests {
             triggers: Vec<&str>,
             owner: ComponentInstanceIdx,
         ) {
-            let idx = self.mode_transition_instances.alloc(ModeTransitionInstance {
-                name: name.map(Name::new),
-                source: Name::new(source),
-                destination: Name::new(destination),
-                triggers: triggers.into_iter().map(Name::new).collect(),
-                owner,
-            });
+            let idx = self
+                .mode_transition_instances
+                .alloc(ModeTransitionInstance {
+                    name: name.map(Name::new),
+                    source: Name::new(source),
+                    destination: Name::new(destination),
+                    triggers: triggers.into_iter().map(Name::new).collect(),
+                    owner,
+                });
             self.components[owner].mode_transitions.push(idx);
         }
 

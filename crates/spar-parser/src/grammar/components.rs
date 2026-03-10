@@ -4,6 +4,7 @@ use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
 use crate::token_set::TokenSet;
 
+#[allow(dead_code)]
 const COMPONENT_SECTIONS: TokenSet = TokenSet::new(&[
     SyntaxKind::PROTOTYPES_KW,
     SyntaxKind::FEATURES_KW,
@@ -180,9 +181,7 @@ fn component_impl_sections(p: &mut Parser) {
             SyntaxKind::PROTOTYPES_KW => prototype_section(p),
             SyntaxKind::SUBCOMPONENTS_KW => subcomponent_section(p),
             SyntaxKind::INTERNAL_KW => internal_features_section(p),
-            SyntaxKind::PROCESSOR_KW
-                if p.nth(1) == SyntaxKind::FEATURES_KW =>
-            {
+            SyntaxKind::PROCESSOR_KW if p.nth(1) == SyntaxKind::FEATURES_KW => {
                 processor_features_section(p);
             }
             SyntaxKind::CONNECTIONS_KW => super::connections::connection_section(p),

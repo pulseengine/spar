@@ -147,19 +147,19 @@ fn check_impl_extends(
 
     // EXT-CATEGORY-MATCH: Find the extended implementation and check category
     let base_ci = find_component_impl(tree, extends);
-    if let Some(base) = base_ci {
-        if base.category != ci.category {
-            diags.push(AnalysisDiagnostic {
-                severity: Severity::Error,
-                message: format!(
-                    "component implementation '{}' ({}) extends '{}' ({}) \
-                     — categories must match",
-                    qualified, ci.category, extends, base.category
-                ),
-                path,
-                analysis: ANALYSIS_NAME.to_string(),
-            });
-        }
+    if let Some(base) = base_ci
+        && base.category != ci.category
+    {
+        diags.push(AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: format!(
+                "component implementation '{}' ({}) extends '{}' ({}) \
+                 — categories must match",
+                qualified, ci.category, extends, base.category
+            ),
+            path,
+            analysis: ANALYSIS_NAME.to_string(),
+        });
     }
 }
 
@@ -227,8 +227,7 @@ fn check_feature_compatibility(
                         message: format!(
                             "feature '{}' in extending type '{}' is {} but base type '{}' \
                              declares it as {} — refined features must preserve kind",
-                            ext_feat.name, extending.name, ext_feat.kind,
-                            base.name, base_feat.kind
+                            ext_feat.name, extending.name, ext_feat.kind, base.name, base_feat.kind
                         ),
                         path: path.to_vec(),
                         analysis: ANALYSIS_NAME.to_string(),
@@ -261,15 +260,9 @@ fn find_component_impl<'a>(
     let target_type = cref.type_name.as_str();
     let target_impl = cref.impl_name.as_ref().map(|n| n.as_str());
     for (_idx, ci) in tree.component_impls.iter() {
-        let type_match = ci
-            .type_name
-            .as_str()
-            .eq_ignore_ascii_case(target_type);
+        let type_match = ci.type_name.as_str().eq_ignore_ascii_case(target_type);
         let impl_match = match target_impl {
-            Some(ti) => ci
-                .impl_name
-                .as_str()
-                .eq_ignore_ascii_case(ti),
+            Some(ti) => ci.impl_name.as_str().eq_ignore_ascii_case(ti),
             None => true,
         };
         if type_match && impl_match {
@@ -892,11 +885,7 @@ mod tests {
         });
 
         let diags = check_extends_rules(&tree);
-        assert!(
-            diags.is_empty(),
-            "no extends = no diagnostics: {:?}",
-            diags
-        );
+        assert!(diags.is_empty(), "no extends = no diagnostics: {:?}", diags);
     }
 
     // ── Case-insensitive self-ref ────────────────────────────────────

@@ -16,7 +16,7 @@ use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 use spar_hir_def::property_value::parse_size_value;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Resource budget analysis (memory, MIPS, bandwidth).
 pub struct ResourceBudgetAnalysis;
@@ -122,7 +122,9 @@ fn check_memory_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagn
 /// Check bandwidth budgets: compare connection data rates against bus capacity.
 fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     for (bus_idx, bus_comp) in instance.all_components() {
-        if bus_comp.category != ComponentCategory::Bus && bus_comp.category != ComponentCategory::VirtualBus {
+        if bus_comp.category != ComponentCategory::Bus
+            && bus_comp.category != ComponentCategory::VirtualBus
+        {
             continue;
         }
 
@@ -158,18 +160,19 @@ fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDi
                 .get("Deployment_Properties", "Actual_Connection_Binding")
                 .or_else(|| comp_props.get("", "Actual_Connection_Binding"));
 
-            if let Some(binding_val) = binding {
-                if binding_val.to_lowercase().contains(&bus_comp.name.as_str().to_lowercase()) {
-                    // This component's connections use this bus
-                    if let Some(rate_raw) = comp_props
-                        .get("Communication_Properties", "Data_Rate")
-                        .or_else(|| comp_props.get("", "Data_Rate"))
-                    {
-                        if let Some(rate) = parse_data_rate(rate_raw) {
-                            total_rate += rate;
-                            connection_count += 1;
-                        }
-                    }
+            if let Some(binding_val) = binding
+                && binding_val
+                    .to_lowercase()
+                    .contains(&bus_comp.name.as_str().to_lowercase())
+            {
+                // This component's connections use this bus
+                if let Some(rate_raw) = comp_props
+                    .get("Communication_Properties", "Data_Rate")
+                    .or_else(|| comp_props.get("", "Data_Rate"))
+                    && let Some(rate) = parse_data_rate(rate_raw)
+                {
+                    total_rate += rate;
+                    connection_count += 1;
                 }
             }
         }
@@ -184,10 +187,7 @@ fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDi
                 message: format!(
                     "bus '{}' bandwidth may be exceeded: {:.1} bps demanded vs {:.1} bps capacity \
                      ({} connections)",
-                    bus_comp.name,
-                    total_rate,
-                    capacity_bps,
-                    connection_count,
+                    bus_comp.name, total_rate, capacity_bps, connection_count,
                 ),
                 path: bus_path,
                 analysis: "resource_budget".to_string(),
@@ -201,14 +201,13 @@ fn compute_memory_demand(props: &spar_hir_def::properties::PropertyMap) -> u64 {
     let code_size = get_size_property(props, "Source_Code_Size").unwrap_or(0);
     let data_size = get_size_property(props, "Data_Size").unwrap_or(0);
     let stack_size = get_size_property(props, "Stack_Size").unwrap_or(0);
-    code_size.saturating_add(data_size).saturating_add(stack_size)
+    code_size
+        .saturating_add(data_size)
+        .saturating_add(stack_size)
 }
 
 /// Get a size property in bits.
-fn get_size_property(
-    props: &spar_hir_def::properties::PropertyMap,
-    name: &str,
-) -> Option<u64> {
+fn get_size_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
     let raw = props
         .get("Memory_Properties", name)
         .or_else(|| props.get("", name))?;
@@ -216,9 +215,7 @@ fn get_size_property(
 }
 
 /// Extract memory binding target name from property.
-fn get_memory_binding(
-    props: &spar_hir_def::properties::PropertyMap,
-) -> Option<String> {
+fn get_memory_binding(props: &spar_hir_def::properties::PropertyMap) -> Option<String> {
     let raw = props
         .get("Deployment_Properties", "Actual_Memory_Binding")
         .or_else(|| props.get("", "Actual_Memory_Binding"))?;
@@ -251,10 +248,10 @@ fn parse_data_rate(s: &str) -> Option<f64> {
     let s = s.trim();
     // Try common AADL data rate units
     for &(suffix, factor) in DATA_RATE_UNITS {
-        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim()) {
-            if let Ok(val) = num_str.parse::<f64>() {
-                return Some(val * factor);
-            }
+        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim())
+            && let Ok(val) = num_str.parse::<f64>()
+        {
+            return Some(val * factor);
         }
     }
     // Try plain number (assume bps)
@@ -279,7 +276,6 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
-    use spar_hir_def::item_tree::*;
     use spar_hir_def::name::{Name, PropertyRef};
     use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
@@ -323,21 +319,23 @@ mod tests {
             })
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
-                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
@@ -380,19 +378,37 @@ mod tests {
         b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 KByte");
         b.set_property(thread, "Memory_Properties", "Data_Size", "50 KByte");
         b.set_property(thread, "Memory_Properties", "Stack_Size", "10 KByte");
-        b.set_property(thread, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
 
         let inst = b.build(root);
         let diags = ResourceBudgetAnalysis.analyze(&inst);
 
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert!(errors.is_empty(), "should be within budget: {:?}", errors);
 
-        let infos: Vec<_> = diags.iter()
+        let infos: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
             .collect();
-        assert_eq!(infos.len(), 1, "should report memory utilization: {:?}", diags);
-        assert!(infos[0].message.contains("ram"), "should mention ram: {}", infos[0].message);
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report memory utilization: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("ram"),
+            "should mention ram: {}",
+            infos[0].message
+        );
     }
 
     #[test]
@@ -411,18 +427,40 @@ mod tests {
 
         // t1: 60 KByte code
         b.set_property(t1, "Memory_Properties", "Source_Code_Size", "60 KByte");
-        b.set_property(t1, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
 
         // t2: 60 KByte code -> total 120 KByte > 100 KByte
         b.set_property(t2, "Memory_Properties", "Source_Code_Size", "60 KByte");
-        b.set_property(t2, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
 
         let inst = b.build(root);
         let diags = ResourceBudgetAnalysis.analyze(&inst);
 
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert_eq!(errors.len(), 1, "should error on exceeded budget: {:?}", diags);
-        assert!(errors[0].message.contains("exceeded"), "should mention exceeded: {}", errors[0].message);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "should error on exceeded budget: {:?}",
+            diags
+        );
+        assert!(
+            errors[0].message.contains("exceeded"),
+            "should mention exceeded: {}",
+            errors[0].message
+        );
     }
 
     #[test]
@@ -436,10 +474,12 @@ mod tests {
         let inst = b.build(root);
         let diags = ResourceBudgetAnalysis.analyze(&inst);
 
-        let mem_diags: Vec<_> = diags.iter()
-            .filter(|d| d.message.contains("ram"))
-            .collect();
-        assert!(mem_diags.is_empty(), "no capacity = no check: {:?}", mem_diags);
+        let mem_diags: Vec<_> = diags.iter().filter(|d| d.message.contains("ram")).collect();
+        assert!(
+            mem_diags.is_empty(),
+            "no capacity = no check: {:?}",
+            mem_diags
+        );
     }
 
     #[test]
@@ -469,19 +509,36 @@ mod tests {
         b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 KByte");
         b.set_property(thread, "Memory_Properties", "Data_Size", "100 KByte");
         b.set_property(thread, "Memory_Properties", "Stack_Size", "100 KByte");
-        b.set_property(thread, "Deployment_Properties", "Actual_Memory_Binding", "reference (ram)");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
 
         let inst = b.build(root);
         let diags = ResourceBudgetAnalysis.analyze(&inst);
 
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "300 KB < 512 KB, should be within budget: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "300 KB < 512 KB, should be within budget: {:?}",
+            errors
+        );
 
-        let infos: Vec<_> = diags.iter()
+        let infos: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
             .collect();
         assert_eq!(infos.len(), 1, "should report utilization: {:?}", diags);
         // ~58.6% utilization
-        assert!(infos[0].message.contains("58."), "should show ~58% utilization: {}", infos[0].message);
+        assert!(
+            infos[0].message.contains("58."),
+            "should show ~58% utilization: {}",
+            infos[0].message
+        );
     }
 }

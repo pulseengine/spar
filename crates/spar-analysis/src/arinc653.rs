@@ -16,7 +16,7 @@ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 use spar_hir_def::property_value::parse_time_value;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// ARINC 653 partition scheduling analysis.
 pub struct Arinc653Analysis;
@@ -53,10 +53,7 @@ fn find_components_by_category(
 }
 
 /// Find a component by name anywhere in the instance hierarchy.
-fn find_component_by_name(
-    instance: &SystemInstance,
-    name: &str,
-) -> Option<ComponentInstanceIdx> {
+fn find_component_by_name(instance: &SystemInstance, name: &str) -> Option<ComponentInstanceIdx> {
     instance
         .all_components()
         .find(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name))
@@ -99,15 +96,14 @@ fn owning_partition(
     if let Some(raw) = props
         .get("Deployment_Properties", "Actual_Processor_Binding")
         .or_else(|| props.get("", "Actual_Processor_Binding"))
+        && let Some(target) = extract_reference_target(raw)
     {
-        if let Some(target) = extract_reference_target(raw) {
-            // Look up the target by name and check if it's a virtual processor
-            for (comp_idx, comp) in instance.all_components() {
-                if comp.name.as_str().eq_ignore_ascii_case(target)
-                    && comp.category == ComponentCategory::VirtualProcessor
-                {
-                    return Some(comp_idx);
-                }
+        // Look up the target by name and check if it's a virtual processor
+        for (comp_idx, comp) in instance.all_components() {
+            if comp.name.as_str().eq_ignore_ascii_case(target)
+                && comp.category == ComponentCategory::VirtualProcessor
+            {
+                return Some(comp_idx);
             }
         }
     }
@@ -136,18 +132,14 @@ fn extract_reference_target(val: &str) -> Option<&str> {
 
 /// **ARINC-PROCESSOR-HAS-PARTITIONS**: Every processor should contain
 /// at least one virtual processor (partition) subcomponent.
-fn check_processor_has_partitions(
-    instance: &SystemInstance,
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
+fn check_processor_has_partitions(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     let processors = find_components_by_category(instance, ComponentCategory::Processor);
 
     for proc_idx in processors {
         let proc = instance.component(proc_idx);
-        let has_vp = proc
-            .children
-            .iter()
-            .any(|&child| instance.component(child).category == ComponentCategory::VirtualProcessor);
+        let has_vp = proc.children.iter().any(|&child| {
+            instance.component(child).category == ComponentCategory::VirtualProcessor
+        });
 
         if !has_vp {
             diags.push(AnalysisDiagnostic {
@@ -167,10 +159,7 @@ fn check_processor_has_partitions(
 /// **ARINC-PARTITION-ASSIGNMENT**: Every process subcomponent must be
 /// bound to a virtual processor (partition), either by containment
 /// hierarchy or explicit binding property.
-fn check_partition_assignment(
-    instance: &SystemInstance,
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
+fn check_partition_assignment(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     let processes = find_components_by_category(instance, ComponentCategory::Process);
 
     for proc_idx in processes {
@@ -194,26 +183,17 @@ fn check_partition_assignment(
 /// processors should not share direct port connections. Connections
 /// between different partitions must go through an inter-partition
 /// communication mechanism.
-fn check_partition_isolation(
-    instance: &SystemInstance,
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
+fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     // Check semantic connections for cross-partition violations
     for sem_conn in &instance.semantic_connections {
         let (src_comp, _) = &sem_conn.ultimate_source;
         let (dst_comp, _) = &sem_conn.ultimate_destination;
 
         // Walk up to the owning process for each endpoint
-        let src_process = find_ancestor_of_category(
-            instance,
-            *src_comp,
-            ComponentCategory::Process,
-        );
-        let dst_process = find_ancestor_of_category(
-            instance,
-            *dst_comp,
-            ComponentCategory::Process,
-        );
+        let src_process =
+            find_ancestor_of_category(instance, *src_comp, ComponentCategory::Process);
+        let dst_process =
+            find_ancestor_of_category(instance, *dst_comp, ComponentCategory::Process);
 
         if let (Some(src_proc), Some(dst_proc)) = (src_process, dst_process) {
             if src_proc == dst_proc {
@@ -224,30 +204,26 @@ fn check_partition_isolation(
             let src_vp = owning_partition(instance, src_proc);
             let dst_vp = owning_partition(instance, dst_proc);
 
-            if let (Some(svp), Some(dvp)) = (src_vp, dst_vp) {
-                if svp != dvp {
-                    let src_name = instance.component(src_proc).name.as_str();
-                    let dst_name = instance.component(dst_proc).name.as_str();
-                    let src_vp_name = instance.component(svp).name.as_str();
-                    let dst_vp_name = instance.component(dvp).name.as_str();
+            if let (Some(svp), Some(dvp)) = (src_vp, dst_vp)
+                && svp != dvp
+            {
+                let src_name = instance.component(src_proc).name.as_str();
+                let dst_name = instance.component(dst_proc).name.as_str();
+                let src_vp_name = instance.component(svp).name.as_str();
+                let dst_vp_name = instance.component(dvp).name.as_str();
 
-                    diags.push(AnalysisDiagnostic {
-                        severity: Severity::Warning,
-                        message: format!(
-                            "direct connection '{}' crosses partition boundary: \
-                             process '{}' (partition '{}') -> process '{}' (partition '{}'). \
-                             Inter-partition communication should use approved mechanisms \
-                             (ARINC-PARTITION-ISOLATION)",
-                            sem_conn.name,
-                            src_name,
-                            src_vp_name,
-                            dst_name,
-                            dst_vp_name,
-                        ),
-                        path: component_path(instance, *src_comp),
-                        analysis: "arinc653".to_string(),
-                    });
-                }
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "direct connection '{}' crosses partition boundary: \
+                         process '{}' (partition '{}') -> process '{}' (partition '{}'). \
+                         Inter-partition communication should use approved mechanisms \
+                         (ARINC-PARTITION-ISOLATION)",
+                        sem_conn.name, src_name, src_vp_name, dst_name, dst_vp_name,
+                    ),
+                    path: component_path(instance, *src_comp),
+                    analysis: "arinc653".to_string(),
+                });
             }
         }
     }
@@ -277,42 +253,40 @@ fn check_partition_isolation(
                         let src_vp = owning_partition(instance, src_idx);
                         let dst_vp = owning_partition(instance, dst_idx);
 
-                        if let (Some(svp), Some(dvp)) = (src_vp, dst_vp) {
-                            if svp != dvp {
-                                // Check if we already reported this via semantic connections
-                                // to avoid duplicates
-                                let already_reported = diags.iter().any(|d| {
-                                    d.analysis == "arinc653"
-                                        && d.message.contains("ARINC-PARTITION-ISOLATION")
-                                        && d.message.contains(
-                                            instance.component(src_idx).name.as_str(),
-                                        )
-                                        && d.message.contains(
-                                            instance.component(dst_idx).name.as_str(),
-                                        )
+                        if let (Some(svp), Some(dvp)) = (src_vp, dst_vp)
+                            && svp != dvp
+                        {
+                            // Check if we already reported this via semantic connections
+                            // to avoid duplicates
+                            let already_reported = diags.iter().any(|d| {
+                                d.analysis == "arinc653"
+                                    && d.message.contains("ARINC-PARTITION-ISOLATION")
+                                    && d.message
+                                        .contains(instance.component(src_idx).name.as_str())
+                                    && d.message
+                                        .contains(instance.component(dst_idx).name.as_str())
+                            });
+
+                            if !already_reported {
+                                let src_vp_name = instance.component(svp).name.as_str();
+                                let dst_vp_name = instance.component(dvp).name.as_str();
+
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Warning,
+                                    message: format!(
+                                        "direct connection '{}' crosses partition boundary: \
+                                         process '{}' (partition '{}') -> process '{}' (partition '{}'). \
+                                         Inter-partition communication should use approved mechanisms \
+                                         (ARINC-PARTITION-ISOLATION)",
+                                        conn.name,
+                                        instance.component(src_idx).name,
+                                        src_vp_name,
+                                        instance.component(dst_idx).name,
+                                        dst_vp_name,
+                                    ),
+                                    path: component_path(instance, conn.owner),
+                                    analysis: "arinc653".to_string(),
                                 });
-
-                                if !already_reported {
-                                    let src_vp_name = instance.component(svp).name.as_str();
-                                    let dst_vp_name = instance.component(dvp).name.as_str();
-
-                                    diags.push(AnalysisDiagnostic {
-                                        severity: Severity::Warning,
-                                        message: format!(
-                                            "direct connection '{}' crosses partition boundary: \
-                                             process '{}' (partition '{}') -> process '{}' (partition '{}'). \
-                                             Inter-partition communication should use approved mechanisms \
-                                             (ARINC-PARTITION-ISOLATION)",
-                                            conn.name,
-                                            instance.component(src_idx).name,
-                                            src_vp_name,
-                                            instance.component(dst_idx).name,
-                                            dst_vp_name,
-                                        ),
-                                        path: component_path(instance, conn.owner),
-                                        analysis: "arinc653".to_string(),
-                                    });
-                                }
                             }
                         }
                     }
@@ -325,10 +299,7 @@ fn check_partition_isolation(
 /// **ARINC-WINDOW-UTILIZATION**: The sum of virtual processor execution
 /// times on a single processor must not exceed the processor's major
 /// frame period.
-fn check_window_utilization(
-    instance: &SystemInstance,
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
+fn check_window_utilization(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     let processors = find_components_by_category(instance, ComponentCategory::Processor);
 
     for proc_idx in processors {
@@ -405,10 +376,7 @@ fn check_window_utilization(
 }
 
 /// Extract a timing property (Period, Execution_Time, etc.) in picoseconds.
-fn get_timing_property(
-    props: &spar_hir_def::properties::PropertyMap,
-    name: &str,
-) -> Option<u64> {
+fn get_timing_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
     let raw = props
         .get("Timing_Properties", name)
         .or_else(|| props.get("", name))?;
@@ -419,9 +387,7 @@ fn get_timing_property(
 ///
 /// This property is typically a range (e.g., "1 ms .. 5 ms"). We take the
 /// worst case (max). If it's a single value, we use that.
-fn get_execution_time(
-    props: &spar_hir_def::properties::PropertyMap,
-) -> Option<u64> {
+fn get_execution_time(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
     let raw = props
         .get("Timing_Properties", "Execution_Time")
         .or_else(|| props.get("", "Execution_Time"))
@@ -489,7 +455,11 @@ mod tests {
             })
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
@@ -533,17 +503,15 @@ mod tests {
             idx
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
-                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
@@ -825,8 +793,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("ARINC-WINDOW-UTILIZATION")
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
             })
             .collect();
         assert!(
@@ -838,8 +805,7 @@ mod tests {
         let infos: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Info
-                    && d.message.contains("partition window utilization")
+                d.severity == Severity::Info && d.message.contains("partition window utilization")
             })
             .collect();
         assert!(
@@ -877,8 +843,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("ARINC-WINDOW-UTILIZATION")
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
             })
             .collect();
         assert_eq!(

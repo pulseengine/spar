@@ -13,7 +13,7 @@
 
 use spar_hir_def::instance::SystemInstance;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates property association rules on the instance model.
 ///
@@ -81,8 +81,7 @@ fn check_duplicate_properties(
                     message: format!(
                         "property '{}' has {} non-append associations \
                          (only the last assignment takes effect)",
-                        prop_display,
-                        non_append_count
+                        prop_display, non_append_count
                     ),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
@@ -107,21 +106,19 @@ fn check_range_ordering(
                 let low_str = low_str.trim();
                 let high_str = high_str.trim();
                 // Try to parse as integers
-                if let (Ok(low), Ok(high)) = (
-                    parse_numeric_value(low_str),
-                    parse_numeric_value(high_str),
-                ) {
-                    if low > high {
-                        diags.push(AnalysisDiagnostic {
-                            severity: Severity::Error,
-                            message: format!(
-                                "property '{}' range has lower bound ({}) > upper bound ({})",
-                                pv.name, low_str, high_str
-                            ),
-                            path: path.to_vec(),
-                            analysis: "property_rules".to_string(),
-                        });
-                    }
+                if let (Ok(low), Ok(high)) =
+                    (parse_numeric_value(low_str), parse_numeric_value(high_str))
+                    && low > high
+                {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "property '{}' range has lower bound ({}) > upper bound ({})",
+                            pv.name, low_str, high_str
+                        ),
+                        path: path.to_vec(),
+                        analysis: "property_rules".to_string(),
+                    });
                 }
             }
         }
@@ -241,10 +238,7 @@ fn check_value_types(
             if val.is_empty() {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
-                    message: format!(
-                        "property '{}' has an empty value",
-                        pv.name
-                    ),
+                    message: format!("property '{}' has an empty value", pv.name),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
                 });
@@ -278,22 +272,22 @@ fn check_constant_references(
         for pv in values {
             let val = pv.value.trim();
             // Check for malformed reference expressions
-            if val.contains("reference") {
-                if let Some(start) = val.find("reference") {
-                    let after = &val[start + "reference".len()..];
-                    let trimmed = after.trim();
-                    if !trimmed.starts_with('(') {
-                        diags.push(AnalysisDiagnostic {
-                            severity: Severity::Warning,
-                            message: format!(
-                                "property '{}' contains 'reference' keyword \
-                                 without proper parenthesized target",
-                                pv.name
-                            ),
-                            path: path.to_vec(),
-                            analysis: "property_rules".to_string(),
-                        });
-                    }
+            if val.contains("reference")
+                && let Some(start) = val.find("reference")
+            {
+                let after = &val[start + "reference".len()..];
+                let trimmed = after.trim();
+                if !trimmed.starts_with('(') {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "property '{}' contains 'reference' keyword \
+                             without proper parenthesized target",
+                            pv.name
+                        ),
+                        path: path.to_vec(),
+                        analysis: "property_rules".to_string(),
+                    });
                 }
             }
         }
@@ -323,14 +317,11 @@ fn check_applies_to(
     ];
 
     for (set, name) in &thread_only_props {
-        let has_prop = prop_map.get(set, name).is_some()
-            || prop_map.get("", name).is_some();
+        let has_prop = prop_map.get(set, name).is_some() || prop_map.get("", name).is_some();
         if has_prop
             && !matches!(
                 category,
-                ComponentCategory::Thread
-                    | ComponentCategory::Device
-                    | ComponentCategory::Abstract
+                ComponentCategory::Thread | ComponentCategory::Device | ComponentCategory::Abstract
             )
         {
             diags.push(AnalysisDiagnostic {
@@ -405,13 +396,7 @@ mod tests {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
             self.set_property_ext(comp, set, name, value, false);
         }
 
@@ -423,10 +408,7 @@ mod tests {
             value: &str,
             is_append: bool,
         ) {
-            let map = self
-                .property_maps
-                .entry(comp)
-                .or_insert_with(PropertyMap::new);
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
                     property_set: if set.is_empty() {
@@ -611,12 +593,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("mixed element"))
             .collect();
-        assert_eq!(
-            list_warns.len(),
-            1,
-            "mixed list should warn: {:?}",
-            diags
-        );
+        assert_eq!(list_warns.len(), 1, "mixed list should warn: {:?}", diags);
     }
 
     #[test]
@@ -652,12 +629,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("empty value"))
             .collect();
-        assert_eq!(
-            empty_warns.len(),
-            1,
-            "empty value should warn: {:?}",
-            diags
-        );
+        assert_eq!(empty_warns.len(), 1, "empty value should warn: {:?}", diags);
     }
 
     #[test]
@@ -690,10 +662,7 @@ mod tests {
         let diags = PropertyRuleAnalysis.analyze(&inst);
         let type_errs: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.message.contains("empty value")
-                    || d.message.contains("unbalanced")
-            })
+            .filter(|d| d.message.contains("empty value") || d.message.contains("unbalanced"))
             .collect();
         assert!(
             type_errs.is_empty(),

@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use spar_hir_def::instance::SystemInstance;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Analyzes model completeness.
 ///
@@ -118,7 +118,11 @@ impl Analysis for CompletenessAnalysis {
 
         // Check instance-level diagnostics for unresolved references.
         for inst_diag in &instance.diagnostics {
-            let path: Vec<String> = inst_diag.path.iter().map(|n| n.as_str().to_string()).collect();
+            let path: Vec<String> = inst_diag
+                .path
+                .iter()
+                .map(|n| n.as_str().to_string())
+                .collect();
             diags.push(AnalysisDiagnostic {
                 severity: Severity::Error,
                 message: inst_diag.message.clone(),

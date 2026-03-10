@@ -48,12 +48,22 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
             }
             SyntaxKind::PUBLIC_SECTION => {
                 lower_section_with_visibility(
-                    &child, tree, &mut public_items, &mut with_clauses, &mut renames, true,
+                    &child,
+                    tree,
+                    &mut public_items,
+                    &mut with_clauses,
+                    &mut renames,
+                    true,
                 );
             }
             SyntaxKind::PRIVATE_SECTION => {
                 lower_section_with_visibility(
-                    &child, tree, &mut private_items, &mut with_clauses, &mut renames, false,
+                    &child,
+                    tree,
+                    &mut private_items,
+                    &mut with_clauses,
+                    &mut renames,
+                    false,
                 );
             }
             _ => {}
@@ -100,17 +110,23 @@ fn lower_section_with_visibility(
                 collect_with_names(&child, with_clauses);
             }
             SyntaxKind::COMPONENT_TYPE => {
-                if let Some(item_ref) = lower_component_type_with_visibility(&child, tree, is_public) {
+                if let Some(item_ref) =
+                    lower_component_type_with_visibility(&child, tree, is_public)
+                {
                     items.push(item_ref);
                 }
             }
             SyntaxKind::COMPONENT_IMPL => {
-                if let Some(item_ref) = lower_component_impl_with_visibility(&child, tree, is_public) {
+                if let Some(item_ref) =
+                    lower_component_impl_with_visibility(&child, tree, is_public)
+                {
                     items.push(item_ref);
                 }
             }
             SyntaxKind::FEATURE_GROUP_TYPE => {
-                if let Some(item_ref) = lower_feature_group_type_with_visibility(&child, tree, is_public) {
+                if let Some(item_ref) =
+                    lower_feature_group_type_with_visibility(&child, tree, is_public)
+                {
                     items.push(item_ref);
                 }
             }
@@ -132,7 +148,11 @@ fn lower_section_with_visibility(
     }
 }
 
-fn lower_component_type_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
+fn lower_component_type_with_visibility(
+    node: &SyntaxNode,
+    tree: &mut ItemTree,
+    is_public: bool,
+) -> Option<ItemRef> {
     let category = extract_category(node)?;
     let name = extract_decl_name(node)?;
 
@@ -197,7 +217,11 @@ fn lower_component_type_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, 
     Some(ItemRef::ComponentType(idx))
 }
 
-fn lower_component_impl_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
+fn lower_component_impl_with_visibility(
+    node: &SyntaxNode,
+    tree: &mut ItemTree,
+    is_public: bool,
+) -> Option<ItemRef> {
     let category = extract_category(node)?;
 
     // Extract type_name from REALIZATION child
@@ -291,7 +315,11 @@ fn lower_component_impl_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, 
     Some(ItemRef::ComponentImpl(idx))
 }
 
-fn lower_feature_group_type_with_visibility(node: &SyntaxNode, tree: &mut ItemTree, is_public: bool) -> Option<ItemRef> {
+fn lower_feature_group_type_with_visibility(
+    node: &SyntaxNode,
+    tree: &mut ItemTree,
+    is_public: bool,
+) -> Option<ItemRef> {
     let name = extract_decl_name(node)?;
 
     let extends = node
@@ -444,8 +472,7 @@ fn lower_property_set(ps: &ast::PropertySet, tree: &mut ItemTree) {
 fn lower_property_set_in_section(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ItemRef> {
     let name = extract_name_text(node)?;
 
-    let (property_defs, property_type_defs, property_constants) =
-        extract_property_set_items(node);
+    let (property_defs, property_type_defs, property_constants) = extract_property_set_items(node);
 
     let idx = tree.property_sets.alloc(PropertySetItem {
         name,
@@ -508,8 +535,8 @@ fn extract_property_set_items(
                         .and_then(|pt| lower_property_type_def(&pt));
 
                     // The constant value is after the FAT_ARROW
-                    let value = find_property_value_node(&child)
-                        .and_then(|vn| lower_property_expr(&vn));
+                    let value =
+                        find_property_value_node(&child).and_then(|vn| lower_property_expr(&vn));
 
                     constants.push(PropertyConstantItem {
                         name: Name::new(tok.text()),
@@ -537,10 +564,10 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
     let mut child_nodes: Vec<SyntaxNode> = Vec::new();
 
     for elem in node.children_with_tokens() {
-        if let Some(tok) = elem.as_token() {
-            if !tok.kind().is_trivia() {
-                tokens.push((tok.kind(), tok.text().to_string()));
-            }
+        if let Some(tok) = elem.as_token()
+            && !tok.kind().is_trivia()
+        {
+            tokens.push((tok.kind(), tok.text().to_string()));
         }
         if let Some(n) = elem.as_node() {
             child_nodes.push(n.clone());
@@ -572,10 +599,7 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
         }
         Some(SyntaxKind::AADLREAL_KW) => {
             let units = extract_units_ref(&tokens, &child_nodes);
-            Some(PropertyTypeDef::AadlReal {
-                range: None,
-                units,
-            })
+            Some(PropertyTypeDef::AadlReal { range: None, units })
         }
         Some(SyntaxKind::AADLSTRING_KW) => Some(PropertyTypeDef::AadlString),
         Some(SyntaxKind::AADLBOOLEAN_KW) => Some(PropertyTypeDef::AadlBoolean),
@@ -599,7 +623,7 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
             let inner = child_nodes
                 .iter()
                 .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
-                .and_then(|pt| lower_property_type_def(pt))
+                .and_then(lower_property_type_def)
                 .unwrap_or(PropertyTypeDef::AadlString);
             Some(PropertyTypeDef::ListOf(Box::new(inner)))
         }
@@ -608,7 +632,7 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
             let inner = child_nodes
                 .iter()
                 .find(|c| c.kind() == SyntaxKind::PROPERTY_TYPE)
-                .and_then(|pt| lower_property_type_def(pt))
+                .and_then(lower_property_type_def)
                 .unwrap_or(PropertyTypeDef::AadlInteger {
                     range: None,
                     units: None,
@@ -644,21 +668,18 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
                     SyntaxKind::IDENT if in_parens => {
                         let unit_name = Name::new(text);
                         // Check for `=> base * factor`
-                        if idx + 1 < tokens.len()
-                            && tokens[idx + 1].0 == SyntaxKind::FAT_ARROW
-                        {
+                        if idx + 1 < tokens.len() && tokens[idx + 1].0 == SyntaxKind::FAT_ARROW {
                             // Skip =>
                             idx += 2;
                             // base unit name
-                            let base_name = if idx < tokens.len()
-                                && tokens[idx].0 == SyntaxKind::IDENT
-                            {
-                                let b = Name::new(&tokens[idx].1);
-                                idx += 1;
-                                b
-                            } else {
-                                Name::new("?")
-                            };
+                            let base_name =
+                                if idx < tokens.len() && tokens[idx].0 == SyntaxKind::IDENT {
+                                    let b = Name::new(&tokens[idx].1);
+                                    idx += 1;
+                                    b
+                                } else {
+                                    Name::new("?")
+                                };
                             // * factor
                             if idx < tokens.len() && tokens[idx].0 == SyntaxKind::STAR {
                                 idx += 1;
@@ -674,10 +695,7 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
                                 };
                                 units.push((unit_name, Some((base_name, factor))));
                             } else {
-                                units.push((
-                                    unit_name,
-                                    Some((base_name, "1".to_string())),
-                                ));
+                                units.push((unit_name, Some((base_name, "1".to_string()))));
                             }
                             continue; // skip normal idx increment
                         } else {
@@ -740,10 +758,7 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
 /// Extract `units UnitTypeName` reference from token list.
 ///
 /// Looks for UNITS_KW followed by a CLASSIFIER_REF child node or IDENT token.
-fn extract_units_ref(
-    tokens: &[(SyntaxKind, String)],
-    children: &[SyntaxNode],
-) -> Option<Name> {
+fn extract_units_ref(tokens: &[(SyntaxKind, String)], children: &[SyntaxNode]) -> Option<Name> {
     let has_units_kw = tokens.iter().any(|(k, _)| *k == SyntaxKind::UNITS_KW);
     if !has_units_kw {
         return None;
@@ -830,16 +845,16 @@ fn extract_applies_to_list(node: &SyntaxNode) -> Vec<AppliesToKind> {
                 _ => {}
             }
         }
-        if let Some(n) = elem.as_node() {
-            if in_parens && n.kind() == SyntaxKind::COMPONENT_CATEGORY {
-                let text = n.text().to_string();
-                let normalized: String =
-                    text.split_whitespace().collect::<Vec<_>>().join(" ");
-                if let Some(cat) = parse_category(&normalized) {
-                    result.push(AppliesToKind::Category(cat));
-                } else {
-                    result.push(AppliesToKind::Named(Name::new(&normalized)));
-                }
+        if let Some(n) = elem.as_node()
+            && in_parens
+            && n.kind() == SyntaxKind::COMPONENT_CATEGORY
+        {
+            let text = n.text().to_string();
+            let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            if let Some(cat) = parse_category(&normalized) {
+                result.push(AppliesToKind::Category(cat));
+            } else {
+                result.push(AppliesToKind::Named(Name::new(&normalized)));
             }
         }
     }
@@ -887,9 +902,7 @@ fn lower_features(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<Featu
 
         let access_kind = extract_access_kind(&node);
 
-        let is_refined = node
-            .children()
-            .any(|c| c.kind() == SyntaxKind::REFINED_TO);
+        let is_refined = node.children().any(|c| c.kind() == SyntaxKind::REFINED_TO);
 
         let classifier = node
             .children()
@@ -922,11 +935,7 @@ fn lower_features(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<Featu
 
 // ── Subcomponent lowering ──────────────────────────────────────────
 
-fn lower_subcomponents(
-    section: &SyntaxNode,
-    tree: &mut ItemTree,
-    out: &mut Vec<SubcomponentIdx>,
-) {
+fn lower_subcomponents(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<SubcomponentIdx>) {
     for child in section.children() {
         if child.kind() != SyntaxKind::SUBCOMPONENT {
             continue;
@@ -942,9 +951,7 @@ fn lower_subcomponents(
             None => continue,
         };
 
-        let is_refined = child
-            .children()
-            .any(|c| c.kind() == SyntaxKind::REFINED_TO);
+        let is_refined = child.children().any(|c| c.kind() == SyntaxKind::REFINED_TO);
 
         let classifier = child
             .children()
@@ -998,17 +1005,19 @@ fn lower_connections(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<Co
             .filter_map(|it| it.into_token())
             .any(|tok| tok.kind() == SyntaxKind::BIDI_ARROW);
 
-        let is_refined = child
-            .children()
-            .any(|c| c.kind() == SyntaxKind::REFINED_TO);
+        let is_refined = child.children().any(|c| c.kind() == SyntaxKind::REFINED_TO);
 
         // Extract source and destination CONNECTED_ELEMENT nodes
         let mut connected_elements = child
             .children()
             .filter(|c| c.kind() == SyntaxKind::CONNECTED_ELEMENT);
 
-        let src = connected_elements.next().and_then(|ce| parse_connected_element(&ce));
-        let dst = connected_elements.next().and_then(|ce| parse_connected_element(&ce));
+        let src = connected_elements
+            .next()
+            .and_then(|ce| parse_connected_element(&ce));
+        let dst = connected_elements
+            .next()
+            .and_then(|ce| parse_connected_element(&ce));
 
         let in_modes = extract_in_modes(&child);
 
@@ -1103,18 +1112,13 @@ fn lower_flow_specs(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<Flo
         let flow_ends: Vec<Name> = child
             .children()
             .filter(|c| c.kind() == SyntaxKind::FLOW_END)
-            .filter_map(|fe| {
-                first_ident_token(&fe).map(|tok| Name::new(tok.text()))
-            })
+            .filter_map(|fe| first_ident_token(&fe).map(|tok| Name::new(tok.text())))
             .collect();
 
         let (source_feature, sink_feature) = match kind {
             FlowKind::Source => (flow_ends.first().cloned(), None),
             FlowKind::Sink => (flow_ends.first().cloned(), None),
-            FlowKind::Path => (
-                flow_ends.first().cloned(),
-                flow_ends.get(1).cloned(),
-            ),
+            FlowKind::Path => (flow_ends.first().cloned(), flow_ends.get(1).cloned()),
         };
 
         let in_modes = extract_in_modes(&child);
@@ -1164,10 +1168,7 @@ fn lower_flow_impl_section(
     }
 }
 
-fn lower_single_end_to_end_flow(
-    node: &SyntaxNode,
-    tree: &mut ItemTree,
-) -> Option<EndToEndFlowIdx> {
+fn lower_single_end_to_end_flow(node: &SyntaxNode, tree: &mut ItemTree) -> Option<EndToEndFlowIdx> {
     let name = first_ident_token(node).map(|tok| Name::new(tok.text()))?;
 
     // Collect segment names from FLOW_SEGMENT children
@@ -1302,7 +1303,10 @@ fn lower_mode_transition(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ModeT
     for child in node.children() {
         if child.kind() == SyntaxKind::MODE_TRIGGER {
             // Collect trigger port names
-            for tok in child.children_with_tokens().filter_map(|it| it.into_token()) {
+            for tok in child
+                .children_with_tokens()
+                .filter_map(|it| it.into_token())
+            {
                 if tok.kind() == SyntaxKind::IDENT {
                     triggers.push(Name::new(tok.text()));
                 }
@@ -1339,11 +1343,7 @@ fn lower_mode_transition(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ModeT
 
 // ── Prototype lowering ─────────────────────────────────────────────
 
-fn lower_prototypes(
-    section: &SyntaxNode,
-    tree: &mut ItemTree,
-    out: &mut Vec<PrototypeIdx>,
-) {
+fn lower_prototypes(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<PrototypeIdx>) {
     for child in section.children() {
         if child.kind() != SyntaxKind::PROTOTYPE {
             continue;
@@ -1371,11 +1371,7 @@ fn lower_prototypes(
 
 // ── Call sequence lowering ─────────────────────────────────────────
 
-fn lower_call_sequences(
-    section: &SyntaxNode,
-    tree: &mut ItemTree,
-    out: &mut Vec<CallSequenceIdx>,
-) {
+fn lower_call_sequences(section: &SyntaxNode, tree: &mut ItemTree, out: &mut Vec<CallSequenceIdx>) {
     for child in section.children() {
         if child.kind() != SyntaxKind::CALL_SEQUENCE {
             continue;
@@ -1385,19 +1381,19 @@ fn lower_call_sequences(
 
         let mut calls = Vec::new();
         for call_node in child.children() {
-            if call_node.kind() == SyntaxKind::SUBPROGRAM_CALL {
-                if let Some(call_name) = first_ident_token(&call_node) {
-                    let called_subprogram = call_node
-                        .children()
-                        .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
-                        .and_then(|cr| parse_classifier_ref_node(&cr));
+            if call_node.kind() == SyntaxKind::SUBPROGRAM_CALL
+                && let Some(call_name) = first_ident_token(&call_node)
+            {
+                let called_subprogram = call_node
+                    .children()
+                    .find(|c| c.kind() == SyntaxKind::CLASSIFIER_REF)
+                    .and_then(|cr| parse_classifier_ref_node(&cr));
 
-                    let call_idx = tree.subprogram_calls.alloc(SubprogramCallItem {
-                        name: Name::new(call_name.text()),
-                        called_subprogram,
-                    });
-                    calls.push(call_idx);
-                }
+                let call_idx = tree.subprogram_calls.alloc(SubprogramCallItem {
+                    name: Name::new(call_name.text()),
+                    called_subprogram,
+                });
+                calls.push(call_idx);
             }
         }
 
@@ -1538,36 +1534,34 @@ fn extract_property_value_text(node: &SyntaxNode) -> String {
 fn find_property_value_node(node: &SyntaxNode) -> Option<SyntaxNode> {
     let mut past_arrow = false;
     for elem in node.children_with_tokens() {
-        if let Some(tok) = elem.as_token() {
-            if tok.kind() == SyntaxKind::FAT_ARROW || tok.kind() == SyntaxKind::PLUS_ARROW {
-                past_arrow = true;
-                continue;
-            }
+        if let Some(tok) = elem.as_token()
+            && (tok.kind() == SyntaxKind::FAT_ARROW || tok.kind() == SyntaxKind::PLUS_ARROW)
+        {
+            past_arrow = true;
+            continue;
         }
-        if past_arrow {
-            if let Some(n) = elem.as_node() {
-                match n.kind() {
-                    SyntaxKind::INTEGER_VALUE
-                    | SyntaxKind::REAL_VALUE
-                    | SyntaxKind::STRING_VALUE
-                    | SyntaxKind::BOOLEAN_VALUE
-                    | SyntaxKind::LIST_VALUE
-                    | SyntaxKind::RECORD_VALUE
-                    | SyntaxKind::RANGE_VALUE
-                    | SyntaxKind::CLASSIFIER_VALUE
-                    | SyntaxKind::REFERENCE_VALUE
-                    | SyntaxKind::COMPUTED_VALUE
-                    | SyntaxKind::PROPERTY_EXPRESSION => {
-                        return Some(n.clone());
-                    }
-                    SyntaxKind::APPLIES_TO
-                    | SyntaxKind::IN_BINDING
-                    | SyntaxKind::MODAL_PROPERTY_VALUE => {
-                        // Stop searching — we've passed the value region
-                        return None;
-                    }
-                    _ => {}
+        if past_arrow && let Some(n) = elem.as_node() {
+            match n.kind() {
+                SyntaxKind::INTEGER_VALUE
+                | SyntaxKind::REAL_VALUE
+                | SyntaxKind::STRING_VALUE
+                | SyntaxKind::BOOLEAN_VALUE
+                | SyntaxKind::LIST_VALUE
+                | SyntaxKind::RECORD_VALUE
+                | SyntaxKind::RANGE_VALUE
+                | SyntaxKind::CLASSIFIER_VALUE
+                | SyntaxKind::REFERENCE_VALUE
+                | SyntaxKind::COMPUTED_VALUE
+                | SyntaxKind::PROPERTY_EXPRESSION => {
+                    return Some(n.clone());
                 }
+                SyntaxKind::APPLIES_TO
+                | SyntaxKind::IN_BINDING
+                | SyntaxKind::MODAL_PROPERTY_VALUE => {
+                    // Stop searching — we've passed the value region
+                    return None;
+                }
+                _ => {}
             }
         }
     }
@@ -1684,11 +1678,7 @@ fn lower_real_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     }
 
     let text = real_text?;
-    let display = if negative {
-        format!("-{}", text)
-    } else {
-        text
-    };
+    let display = if negative { format!("-{}", text) } else { text };
 
     if let Some(u) = unit {
         Some(PropertyExpr::Real(display, Some(u)))
@@ -1738,10 +1728,10 @@ fn lower_boolean_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     }
     // If there are child nodes (e.g., `not` wrapping another boolean expression)
     for child in node.children() {
-        if child.kind() == SyntaxKind::BOOLEAN_VALUE {
-            if let Some(PropertyExpr::Boolean(val)) = lower_boolean_value(&child) {
-                return Some(PropertyExpr::Boolean(if has_not { !val } else { val }));
-            }
+        if child.kind() == SyntaxKind::BOOLEAN_VALUE
+            && let Some(PropertyExpr::Boolean(val)) = lower_boolean_value(&child)
+        {
+            return Some(PropertyExpr::Boolean(if has_not { !val } else { val }));
         }
     }
     None
@@ -1815,10 +1805,12 @@ fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         return lower_range_from_tokens(node);
     }
 
-    let min_expr = lower_property_expr(&value_nodes[0])
-        .unwrap_or_else(|| PropertyExpr::Opaque(value_nodes[0].text().to_string().trim().to_string()));
-    let max_expr = lower_property_expr(&value_nodes[1])
-        .unwrap_or_else(|| PropertyExpr::Opaque(value_nodes[1].text().to_string().trim().to_string()));
+    let min_expr = lower_property_expr(&value_nodes[0]).unwrap_or_else(|| {
+        PropertyExpr::Opaque(value_nodes[0].text().to_string().trim().to_string())
+    });
+    let max_expr = lower_property_expr(&value_nodes[1]).unwrap_or_else(|| {
+        PropertyExpr::Opaque(value_nodes[1].text().to_string().trim().to_string())
+    });
 
     let delta = delta_node.and_then(|dn| {
         dn.children()
@@ -1878,13 +1870,13 @@ fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
                 _ => {}
             }
         }
-        if let Some(n) = elem.as_node() {
-            if past_dot_dot {
-                if n.kind() == SyntaxKind::DELTA_VALUE {
-                    delta_expr = n.children().find_map(|c| lower_property_expr(&c));
-                } else if max_expr.is_none() {
-                    max_expr = lower_property_expr(n);
-                }
+        if let Some(n) = elem.as_node()
+            && past_dot_dot
+        {
+            if n.kind() == SyntaxKind::DELTA_VALUE {
+                delta_expr = n.children().find_map(|c| lower_property_expr(&c));
+            } else if max_expr.is_none() {
+                max_expr = lower_property_expr(n);
             }
         }
     }
@@ -1905,9 +1897,7 @@ fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
         return None;
     };
 
-    let max = max_expr.unwrap_or_else(|| {
-        PropertyExpr::Opaque("?".to_string())
-    });
+    let max = max_expr.unwrap_or_else(|| PropertyExpr::Opaque("?".to_string()));
 
     Some(PropertyExpr::Range {
         min: Box::new(min),
@@ -1973,17 +1963,17 @@ fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         .filter_map(|it| it.into_token())
         .next();
 
-    if let Some(ref tok) = first_tok {
-        if tok.kind() == SyntaxKind::PLUS || tok.kind() == SyntaxKind::MINUS {
-            // Signed value wrapper — find the inner expression
-            let sign_negative = tok.kind() == SyntaxKind::MINUS;
-            for child in node.children() {
-                if let Some(inner) = lower_property_expr(&child) {
-                    return Some(apply_sign(inner, sign_negative));
-                }
+    if let Some(ref tok) = first_tok
+        && (tok.kind() == SyntaxKind::PLUS || tok.kind() == SyntaxKind::MINUS)
+    {
+        // Signed value wrapper — find the inner expression
+        let sign_negative = tok.kind() == SyntaxKind::MINUS;
+        for child in node.children() {
+            if let Some(inner) = lower_property_expr(&child) {
+                return Some(apply_sign(inner, sign_negative));
             }
-            return None;
         }
+        return None;
     }
 
     // Collect all identifiers and separators to form the name
@@ -2014,8 +2004,8 @@ fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
     match expr {
         PropertyExpr::Integer(val, unit) => PropertyExpr::Integer(-val, unit),
         PropertyExpr::Real(val, unit) => {
-            if val.starts_with('-') {
-                PropertyExpr::Real(val[1..].to_string(), unit)
+            if let Some(stripped) = val.strip_prefix('-') {
+                PropertyExpr::Real(stripped.to_string(), unit)
             } else {
                 PropertyExpr::Real(format!("-{}", val), unit)
             }
@@ -2194,11 +2184,14 @@ fn extract_array_dimensions(node: &SyntaxNode) -> Vec<ArrayDimension> {
                 .find(|c| c.kind() == SyntaxKind::ARRAY_SIZE)
                 .and_then(|size_node| {
                     // Try to parse integer literal
-                    for tok in size_node.children_with_tokens().filter_map(|it| it.into_token()) {
-                        if tok.kind() == SyntaxKind::INTEGER_LIT {
-                            if let Ok(n) = tok.text().parse::<u64>() {
-                                return Some(ArraySize::Literal(n));
-                            }
+                    for tok in size_node
+                        .children_with_tokens()
+                        .filter_map(|it| it.into_token())
+                    {
+                        if tok.kind() == SyntaxKind::INTEGER_LIT
+                            && let Ok(n) = tok.text().parse::<u64>()
+                        {
+                            return Some(ArraySize::Literal(n));
                         }
                     }
                     None
@@ -2260,17 +2253,16 @@ fn extract_inverse_of(node: &SyntaxNode) -> Option<ClassifierRef> {
     // Look for INVERSE_KW followed by OF_KW followed by CLASSIFIER_REF
     let mut saw_inverse = false;
     for child in node.children_with_tokens() {
-        if let Some(tok) = child.as_token() {
-            if tok.kind() == SyntaxKind::INVERSE_KW {
-                saw_inverse = true;
-            }
+        if let Some(tok) = child.as_token()
+            && tok.kind() == SyntaxKind::INVERSE_KW
+        {
+            saw_inverse = true;
         }
-        if saw_inverse {
-            if let Some(n) = child.as_node() {
-                if n.kind() == SyntaxKind::CLASSIFIER_REF {
-                    return parse_classifier_ref_node(n);
-                }
-            }
+        if saw_inverse
+            && let Some(n) = child.as_node()
+            && n.kind() == SyntaxKind::CLASSIFIER_REF
+        {
+            return parse_classifier_ref_node(n);
         }
     }
     None

@@ -9,7 +9,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates deployment binding properties on the instance model.
 ///
@@ -29,11 +29,14 @@ impl Analysis for BindingCheckAnalysis {
 
         // Track whether the model has any processors and memory components
         let has_processors = instance.all_components().any(|(_, c)| {
-            matches!(c.category, ComponentCategory::Processor | ComponentCategory::VirtualProcessor)
+            matches!(
+                c.category,
+                ComponentCategory::Processor | ComponentCategory::VirtualProcessor
+            )
         });
-        let has_memory = instance.all_components().any(|(_, c)| {
-            matches!(c.category, ComponentCategory::Memory)
-        });
+        let has_memory = instance
+            .all_components()
+            .any(|(_, c)| matches!(c.category, ComponentCategory::Memory));
 
         for (comp_idx, comp) in instance.all_components() {
             let path = component_path(instance, comp_idx);
@@ -41,7 +44,9 @@ impl Analysis for BindingCheckAnalysis {
 
             // Check for processor bindings on threads
             if comp.category == ComponentCategory::Thread && has_processors {
-                let has_binding = props.get("Deployment_Properties", "Actual_Processor_Binding").is_some()
+                let has_binding = props
+                    .get("Deployment_Properties", "Actual_Processor_Binding")
+                    .is_some()
                     || props.get("", "Actual_Processor_Binding").is_some();
                 if !has_binding {
                     diags.push(AnalysisDiagnostic {
@@ -59,7 +64,9 @@ impl Analysis for BindingCheckAnalysis {
 
             // Check for memory bindings on processes
             if comp.category == ComponentCategory::Process && has_memory {
-                let has_binding = props.get("Deployment_Properties", "Actual_Memory_Binding").is_some()
+                let has_binding = props
+                    .get("Deployment_Properties", "Actual_Memory_Binding")
+                    .is_some()
                     || props.get("", "Actual_Memory_Binding").is_some();
                 if !has_binding {
                     diags.push(AnalysisDiagnostic {
@@ -87,7 +94,10 @@ impl Analysis for BindingCheckAnalysis {
                     comp_idx,
                     "Actual_Processor_Binding",
                     binding_val,
-                    &[ComponentCategory::Processor, ComponentCategory::VirtualProcessor],
+                    &[
+                        ComponentCategory::Processor,
+                        ComponentCategory::VirtualProcessor,
+                    ],
                     &path,
                     &mut diags,
                 );
@@ -103,7 +113,11 @@ impl Analysis for BindingCheckAnalysis {
                     comp_idx,
                     "Actual_Memory_Binding",
                     binding_val,
-                    &[ComponentCategory::Memory, ComponentCategory::System, ComponentCategory::Processor],
+                    &[
+                        ComponentCategory::Memory,
+                        ComponentCategory::System,
+                        ComponentCategory::Processor,
+                    ],
                     &path,
                     &mut diags,
                 );
@@ -185,10 +199,9 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
-    use spar_hir_def::item_tree::*;
     use spar_hir_def::name::Name;
-    use spar_hir_def::properties::{PropertyMap, PropertyValue};
     use spar_hir_def::name::PropertyRef;
+    use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
     struct TestBuilder {
         components: Arena<ComponentInstance>,
@@ -230,21 +243,23 @@ mod tests {
             })
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
-                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
@@ -282,10 +297,16 @@ mod tests {
 
         let inst = b.build(root);
         let diags = BindingCheckAnalysis.analyze(&inst);
-        let infos: Vec<_> = diags.iter()
+        let infos: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("Actual_Processor_Binding"))
             .collect();
-        assert_eq!(infos.len(), 1, "thread should note missing binding: {:?}", diags);
+        assert_eq!(
+            infos.len(),
+            1,
+            "thread should note missing binding: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -297,14 +318,26 @@ mod tests {
         let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
         b.set_children(root, vec![cpu, proc]);
         b.set_children(proc, vec![thread]);
-        b.set_property(thread, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu)");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu)",
+        );
 
         let inst = b.build(root);
         let diags = BindingCheckAnalysis.analyze(&inst);
-        let binding_diags: Vec<_> = diags.iter()
-            .filter(|d| d.message.contains("Actual_Processor_Binding") && d.message.contains("worker"))
+        let binding_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Actual_Processor_Binding") && d.message.contains("worker")
+            })
             .collect();
-        assert!(binding_diags.is_empty(), "bound thread should not warn: {:?}", binding_diags);
+        assert!(
+            binding_diags.is_empty(),
+            "bound thread should not warn: {:?}",
+            binding_diags
+        );
     }
 
     #[test]
@@ -318,10 +351,15 @@ mod tests {
 
         let inst = b.build(root);
         let diags = BindingCheckAnalysis.analyze(&inst);
-        let binding_diags: Vec<_> = diags.iter()
+        let binding_diags: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("Actual_Processor_Binding"))
             .collect();
-        assert!(binding_diags.is_empty(), "no processors = no binding needed: {:?}", binding_diags);
+        assert!(
+            binding_diags.is_empty(),
+            "no processors = no binding needed: {:?}",
+            binding_diags
+        );
     }
 
     #[test]
@@ -340,13 +378,24 @@ mod tests {
         let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
         b.set_children(root, vec![mem, thread]);
         // Bind thread to memory (wrong — should be processor)
-        b.set_property(thread, "Deployment_Properties", "Actual_Processor_Binding", "reference (mem)");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (mem)",
+        );
 
         let inst = b.build(root);
         let diags = BindingCheckAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter()
+        let errors: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("memory"))
             .collect();
-        assert_eq!(errors.len(), 1, "binding to memory for processor: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "binding to memory for processor: {:?}",
+            diags
+        );
     }
 }

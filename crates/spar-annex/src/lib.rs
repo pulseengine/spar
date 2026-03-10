@@ -33,10 +33,10 @@
 //! | `BLESS` | Non-standard (Kansas State Univ) | — | Opaque only |
 //! | `security` | Experimental (DARPA CASE) | — | Opaque only |
 
+pub mod ba;
+pub mod emv2;
 mod registry;
 mod types;
-pub mod emv2;
-pub mod ba;
 
 pub use registry::AnnexRegistry;
 pub use types::*;
