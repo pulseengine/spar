@@ -10,5 +10,7 @@ description = "Bidirectional transforms between AADL and external formats (WIT, 
 spar-hir-def.workspace = true
 la-arena = "0.3"
 smol_str = "0.3"
+serde.workspace = true
+serde_json = "1"
 
 [dev-dependencies]
