@@ -1,0 +1,315 @@
+# Spar toolchain requirements — derived from SAE AS5506C (AADL v2.2)
+# and operational needs for the spar+rivet integration.
+
+artifacts:
+
+  # ── Parsing (AS5506 Ch.15) ──────────────────────────────────────────────
+
+  - id: REQ-PARSE-001
+    type: requirement
+    title: AADL v2.2 lexical and syntactic parsing
+    description: >
+      Parse all AADL v2.2 lexical elements (identifiers, numeric literals,
+      string literals, comments, 76 reserved words) and produce a lossless
+      concrete syntax tree (CST) preserving every byte of input.
+    status: implemented
+    tags: [parsing, as5506-ch15]
+
+  - id: REQ-PARSE-002
+    type: requirement
+    title: Parse error recovery with source locations
+    description: >
+      Report parse errors with file path, line, and column. Recover from
+      errors to continue parsing the rest of the file.
+    status: implemented
+    tags: [parsing, diagnostics]
+
+  # ── Declarative Model (AS5506 Ch.4-8) ──────────────────────────────────
+
+  - id: REQ-MODEL-001
+    type: requirement
+    title: Declarative model construction (ItemTree)
+    description: >
+      Lower CST to an ItemTree capturing packages, component types,
+      component implementations, feature group types, property sets, and
+      all nested items (features, subcomponents, connections, flows, modes,
+      prototypes, call sequences, renames).
+    status: implemented
+    tags: [model, as5506-ch4]
+
+  - id: REQ-MODEL-002
+    type: requirement
+    title: Support all 14 component categories
+    description: >
+      System, process, thread, thread_group, processor, virtual_processor,
+      memory, bus, virtual_bus, device, subprogram, subprogram_group,
+      data, abstract.
+    status: implemented
+    tags: [model, as5506-ch5]
+
+  - id: REQ-MODEL-003
+    type: requirement
+    title: Support all feature kinds
+    description: >
+      Data port, event port, event data port, parameter, data access,
+      bus access, subprogram access, subprogram_group access, feature group,
+      abstract feature. With direction (in/out/in_out) and array dimensions.
+    status: implemented
+    tags: [model, as5506-ch8]
+
+  - id: REQ-MODEL-004
+    type: requirement
+    title: Support all connection kinds
+    description: >
+      Port connection, access connection, feature group connection,
+      feature connection, parameter connection. With in_modes filtering.
+    status: implemented
+    tags: [model, as5506-ch9]
+
+  - id: REQ-MODEL-005
+    type: requirement
+    title: Component extension (extends, refined to)
+    description: >
+      Support component type extension, implementation extension,
+      feature refinement, and subcomponent refinement.
+    status: partial
+    tags: [model, as5506-ch4]
+
+  # ── Name Resolution (AS5506 Ch.4) ──────────────────────────────────────
+
+  - id: REQ-RESOLVE-001
+    type: requirement
+    title: Cross-file classifier resolution
+    description: >
+      Resolve classifier references across files via with clauses.
+      Case-insensitive matching per AADL spec.
+    status: implemented
+    tags: [resolution, as5506-ch4]
+
+  - id: REQ-RESOLVE-002
+    type: requirement
+    title: Property reference resolution
+    description: >
+      Resolve qualified property references (PropertySet::PropertyName)
+      across files.
+    status: implemented
+    tags: [resolution, as5506-ch11]
+
+  # ── Instance Model (AS5506 Ch.14) ──────────────────────────────────────
+
+  - id: REQ-INST-001
+    type: requirement
+    title: Recursive system instantiation
+    description: >
+      Recursively expand a root system implementation into a flattened
+      component hierarchy with features, connections, and modes.
+    status: implemented
+    tags: [instance, as5506-ch14]
+
+  - id: REQ-INST-002
+    type: requirement
+    title: Array subcomponent expansion
+    description: >
+      Expand array subcomponents (sub[N]: thread T) into N instances
+      with proper indexing and connection pattern expansion.
+    status: implemented
+    tags: [instance, as5506-ch14]
+
+  - id: REQ-INST-003
+    type: requirement
+    title: Semantic connection tracing
+    description: >
+      Trace connections through the hierarchy resolving across, up,
+      and down patterns to produce end-to-end connection instances.
+    status: partial
+    tags: [instance, as5506-ch14]
+
+  - id: REQ-INST-004
+    type: requirement
+    title: System Operation Modes computation
+    description: >
+      Compute SOMs as the cartesian product of modes across all
+      modal subcomponents for each system level.
+    status: partial
+    tags: [instance, as5506-ch12]
+
+  # ── Property System (AS5506 Ch.11) ─────────────────────────────────────
+
+  - id: REQ-PROP-001
+    type: requirement
+    title: Predeclared property sets
+    description: >
+      Support all 8 predeclared property sets with 104 properties:
+      Timing, Communication, Memory, Deployment, Thread, Programming,
+      Modeling, AADL_Project.
+    status: implemented
+    tags: [properties, as5506-ch11]
+
+  - id: REQ-PROP-002
+    type: requirement
+    title: Property expression evaluation
+    description: >
+      Evaluate all property expression types: integer, real, string,
+      boolean, enumeration, list, record, range, classifier, reference,
+      computed values, unit literals.
+    status: partial
+    tags: [properties, as5506-ch11]
+
+  - id: REQ-PROP-003
+    type: requirement
+    title: Unit conversion
+    description: >
+      Parse and apply unit conversion factors for time, size, and
+      rate properties (e.g., ms to us, KB to bytes).
+    status: implemented
+    tags: [properties, as5506-ch11]
+
+  # ── Analysis ───────────────────────────────────────────────────────────
+
+  - id: REQ-ANALYSIS-001
+    type: requirement
+    title: Connectivity analysis
+    description: >
+      Verify every required port has incoming connections and warn about
+      unconnected features and dangling endpoints.
+    status: implemented
+    tags: [analysis]
+
+  - id: REQ-ANALYSIS-002
+    type: requirement
+    title: Scheduling analysis (RMA)
+    description: >
+      Rate Monotonic Analysis on threads grouped by processor binding.
+      Check utilization bounds.
+    status: implemented
+    tags: [analysis, scheduling]
+
+  - id: REQ-ANALYSIS-003
+    type: requirement
+    title: Latency analysis
+    description: >
+      Compute best/worst-case latency for end-to-end flows considering
+      execution times and sampling delays.
+    status: implemented
+    tags: [analysis, latency]
+
+  - id: REQ-ANALYSIS-004
+    type: requirement
+    title: Resource budget analysis
+    description: >
+      Validate memory budgets and bandwidth budgets against capacity.
+    status: implemented
+    tags: [analysis, resource]
+
+  - id: REQ-ANALYSIS-005
+    type: requirement
+    title: EMV2 fault tree analysis
+    description: >
+      Build structural fault trees from error model annotations.
+      Detect single-point-of-failure via minimal cut sets.
+    status: implemented
+    tags: [analysis, safety, emv2]
+
+  - id: REQ-ANALYSIS-006
+    type: requirement
+    title: ARINC 653 partition scheduling
+    description: >
+      Validate partition window scheduling, inter-partition communication,
+      and process-to-partition bindings per ARINC 653.
+    status: implemented
+    tags: [analysis, arinc653]
+
+  - id: REQ-ANALYSIS-007
+    type: requirement
+    title: Legality rules (AS5506 naming and well-formedness)
+    description: >
+      Enforce AADL naming rules, category restrictions, direction rules,
+      connection rules, flow rules, binding rules, mode rules, and
+      subcomponent rules. Target 50+ rules.
+    status: partial
+    tags: [analysis, legality]
+
+  - id: REQ-ANALYSIS-008
+    type: requirement
+    title: Classifier type matching on connections
+    description: >
+      Validate data type compatibility on connections — connected ports
+      must have compatible classifiers.
+    status: implemented
+    tags: [analysis, legality]
+
+  # ── Serialization & Integration ────────────────────────────────────────
+
+  - id: REQ-SERDE-001
+    type: requirement
+    title: JSON serialization of all public types
+    description: >
+      Derive Serialize/Deserialize on all spar-hir public types.
+      Support --format json on CLI commands.
+    status: implemented
+    tags: [integration, serde]
+
+  - id: REQ-WASM-001
+    type: requirement
+    title: WASM component target
+    description: >
+      Compile spar to wasm32-wasip2. Export adapter and renderer
+      interfaces via WIT.
+    status: implemented
+    tags: [integration, wasm]
+
+  - id: REQ-LSP-001
+    type: requirement
+    title: Language Server Protocol support
+    description: >
+      LSP server with diagnostics, hover, completion, go-to-definition,
+      code actions, formatting, rename, and inlay hints.
+    status: implemented
+    tags: [tooling, lsp]
+
+  # ── Transform ──────────────────────────────────────────────────────────
+
+  - id: REQ-TRANSFORM-001
+    type: requirement
+    title: WIT to AADL transform
+    description: >
+      Bidirectional transform between WebAssembly Interface Types
+      and AADL component declarations.
+    status: implemented
+    tags: [transform, wit]
+
+  - id: REQ-TRANSFORM-002
+    type: requirement
+    title: Rust crate introspection
+    description: >
+      Import cargo metadata to generate virtual AADL packages
+      representing Rust crate architecture.
+    status: planned
+    tags: [transform, rust]
+
+  - id: REQ-TRANSFORM-003
+    type: requirement
+    title: WAC composition to AADL
+    description: >
+      Read WAC composition files and generate AADL system
+      implementations with subcomponents and connections.
+    status: planned
+    tags: [transform, wac]
+
+  - id: REQ-TRANSFORM-004
+    type: requirement
+    title: wRPC transport modeling
+    description: >
+      Map wRPC transports (NATS, TCP, QUIC) to AADL bus components
+      with deployment bindings.
+    status: planned
+    tags: [transform, wrpc]
+
+  - id: REQ-TRANSFORM-005
+    type: requirement
+    title: WASI P3 async mapping
+    description: >
+      Map WASI P3 async functions, streams, and futures to AADL
+      thread components with scheduling properties.
+    status: planned
+    tags: [transform, wasi-p3]

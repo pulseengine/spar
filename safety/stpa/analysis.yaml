@@ -1,0 +1,838 @@
+# STPA Analysis — Spar AADL Toolchain
+#
+# Analyzes spar itself as a safety-relevant tool. Spar's analysis results
+# inform architecture decisions for DO-178C/DO-254 avionics systems.
+# An incorrect analysis result (false negative) could lead to an unsafe
+# architecture being approved. A false positive wastes engineering effort
+# but is not safety-critical.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1a: Losses
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: L-1
+    type: loss
+    title: Unsafe architecture approved
+    description: >
+      An architecture with safety-critical defects (scheduling overrun,
+      single-point-of-failure, unconnected safety paths) is approved for
+      implementation because spar failed to detect the defect.
+    stakeholders: [system-integrator, certification-authority, end-user]
+
+  - id: L-2
+    type: loss
+    title: Excessive engineering rework
+    description: >
+      False positive diagnostics cause engineers to redesign correct
+      architectures, wasting significant time and budget.
+    stakeholders: [system-integrator, project-manager]
+
+  - id: L-3
+    type: loss
+    title: Loss of trust in toolchain
+    description: >
+      Inconsistent, incorrect, or confusing analysis results cause
+      engineers to bypass spar and rely on manual review, eliminating
+      the safety benefit of automated analysis.
+    stakeholders: [system-integrator, safety-reviewer]
+
+  - id: L-4
+    type: loss
+    title: Incorrect architecture documentation
+    description: >
+      Serialized JSON or rendered SVG output misrepresents the actual
+      AADL model, leading to incorrect documentation artifacts in the
+      certification evidence package.
+    stakeholders: [certification-authority, safety-reviewer]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1b: Hazards
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: H-1
+    type: hazard
+    title: Analysis produces false negative
+    description: >
+      Spar's analysis passes fail to detect a genuine architectural
+      defect in the AADL model (e.g., schedulability violation,
+      unconnected safety-critical port, single-point-of-failure path).
+    severity: critical
+    losses: [L-1]
+
+  - id: H-2
+    type: hazard
+    title: Analysis produces false positive
+    description: >
+      Spar reports a defect that does not actually exist in the model,
+      causing unnecessary rework.
+    severity: marginal
+    losses: [L-2, L-3]
+
+  - id: H-3
+    type: hazard
+    title: Instance model does not match declarative model
+    description: >
+      The instantiated system tree diverges from the declared AADL
+      structure due to incorrect expansion, missing connections,
+      or wrong property inheritance.
+    severity: critical
+    losses: [L-1, L-4]
+
+  - id: H-4
+    type: hazard
+    title: Serialized output does not match internal model
+    description: >
+      JSON, SVG, or text output represents a different model than
+      what spar computed internally (serialization/rendering bug).
+    severity: critical
+    losses: [L-4]
+
+  - id: H-5
+    type: hazard
+    title: Parser silently drops valid AADL constructs
+    description: >
+      The parser accepts input without error but silently omits valid
+      AADL constructs from the CST, causing downstream analyses to
+      operate on an incomplete model.
+    severity: critical
+    losses: [L-1, L-3]
+
+  - id: H-6
+    type: hazard
+    title: Property values incorrectly evaluated
+    description: >
+      Timing, memory, or deployment properties are parsed or evaluated
+      to wrong numeric values, causing analyses to compute incorrect
+      results (e.g., wrong period causes RMA to pass when it should fail).
+    severity: critical
+    losses: [L-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1c: System-Level Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SC-1
+    type: system-constraint
+    title: No false negatives on safety analyses
+    description: >
+      Spar must detect all genuine architectural defects for which it
+      has implemented analysis passes. Coverage gaps must be documented.
+    spec-baseline: AS5506C
+    hazards: [H-1]
+
+  - id: SC-2
+    type: system-constraint
+    title: Minimize false positives
+    description: >
+      Spar should not report defects that do not exist. When uncertain,
+      spar should clearly indicate the confidence level (info vs warning
+      vs error severity).
+    hazards: [H-2]
+
+  - id: SC-3
+    type: system-constraint
+    title: Instance model fidelity
+    description: >
+      The instance model must faithfully represent the declared AADL
+      structure. Every subcomponent, connection, mode, flow, and property
+      in the declarative model must appear in the instance model.
+    hazards: [H-3]
+
+  - id: SC-4
+    type: system-constraint
+    title: Output fidelity
+    description: >
+      All serialized outputs (JSON, SVG, text) must accurately represent
+      the internal computed model. Round-trip deserialization must produce
+      equivalent data.
+    hazards: [H-4]
+
+  - id: SC-5
+    type: system-constraint
+    title: Parser completeness
+    description: >
+      The parser must produce CST nodes for all valid AADL v2.2 constructs.
+      Unrecognized constructs must produce error diagnostics, never silent
+      omission.
+    hazards: [H-5]
+
+  - id: SC-6
+    type: system-constraint
+    title: Property evaluation correctness
+    description: >
+      Property values must be evaluated with correct units, arithmetic,
+      defaults, and inheritance chains. Unit conversion factors must match
+      the AS5506 standard.
+    hazards: [H-6]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 2: Control Structure
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CTRL-ENGINEER
+    type: controller
+    title: AADL Engineer
+    controller-type: human
+    process-model:
+      - Believes the AADL model is syntactically and semantically correct
+      - Believes spar will detect architectural defects
+      - May not know all AADL legality rules
+      - Relies on spar diagnostics to guide model corrections
+
+  - id: CTRL-REVIEWER
+    type: controller
+    title: Safety Reviewer
+    controller-type: human
+    process-model:
+      - Believes spar analysis output is complete and correct
+      - Uses analysis results as evidence for certification
+      - May not independently verify spar results
+      - Assumes spar coverage matches documented capability
+
+  - id: CTRL-PARSER
+    type: controller
+    title: Parser Controller (spar-parser + spar-syntax)
+    controller-type: automated
+    source-file: crates/spar-parser/src/lib.rs
+    process-model:
+      - Token stream represents complete input
+      - Grammar rules cover all AADL v2.2 productions
+      - Error recovery preserves unparsed tokens
+
+  - id: CTRL-MODEL
+    type: controller
+    title: Model Builder (spar-hir-def)
+    controller-type: automated
+    source-file: crates/spar-hir-def/src/item_tree/lower.rs
+    process-model:
+      - CST is complete (all valid constructs present)
+      - Lowering handles all SyntaxKind variants
+      - Property expressions are correctly typed
+      - Name resolution finds all cross-file references
+
+  - id: CTRL-INSTANCE
+    type: controller
+    title: Instance Builder (spar-hir-def::instance)
+    controller-type: automated
+    source-file: crates/spar-hir-def/src/instance.rs
+    process-model:
+      - Declarative model is complete and correct
+      - Classifier references resolve to valid types
+      - Recursive expansion terminates
+      - Array dimensions are finite positive integers
+
+  - id: CTRL-ANALYSIS
+    type: controller
+    title: Analysis Engine (spar-analysis)
+    controller-type: automated
+    source-file: crates/spar-analysis/src/lib.rs
+    process-model:
+      - Instance model faithfully represents the architecture
+      - Property values are correctly evaluated
+      - All relevant analysis passes are registered and run
+      - Diagnostic severity correctly reflects defect impact
+
+  - id: CTRL-OUTPUT
+    type: controller
+    title: Output Controller (spar-cli, spar-wasm)
+    controller-type: automated
+    source-file: crates/spar-cli/src/main.rs
+    process-model:
+      - Analysis diagnostics are complete
+      - Serialization preserves all fields
+      - Format conversion (JSON, SVG, text) is lossless for the domain
+
+  # ── Controlled Processes ───────────────────────────────────────────────
+
+  - id: CP-SOURCE
+    type: controlled-process
+    title: AADL Source Files
+    description: The .aadl input files written by engineers
+
+  - id: CP-MODEL
+    type: controlled-process
+    title: Internal AADL Model (ItemTree + Instance)
+    description: The in-memory representation of the AADL architecture
+
+  - id: CP-DIAGNOSTICS
+    type: controlled-process
+    title: Analysis Diagnostics
+    description: The list of errors, warnings, and info diagnostics produced
+
+  - id: CP-DECISIONS
+    type: controlled-process
+    title: Architecture Decisions
+    description: Downstream design decisions informed by spar analysis
+
+  # ── Control Actions ────────────────────────────────────────────────────
+
+  - id: CA-PARSE
+    type: control-action
+    title: Parse AADL source
+    action: Transform source text into concrete syntax tree
+    source: CTRL-PARSER
+    target: CP-MODEL
+
+  - id: CA-LOWER
+    type: control-action
+    title: Lower CST to ItemTree
+    action: Convert syntax tree nodes to typed HIR items
+    source: CTRL-MODEL
+    target: CP-MODEL
+
+  - id: CA-INSTANTIATE
+    type: control-action
+    title: Instantiate system
+    action: Recursively expand root implementation into instance tree
+    source: CTRL-INSTANCE
+    target: CP-MODEL
+
+  - id: CA-ANALYZE
+    type: control-action
+    title: Run analysis passes
+    action: Execute registered analyses against instance model
+    source: CTRL-ANALYSIS
+    target: CP-DIAGNOSTICS
+
+  - id: CA-REPORT
+    type: control-action
+    title: Report results
+    action: Format and output analysis diagnostics
+    source: CTRL-OUTPUT
+    target: CP-DECISIONS
+
+  - id: CA-REVIEW
+    type: control-action
+    title: Review and approve architecture
+    action: Evaluate analysis output and decide on architecture approval
+    source: CTRL-REVIEWER
+    target: CP-DECISIONS
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3: Unsafe Control Actions
+  # ══════════════════════════════════════════════════════════════════════
+
+  # ── Parser UCAs ────────────────────────────────────────────────────────
+
+  - id: UCA-1
+    type: uca
+    title: Parser silently drops construct
+    uca-type: not-providing
+    context: >
+      When AADL source contains a valid construct (e.g., annex subclause,
+      prototype binding, call sequence) that the parser does not recognize.
+    rationale: >
+      Missing CST node means the construct is invisible to all downstream
+      processing. No diagnostic is emitted, so the engineer believes the
+      model is complete.
+    controller: CTRL-PARSER
+    hazards: [H-5]
+
+  - id: UCA-2
+    type: uca
+    title: Parser accepts invalid AADL without error
+    uca-type: providing
+    context: >
+      When the source contains a syntax error but the parser's error
+      recovery consumes it without emitting a diagnostic.
+    rationale: >
+      Engineer believes the model is valid when it is not. Downstream
+      analyses may produce incorrect results on a malformed model.
+    controller: CTRL-PARSER
+    hazards: [H-1, H-5]
+
+  # ── Model Builder UCAs ────────────────────────────────────────────────
+
+  - id: UCA-3
+    type: uca
+    title: Lowering omits CST node
+    uca-type: not-providing
+    context: >
+      When the CST contains a valid node (e.g., property association,
+      mode transition trigger, connection in_modes) but the lowering
+      code does not handle that SyntaxKind.
+    rationale: >
+      ItemTree is incomplete. Analyses that depend on the missing data
+      will produce false negatives.
+    controller: CTRL-MODEL
+    hazards: [H-1, H-3]
+
+  - id: UCA-4
+    type: uca
+    title: Lowering assigns wrong property value
+    uca-type: providing
+    context: >
+      When a property expression is lowered with incorrect unit conversion,
+      wrong numeric parsing, or misidentified property type.
+    rationale: >
+      Scheduling analysis may use wrong period/deadline values. Resource
+      budget may use wrong memory sizes.
+    controller: CTRL-MODEL
+    hazards: [H-6]
+
+  - id: UCA-5
+    type: uca
+    title: Name resolution returns wrong classifier
+    uca-type: providing
+    context: >
+      When two packages define types with similar names and the resolver
+      picks the wrong one due to case-insensitive matching or import order.
+    rationale: >
+      Subcomponent instantiates the wrong type. Connection type checking
+      passes when it should fail.
+    controller: CTRL-MODEL
+    hazards: [H-3]
+
+  # ── Instance Builder UCAs ─────────────────────────────────────────────
+
+  - id: UCA-6
+    type: uca
+    title: Instance expansion misses subcomponent
+    uca-type: not-providing
+    context: >
+      When a component implementation has subcomponents filtered by modes
+      and the instance builder incorrectly filters them out in the
+      default (non-modal) expansion.
+    rationale: >
+      Missing subcomponent means missing connections and missing analyses.
+      An entire subsystem could be invisible.
+    controller: CTRL-INSTANCE
+    hazards: [H-3]
+
+  - id: UCA-7
+    type: uca
+    title: Array expansion produces wrong count
+    uca-type: providing
+    context: >
+      When array dimension expression evaluation produces wrong N,
+      or when array indexing in connection patterns is off-by-one.
+    rationale: >
+      Too few instances: missing redundancy paths. Too many: phantom
+      components consume scheduling/resource budgets incorrectly.
+    controller: CTRL-INSTANCE
+    hazards: [H-3, H-1]
+
+  - id: UCA-8
+    type: uca
+    title: Connection tracing produces wrong endpoint
+    uca-type: providing
+    context: >
+      When multi-level connection tracing (up/down patterns) follows
+      the wrong feature in a feature group or resolves to a feature
+      in the wrong subcomponent.
+    rationale: >
+      Connectivity analysis passes (no unconnected ports) but the actual
+      data flow path is wrong. Latency analysis computes wrong path.
+    controller: CTRL-INSTANCE
+    hazards: [H-3, H-1]
+
+  - id: UCA-9
+    type: uca
+    title: Instance builder enters infinite recursion
+    uca-type: stopped-too-soon
+    context: >
+      When a component implementation contains a subcomponent whose
+      classifier directly or indirectly references the parent
+      (circular containment).
+    rationale: >
+      Stack overflow crashes spar. No analysis output is produced.
+      Engineer may not understand the error.
+    controller: CTRL-INSTANCE
+    hazards: [H-3]
+
+  # ── Analysis Engine UCAs ──────────────────────────────────────────────
+
+  - id: UCA-10
+    type: uca
+    title: Analysis not registered
+    uca-type: not-providing
+    context: >
+      When a relevant analysis pass exists but is not registered with
+      the AnalysisRunner for the current invocation (e.g., ARINC 653
+      analysis exists but is not added when analyzing a partitioned system).
+    rationale: >
+      Entire class of defects goes undetected. Engineer believes the
+      model was fully analyzed.
+    controller: CTRL-ANALYSIS
+    hazards: [H-1]
+
+  - id: UCA-11
+    type: uca
+    title: Analysis uses wrong property value
+    uca-type: providing
+    context: >
+      When the analysis reads a property from the instance model but
+      the property was incorrectly inherited, defaulted, or unit-converted.
+    rationale: >
+      RMA with wrong period: schedulability check is meaningless.
+      Resource budget with wrong memory size: budget check is wrong.
+    controller: CTRL-ANALYSIS
+    hazards: [H-1, H-6]
+
+  - id: UCA-12
+    type: uca
+    title: Analysis emits wrong severity
+    uca-type: providing
+    context: >
+      When a genuine safety-critical defect (e.g., CPU utilization > 100%)
+      is reported as info or warning instead of error.
+    rationale: >
+      Engineer or reviewer may dismiss the diagnostic. The defect
+      persists in the approved architecture.
+    controller: CTRL-ANALYSIS
+    hazards: [H-1]
+
+  - id: UCA-13
+    type: uca
+    title: Analysis produces false positive
+    uca-type: providing
+    context: >
+      When the analysis reports a defect that does not exist because
+      it does not account for modal filtering, property overrides,
+      or correct inheritance.
+    rationale: >
+      Wastes engineering effort. Repeated false positives erode trust.
+    controller: CTRL-ANALYSIS
+    hazards: [H-2]
+
+  # ── Output Controller UCAs ────────────────────────────────────────────
+
+  - id: UCA-14
+    type: uca
+    title: JSON serialization drops field
+    uca-type: not-providing
+    context: >
+      When a spar-hir type gains a new field but the serde derive
+      does not include it (e.g., field added to struct but not to
+      the serializable projection).
+    rationale: >
+      Downstream consumers (rivet AADL adapter) see incomplete data.
+      Architecture documentation is incomplete.
+    controller: CTRL-OUTPUT
+    hazards: [H-4]
+
+  - id: UCA-15
+    type: uca
+    title: SVG rendering misrepresents topology
+    uca-type: providing
+    context: >
+      When the graph builder omits connections, misplaces nodes, or
+      renders wrong port labels in the SVG diagram.
+    rationale: >
+      Visual architecture documentation does not match the actual model.
+      Reviewer makes decisions based on incorrect diagram.
+    controller: CTRL-OUTPUT
+    hazards: [H-4]
+
+  - id: UCA-16
+    type: uca
+    title: Diagnostic output suppresses errors
+    uca-type: not-providing
+    context: >
+      When the CLI or WASM output formatter filters, truncates, or
+      fails to transmit error-severity diagnostics to the user.
+    rationale: >
+      Critical defects are computed but never shown to the engineer.
+    controller: CTRL-OUTPUT
+    hazards: [H-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3b: Controller Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CC-1
+    type: controller-constraint
+    title: Parser must emit diagnostic for unrecognized constructs
+    constraint: >
+      The parser must produce an error diagnostic for any token sequence
+      it cannot match to an AADL production. Silent consumption of
+      tokens without CST node creation is prohibited.
+    controller: CTRL-PARSER
+    ucas: [UCA-1, UCA-2]
+    hazards: [H-5]
+
+  - id: CC-2
+    type: controller-constraint
+    title: Lowering must handle all SyntaxKind variants
+    constraint: >
+      The CST-to-ItemTree lowering must have a match arm for every
+      SyntaxKind that represents a semantic AADL construct. Unhandled
+      variants must emit a warning diagnostic.
+    controller: CTRL-MODEL
+    ucas: [UCA-3]
+    hazards: [H-3]
+
+  - id: CC-3
+    type: controller-constraint
+    title: Property evaluation must use standard unit factors
+    constraint: >
+      Unit conversion factors must match AS5506 Appendix A.
+      Property values must be validated against their declared type.
+    controller: CTRL-MODEL
+    ucas: [UCA-4]
+    hazards: [H-6]
+
+  - id: CC-4
+    type: controller-constraint
+    title: Resolver must handle ambiguous names deterministically
+    constraint: >
+      When multiple classifiers match a reference, the resolver must
+      prefer the local package, then follow import order, and emit
+      a warning for ambiguous resolution.
+    controller: CTRL-MODEL
+    ucas: [UCA-5]
+    hazards: [H-3]
+
+  - id: CC-5
+    type: controller-constraint
+    title: Instance builder must include all non-modal subcomponents
+    constraint: >
+      Subcomponents without in_modes filtering must always be instantiated.
+      Modal subcomponents must be instantiated in all modes (with mode
+      membership tracking).
+    controller: CTRL-INSTANCE
+    ucas: [UCA-6]
+    hazards: [H-3]
+
+  - id: CC-6
+    type: controller-constraint
+    title: Array dimensions must be validated positive
+    constraint: >
+      Array dimension expressions must evaluate to positive integers.
+      Array index patterns in connections must be bounds-checked.
+    controller: CTRL-INSTANCE
+    ucas: [UCA-7]
+    hazards: [H-3]
+
+  - id: CC-7
+    type: controller-constraint
+    title: Connection tracing must verify endpoints
+    constraint: >
+      After multi-level connection tracing, both endpoints must resolve
+      to valid feature instances. Unresolved endpoints must produce
+      diagnostics.
+    controller: CTRL-INSTANCE
+    ucas: [UCA-8]
+    hazards: [H-3]
+
+  - id: CC-8
+    type: controller-constraint
+    title: Instance builder must detect circular containment
+    constraint: >
+      Before recursive expansion, check for cycles in the classifier
+      reference graph. Emit an error and stop expansion if a cycle
+      is detected.
+    controller: CTRL-INSTANCE
+    ucas: [UCA-9]
+    hazards: [H-3]
+
+  - id: CC-9
+    type: controller-constraint
+    title: All safety analyses must be registered by default
+    constraint: >
+      The AnalysisRunner must register all implemented analysis passes
+      by default. Selective registration is allowed only via explicit
+      user opt-out.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-10]
+    hazards: [H-1]
+
+  - id: CC-10
+    type: controller-constraint
+    title: Analyses must read properties through validated accessors
+    constraint: >
+      Analysis passes must not directly interpret raw property strings.
+      All property access must go through typed accessor functions that
+      perform unit conversion and type validation.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-11]
+    hazards: [H-1, H-6]
+
+  - id: CC-11
+    type: controller-constraint
+    title: Severity assignment must follow documented criteria
+    constraint: >
+      Error = confirmed standard violation or guaranteed runtime failure.
+      Warning = likely defect or incomplete specification.
+      Info = style suggestion or optional improvement.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-12]
+    hazards: [H-1]
+
+  - id: CC-12
+    type: controller-constraint
+    title: Analyses must account for modes and property overrides
+    constraint: >
+      Before reporting a defect, analyses must check whether the condition
+      is filtered by modes or overridden by property associations at a
+      more specific level.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-13]
+    hazards: [H-2]
+
+  - id: CC-13
+    type: controller-constraint
+    title: Serialization must include all public fields
+    constraint: >
+      Serde derives must be present on all public types. New fields
+      added to structs must be included in serialization. Integration
+      tests must verify round-trip fidelity.
+    controller: CTRL-OUTPUT
+    ucas: [UCA-14]
+    hazards: [H-4]
+
+  - id: CC-14
+    type: controller-constraint
+    title: Output must not filter error diagnostics
+    constraint: >
+      The output formatter must transmit all diagnostics regardless
+      of severity. Filtering is only allowed via explicit user flags
+      (e.g., --severity-min warning).
+    controller: CTRL-OUTPUT
+    ucas: [UCA-16]
+    hazards: [H-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 4: Loss Scenarios
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: LS-1
+    type: loss-scenario
+    title: Annex subclause silently dropped
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The parser encounters an annex subclause (e.g., EMV2 error model
+      within a component) but the annex parsing code returns None instead
+      of an error. The CST has no node for the annex. The model builder
+      never sees the error model. EMV2 fault tree analysis finds no
+      annotations and reports "no error model" (info). The actual error
+      propagation paths are never checked.
+    causal-factors:
+      - spar-annex returns None for unrecognized annex names
+      - No diagnostic emitted for unparsed annex content
+      - EMV2 analysis treats missing annotations as "not applicable"
+    uca: [UCA-1]
+    hazards: [H-5, H-1]
+
+  - id: LS-2
+    type: loss-scenario
+    title: Unit conversion factor wrong for time property
+    scenario-type: inadequate-process-model
+    description: >
+      A property like Period => 10 ms is lowered to a PropertyExpr with
+      the wrong conversion factor (e.g., factor of 1000 instead of
+      1_000_000 for ms-to-ps). The scheduling analysis reads Period as
+      10_000 ps instead of 10_000_000_000 ps. RMA computes utilization
+      with a period 1000x smaller than actual, reporting a false pass.
+    causal-factors:
+      - Unit conversion table in standard_properties.rs has wrong factor
+      - No cross-check against known good values in tests
+      - RMA formula does not sanity-check period magnitude
+    uca: [UCA-4, UCA-11]
+    hazards: [H-6, H-1]
+
+  - id: LS-3
+    type: loss-scenario
+    title: Recursive instantiation overflow
+    scenario-type: controller-failure
+    description: >
+      An AADL model contains A.impl with subcomponent b: B, and B.impl
+      with subcomponent a: A (mutual recursion). The instance builder
+      has no cycle detection. Expansion enters infinite recursion and
+      crashes with stack overflow. No diagnostics are produced. The
+      engineer sees only "process terminated" with no explanation.
+    causal-factors:
+      - No cycle detection in instantiation
+      - No recursion depth limit
+      - Crash produces no diagnostic
+    uca: [UCA-9]
+    hazards: [H-3]
+
+  - id: LS-4
+    type: loss-scenario
+    title: Connection tracing follows wrong feature group member
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A feature group FG contains ports A and B. A connection maps
+      sub1.fg -> sub2.fg. During semantic connection tracing, the
+      algorithm matches FG members by position instead of by name.
+      If sub1's FG has members [A, B] and sub2's has [B, A] (due to
+      inverse_of), the connections are crossed: sub1.fg.A connects
+      to sub2.fg.B. Connectivity analysis passes because all ports
+      are connected. But the actual data flow is wrong.
+    causal-factors:
+      - Feature group member matching by index instead of name
+      - inverse_of handling reverses member order
+      - Connectivity analysis checks presence, not correctness
+    uca: [UCA-8]
+    hazards: [H-3, H-1]
+
+  - id: LS-5
+    type: loss-scenario
+    title: Analysis pass not registered after code addition
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A developer adds a new analysis pass (e.g., classifier_match.rs)
+      but forgets to register it in the AnalysisRunner::register_all()
+      function. The analysis code compiles and its unit tests pass in
+      isolation. But when spar runs on a real model, the new analysis
+      never executes. Connection type mismatches go undetected.
+    causal-factors:
+      - Manual registration required (no automatic discovery)
+      - Unit tests test the analysis in isolation, not via AnalysisRunner
+      - No integration test verifying all analyses are registered
+    uca: [UCA-10]
+    hazards: [H-1]
+
+  - id: LS-6
+    type: loss-scenario
+    title: JSON drops new InstanceNode field
+    scenario-type: inadequate-feedback
+    description: >
+      A developer adds array_index to InstanceNode but the serializable
+      projection (used for JSON output) is a separate struct that was
+      not updated. The internal model has array indices. The JSON output
+      does not. Rivet's AADL adapter receives JSON without array info.
+      Array components appear as duplicates with the same name.
+    causal-factors:
+      - Serializable projection is manually maintained separately
+      - No compile-time check that projection matches source struct
+      - No round-trip test comparing internal vs. serialized model
+    uca: [UCA-14]
+    hazards: [H-4]
+
+  - id: LS-7
+    type: loss-scenario
+    title: Modal property override not considered in analysis
+    scenario-type: inadequate-process-model
+    description: >
+      A thread has Period => 20ms globally but Period => 5ms in mode
+      HighRate. The scheduling analysis reads only the default period
+      (20ms). In HighRate mode, the actual period is 5ms, causing 4x
+      higher CPU utilization. RMA reports the system is schedulable
+      because it used the 20ms period.
+    causal-factors:
+      - Analysis reads only default (non-modal) property values
+      - Modal property associations not evaluated per-mode
+      - No per-mode scheduling analysis
+    uca: [UCA-11]
+    hazards: [H-1]
+
+  - id: LS-8
+    type: loss-scenario
+    title: Engineer dismisses analysis due to repeated false positives
+    scenario-type: inadequate-feedback
+    description: >
+      Spar's connectivity analysis reports "unconnected port" for ports
+      that are intentionally unconnected (monitoring ports, debug ports).
+      After seeing many such false positives, the engineer stops reading
+      connectivity diagnostics. A genuine unconnected safety-critical
+      port is then missed among the noise.
+    causal-factors:
+      - No way to mark intentionally unconnected ports
+      - No severity differentiation between required and optional ports
+      - Alert fatigue causes engineer to ignore diagnostics
+    uca: [UCA-13]
+    hazards: [H-2, H-1]
