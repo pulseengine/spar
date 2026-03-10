@@ -12,23 +12,29 @@ use crate::name::{ClassifierRef, Name, PropertyRef};
 /// Lower a parsed source file into an item tree.
 pub fn lower_file(root: &SyntaxNode) -> ItemTree {
     let mut tree = ItemTree::default();
+    let mut diagnostics = Vec::new();
     let file = match ast::SourceFile::cast(root.clone()) {
         Some(f) => f,
         None => return tree,
     };
 
     for pkg in file.packages() {
-        lower_package(&pkg, &mut tree);
+        lower_package(&pkg, &mut tree, &mut diagnostics);
     }
 
     for ps in file.property_sets() {
         lower_property_set(&ps, &mut tree);
     }
 
+    tree.diagnostics = diagnostics;
     tree
 }
 
-fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
+fn lower_package(
+    pkg: &ast::AadlPackage,
+    tree: &mut ItemTree,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
+) {
     // Package name is inside a NAME node child
     let name = match extract_name_text(pkg.syntax()) {
         Some(n) => n,
@@ -54,6 +60,7 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
                     &mut with_clauses,
                     &mut renames,
                     true,
+                    diagnostics,
                 );
             }
             SyntaxKind::PRIVATE_SECTION => {
@@ -64,6 +71,7 @@ fn lower_package(pkg: &ast::AadlPackage, tree: &mut ItemTree) {
                     &mut with_clauses,
                     &mut renames,
                     false,
+                    diagnostics,
                 );
             }
             _ => {}
@@ -103,6 +111,7 @@ fn lower_section_with_visibility(
     with_clauses: &mut Vec<Name>,
     renames_out: &mut Vec<RenamesIdx>,
     is_public: bool,
+    diagnostics: &mut Vec<LoweringDiagnostic>,
 ) {
     for child in section.children() {
         match child.kind() {
@@ -137,13 +146,34 @@ fn lower_section_with_visibility(
             }
             SyntaxKind::ANNEX_LIBRARY => {
                 items.push(ItemRef::AnnexLibrary);
+                // STPA-REQ-002: warn that annex content was not processed
+                diagnostics.push(LoweringDiagnostic {
+                    message: "annex library content not processed (no registered annex parser)"
+                        .to_string(),
+                    severity: LoweringSeverity::Warning,
+                });
             }
             SyntaxKind::RENAMES_CLAUSE => {
                 if let Some(idx) = lower_renames_clause(&child, tree) {
                     renames_out.push(idx);
                 }
             }
-            _ => {}
+            // STPA-REQ-004: Non-semantic kinds intentionally ignored
+            SyntaxKind::ERROR
+            | SyntaxKind::WHITESPACE
+            | SyntaxKind::COMMENT
+            | SyntaxKind::NAME
+            | SyntaxKind::END_KW
+            | SyntaxKind::SEMICOLON
+            | SyntaxKind::PACKAGE_PROPERTIES
+            | SyntaxKind::ANNEX_SUBCLAUSE => {}
+            // STPA-REQ-004: Warn on any unhandled semantic construct
+            other => {
+                diagnostics.push(LoweringDiagnostic {
+                    message: format!("unhandled syntax construct in package section: {:?}", other),
+                    severity: LoweringSeverity::Warning,
+                });
+            }
         }
     }
 }
@@ -2324,5 +2354,83 @@ fn parse_classifier_ref_node(node: &SyntaxNode) -> Option<ClassifierRef> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lowering_diagnostic_tests {
+    use super::*;
+    use spar_syntax::parse;
+
+    #[test]
+    fn annex_library_emits_diagnostic() {
+        let src = r#"
+package Pkg
+public
+  annex EMV2 {**
+    error model behavior
+  **};
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        assert!(
+            tree.diagnostics
+                .iter()
+                .any(|d| d.message.contains("annex") && d.severity == LoweringSeverity::Warning),
+            "should emit warning diagnostic for unparsed annex: {:?}",
+            tree.diagnostics
+        );
+    }
+
+    #[test]
+    fn known_syntax_kinds_no_spurious_warnings() {
+        let src = r#"
+package Pkg
+public
+  system S
+  end S;
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        let unhandled: Vec<_> = tree
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unhandled"))
+            .collect();
+        assert!(
+            unhandled.is_empty(),
+            "known constructs should not produce unhandled warnings: {:?}",
+            unhandled
+        );
+    }
+
+    #[test]
+    fn no_diagnostics_for_clean_package() {
+        let src = r#"
+package Clean
+public
+  system A
+    features
+      inp: in data port;
+  end A;
+
+  system implementation A.Impl
+    subcomponents
+      sub1: system B;
+  end A.Impl;
+
+  system B
+  end B;
+end Clean;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        assert!(
+            tree.diagnostics.is_empty(),
+            "clean package should produce no diagnostics: {:?}",
+            tree.diagnostics
+        );
     }
 }
