@@ -338,6 +338,60 @@ impl GlobalScope {
         ResolvedClassifier::Unresolved
     }
 
+    /// Resolve a classifier reference, collecting ambiguity warnings (STPA-REQ-007).
+    ///
+    /// When an unqualified reference matches classifiers in multiple imported
+    /// packages, returns the first match (same as `resolve_classifier`) but also
+    /// emits a warning listing all candidate packages.
+    pub fn resolve_classifier_with_diagnostics(
+        &self,
+        from_package: &Name,
+        reference: &ClassifierRef,
+    ) -> (ResolvedClassifier, Vec<String>) {
+        let result = self.resolve_classifier(from_package, reference);
+        let mut warnings = Vec::new();
+
+        // Only check for ambiguity on unqualified references that resolved
+        if reference.package.is_some() || matches!(result, ResolvedClassifier::Unresolved) {
+            return (result, warnings);
+        }
+
+        let from_key = CiName::new(from_package);
+
+        // Check if it resolved from same package (no ambiguity possible)
+        if self
+            .resolve_in_package(&from_key, reference, true)
+            .is_some()
+        {
+            return (result, warnings);
+        }
+
+        // It resolved from an import — count all imports that match
+        if let Some(from_scope) = self.packages.get(&from_key) {
+            let mut candidates = Vec::new();
+            for import in &from_scope.imports {
+                let import_key = CiName::new(import);
+                if self
+                    .resolve_in_package(&import_key, reference, false)
+                    .is_some()
+                {
+                    candidates.push(import.as_str().to_string());
+                }
+            }
+            if candidates.len() > 1 {
+                warnings.push(format!(
+                    "ambiguous classifier reference '{}': matches found in packages {}; \
+                     using first match from '{}'",
+                    reference.type_name,
+                    candidates.join(", "),
+                    candidates[0],
+                ));
+            }
+        }
+
+        (result, warnings)
+    }
+
     fn resolve_in_package(
         &self,
         pkg_key: &CiName,
@@ -537,5 +591,234 @@ impl GlobalScope {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::item_tree::*;
+    use std::sync::Arc;
+
+    /// Helper: build a tree with package `pkg_name` containing one component type.
+    fn pkg_with_type(pkg_name: &str, type_name: &str, cat: ComponentCategory) -> ItemTree {
+        let mut tree = ItemTree::default();
+        let ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new(type_name),
+            category: cat,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new(pkg_name),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+        tree
+    }
+
+    #[test]
+    fn ambiguous_unqualified_reference_warns() {
+        // Packages A and B both have "Sensor" type.
+        // Package C imports both and references unqualified "Sensor".
+        let mut tree = ItemTree::default();
+
+        let ct_a = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::Device,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_a)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let ct_b = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_b)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("C"),
+            with_clauses: vec![Name::new("A"), Name::new("B")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+        let reference = ClassifierRef::type_only(Name::new("Sensor"));
+        let (result, warnings) =
+            scope.resolve_classifier_with_diagnostics(&Name::new("C"), &reference);
+
+        assert!(
+            !matches!(result, ResolvedClassifier::Unresolved),
+            "should resolve to something"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("ambiguous")),
+            "should warn about ambiguity: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn qualified_reference_no_ambiguity_warning() {
+        let mut tree = ItemTree::default();
+
+        let ct_a = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::Device,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_a)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let ct_b = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_b)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("C"),
+            with_clauses: vec![Name::new("A"), Name::new("B")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+        // Qualified reference: A::Sensor — no ambiguity
+        let reference = ClassifierRef::qualified(Name::new("A"), Name::new("Sensor"));
+        let (_result, warnings) =
+            scope.resolve_classifier_with_diagnostics(&Name::new("C"), &reference);
+
+        assert!(
+            warnings.is_empty(),
+            "qualified reference should not warn: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn same_package_match_no_ambiguity_warning() {
+        let mut tree = ItemTree::default();
+
+        // Package C has its own "Sensor" and imports A which also has "Sensor"
+        let ct_c = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::Device,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("C"),
+            with_clauses: vec![Name::new("A")],
+            public_items: vec![ItemRef::ComponentType(ct_c)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let ct_a = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_a)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+        let reference = ClassifierRef::type_only(Name::new("Sensor"));
+        let (result, warnings) =
+            scope.resolve_classifier_with_diagnostics(&Name::new("C"), &reference);
+
+        // Same-package match takes priority — no ambiguity
+        assert!(
+            !matches!(result, ResolvedClassifier::Unresolved),
+            "should resolve"
+        );
+        assert!(
+            warnings.is_empty(),
+            "same-package match should not warn: {:?}",
+            warnings
+        );
     }
 }
