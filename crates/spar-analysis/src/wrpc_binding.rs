@@ -11,7 +11,7 @@
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates that cross-processor connections have bus bindings.
 ///
@@ -77,9 +77,7 @@ impl Analysis for WrpcBindingAnalysis {
             // If both have processor bindings and they differ, the connection
             // crosses a processor boundary.
             let crosses_boundary = match (&src_binding, &dst_binding) {
-                (Some(src_b), Some(dst_b)) => {
-                    !src_b.eq_ignore_ascii_case(dst_b)
-                }
+                (Some(src_b), Some(dst_b)) => !src_b.eq_ignore_ascii_case(dst_b),
                 _ => false,
             };
 
@@ -94,9 +92,7 @@ impl Analysis for WrpcBindingAnalysis {
             let has_conn_binding = owner_props
                 .get("Deployment_Properties", "Actual_Connection_Binding")
                 .is_some()
-                || owner_props
-                    .get("", "Actual_Connection_Binding")
-                    .is_some();
+                || owner_props.get("", "Actual_Connection_Binding").is_some();
 
             if !has_conn_binding {
                 let path = component_path(instance, owner);
@@ -141,10 +137,7 @@ fn find_child_by_name(
 ///
 /// Walks up the hierarchy: if a thread has a binding, use it; otherwise
 /// check its parent process, etc.
-fn get_processor_binding(
-    instance: &SystemInstance,
-    idx: ComponentInstanceIdx,
-) -> Option<String> {
+fn get_processor_binding(instance: &SystemInstance, idx: ComponentInstanceIdx) -> Option<String> {
     let mut current = Some(idx);
     while let Some(ci) = current {
         let props = instance.properties_for(ci);
@@ -167,8 +160,8 @@ mod tests {
     use spar_hir_def::instance::*;
     use spar_hir_def::item_tree::*;
     use spar_hir_def::name::Name;
-    use spar_hir_def::properties::{PropertyMap, PropertyValue};
     use spar_hir_def::name::PropertyRef;
+    use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
     struct TestBuilder {
         components: Arena<ComponentInstance>,
@@ -210,7 +203,11 @@ mod tests {
             })
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
@@ -241,17 +238,15 @@ mod tests {
             conn_idx
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
-                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
@@ -288,15 +283,30 @@ mod tests {
         b.set_children(root, vec![cpu1, cpu2, sender, receiver]);
 
         // Bind sender to cpu1, receiver to cpu2
-        b.set_property(sender, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
-        b.set_property(receiver, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu2)");
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
 
         // Add connection between sender and receiver, no bus binding
         b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
 
         let inst = b.build(root);
         let diags = WrpcBindingAnalysis.analyze(&inst);
-        assert_eq!(diags.len(), 1, "should warn about missing bus binding: {:?}", diags);
+        assert_eq!(
+            diags.len(),
+            1,
+            "should warn about missing bus binding: {:?}",
+            diags
+        );
         assert_eq!(diags[0].severity, Severity::Warning);
         assert!(diags[0].message.contains("Actual_Connection_Binding"));
         assert!(diags[0].message.contains("c1"));
@@ -312,16 +322,35 @@ mod tests {
         let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
         b.set_children(root, vec![cpu1, cpu2, sender, receiver]);
 
-        b.set_property(sender, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
-        b.set_property(receiver, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu2)");
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
 
         // Connection with bus binding on owner
         b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
-        b.set_property(root, "Deployment_Properties", "Actual_Connection_Binding", "reference (nats_bus)");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (nats_bus)",
+        );
 
         let inst = b.build(root);
         let diags = WrpcBindingAnalysis.analyze(&inst);
-        assert!(diags.is_empty(), "should not warn when bus binding exists: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "should not warn when bus binding exists: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -335,8 +364,18 @@ mod tests {
         b.set_children(root, vec![cpu1, cpu2, sender, receiver]);
 
         // Both bound to same processor
-        b.set_property(sender, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
-        b.set_property(receiver, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
 
@@ -354,14 +393,28 @@ mod tests {
         let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
         b.set_children(root, vec![cpu, sender, receiver]);
 
-        b.set_property(sender, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu)");
-        b.set_property(receiver, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu)");
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu)",
+        );
 
         b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
 
         let inst = b.build(root);
         let diags = WrpcBindingAnalysis.analyze(&inst);
-        assert!(diags.is_empty(), "single processor model = skip: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "single processor model = skip: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -379,6 +432,10 @@ mod tests {
 
         let inst = b.build(root);
         let diags = WrpcBindingAnalysis.analyze(&inst);
-        assert!(diags.is_empty(), "no bindings = can't determine boundary: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "no bindings = can't determine boundary: {:?}",
+            diags
+        );
     }
 }

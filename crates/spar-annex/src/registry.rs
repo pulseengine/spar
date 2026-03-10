@@ -93,12 +93,11 @@ impl AnnexRegistry {
         use spar_syntax::SyntaxKind;
 
         let kind = node.kind();
-        if kind == SyntaxKind::ANNEX_SUBCLAUSE || kind == SyntaxKind::ANNEX_LIBRARY {
-            if let Some((name, text)) = crate::extract_annex_content(node) {
-                if let Some(result) = self.parse(&name, &text) {
-                    results.push((name, node.text_range(), result));
-                }
-            }
+        if (kind == SyntaxKind::ANNEX_SUBCLAUSE || kind == SyntaxKind::ANNEX_LIBRARY)
+            && let Some((name, text)) = crate::extract_annex_content(node)
+            && let Some(result) = self.parse(&name, &text)
+        {
+            results.push((name, node.text_range(), result));
         }
 
         for child in node.children() {

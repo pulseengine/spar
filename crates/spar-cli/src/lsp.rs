@@ -33,15 +33,14 @@ use lsp_types::{
     DocumentSymbol, DocumentSymbolResponse, FileSystemWatcher, FormattingOptions,
     GotoDefinitionResponse, Hover, HoverContents, HoverProviderCapability, InitializeParams,
     InlayHint, InlayHintKind, InlayHintLabel, InlayHintParams, Location, MarkedString, OneOf,
-    Position, PrepareRenameResponse, PublishDiagnosticsParams, Range, Registration,
-    RenameOptions, RenameParams, ServerCapabilities, SymbolInformation, SymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Uri, WatchKind, WorkspaceEdit,
-    WorkspaceSymbolResponse,
+    Position, PrepareRenameResponse, PublishDiagnosticsParams, Range, Registration, RenameOptions,
+    RenameParams, ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Uri, WatchKind, WorkspaceEdit, WorkspaceSymbolResponse,
 };
 
+use spar_hir_def::ItemTree;
 use spar_hir_def::item_tree::ItemRef;
 use spar_hir_def::resolver::GlobalScope;
-use spar_hir_def::ItemTree;
 use spar_syntax::SyntaxKind;
 
 // ── Public entry point ──────────────────────────────────────────────
@@ -65,10 +64,7 @@ pub fn run_lsp_server() {
 
     // Extract workspace root from initialize params.
     #[allow(deprecated)]
-    let workspace_root = init_params
-        .root_uri
-        .as_ref()
-        .and_then(|uri| uri_to_file_path(uri));
+    let workspace_root = init_params.root_uri.as_ref().and_then(uri_to_file_path);
 
     eprintln!("spar-lsp: initialized, workspace root: {workspace_root:?}");
 
@@ -96,10 +92,7 @@ fn server_capabilities() -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
-            trigger_characters: Some(vec![
-                ":".to_string(),
-                ".".to_string(),
-            ]),
+            trigger_characters: Some(vec![":".to_string(), ".".to_string()]),
             resolve_provider: Some(false),
             ..Default::default()
         }),
@@ -225,8 +218,7 @@ impl ServerState {
     fn update_file(&mut self, uri_str: &str, content: &str) {
         let parsed = spar_syntax::parse(content);
         let tree = spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
-        self.item_trees
-            .insert(uri_str.to_string(), Arc::new(tree));
+        self.item_trees.insert(uri_str.to_string(), Arc::new(tree));
         self.documents
             .insert(uri_str.to_string(), content.to_string());
         self.rebuild_global_scope();
@@ -259,10 +251,7 @@ fn scan_aadl_files_recursive(dir: &Path, callback: &mut dyn FnMut(&Path)) {
         let path = entry.path();
         if path.is_dir() {
             scan_aadl_files_recursive(&path, callback);
-        } else if path
-            .extension()
-            .map_or(false, |ext| ext == "aadl")
-        {
+        } else if path.extension().is_some_and(|ext| ext == "aadl") {
             callback(&path);
         }
     }
@@ -322,10 +311,7 @@ fn handle_request(state: &mut ServerState, connection: &Connection, req: Request
 }
 
 fn cast_request<R: LspRequest>(req: Request) -> Option<(RequestId, R::Params)> {
-    match req.extract::<R::Params>(R::METHOD) {
-        Ok(pair) => Some(pair),
-        Err(_) => None,
-    }
+    req.extract::<R::Params>(R::METHOD).ok()
 }
 
 fn send_ok(connection: &Connection, id: RequestId, result: serde_json::Value) {
@@ -387,20 +373,19 @@ fn handle_watched_file_changes(
         let uri_str = event.uri.as_str().to_string();
 
         match event.typ {
-            lsp_types::FileChangeType::CREATED | lsp_types::FileChangeType::CHANGED => {
+            lsp_types::FileChangeType::CREATED | lsp_types::FileChangeType::CHANGED
                 // Read the file from disk (unless it's already open with editor contents).
-                if !state.open_files.contains(&uri_str) {
-                    if let Some(path) = uri_to_file_path(&event.uri) {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            let parsed = spar_syntax::parse(&content);
-                            let tree = spar_hir_def::item_tree::lower::lower_file(
-                                &parsed.syntax_node(),
-                            );
-                            state.item_trees.insert(uri_str.clone(), Arc::new(tree));
-                            state.documents.insert(uri_str, content);
-                            changed = true;
-                        }
-                    }
+                if !state.open_files.contains(&uri_str) =>
+            {
+                if let Some(path) = uri_to_file_path(&event.uri)
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
+                    let parsed = spar_syntax::parse(&content);
+                    let tree =
+                        spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
+                    state.item_trees.insert(uri_str.clone(), Arc::new(tree));
+                    state.documents.insert(uri_str, content);
+                    changed = true;
                 }
             }
             lsp_types::FileChangeType::DELETED => {
@@ -478,10 +463,7 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
         diagnostics,
         version: None,
     };
-    let notif = lsp_server::Notification::new(
-        PublishDiagnostics::METHOD.to_string(),
-        params,
-    );
+    let notif = lsp_server::Notification::new(PublishDiagnostics::METHOD.to_string(), params);
     connection
         .sender
         .send(Message::Notification(notif))
@@ -508,13 +490,13 @@ fn handle_hover(state: &ServerState, params: lsp_types::HoverParams) -> Option<H
     let text = token.text();
 
     // Keyword hover: show AADL reference.
-    if kind.is_keyword() {
-        if let Some(info) = keyword_hover_info(kind) {
-            return Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::String(info)),
-                range: Some(token_range(&token)),
-            });
-        }
+    if kind.is_keyword()
+        && let Some(info) = keyword_hover_info(kind)
+    {
+        return Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(info)),
+            range: Some(token_range(&token)),
+        });
     }
 
     // Identifier hover: look up in the ItemTree.
@@ -824,7 +806,12 @@ fn handle_document_symbols(
                         .property_defs
                         .iter()
                         .map(|def| {
-                            make_symbol(def.name.as_str(), Some("property"), SymbolKind::PROPERTY, None)
+                            make_symbol(
+                                def.name.as_str(),
+                                Some("property"),
+                                SymbolKind::PROPERTY,
+                                None,
+                            )
                         })
                         .collect();
                     children.push(make_symbol(
@@ -860,7 +847,7 @@ fn handle_document_symbols(
         let already_covered = symbols.iter().any(|s| {
             s.children
                 .as_ref()
-                .map_or(false, |ch| ch.iter().any(|c| c.name == ps.name.as_str()))
+                .is_some_and(|ch| ch.iter().any(|c| c.name == ps.name.as_str()))
         });
         if already_covered {
             continue;
@@ -869,7 +856,12 @@ fn handle_document_symbols(
             .property_defs
             .iter()
             .map(|def| {
-                make_symbol(def.name.as_str(), Some("property"), SymbolKind::PROPERTY, None)
+                make_symbol(
+                    def.name.as_str(),
+                    Some("property"),
+                    SymbolKind::PROPERTY,
+                    None,
+                )
             })
             .collect();
         symbols.push(make_symbol(
@@ -950,13 +942,13 @@ fn handle_goto_definition(
         }
         let other_parsed = spar_syntax::parse(other_source);
         let other_root = other_parsed.syntax_node();
-        if let Some(range) = find_definition_range_in_file(&other_root, name, other_source) {
-            if let Ok(other_uri) = other_uri_str.parse::<Uri>() {
-                return Some(GotoDefinitionResponse::Scalar(Location {
-                    uri: other_uri,
-                    range,
-                }));
-            }
+        if let Some(range) = find_definition_range_in_file(&other_root, name, other_source)
+            && let Ok(other_uri) = other_uri_str.parse::<Uri>()
+        {
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: other_uri,
+                range,
+            }));
         }
     }
 
@@ -987,16 +979,15 @@ fn find_definition_range_in_file(
 
         // Walk direct token children looking for a matching IDENT.
         for token in node.children_with_tokens() {
-            if let Some(tok) = token.as_token() {
-                if tok.kind() == SyntaxKind::IDENT
-                    && tok.text().eq_ignore_ascii_case(name)
-                {
-                    let start: usize = tok.text_range().start().into();
-                    let end: usize = tok.text_range().end().into();
-                    let start_pos = offset_to_position(source, start);
-                    let end_pos = offset_to_position(source, end);
-                    return Some(Range::new(start_pos, end_pos));
-                }
+            if let Some(tok) = token.as_token()
+                && tok.kind() == SyntaxKind::IDENT
+                && tok.text().eq_ignore_ascii_case(name)
+            {
+                let start: usize = tok.text_range().start().into();
+                let end: usize = tok.text_range().end().into();
+                let start_pos = offset_to_position(source, start);
+                let end_pos = offset_to_position(source, end);
+                return Some(Range::new(start_pos, end_pos));
             }
         }
     }
@@ -1006,10 +997,7 @@ fn find_definition_range_in_file(
 
 // ── Completion ──────────────────────────────────────────────────────
 
-fn handle_completion(
-    state: &ServerState,
-    params: CompletionParams,
-) -> Option<CompletionResponse> {
+fn handle_completion(state: &ServerState, params: CompletionParams) -> Option<CompletionResponse> {
     let uri = &params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
     let source = state.documents.get(uri.as_str())?;
@@ -1130,8 +1118,13 @@ fn is_in_section(source: &str, offset: usize, section: &str) -> bool {
     // Check that no other section keyword appears after it.
     let after_section = &lower[section_pos + section.len()..];
     let other_sections = [
-        "features", "subcomponents", "connections", "flows", "modes",
-        "calls", "prototypes",
+        "features",
+        "subcomponents",
+        "connections",
+        "flows",
+        "modes",
+        "calls",
+        "prototypes",
     ];
     for other in &other_sections {
         if *other != section && after_section.contains(other) {
@@ -1154,18 +1147,33 @@ fn is_in_section(source: &str, offset: usize, section: &str) -> bool {
 fn add_keyword_completions(items: &mut Vec<CompletionItem>) {
     // Component categories.
     let categories = [
-        ("system", "Component category: composite integration component"),
+        (
+            "system",
+            "Component category: composite integration component",
+        ),
         ("process", "Component category: protected address space"),
         ("thread", "Component category: schedulable execution unit"),
-        ("thread group", "Component category: logical thread grouping"),
+        (
+            "thread group",
+            "Component category: logical thread grouping",
+        ),
         ("processor", "Component category: hardware scheduler"),
-        ("virtual processor", "Component category: virtual execution platform"),
+        (
+            "virtual processor",
+            "Component category: virtual execution platform",
+        ),
         ("memory", "Component category: storage component"),
         ("bus", "Component category: hardware communication channel"),
-        ("virtual bus", "Component category: virtual communication channel"),
+        (
+            "virtual bus",
+            "Component category: virtual communication channel",
+        ),
         ("device", "Component category: external interface"),
         ("subprogram", "Component category: callable code"),
-        ("subprogram group", "Component category: subprogram collection"),
+        (
+            "subprogram group",
+            "Component category: subprogram collection",
+        ),
         ("data", "Component category: data type/structure"),
         ("abstract", "Component category: generic component"),
     ];
@@ -1285,10 +1293,10 @@ fn add_classifier_completions(
 
     // Component types.
     for (pkg_name, type_name, category) in scope.all_component_types() {
-        if let Some(filter) = filter_category {
-            if category != filter {
-                continue;
-            }
+        if let Some(filter) = filter_category
+            && category != filter
+        {
+            continue;
         }
 
         let qualified = format!("{}::{}", pkg_name.as_str(), type_name.as_str());
@@ -1310,10 +1318,10 @@ fn add_classifier_completions(
 
     // Component implementations.
     for (pkg_name, type_name, impl_name, category) in scope.all_component_impls() {
-        if let Some(filter) = filter_category {
-            if category != filter {
-                continue;
-            }
+        if let Some(filter) = filter_category
+            && category != filter
+        {
+            continue;
         }
 
         let impl_qualified = format!(
@@ -1326,7 +1334,11 @@ fn add_classifier_completions(
         items.push(CompletionItem {
             label: impl_short.clone(),
             kind: Some(CompletionItemKind::METHOD),
-            detail: Some(format!("{} implementation ({})", category, pkg_name.as_str())),
+            detail: Some(format!(
+                "{} implementation ({})",
+                category,
+                pkg_name.as_str()
+            )),
             insert_text: Some(impl_qualified.clone()),
             ..Default::default()
         });
@@ -1433,9 +1445,7 @@ fn handle_workspace_symbol(
 
         // Packages.
         for (_idx, pkg) in tree.packages.iter() {
-            if query.is_empty()
-                || pkg.name.as_str().to_ascii_lowercase().contains(&query)
-            {
+            if query.is_empty() || pkg.name.as_str().to_ascii_lowercase().contains(&query) {
                 symbols.push(SymbolInformation {
                     name: pkg.name.as_str().to_string(),
                     kind: SymbolKind::MODULE,
@@ -1474,9 +1484,7 @@ fn handle_workspace_symbol(
                         let ci = &tree.component_impls[*ci_idx];
                         let full_name =
                             format!("{}.{}", ci.type_name.as_str(), ci.impl_name.as_str());
-                        if query.is_empty()
-                            || full_name.to_ascii_lowercase().contains(&query)
-                        {
+                        if query.is_empty() || full_name.to_ascii_lowercase().contains(&query) {
                             symbols.push(SymbolInformation {
                                 name: full_name,
                                 kind: SymbolKind::METHOD,
@@ -1533,13 +1541,11 @@ fn handle_workspace_symbol(
 
         // Top-level property sets (outside packages).
         for (_idx, ps) in tree.property_sets.iter() {
-            if query.is_empty()
-                || ps.name.as_str().to_ascii_lowercase().contains(&query)
-            {
+            if query.is_empty() || ps.name.as_str().to_ascii_lowercase().contains(&query) {
                 // Avoid duplicates from package-contained sets.
-                let already = symbols.iter().any(|s| {
-                    s.name == ps.name.as_str() && s.kind == SymbolKind::NAMESPACE
-                });
+                let already = symbols
+                    .iter()
+                    .any(|s| s.name == ps.name.as_str() && s.kind == SymbolKind::NAMESPACE);
                 if !already {
                     symbols.push(SymbolInformation {
                         name: ps.name.as_str().to_string(),
@@ -1562,6 +1568,7 @@ fn handle_workspace_symbol(
 
 // ── Code Actions ────────────────────────────────────────────────────
 
+#[allow(clippy::mutable_key_type)]
 fn handle_code_action(
     state: &ServerState,
     params: &CodeActionParams,
@@ -1628,21 +1635,19 @@ fn handle_code_action(
         }
 
         // Action 3: Add with-clause for unresolved classifier references
-        if diag_source.starts_with("spar-") && msg.contains("unresolved") {
-            // Try to find a package that defines the unresolved name
-            if let Some(name) = extract_unresolved_name(msg) {
-                if let Some(pkg_name) = find_package_for_name(state, &name) {
-                    if let Some(with_edit) = make_with_clause_edit(source, uri, &pkg_name) {
-                        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                            title: format!("Add 'with {};'", pkg_name),
-                            kind: Some(CodeActionKind::QUICKFIX),
-                            diagnostics: Some(vec![diag.clone()]),
-                            edit: Some(with_edit),
-                            ..Default::default()
-                        }));
-                    }
-                }
-            }
+        if diag_source.starts_with("spar-")
+            && msg.contains("unresolved")
+            && let Some(name) = extract_unresolved_name(msg)
+            && let Some(pkg_name) = find_package_for_name(state, &name)
+            && let Some(with_edit) = make_with_clause_edit(source, uri, &pkg_name)
+        {
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Add 'with {};'", pkg_name),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![diag.clone()]),
+                edit: Some(with_edit),
+                ..Default::default()
+            }));
         }
 
         // Action 4: Quick-fix port direction mismatch
@@ -1697,11 +1702,11 @@ fn find_expected_end_name(source: &str, range: &Range) -> Option<String> {
             let node_range = node.text_range();
             // The diagnostic offset should be near the end of this node
             // or just after it (for missing `end` keywords)
-            if node_range.start() < target_offset {
-                if best_node.is_none() || node_range.start() > best_end {
-                    best_node = Some(node.clone());
-                    best_end = node_range.start();
-                }
+            if node_range.start() < target_offset
+                && (best_node.is_none() || node_range.start() > best_end)
+            {
+                best_node = Some(node.clone());
+                best_end = node_range.start();
             }
         }
     }
@@ -1710,23 +1715,25 @@ fn find_expected_end_name(source: &str, range: &Range) -> Option<String> {
 
     // Extract the name from the declaration node
     match decl_node.kind() {
-        SyntaxKind::AADL_PACKAGE | SyntaxKind::COMPONENT_TYPE
-        | SyntaxKind::FEATURE_GROUP_TYPE | SyntaxKind::PROPERTY_SET => {
+        SyntaxKind::AADL_PACKAGE
+        | SyntaxKind::COMPONENT_TYPE
+        | SyntaxKind::FEATURE_GROUP_TYPE
+        | SyntaxKind::PROPERTY_SET => {
             // Name is the first IDENT token child (possibly inside a NAME node)
             for child in decl_node.children_with_tokens() {
-                if let Some(tok) = child.as_token() {
-                    if tok.kind() == SyntaxKind::IDENT {
-                        return Some(tok.text().to_string());
-                    }
+                if let Some(tok) = child.as_token()
+                    && tok.kind() == SyntaxKind::IDENT
+                {
+                    return Some(tok.text().to_string());
                 }
-                if let Some(node) = child.as_node() {
-                    if node.kind() == SyntaxKind::NAME {
-                        // Extract text from the NAME node
-                        let name_text: String = node.text().to_string();
-                        let trimmed = name_text.trim().to_string();
-                        if !trimmed.is_empty() {
-                            return Some(trimmed);
-                        }
+                if let Some(node) = child.as_node()
+                    && node.kind() == SyntaxKind::NAME
+                {
+                    // Extract text from the NAME node
+                    let name_text: String = node.text().to_string();
+                    let trimmed = name_text.trim().to_string();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed);
                     }
                 }
             }
@@ -1749,15 +1756,16 @@ fn find_expected_end_name(source: &str, range: &Range) -> Option<String> {
                         impl_name = Some(tok.text().to_string());
                     }
                 }
-                if let Some(node) = child.as_node() {
-                    if node.kind() == SyntaxKind::REALIZATION && past_implementation {
-                        // Extract the type name from REALIZATION
-                        for rtok in node.children_with_tokens() {
-                            if let Some(t) = rtok.as_token() {
-                                if t.kind() == SyntaxKind::IDENT {
-                                    type_name = Some(t.text().to_string());
-                                }
-                            }
+                if let Some(node) = child.as_node()
+                    && node.kind() == SyntaxKind::REALIZATION
+                    && past_implementation
+                {
+                    // Extract the type name from REALIZATION
+                    for rtok in node.children_with_tokens() {
+                        if let Some(t) = rtok.as_token()
+                            && t.kind() == SyntaxKind::IDENT
+                        {
+                            type_name = Some(t.text().to_string());
                         }
                     }
                 }
@@ -1826,11 +1834,8 @@ fn find_package_for_name(state: &ServerState, name: &str) -> Option<String> {
 }
 
 /// Generate a WorkspaceEdit to insert `with PackageName;` at the top of the file.
-fn make_with_clause_edit(
-    source: &str,
-    uri: &Uri,
-    pkg_name: &str,
-) -> Option<WorkspaceEdit> {
+#[allow(clippy::mutable_key_type)]
+fn make_with_clause_edit(source: &str, uri: &Uri, pkg_name: &str) -> Option<WorkspaceEdit> {
     // Check if we already have this with-clause
     let lower = source.to_ascii_lowercase();
     let with_check = format!("with {}", pkg_name.to_ascii_lowercase());
@@ -1877,13 +1882,19 @@ fn find_with_clause_insert_offset(source: &str) -> usize {
 
     // After `public` keyword line
     if let Some(pos) = lower.find("public") {
-        let line_end = source[pos..].find('\n').map(|p| pos + p + 1).unwrap_or(pos + 6);
+        let line_end = source[pos..]
+            .find('\n')
+            .map(|p| pos + p + 1)
+            .unwrap_or(pos + 6);
         return line_end;
     }
 
     // After `package Name` line
     if let Some(pos) = lower.find("package ") {
-        let line_end = source[pos..].find('\n').map(|p| pos + p + 1).unwrap_or(pos + 8);
+        let line_end = source[pos..]
+            .find('\n')
+            .map(|p| pos + p + 1)
+            .unwrap_or(pos + 8);
         return line_end;
     }
 
@@ -1891,15 +1902,15 @@ fn find_with_clause_insert_offset(source: &str) -> usize {
 }
 
 /// Generate a WorkspaceEdit to swap `src -> dst` to `dst -> src` in a connection.
-fn make_swap_connection_edit(
-    source: &str,
-    uri: &Uri,
-    diag_range: &Range,
-) -> Option<WorkspaceEdit> {
+#[allow(clippy::mutable_key_type)]
+fn make_swap_connection_edit(source: &str, uri: &Uri, diag_range: &Range) -> Option<WorkspaceEdit> {
     // Find the line containing the diagnostic
     let offset = position_to_offset(source, diag_range.start)?;
     let line_start = source[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let line_end = source[offset..].find('\n').map(|p| offset + p).unwrap_or(source.len());
+    let line_end = source[offset..]
+        .find('\n')
+        .map(|p| offset + p)
+        .unwrap_or(source.len());
     let line = &source[line_start..line_end];
 
     // Look for `src -> dst` or `src <-> dst` pattern
@@ -1915,7 +1926,10 @@ fn make_swap_connection_edit(
     // Source is between `:` (or `port`/`access` keyword) and arrow
     // Look for the content before the arrow
     let before_arrow = line[..arrow].trim();
-    let after_arrow = line[arrow + arrow_len..].trim().trim_end_matches(';').trim();
+    let after_arrow = line[arrow + arrow_len..]
+        .trim()
+        .trim_end_matches(';')
+        .trim();
 
     // Find the last space-separated token before arrow (src endpoint)
     // and first token after arrow (dst endpoint)
@@ -1934,7 +1948,12 @@ fn make_swap_connection_edit(
     }
 
     // Build the replacement: swap src and dst
-    let old_text = format!("{}{}{}", src_text, arrow_str, after_arrow.split(';').next().unwrap_or(after_arrow));
+    let old_text = format!(
+        "{}{}{}",
+        src_text,
+        arrow_str,
+        after_arrow.split(';').next().unwrap_or(after_arrow)
+    );
     let new_text = format!("{}{}{}", dst_text, arrow_str, src_text);
 
     // Find the position of the old text in the line
@@ -1961,7 +1980,13 @@ fn make_swap_connection_edit(
 fn find_connection_endpoint_start(text: &str) -> Option<usize> {
     // Connection syntax: `name : port src` or `name : access src` etc.
     // The endpoint starts after the last connection-kind keyword
-    let keywords = ["port ", "access ", "feature group ", "feature ", "parameter "];
+    let keywords = [
+        "port ",
+        "access ",
+        "feature group ",
+        "feature ",
+        "parameter ",
+    ];
     let mut last = 0;
     for kw in &keywords {
         let lower = text.to_ascii_lowercase();
@@ -1989,11 +2014,7 @@ fn handle_formatting(
     let uri = &params.text_document.uri;
     let source = state.documents.get(uri.as_str())?;
     let edits = format_document(source, &params.options);
-    if edits.is_empty() {
-        None
-    } else {
-        Some(edits)
-    }
+    if edits.is_empty() { None } else { Some(edits) }
 }
 
 /// Format an AADL document by walking the CST and emitting properly formatted text.
@@ -2088,11 +2109,7 @@ fn format_node_recursive(
 }
 
 /// Format a package node.
-fn format_package(
-    node: &spar_syntax::SyntaxNode,
-    depth: usize,
-    indent_size: usize,
-) -> String {
+fn format_package(node: &spar_syntax::SyntaxNode, depth: usize, indent_size: usize) -> String {
     use rowan::NodeOrToken;
 
     let mut out = String::new();
@@ -2153,11 +2170,7 @@ fn format_package(
 }
 
 /// Format a public/private section.
-fn format_section(
-    node: &spar_syntax::SyntaxNode,
-    depth: usize,
-    indent_size: usize,
-) -> String {
+fn format_section(node: &spar_syntax::SyntaxNode, depth: usize, indent_size: usize) -> String {
     use rowan::NodeOrToken;
 
     let mut out = String::new();
@@ -2185,36 +2198,34 @@ fn format_section(
                     out.push_str(&format_keyword_token(&t));
                 }
             }
-            NodeOrToken::Node(n) => {
-                match n.kind() {
-                    SyntaxKind::WITH_CLAUSE => {
-                        if !out.ends_with('\n') && !out.is_empty() {
-                            out.push('\n');
-                        }
-                        out.push_str(&indent);
-                        out.push_str(&format_inline_node(&n));
+            NodeOrToken::Node(n) => match n.kind() {
+                SyntaxKind::WITH_CLAUSE => {
+                    if !out.ends_with('\n') && !out.is_empty() {
                         out.push('\n');
                     }
-                    SyntaxKind::COMPONENT_TYPE => {
-                        if !out.ends_with('\n') && !out.is_empty() {
-                            out.push('\n');
-                        }
-                        out.push_str(&format_component_type(&n, depth + 1, indent_size));
-                    }
-                    SyntaxKind::COMPONENT_IMPL => {
-                        if !out.ends_with('\n') && !out.is_empty() {
-                            out.push('\n');
-                        }
-                        out.push_str(&format_component_impl(&n, depth + 1, indent_size));
-                    }
-                    SyntaxKind::ANNEX_SUBCLAUSE | SyntaxKind::ANNEX_LIBRARY => {
-                        out.push_str(&n.text().to_string());
-                    }
-                    _ => {
-                        out.push_str(&format_classifier_generic(&n, depth + 1, indent_size));
-                    }
+                    out.push_str(&indent);
+                    out.push_str(&format_inline_node(&n));
+                    out.push('\n');
                 }
-            }
+                SyntaxKind::COMPONENT_TYPE => {
+                    if !out.ends_with('\n') && !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&format_component_type(&n, depth + 1, indent_size));
+                }
+                SyntaxKind::COMPONENT_IMPL => {
+                    if !out.ends_with('\n') && !out.is_empty() {
+                        out.push('\n');
+                    }
+                    out.push_str(&format_component_impl(&n, depth + 1, indent_size));
+                }
+                SyntaxKind::ANNEX_SUBCLAUSE | SyntaxKind::ANNEX_LIBRARY => {
+                    out.push_str(&n.text().to_string());
+                }
+                _ => {
+                    out.push_str(&format_classifier_generic(&n, depth + 1, indent_size));
+                }
+            },
         }
     }
 
@@ -2330,11 +2341,7 @@ fn format_classifier_body(
 }
 
 /// Format a body section (features, subcomponents, connections, etc.).
-fn format_body_section(
-    node: &spar_syntax::SyntaxNode,
-    depth: usize,
-    indent_size: usize,
-) -> String {
+fn format_body_section(node: &spar_syntax::SyntaxNode, depth: usize, indent_size: usize) -> String {
     use rowan::NodeOrToken;
 
     let mut out = String::new();
@@ -2404,10 +2411,9 @@ fn normalize_declaration(text: &str) -> String {
     let mut result = String::new();
     let trimmed = text.trim();
 
-    let mut chars = trimmed.chars().peekable();
     let mut prev_was_space = false;
 
-    while let Some(ch) = chars.next() {
+    for ch in trimmed.chars() {
         match ch {
             '\n' | '\r' => {
                 // Replace newlines with a single space (declarations should be on one line)
@@ -2444,8 +2450,7 @@ fn normalize_declaration(text: &str) -> String {
     }
 
     // Normalize spacing around operators
-    let out = normalize_operator_spacing(&out);
-    out
+    normalize_operator_spacing(&out)
 }
 
 /// Normalize spacing around AADL operators: `:`, `->`, `<->`, `=>`, `::`, `.`.
@@ -2589,10 +2594,8 @@ fn handle_prepare_rename(
     }
 }
 
-fn handle_rename(
-    state: &ServerState,
-    params: &RenameParams,
-) -> Option<WorkspaceEdit> {
+#[allow(clippy::mutable_key_type)]
+fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<WorkspaceEdit> {
     let uri = &params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
     let new_name = &params.new_name;
@@ -2625,10 +2628,15 @@ fn handle_rename(
 
         let refs = find_references_in_document(doc_source, &old_name, symbol_kind);
         if !refs.is_empty() {
-            changes.insert(doc_uri, refs.into_iter().map(|range| TextEdit {
-                range,
-                new_text: new_name.clone(),
-            }).collect());
+            changes.insert(
+                doc_uri,
+                refs.into_iter()
+                    .map(|range| TextEdit {
+                        range,
+                        new_text: new_name.clone(),
+                    })
+                    .collect(),
+            );
         }
     }
 
@@ -2712,16 +2720,15 @@ fn find_references_in_document(
 
     // Walk all tokens looking for IDENT tokens matching the name
     for token in root.descendants_with_tokens() {
-        if let Some(tok) = token.as_token() {
-            if tok.kind() == SyntaxKind::IDENT
-                && tok.text().eq_ignore_ascii_case(name)
-            {
-                let start: usize = tok.text_range().start().into();
-                let end: usize = tok.text_range().end().into();
-                let start_pos = offset_to_position(source, start);
-                let end_pos = offset_to_position(source, end);
-                ranges.push(Range::new(start_pos, end_pos));
-            }
+        if let Some(tok) = token.as_token()
+            && tok.kind() == SyntaxKind::IDENT
+            && tok.text().eq_ignore_ascii_case(name)
+        {
+            let start: usize = tok.text_range().start().into();
+            let end: usize = tok.text_range().end().into();
+            let start_pos = offset_to_position(source, start);
+            let end_pos = offset_to_position(source, end);
+            ranges.push(Range::new(start_pos, end_pos));
         }
     }
 
@@ -2730,10 +2737,7 @@ fn find_references_in_document(
 
 // ── Inlay Hints ─────────────────────────────────────────────────────
 
-fn handle_inlay_hints(
-    state: &ServerState,
-    params: &InlayHintParams,
-) -> Option<Vec<InlayHint>> {
+fn handle_inlay_hints(state: &ServerState, params: &InlayHintParams) -> Option<Vec<InlayHint>> {
     let uri = &params.text_document.uri;
     let source = state.documents.get(uri.as_str())?;
     let tree = state.item_trees.get(uri.as_str())?;
@@ -2787,11 +2791,7 @@ fn handle_inlay_hints(
         }
     }
 
-    if hints.is_empty() {
-        None
-    } else {
-        Some(hints)
-    }
+    if hints.is_empty() { None } else { Some(hints) }
 }
 
 /// Find the first occurrence of an identifier name in the source and return
@@ -2801,13 +2801,12 @@ fn find_name_position(source: &str, name: &str) -> Option<Position> {
     let root = parsed.syntax_node();
 
     for token in root.descendants_with_tokens() {
-        if let Some(tok) = token.as_token() {
-            if tok.kind() == SyntaxKind::IDENT
-                && tok.text().eq_ignore_ascii_case(name)
-            {
-                let end: usize = tok.text_range().end().into();
-                return Some(offset_to_position(source, end));
-            }
+        if let Some(tok) = token.as_token()
+            && tok.kind() == SyntaxKind::IDENT
+            && tok.text().eq_ignore_ascii_case(name)
+        {
+            let end: usize = tok.text_range().end().into();
+            return Some(offset_to_position(source, end));
         }
     }
     None
@@ -2877,8 +2876,8 @@ fn percent_decode(s: &str) -> String {
     let mut chars = s.bytes();
     while let Some(b) = chars.next() {
         if b == b'%' {
-            let hi = chars.next().and_then(|c| hex_val(c));
-            let lo = chars.next().and_then(|c| hex_val(c));
+            let hi = chars.next().and_then(hex_val);
+            let lo = chars.next().and_then(hex_val);
             if let (Some(h), Some(l)) = (hi, lo) {
                 result.push((h << 4 | l) as char);
             } else {
@@ -3002,7 +3001,10 @@ mod tests {
             !result.contains("  "),
             "Should collapse multiple spaces: {result}"
         );
-        assert!(result.contains("foo"), "Should preserve identifiers: {result}");
+        assert!(
+            result.contains("foo"),
+            "Should preserve identifiers: {result}"
+        );
     }
 
     // ── Code action tests ───────────────────────────────────────────
@@ -3013,7 +3015,9 @@ mod tests {
         let uri: Uri = "file:///test.aadl".parse().unwrap();
         // Store a document so the code action handler can access it
         let source = "package Foo\nend Foo\n";
-        state.documents.insert(uri.as_str().to_string(), source.to_string());
+        state
+            .documents
+            .insert(uri.as_str().to_string(), source.to_string());
 
         let params = CodeActionParams {
             text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
@@ -3172,10 +3176,7 @@ mod tests {
             extract_unresolved_name("unresolved reference 'Pkg::Bar'"),
             Some("Bar".to_string())
         );
-        assert_eq!(
-            extract_unresolved_name("no match here"),
-            None
-        );
+        assert_eq!(extract_unresolved_name("no match here"), None);
     }
 
     #[test]
@@ -3188,7 +3189,8 @@ mod tests {
 
     #[test]
     fn find_expected_end_name_for_component_type() {
-        let source = "package Pkg\npublic\n  system Controller\n  features\n    x : in data port;\n";
+        let source =
+            "package Pkg\npublic\n  system Controller\n  features\n    x : in data port;\n";
         let range = Range::new(Position::new(5, 0), Position::new(5, 0));
         let name = find_expected_end_name(source, &range);
         assert_eq!(name, Some("Controller".to_string()));

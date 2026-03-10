@@ -142,11 +142,7 @@ impl LegalityEngine {
     }
 
     /// Run all checks (both ItemTree-level and instance-level).
-    pub fn check_all(
-        &self,
-        tree: &ItemTree,
-        instance: &SystemInstance,
-    ) -> Vec<LegalityDiagnostic> {
+    pub fn check_all(&self, tree: &ItemTree, instance: &SystemInstance) -> Vec<LegalityDiagnostic> {
         let mut out = self.check_item_tree(tree);
         out.extend(self.check_instance(instance));
         out
@@ -158,7 +154,10 @@ impl LegalityEngine {
 /// Map a naming-rule diagnostic to a specific rule ID.
 fn classify_naming_rule(d: &AnalysisDiagnostic) -> LegalityRule {
     let msg = &d.message;
-    if msg.contains("empty name") || msg.contains("empty type name") || msg.contains("empty impl name") {
+    if msg.contains("empty name")
+        || msg.contains("empty type name")
+        || msg.contains("empty impl name")
+    {
         LegalityRule {
             id: "N-1",
             description: "Identifiers must be non-empty",
@@ -176,7 +175,9 @@ fn classify_naming_rule(d: &AnalysisDiagnostic) -> LegalityRule {
             description: "No self-referencing with clauses",
             section: "AS5506 \u{00a7}4.2",
         }
-    } else if msg.contains("duplicate property definition") || msg.contains("duplicate property type") {
+    } else if msg.contains("duplicate property definition")
+        || msg.contains("duplicate property type")
+    {
         LegalityRule {
             id: "N-4",
             description: "No duplicate property set member names",
@@ -359,7 +360,12 @@ fn check_impl_type_match(tree: &ItemTree) -> Vec<LegalityDiagnostic> {
         let mut declared_types: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         for item_ref in pkg.public_items.iter().chain(pkg.private_items.iter()) {
             if let spar_hir_def::item_tree::ItemRef::ComponentType(ct_idx) = item_ref {
-                declared_types.insert(tree.component_types[*ct_idx].name.as_str().to_ascii_lowercase());
+                declared_types.insert(
+                    tree.component_types[*ct_idx]
+                        .name
+                        .as_str()
+                        .to_ascii_lowercase(),
+                );
             }
         }
 
@@ -516,7 +522,11 @@ mod tests {
             idx
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
@@ -593,7 +603,10 @@ mod tests {
         tree.packages.alloc(Package {
             name: Name::new("Pkg"),
             with_clauses: Vec::new(),
-            public_items: vec![ItemRef::ComponentType(ct_idx), ItemRef::ComponentImpl(ci_idx)],
+            public_items: vec![
+                ItemRef::ComponentType(ct_idx),
+                ItemRef::ComponentImpl(ci_idx),
+            ],
             private_items: Vec::new(),
             renames: Vec::new(),
         });
@@ -629,7 +642,12 @@ mod tests {
             Some(root),
         );
 
-        b.add_feature("reading", FeatureKind::DataPort, Some(Direction::Out), child_a);
+        b.add_feature(
+            "reading",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            child_a,
+        );
         b.add_feature("input", FeatureKind::DataPort, Some(Direction::In), child_b);
         b.add_connection(
             "c1",
@@ -725,7 +743,10 @@ mod tests {
 
         assert!(!diags.is_empty(), "should produce at least one diagnostic");
         let naming = diags.iter().find(|d| d.rule.id.starts_with("N-"));
-        assert!(naming.is_some(), "should have an N-* rule tagged diagnostic");
+        assert!(
+            naming.is_some(),
+            "should have an N-* rule tagged diagnostic"
+        );
         assert_eq!(naming.unwrap().rule.id, "N-2");
     }
 
@@ -734,20 +755,50 @@ mod tests {
     #[test]
     fn direction_violation_produces_tagged_diagnostics() {
         let mut b = TestInstanceBuilder::new();
-        let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-        let a = b.add_component("a", ComponentCategory::System, "A", Some("impl"), "Pkg", Some(root));
-        let bb = b.add_component("b", ComponentCategory::System, "B", Some("impl"), "Pkg", Some(root));
+        let root = b.add_component(
+            "root",
+            ComponentCategory::System,
+            "Top",
+            Some("impl"),
+            "Pkg",
+            None,
+        );
+        let a = b.add_component(
+            "a",
+            ComponentCategory::System,
+            "A",
+            Some("impl"),
+            "Pkg",
+            Some(root),
+        );
+        let bb = b.add_component(
+            "b",
+            ComponentCategory::System,
+            "B",
+            Some("impl"),
+            "Pkg",
+            Some(root),
+        );
         // Wrong direction: in -> out for across connection
         b.add_feature("p1", FeatureKind::DataPort, Some(Direction::In), a);
         b.add_feature("p2", FeatureKind::DataPort, Some(Direction::Out), bb);
-        b.add_connection("c1", ConnectionKind::Port, root, end(Some("a"), "p1"), end(Some("b"), "p2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "p1"),
+            end(Some("b"), "p2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let instance = b.build(root);
         let engine = LegalityEngine::new();
         let diags = engine.check_instance(&instance);
 
-        let dir_diags: Vec<_> = diags.iter().filter(|d| d.rule.id.starts_with("D-")).collect();
+        let dir_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id.starts_with("D-"))
+            .collect();
         assert!(
             !dir_diags.is_empty(),
             "should produce D-* tagged diagnostics for direction violations"
@@ -796,8 +847,19 @@ mod tests {
         let engine = LegalityEngine::new();
         let diags = engine.check_item_tree(&tree);
 
-        let impl_type: Vec<_> = diags.iter().filter(|d| d.rule.id == "L-impl-type").collect();
-        assert_eq!(impl_type.len(), 1, "should flag missing type: {:?}", diags.iter().map(|d| (&d.rule.id, &d.inner.message)).collect::<Vec<_>>());
+        let impl_type: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id == "L-impl-type")
+            .collect();
+        assert_eq!(
+            impl_type.len(),
+            1,
+            "should flag missing type: {:?}",
+            diags
+                .iter()
+                .map(|d| (&d.rule.id, &d.inner.message))
+                .collect::<Vec<_>>()
+        );
         assert!(impl_type[0].inner.message.contains("MissingType"));
     }
 
@@ -808,8 +870,15 @@ mod tests {
         let engine = LegalityEngine::new();
         let diags = engine.check_item_tree(&tree);
 
-        let impl_type: Vec<_> = diags.iter().filter(|d| d.rule.id == "L-impl-type").collect();
-        assert!(impl_type.is_empty(), "matching type should produce no L-impl-type: {:?}", impl_type);
+        let impl_type: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id == "L-impl-type")
+            .collect();
+        assert!(
+            impl_type.is_empty(),
+            "matching type should produce no L-impl-type: {:?}",
+            impl_type
+        );
     }
 
     // ── Cross-cutting: L-fg-features ───────────────────────────────
@@ -830,7 +899,10 @@ mod tests {
         let engine = LegalityEngine::new();
         let diags = engine.check_item_tree(&tree);
 
-        let fg: Vec<_> = diags.iter().filter(|d| d.rule.id == "L-fg-features").collect();
+        let fg: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id == "L-fg-features")
+            .collect();
         assert_eq!(fg.len(), 1, "empty feature group should warn");
         assert!(fg[0].inner.message.contains("EmptyGroup"));
     }
@@ -862,7 +934,10 @@ mod tests {
         let engine = LegalityEngine::new();
         let diags = engine.check_item_tree(&tree);
 
-        let fg: Vec<_> = diags.iter().filter(|d| d.rule.id == "L-fg-features").collect();
+        let fg: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id == "L-fg-features")
+            .collect();
         assert!(fg.is_empty(), "feature group with features should not warn");
     }
 
@@ -916,8 +991,22 @@ mod tests {
 
         // Instance with a hierarchy violation (thread in system)
         let mut ib = TestInstanceBuilder::new();
-        let root = ib.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-        let thread = ib.add_component("t1", ComponentCategory::Thread, "Worker", None, "Pkg", Some(root));
+        let root = ib.add_component(
+            "root",
+            ComponentCategory::System,
+            "Top",
+            Some("impl"),
+            "Pkg",
+            None,
+        );
+        let thread = ib.add_component(
+            "t1",
+            ComponentCategory::Thread,
+            "Worker",
+            None,
+            "Pkg",
+            Some(root),
+        );
         ib.set_children(root, vec![thread]);
         let instance = ib.build(root);
 
@@ -926,8 +1015,14 @@ mod tests {
         // Should have both N-* (naming) and H-* (hierarchy) diagnostics
         let has_naming = diags.iter().any(|d| d.rule.id.starts_with("N-"));
         let has_hierarchy = diags.iter().any(|d| d.rule.id.starts_with("H-"));
-        assert!(has_naming, "should have naming diagnostics from ItemTree check");
-        assert!(has_hierarchy, "should have hierarchy diagnostics from instance check");
+        assert!(
+            has_naming,
+            "should have naming diagnostics from ItemTree check"
+        );
+        assert!(
+            has_hierarchy,
+            "should have hierarchy diagnostics from instance check"
+        );
     }
 
     // ── Category rule tagging ──────────────────────────────────────

@@ -222,7 +222,8 @@ end ErrorLib;
         assert!(r1.ok());
 
         // Change file text — salsa should recompute.
-        file.set_text(&mut db).to("package V2\npublic\nend V2;".to_string());
+        file.set_text(&mut db)
+            .to("package V2\npublic\nend V2;".to_string());
 
         let r2 = parse_file(&db, file);
         assert!(r2.ok());

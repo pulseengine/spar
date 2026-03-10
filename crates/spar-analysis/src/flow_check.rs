@@ -9,7 +9,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::FlowKind;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates flow specifications and end-to-end flows in the instance model.
 ///
@@ -142,7 +142,9 @@ impl Analysis for FlowCheckAnalysis {
                     message: format!(
                         "end-to-end flow '{}' in '{}' has {} segments \
                          (expected odd number: flow, conn, flow, ...)",
-                        e2e.name, owner.name, e2e.segments.len()
+                        e2e.name,
+                        owner.name,
+                        e2e.segments.len()
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
@@ -155,9 +157,10 @@ impl Analysis for FlowCheckAnalysis {
                 if i % 2 == 1 {
                     // This should be a connection name
                     let seg_text = seg.as_str();
-                    let is_connection = owner.connections.iter().any(|&ci| {
-                        instance.connections[ci].name.eq_ci(seg)
-                    });
+                    let is_connection = owner
+                        .connections
+                        .iter()
+                        .any(|&ci| instance.connections[ci].name.eq_ci(seg));
                     if !is_connection && !seg_text.contains('.') {
                         diags.push(AnalysisDiagnostic {
                             severity: Severity::Warning,
@@ -248,12 +251,7 @@ mod tests {
             self.components[owner].features.push(idx);
         }
 
-        fn add_flow(
-            &mut self,
-            name: &str,
-            kind: FlowKind,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_flow(&mut self, name: &str, kind: FlowKind, owner: ComponentInstanceIdx) {
             let idx = self.flow_instances.alloc(FlowInstance {
                 name: Name::new(name),
                 kind,
@@ -262,11 +260,7 @@ mod tests {
             self.components[owner].flows.push(idx);
         }
 
-        fn add_connection_inst(
-            &mut self,
-            name: &str,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_connection_inst(&mut self, name: &str, owner: ComponentInstanceIdx) {
             let idx = self.connections.alloc(ConnectionInstance {
                 name: Name::new(name),
                 kind: ConnectionKind::Port,
@@ -278,12 +272,7 @@ mod tests {
             self.components[owner].connections.push(idx);
         }
 
-        fn add_e2e(
-            &mut self,
-            name: &str,
-            owner: ComponentInstanceIdx,
-            segments: Vec<&str>,
-        ) {
+        fn add_e2e(&mut self, name: &str, owner: ComponentInstanceIdx, segments: Vec<&str>) {
             self.end_to_end_flows.alloc(EndToEndFlowInstance {
                 name: Name::new(name),
                 owner,
@@ -291,7 +280,11 @@ mod tests {
             });
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
@@ -324,7 +317,10 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let warnings: Vec<_> = diags.iter().filter(|d| d.message.contains("flow source")).collect();
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("flow source"))
+            .collect();
         assert!(warnings.is_empty(), "valid source flow: {:?}", warnings);
     }
 
@@ -339,8 +335,16 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let warnings: Vec<_> = diags.iter().filter(|d| d.message.contains("no output ports")).collect();
-        assert_eq!(warnings.len(), 1, "should warn about source with no out: {:?}", diags);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no output ports"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about source with no out: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -350,12 +354,19 @@ mod tests {
         let sensor = b.add_component("sensor", ComponentCategory::System, Some(root));
         let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
         b.add_connection_inst("c1", root);
-        b.add_e2e("e2e_flow", root, vec!["sensor.data_src", "c1", "ctrl.data_sink"]);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.data_src", "c1", "ctrl.data_sink"],
+        );
         b.set_children(root, vec![sensor, ctrl]);
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert!(errors.is_empty(), "valid e2e flow: {:?}", errors);
     }
 
@@ -367,7 +378,10 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "empty e2e should error: {:?}", diags);
         assert!(errors[0].message.contains("no segments"));
     }
@@ -380,7 +394,8 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let warnings: Vec<_> = diags.iter()
+        let warnings: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("expected odd"))
             .collect();
         assert_eq!(warnings.len(), 1, "even segment count: {:?}", diags);
@@ -396,10 +411,16 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let warnings: Vec<_> = diags.iter()
+        let warnings: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("not a known connection"))
             .collect();
-        assert_eq!(warnings.len(), 1, "should flag unknown connection: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should flag unknown connection: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -414,7 +435,8 @@ mod tests {
 
         let inst = b.build(root);
         let diags = FlowCheckAnalysis.analyze(&inst);
-        let warnings: Vec<_> = diags.iter()
+        let warnings: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("lacks both"))
             .collect();
         assert_eq!(warnings.len(), 1, "path needs both directions: {:?}", diags);

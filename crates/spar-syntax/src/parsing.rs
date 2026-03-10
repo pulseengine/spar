@@ -1,8 +1,8 @@
 use std::mem;
 
 use rowan::GreenNodeBuilder;
-use spar_parser::event::Event;
 use spar_parser::SyntaxKind;
+use spar_parser::event::Event;
 
 /// Result of parsing an AADL source file.
 pub struct Parse {
@@ -73,7 +73,10 @@ fn resolve_events(mut events: Vec<Event>) -> Vec<ResolvedEvent> {
 
     for i in 0..events.len() {
         match mem::replace(&mut events[i], Event::Tombstone) {
-            Event::Start { kind, forward_parent } => {
+            Event::Start {
+                kind,
+                forward_parent,
+            } => {
                 // Collect this event's kind, then walk the forward_parent chain.
                 forward_parents.push(kind);
                 let mut idx = i;
@@ -83,7 +86,10 @@ fn resolve_events(mut events: Vec<Event>) -> Vec<ResolvedEvent> {
                     // Replace the target event with a tombstone so it's not
                     // processed again when the main loop reaches it.
                     fp = match mem::replace(&mut events[idx], Event::Tombstone) {
-                        Event::Start { kind, forward_parent } => {
+                        Event::Start {
+                            kind,
+                            forward_parent,
+                        } => {
                             forward_parents.push(kind);
                             forward_parent
                         }
@@ -126,11 +132,7 @@ fn resolve_events(mut events: Vec<Event>) -> Vec<ResolvedEvent> {
 // ---------------------------------------------------------------------------
 
 /// Build a rowan green tree from parser events and the original token list.
-fn build_tree(
-    input: &str,
-    tokens: &[(SyntaxKind, usize)],
-    events: Vec<Event>,
-) -> Parse {
+fn build_tree(input: &str, tokens: &[(SyntaxKind, usize)], events: Vec<Event>) -> Parse {
     let mut builder = GreenNodeBuilder::new();
     let mut errors = Vec::new();
 
@@ -169,8 +171,13 @@ fn build_tree(
                 // root node, since leading trivia must be inside the root.
                 if depth > 0 {
                     eat_trivia(
-                        &mut builder, tokens, input, &token_starts,
-                        &mut raw_pos, nt_pos, &non_trivia_indices,
+                        &mut builder,
+                        tokens,
+                        input,
+                        &token_starts,
+                        &mut raw_pos,
+                        nt_pos,
+                        &non_trivia_indices,
                     );
                 }
                 depth += 1;
@@ -179,8 +186,13 @@ fn build_tree(
                 // so it lives inside the root.
                 if depth == 1 {
                     eat_trivia(
-                        &mut builder, tokens, input, &token_starts,
-                        &mut raw_pos, nt_pos, &non_trivia_indices,
+                        &mut builder,
+                        tokens,
+                        input,
+                        &token_starts,
+                        &mut raw_pos,
+                        nt_pos,
+                        &non_trivia_indices,
                     );
                 }
             }

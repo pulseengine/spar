@@ -11,7 +11,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates subcomponent legality rules on the instance model.
 ///
@@ -175,7 +175,6 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
-    use spar_hir_def::item_tree::*;
     use spar_hir_def::name::Name;
 
     struct TestBuilder {
@@ -286,12 +285,7 @@ mod tests {
                     && d.message.contains("system")
             })
             .collect();
-        assert_eq!(
-            errors.len(),
-            1,
-            "thread cannot contain system: {:?}",
-            diags
-        );
+        assert_eq!(errors.len(), 1, "thread cannot contain system: {:?}", diags);
     }
 
     #[test]
@@ -395,8 +389,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("duplicate subcomponent name")
+                d.severity == Severity::Error && d.message.contains("duplicate subcomponent name")
             })
             .collect();
         assert_eq!(

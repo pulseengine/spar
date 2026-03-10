@@ -72,7 +72,7 @@ impl TestInstanceBuilder {
             owner,
             classifier: None,
             access_kind: None,
-                array_index: None,
+            array_index: None,
         });
         self.components[owner].features.push(idx);
         idx
@@ -132,7 +132,10 @@ fn count_by_severity(diags: &[AnalysisDiagnostic], severity: Severity) -> usize 
 }
 
 /// Find diagnostics containing a substring.
-fn diags_containing<'a>(diags: &'a [AnalysisDiagnostic], substring: &str) -> Vec<&'a AnalysisDiagnostic> {
+fn diags_containing<'a>(
+    diags: &'a [AnalysisDiagnostic],
+    substring: &str,
+) -> Vec<&'a AnalysisDiagnostic> {
     diags
         .iter()
         .filter(|d| d.message.contains(substring))
@@ -146,12 +149,38 @@ fn connectivity_valid_model_with_connections() {
     // A well-connected system: root has ports, and parent has connections.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child_a = b.add_component("sensor", ComponentCategory::System, "Sensor", Some("basic"), "Pkg", Some(root));
-    let child_b = b.add_component("controller", ComponentCategory::System, "Controller", Some("basic"), "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child_a = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
+    let child_b = b.add_component(
+        "controller",
+        ComponentCategory::System,
+        "Controller",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
 
     // sensor has an out port, controller has an in port
-    b.add_feature("reading", FeatureKind::DataPort, Some(Direction::Out), child_a);
+    b.add_feature(
+        "reading",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        child_a,
+    );
     b.add_feature("input", FeatureKind::DataPort, Some(Direction::In), child_b);
 
     // root has a connection between them
@@ -166,7 +195,10 @@ fn connectivity_valid_model_with_connections() {
     // No unconnected port warnings expected.
     let port_warnings: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("no incoming connection") || d.message.contains("no outgoing connection"))
+        .filter(|d| {
+            d.message.contains("no incoming connection")
+                || d.message.contains("no outgoing connection")
+        })
         .collect();
     assert!(
         port_warnings.is_empty(),
@@ -180,11 +212,30 @@ fn connectivity_unconnected_ports() {
     // A system where children have ports but no connections exist.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("sensor", ComponentCategory::System, "Sensor", Some("basic"), "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
 
     b.add_feature("data_in", FeatureKind::DataPort, Some(Direction::In), child);
-    b.add_feature("data_out", FeatureKind::DataPort, Some(Direction::Out), child);
+    b.add_feature(
+        "data_out",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        child,
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -194,8 +245,18 @@ fn connectivity_unconnected_ports() {
     // Should warn about both unconnected ports.
     let in_warnings = diags_containing(&diags, "no incoming connection");
     let out_warnings = diags_containing(&diags, "no outgoing connection");
-    assert_eq!(in_warnings.len(), 1, "expected 1 input warning: {:?}", diags);
-    assert_eq!(out_warnings.len(), 1, "expected 1 output warning: {:?}", diags);
+    assert_eq!(
+        in_warnings.len(),
+        1,
+        "expected 1 input warning: {:?}",
+        diags
+    );
+    assert_eq!(
+        out_warnings.len(),
+        1,
+        "expected 1 output warning: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -203,8 +264,22 @@ fn connectivity_dangling_connections() {
     // A system where parent has connections but child has no features.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("empty_sub", ComponentCategory::System, "Empty", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "empty_sub",
+        ComponentCategory::System,
+        "Empty",
+        None,
+        "Pkg",
+        Some(root),
+    );
 
     b.add_connection("c1", ConnectionKind::Port, false, root);
     b.set_children(root, vec![child]);
@@ -227,11 +302,30 @@ fn connectivity_event_ports() {
     // Event ports should also be checked.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("handler", ComponentCategory::System, "Handler", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "handler",
+        ComponentCategory::System,
+        "Handler",
+        None,
+        "Pkg",
+        Some(root),
+    );
 
     b.add_feature("alarm", FeatureKind::EventPort, Some(Direction::In), child);
-    b.add_feature("status", FeatureKind::EventDataPort, Some(Direction::Out), child);
+    b.add_feature(
+        "status",
+        FeatureKind::EventDataPort,
+        Some(Direction::Out),
+        child,
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -250,11 +344,35 @@ fn connectivity_access_features_ignored() {
     // Access features (data access, bus access) should NOT trigger port warnings.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("mem", ComponentCategory::Memory, "RAM", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "mem",
+        ComponentCategory::Memory,
+        "RAM",
+        None,
+        "Pkg",
+        Some(root),
+    );
 
-    b.add_feature("bus_acc", FeatureKind::BusAccess, Some(Direction::In), child);
-    b.add_feature("data_acc", FeatureKind::DataAccess, Some(Direction::Out), child);
+    b.add_feature(
+        "bus_acc",
+        FeatureKind::BusAccess,
+        Some(Direction::In),
+        child,
+    );
+    b.add_feature(
+        "data_acc",
+        FeatureKind::DataAccess,
+        Some(Direction::Out),
+        child,
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -264,7 +382,10 @@ fn connectivity_access_features_ignored() {
     // Access features are not ports — no "no incoming/outgoing connection" warnings.
     let port_warnings: Vec<_> = diags
         .iter()
-        .filter(|d| d.message.contains("no incoming connection") || d.message.contains("no outgoing connection"))
+        .filter(|d| {
+            d.message.contains("no incoming connection")
+                || d.message.contains("no outgoing connection")
+        })
         .collect();
     assert!(
         port_warnings.is_empty(),
@@ -280,9 +401,30 @@ fn hierarchy_valid_containment() {
     // system > process > thread is valid.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let proc = b.add_component("proc1", ComponentCategory::Process, "Proc", Some("impl"), "Pkg", Some(root));
-    let thread = b.add_component("t1", ComponentCategory::Thread, "Worker", Some("impl"), "Pkg", Some(proc));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let proc = b.add_component(
+        "proc1",
+        ComponentCategory::Process,
+        "Proc",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let thread = b.add_component(
+        "t1",
+        ComponentCategory::Thread,
+        "Worker",
+        Some("impl"),
+        "Pkg",
+        Some(proc),
+    );
     b.set_children(root, vec![proc]);
     b.set_children(proc, vec![thread]);
 
@@ -300,8 +442,22 @@ fn hierarchy_invalid_containment_thread_in_system() {
     // system > thread is invalid (thread must be inside process).
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let thread = b.add_component("t1", ComponentCategory::Thread, "Worker", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let thread = b.add_component(
+        "t1",
+        ComponentCategory::Thread,
+        "Worker",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![thread]);
 
     let instance = b.build(root);
@@ -313,7 +469,10 @@ fn hierarchy_invalid_containment_thread_in_system() {
         .filter(|d| d.severity == Severity::Error && d.message.contains("cannot contain"))
         .collect();
     assert_eq!(errors.len(), 1, "expected 1 containment error: {:?}", diags);
-    assert!(errors[0].message.contains("thread"), "error should mention thread");
+    assert!(
+        errors[0].message.contains("thread"),
+        "error should mention thread"
+    );
 }
 
 #[test]
@@ -321,10 +480,38 @@ fn hierarchy_invalid_containment_process_in_thread() {
     // thread > process is invalid.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let proc = b.add_component("proc1", ComponentCategory::Process, "Proc", Some("impl"), "Pkg", Some(root));
-    let thread = b.add_component("t1", ComponentCategory::Thread, "Worker", Some("impl"), "Pkg", Some(proc));
-    let bad_proc = b.add_component("bad_proc", ComponentCategory::Process, "BadProc", None, "Pkg", Some(thread));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let proc = b.add_component(
+        "proc1",
+        ComponentCategory::Process,
+        "Proc",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let thread = b.add_component(
+        "t1",
+        ComponentCategory::Thread,
+        "Worker",
+        Some("impl"),
+        "Pkg",
+        Some(proc),
+    );
+    let bad_proc = b.add_component(
+        "bad_proc",
+        ComponentCategory::Process,
+        "BadProc",
+        None,
+        "Pkg",
+        Some(thread),
+    );
     b.set_children(root, vec![proc]);
     b.set_children(proc, vec![thread]);
     b.set_children(thread, vec![bad_proc]);
@@ -347,8 +534,22 @@ fn hierarchy_abstract_can_contain_anything() {
     // abstract can contain any category.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::Abstract, "Container", Some("impl"), "Pkg", None);
-    let sys = b.add_component("sys", ComponentCategory::System, "Sys", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::Abstract,
+        "Container",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let sys = b.add_component(
+        "sys",
+        ComponentCategory::System,
+        "Sys",
+        None,
+        "Pkg",
+        Some(root),
+    );
     let thread = b.add_component("t", ComponentCategory::Thread, "T", None, "Pkg", Some(root));
     let mem = b.add_component("m", ComponentCategory::Memory, "M", None, "Pkg", Some(root));
     b.set_children(root, vec![sys, thread, mem]);
@@ -366,7 +567,14 @@ fn hierarchy_empty_implementation_warning() {
     // A system implementation with no subcomponents should emit info.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
 
     let instance = b.build(root);
     let analysis = HierarchyAnalysis;
@@ -381,8 +589,22 @@ fn hierarchy_data_empty_impl_no_warning() {
     // A data implementation with no subcomponents should NOT warn (trivially empty).
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let data = b.add_component("d1", ComponentCategory::Data, "MyData", Some("impl"), "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let data = b.add_component(
+        "d1",
+        ComponentCategory::Data,
+        "MyData",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![data]);
 
     let instance = b.build(root);
@@ -407,7 +629,14 @@ fn hierarchy_deep_nesting_warning() {
     // Build a chain deeper than 8 levels.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
 
     let mut prev = root;
     // Create a chain: root > s1 > s2 > ... > s9
@@ -446,10 +675,38 @@ fn hierarchy_processor_containment() {
     // Processor can contain memory, bus, virtual processor, virtual bus, abstract.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let cpu = b.add_component("cpu", ComponentCategory::Processor, "CPU", Some("impl"), "Pkg", Some(root));
-    let mem = b.add_component("cache", ComponentCategory::Memory, "Cache", None, "Pkg", Some(cpu));
-    let vp = b.add_component("vp1", ComponentCategory::VirtualProcessor, "VP", None, "Pkg", Some(cpu));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let cpu = b.add_component(
+        "cpu",
+        ComponentCategory::Processor,
+        "CPU",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let mem = b.add_component(
+        "cache",
+        ComponentCategory::Memory,
+        "Cache",
+        None,
+        "Pkg",
+        Some(cpu),
+    );
+    let vp = b.add_component(
+        "vp1",
+        ComponentCategory::VirtualProcessor,
+        "VP",
+        None,
+        "Pkg",
+        Some(cpu),
+    );
     b.set_children(root, vec![cpu]);
     b.set_children(cpu, vec![mem, vp]);
 
@@ -466,9 +723,30 @@ fn hierarchy_processor_cannot_contain_thread() {
     // Processor cannot contain thread.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let cpu = b.add_component("cpu", ComponentCategory::Processor, "CPU", Some("impl"), "Pkg", Some(root));
-    let thread = b.add_component("t1", ComponentCategory::Thread, "Worker", None, "Pkg", Some(cpu));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let cpu = b.add_component(
+        "cpu",
+        ComponentCategory::Processor,
+        "CPU",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let thread = b.add_component(
+        "t1",
+        ComponentCategory::Thread,
+        "Worker",
+        None,
+        "Pkg",
+        Some(cpu),
+    );
     b.set_children(root, vec![cpu]);
     b.set_children(cpu, vec![thread]);
 
@@ -487,8 +765,22 @@ fn completeness_type_only_subcomponent() {
     // A subcomponent with only a type reference (no implementation).
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("sensor", ComponentCategory::System, "Sensor", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -509,8 +801,22 @@ fn completeness_featureless_component() {
     // A system subcomponent with no features.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("sub", ComponentCategory::System, "Sub", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sub",
+        ComponentCategory::System,
+        "Sub",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -530,8 +836,22 @@ fn completeness_data_featureless_no_warning() {
     // A data component with no features should not warn (trivially featureless).
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let data = b.add_component("d1", ComponentCategory::Data, "Payload", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let data = b.add_component(
+        "d1",
+        ComponentCategory::Data,
+        "Payload",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![data]);
 
     let instance = b.build(root);
@@ -553,8 +873,22 @@ fn completeness_unresolved_type() {
     // A component with empty type_name (unresolved).
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("unknown", ComponentCategory::System, "", None, "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "unknown",
+        ComponentCategory::System,
+        "",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![child]);
 
     let instance = b.build(root);
@@ -574,7 +908,14 @@ fn completeness_instance_diagnostics_forwarded() {
     // Instance-level diagnostics from instantiation should be forwarded.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
     b.add_diagnostic("unresolved implementation: Pkg::Missing.impl", vec!["root"]);
 
     let instance = b.build(root);
@@ -597,10 +938,29 @@ fn completeness_well_formed_model() {
     // produce only minimal info-level diagnostics.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let child = b.add_component("sensor", ComponentCategory::System, "Sensor", Some("basic"), "Pkg", Some(root));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
 
-    b.add_feature("reading", FeatureKind::DataPort, Some(Direction::Out), child);
+    b.add_feature(
+        "reading",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        child,
+    );
     b.add_feature("cmd_in", FeatureKind::DataPort, Some(Direction::In), root);
     b.add_connection("c1", ConnectionKind::Port, false, root);
     b.set_children(root, vec![child]);
@@ -611,8 +971,16 @@ fn completeness_well_formed_model() {
 
     let errors = count_by_severity(&diags, Severity::Error);
     let warnings = count_by_severity(&diags, Severity::Warning);
-    assert_eq!(errors, 0, "well-formed model should have no errors: {:?}", diags);
-    assert_eq!(warnings, 0, "well-formed model should have no warnings: {:?}", diags);
+    assert_eq!(
+        errors, 0,
+        "well-formed model should have no errors: {:?}",
+        diags
+    );
+    assert_eq!(
+        warnings, 0,
+        "well-formed model should have no warnings: {:?}",
+        diags
+    );
 }
 
 // ── AnalysisRunner Tests ────────────────────────────────────────────
@@ -621,9 +989,23 @@ fn completeness_well_formed_model() {
 fn runner_collects_all_diagnostics() {
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
     // Add a thread directly in system (containment error) with no features (completeness info).
-    let thread = b.add_component("t1", ComponentCategory::Thread, "Worker", None, "Pkg", Some(root));
+    let thread = b.add_component(
+        "t1",
+        ComponentCategory::Thread,
+        "Worker",
+        None,
+        "Pkg",
+        Some(root),
+    );
     b.set_children(root, vec![thread]);
 
     let instance = b.build(root);
@@ -658,13 +1040,23 @@ fn runner_collects_all_diagnostics() {
 #[test]
 fn runner_empty_no_analyses() {
     let mut b = TestInstanceBuilder::new();
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
     let instance = b.build(root);
 
     let runner = AnalysisRunner::new();
     let diags = runner.run_all(&instance);
 
-    assert!(diags.is_empty(), "no analyses registered, no diagnostics expected");
+    assert!(
+        diags.is_empty(),
+        "no analyses registered, no diagnostics expected"
+    );
 }
 
 #[test]
@@ -672,16 +1064,52 @@ fn runner_valid_model_minimal_diagnostics() {
     // A valid, well-connected model should produce no errors and no warnings.
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let proc = b.add_component("proc", ComponentCategory::Process, "Proc", Some("impl"), "Pkg", Some(root));
-    let thread = b.add_component("worker", ComponentCategory::Thread, "Worker", Some("impl"), "Pkg", Some(proc));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let proc = b.add_component(
+        "proc",
+        ComponentCategory::Process,
+        "Proc",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let thread = b.add_component(
+        "worker",
+        ComponentCategory::Thread,
+        "Worker",
+        Some("impl"),
+        "Pkg",
+        Some(proc),
+    );
 
     // Give everyone features.
     b.add_feature("cmd_in", FeatureKind::DataPort, Some(Direction::In), root);
-    b.add_feature("status_out", FeatureKind::DataPort, Some(Direction::Out), root);
+    b.add_feature(
+        "status_out",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        root,
+    );
     b.add_feature("data_in", FeatureKind::DataPort, Some(Direction::In), proc);
-    b.add_feature("data_out", FeatureKind::DataPort, Some(Direction::Out), proc);
-    b.add_feature("work_in", FeatureKind::DataPort, Some(Direction::In), thread);
+    b.add_feature(
+        "data_out",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        proc,
+    );
+    b.add_feature(
+        "work_in",
+        FeatureKind::DataPort,
+        Some(Direction::In),
+        thread,
+    );
 
     // Add connections.
     b.add_connection("c1", ConnectionKind::Port, false, root);
@@ -702,7 +1130,11 @@ fn runner_valid_model_minimal_diagnostics() {
     let errors = count_by_severity(&diags, Severity::Error);
     let warnings = count_by_severity(&diags, Severity::Warning);
     assert_eq!(errors, 0, "valid model should have no errors: {:?}", diags);
-    assert_eq!(warnings, 0, "valid model should have no warnings: {:?}", diags);
+    assert_eq!(
+        warnings, 0,
+        "valid model should have no warnings: {:?}",
+        diags
+    );
 }
 
 // ── Containment rule unit tests ─────────────────────────────────────
@@ -791,9 +1223,30 @@ fn containment_rules_comprehensive() {
 fn component_path_builds_correctly() {
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let mid = b.add_component("mid", ComponentCategory::Process, "Mid", Some("impl"), "Pkg", Some(root));
-    let leaf = b.add_component("leaf", ComponentCategory::Thread, "Leaf", None, "Pkg", Some(mid));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let mid = b.add_component(
+        "mid",
+        ComponentCategory::Process,
+        "Mid",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let leaf = b.add_component(
+        "leaf",
+        ComponentCategory::Thread,
+        "Leaf",
+        None,
+        "Pkg",
+        Some(mid),
+    );
     b.set_children(root, vec![mid]);
     b.set_children(mid, vec![leaf]);
 
@@ -806,9 +1259,30 @@ fn component_path_builds_correctly() {
 fn component_depth_calculated_correctly() {
     let mut b = TestInstanceBuilder::new();
 
-    let root = b.add_component("root", ComponentCategory::System, "Top", Some("impl"), "Pkg", None);
-    let mid = b.add_component("mid", ComponentCategory::Process, "Mid", Some("impl"), "Pkg", Some(root));
-    let leaf = b.add_component("leaf", ComponentCategory::Thread, "Leaf", None, "Pkg", Some(mid));
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let mid = b.add_component(
+        "mid",
+        ComponentCategory::Process,
+        "Mid",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+    let leaf = b.add_component(
+        "leaf",
+        ComponentCategory::Thread,
+        "Leaf",
+        None,
+        "Pkg",
+        Some(mid),
+    );
     b.set_children(root, vec![mid]);
     b.set_children(mid, vec![leaf]);
 

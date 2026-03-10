@@ -118,7 +118,7 @@ impl WitTransform {
         let mut out = String::new();
 
         // Try to derive a package declaration from the first package name
-        for (_, pkg) in tree.packages.iter() {
+        if let Some((_, pkg)) = tree.packages.iter().next() {
             let pkg_name = pkg.name.as_str();
             // Strip _WIT suffix if present
             let base = pkg_name
@@ -140,8 +140,6 @@ impl WitTransform {
             } else {
                 out.push_str(&format!("package local:{};\n\n", kebab));
             }
-            // Only use the first package
-            break;
         }
 
         // Collect data types first (we'll reference them from interfaces)
@@ -374,19 +372,17 @@ fn lower_async_function(
     }
 
     // Add Dispatch_Protocol => Aperiodic property
-    let dispatch_prop_idx =
-        tree.property_associations
-            .alloc(PropertyAssociationItem {
-                name: PropertyRef {
-                    property_set: Some(Name::new("Timing_Properties")),
-                    property_name: Name::new("Dispatch_Protocol"),
-                },
-                value: "Aperiodic".to_string(),
-                typed_value: Some(PropertyExpr::Enum(Name::new("Aperiodic"))),
-                is_append: false,
-                applies_to: None,
-                in_modes: Vec::new(),
-            });
+    let dispatch_prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
+        name: PropertyRef {
+            property_set: Some(Name::new("Timing_Properties")),
+            property_name: Name::new("Dispatch_Protocol"),
+        },
+        value: "Aperiodic".to_string(),
+        typed_value: Some(PropertyExpr::Enum(Name::new("Aperiodic"))),
+        is_append: false,
+        applies_to: None,
+        in_modes: Vec::new(),
+    });
 
     tree.component_types.alloc(ComponentTypeItem {
         name: Name::new(aadl_name),
@@ -551,10 +547,7 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
 }
 
 /// Lower a WIT type definition into an AADL data component type.
-fn lower_type_def(
-    typedef: &WitTypeDef,
-    tree: &mut ItemTree,
-) -> Option<ItemRef> {
+fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> {
     match typedef {
         WitTypeDef::Record { name, fields } => {
             let aadl_name = wit_parser::kebab_to_pascal(name);
@@ -596,40 +589,34 @@ fn lower_type_def(
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let prop_idx =
-                tree.property_associations
-                    .alloc(PropertyAssociationItem {
-                        name: PropertyRef {
-                            property_set: Some(Name::new("Data_Model")),
-                            property_name: Name::new("Data_Representation"),
-                        },
-                        value: "Enum".to_string(),
-                        typed_value: Some(PropertyExpr::Enum(Name::new("Enum"))),
-                        is_append: false,
-                        applies_to: None,
-                        in_modes: Vec::new(),
-                    });
+            let prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Data_Model")),
+                    property_name: Name::new("Data_Representation"),
+                },
+                value: "Enum".to_string(),
+                typed_value: Some(PropertyExpr::Enum(Name::new("Enum"))),
+                is_append: false,
+                applies_to: None,
+                in_modes: Vec::new(),
+            });
 
-            let enum_prop_idx =
-                tree.property_associations
-                    .alloc(PropertyAssociationItem {
-                        name: PropertyRef {
-                            property_set: Some(Name::new("Data_Model")),
-                            property_name: Name::new("Enumerators"),
-                        },
-                        value: format!("({})", enum_values),
-                        typed_value: Some(PropertyExpr::List(
-                            cases
-                                .iter()
-                                .map(|c| {
-                                    PropertyExpr::StringLit(wit_parser::kebab_to_pascal(c))
-                                })
-                                .collect(),
-                        )),
-                        is_append: false,
-                        applies_to: None,
-                        in_modes: Vec::new(),
-                    });
+            let enum_prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Data_Model")),
+                    property_name: Name::new("Enumerators"),
+                },
+                value: format!("({})", enum_values),
+                typed_value: Some(PropertyExpr::List(
+                    cases
+                        .iter()
+                        .map(|c| PropertyExpr::StringLit(wit_parser::kebab_to_pascal(c)))
+                        .collect(),
+                )),
+                is_append: false,
+                applies_to: None,
+                in_modes: Vec::new(),
+            });
 
             let ct_idx = tree.component_types.alloc(ComponentTypeItem {
                 name: Name::new(&aadl_name),
@@ -649,7 +636,7 @@ fn lower_type_def(
             let aadl_name = wit_parser::kebab_to_pascal(name);
             let mut features = Vec::new();
             for (cname, payload) in cases {
-                let classifier = payload.as_ref().and_then(|t| wit_type_to_classifier(t));
+                let classifier = payload.as_ref().and_then(wit_type_to_classifier);
                 let feat_idx = tree.features.alloc(Feature {
                     name: Name::new(&wit_parser::kebab_to_snake(cname)),
                     kind: FeatureKind::DataAccess,
@@ -686,40 +673,34 @@ fn lower_type_def(
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let prop_idx =
-                tree.property_associations
-                    .alloc(PropertyAssociationItem {
-                        name: PropertyRef {
-                            property_set: Some(Name::new("Data_Model")),
-                            property_name: Name::new("Data_Representation"),
-                        },
-                        value: "Enum".to_string(),
-                        typed_value: Some(PropertyExpr::Enum(Name::new("Enum"))),
-                        is_append: false,
-                        applies_to: None,
-                        in_modes: Vec::new(),
-                    });
+            let prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Data_Model")),
+                    property_name: Name::new("Data_Representation"),
+                },
+                value: "Enum".to_string(),
+                typed_value: Some(PropertyExpr::Enum(Name::new("Enum"))),
+                is_append: false,
+                applies_to: None,
+                in_modes: Vec::new(),
+            });
 
-            let flags_prop_idx =
-                tree.property_associations
-                    .alloc(PropertyAssociationItem {
-                        name: PropertyRef {
-                            property_set: Some(Name::new("Data_Model")),
-                            property_name: Name::new("Enumerators"),
-                        },
-                        value: format!("({})", enum_values),
-                        typed_value: Some(PropertyExpr::List(
-                            flags
-                                .iter()
-                                .map(|f| {
-                                    PropertyExpr::StringLit(wit_parser::kebab_to_pascal(f))
-                                })
-                                .collect(),
-                        )),
-                        is_append: false,
-                        applies_to: None,
-                        in_modes: Vec::new(),
-                    });
+            let flags_prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Data_Model")),
+                    property_name: Name::new("Enumerators"),
+                },
+                value: format!("({})", enum_values),
+                typed_value: Some(PropertyExpr::List(
+                    flags
+                        .iter()
+                        .map(|f| PropertyExpr::StringLit(wit_parser::kebab_to_pascal(f)))
+                        .collect(),
+                )),
+                is_append: false,
+                applies_to: None,
+                in_modes: Vec::new(),
+            });
 
             let ct_idx = tree.component_types.alloc(ComponentTypeItem {
                 name: Name::new(&aadl_name),
@@ -826,7 +807,11 @@ fn extract_short_name(path: &str) -> String {
     // Take part after last '/'
     let after_slash = no_version.rsplit('/').next().unwrap_or(no_version);
     // Take part after last ':'
-    after_slash.rsplit(':').next().unwrap_or(after_slash).to_string()
+    after_slash
+        .rsplit(':')
+        .next()
+        .unwrap_or(after_slash)
+        .to_string()
 }
 
 // ── AADL → WIT emission helpers ───────────────────────────────────
@@ -869,7 +854,10 @@ fn emit_world(ct: &ComponentTypeItem, tree: &ItemTree, out: &mut String) {
                         out.push_str(&format!("    export {};\n", feat_kebab));
                     }
                     _ => {
-                        out.push_str(&format!("    // {}: {} (unmapped)\n", feat_kebab, feat.kind));
+                        out.push_str(&format!(
+                            "    // {}: {} (unmapped)\n",
+                            feat_kebab, feat.kind
+                        ));
                     }
                 }
             }
@@ -891,13 +879,11 @@ fn emit_interface_from_component(ct: &ComponentTypeItem, tree: &ItemTree, out: &
         if feat.kind == FeatureKind::SubprogramAccess {
             let func_name = wit_parser::to_kebab_case(feat.name.as_str());
             // Try to find the corresponding subprogram type
-            if let Some(ref classifier) = feat.classifier {
-                if let Some(func_sig) =
-                    find_subprogram_signature(&classifier.type_name, tree)
-                {
-                    out.push_str(&format!("    {}", func_sig));
-                    continue;
-                }
+            if let Some(ref classifier) = feat.classifier
+                && let Some(func_sig) = find_subprogram_signature(&classifier.type_name, tree)
+            {
+                out.push_str(&format!("    {}", func_sig));
+                continue;
             }
             out.push_str(&format!("    {}: func();\n", func_name));
         }
@@ -943,7 +929,10 @@ fn find_subprogram_signature(name: &Name, tree: &ItemTree) -> Option<String> {
 fn has_aperiodic_dispatch(ct: &ComponentTypeItem, tree: &ItemTree) -> bool {
     ct.property_associations.iter().any(|&prop_idx| {
         let prop = &tree.property_associations[prop_idx];
-        prop.name.property_name.as_str().eq_ignore_ascii_case("Dispatch_Protocol")
+        prop.name
+            .property_name
+            .as_str()
+            .eq_ignore_ascii_case("Dispatch_Protocol")
             && prop.value.eq_ignore_ascii_case("Aperiodic")
     })
 }
@@ -951,8 +940,7 @@ fn has_aperiodic_dispatch(ct: &ComponentTypeItem, tree: &ItemTree) -> bool {
 /// Emit a WIT function signature from a subprogram or thread component type.
 fn emit_function_signature(ct: &ComponentTypeItem, tree: &ItemTree) -> String {
     let func_name = wit_parser::to_kebab_case(ct.name.as_str());
-    let is_async = ct.category == ComponentCategory::Thread
-        && has_aperiodic_dispatch(ct, tree);
+    let is_async = ct.category == ComponentCategory::Thread && has_aperiodic_dispatch(ct, tree);
     let mut params = Vec::new();
     let mut ret_type = None;
 
@@ -986,7 +974,10 @@ fn emit_function_signature(ct: &ComponentTypeItem, tree: &ItemTree) -> String {
     let params_str = params.join(", ");
     let async_prefix = if is_async { "async " } else { "" };
     match ret_type {
-        Some(ret) => format!("{}: {}func({}) -> {};\n", func_name, async_prefix, params_str, ret),
+        Some(ret) => format!(
+            "{}: {}func({}) -> {};\n",
+            func_name, async_prefix, params_str, ret
+        ),
         None => format!("{}: {}func({});\n", func_name, async_prefix, params_str),
     }
 }
@@ -1064,10 +1055,7 @@ fn emit_item_ref(item_ref: &ItemRef, tree: &ItemTree, out: &mut String, indent: 
     match item_ref {
         ItemRef::ComponentType(idx) => {
             let ct = &tree.component_types[*idx];
-            out.push_str(&format!(
-                "{}{} type {}\n",
-                indent, ct.category, ct.name
-            ));
+            out.push_str(&format!("{}{} type {}\n", indent, ct.category, ct.name));
 
             if let Some(ref extends) = ct.extends {
                 out.push_str(&format!("{}  extends {}\n", indent, extends));
@@ -1085,10 +1073,7 @@ fn emit_item_ref(item_ref: &ItemRef, tree: &ItemTree, out: &mut String, indent: 
                 out.push_str(&format!("{}  properties\n", indent));
                 for &prop_idx in &ct.property_associations {
                     let prop = &tree.property_associations[prop_idx];
-                    out.push_str(&format!(
-                        "{}    {} => {};\n",
-                        indent, prop.name, prop.value
-                    ));
+                    out.push_str(&format!("{}    {} => {};\n", indent, prop.name, prop.value));
                 }
             }
 
@@ -1096,10 +1081,7 @@ fn emit_item_ref(item_ref: &ItemRef, tree: &ItemTree, out: &mut String, indent: 
         }
         ItemRef::FeatureGroupType(idx) => {
             let fgt = &tree.feature_group_types[*idx];
-            out.push_str(&format!(
-                "{}feature group type {}\n",
-                indent, fgt.name
-            ));
+            out.push_str(&format!("{}feature group type {}\n", indent, fgt.name));
 
             if !fgt.features.is_empty() {
                 out.push_str(&format!("{}  features\n", indent));
@@ -1377,7 +1359,11 @@ mod tests {
         });
 
         let wit_text = WitTransform::item_tree_to_wit(&tree);
-        assert!(wit_text.contains("world my-app"), "should have world: {}", wit_text);
+        assert!(
+            wit_text.contains("world my-app"),
+            "should have world: {}",
+            wit_text
+        );
         assert!(
             wit_text.contains("import my-import"),
             "should have import: {}",
@@ -1541,11 +1527,23 @@ mod tests {
     #[test]
     fn wit_primitive_type_mapping() {
         assert_eq!(wit_type_to_aadl_name(&WitType::Bool), "Base_Types::Boolean");
-        assert_eq!(wit_type_to_aadl_name(&WitType::U32), "Base_Types::Unsigned_32");
-        assert_eq!(wit_type_to_aadl_name(&WitType::S64), "Base_Types::Integer_64");
+        assert_eq!(
+            wit_type_to_aadl_name(&WitType::U32),
+            "Base_Types::Unsigned_32"
+        );
+        assert_eq!(
+            wit_type_to_aadl_name(&WitType::S64),
+            "Base_Types::Integer_64"
+        );
         assert_eq!(wit_type_to_aadl_name(&WitType::F64), "Base_Types::Float_64");
-        assert_eq!(wit_type_to_aadl_name(&WitType::String_), "Base_Types::String");
-        assert_eq!(wit_type_to_aadl_name(&WitType::Char), "Base_Types::Character");
+        assert_eq!(
+            wit_type_to_aadl_name(&WitType::String_),
+            "Base_Types::String"
+        );
+        assert_eq!(
+            wit_type_to_aadl_name(&WitType::Char),
+            "Base_Types::Character"
+        );
     }
 
     #[test]
@@ -1569,7 +1567,10 @@ mod tests {
 
     #[test]
     fn extract_short_name_tests() {
-        assert_eq!(extract_short_name("wasi:clocks/monotonic-clock@0.2.0"), "monotonic-clock");
+        assert_eq!(
+            extract_short_name("wasi:clocks/monotonic-clock@0.2.0"),
+            "monotonic-clock"
+        );
         assert_eq!(extract_short_name("wasi:http/types"), "types");
         assert_eq!(extract_short_name("simple-name"), "simple-name");
         assert_eq!(extract_short_name("ns:name"), "name");

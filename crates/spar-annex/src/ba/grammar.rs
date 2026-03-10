@@ -43,10 +43,7 @@ fn behavior_variables_section(p: &mut Parser) {
     let m = p.start();
     p.bump(BaKind::VARIABLES_KW);
 
-    while !p.at_end()
-        && !p.at(BaKind::STATES_KW)
-        && !p.at(BaKind::TRANSITIONS_KW)
-    {
+    while !p.at_end() && !p.at(BaKind::STATES_KW) && !p.at(BaKind::TRANSITIONS_KW) {
         behavior_variable(p);
     }
 
@@ -918,13 +915,12 @@ fn relational_expr(p: &mut Parser) -> Option<CompletedMarker> {
             | BaKind::L_ANGLE_EQ
             | BaKind::R_ANGLE
             | BaKind::R_ANGLE_EQ
-    ) {
-        if let Some(cm) = lhs {
-            let m = cm.precede(p);
-            p.bump_any(); // the relational operator
-            additive_expr(p);
-            return Some(m.complete(p, BaKind::BINARY_EXPR));
-        }
+    ) && let Some(cm) = lhs
+    {
+        let m = cm.precede(p);
+        p.bump_any(); // the relational operator
+        additive_expr(p);
+        return Some(m.complete(p, BaKind::BINARY_EXPR));
     }
 
     lhs
@@ -973,13 +969,13 @@ fn multiplicative_expr(p: &mut Parser) -> Option<CompletedMarker> {
 fn power_expr(p: &mut Parser) -> Option<CompletedMarker> {
     let lhs = unary_expr(p);
 
-    if p.at(BaKind::STAR_STAR) {
-        if let Some(cm) = lhs {
-            let m = cm.precede(p);
-            p.bump(BaKind::STAR_STAR);
-            unary_expr(p);
-            return Some(m.complete(p, BaKind::BINARY_EXPR));
-        }
+    if p.at(BaKind::STAR_STAR)
+        && let Some(cm) = lhs
+    {
+        let m = cm.precede(p);
+        p.bump(BaKind::STAR_STAR);
+        unary_expr(p);
+        return Some(m.complete(p, BaKind::BINARY_EXPR));
     }
 
     lhs

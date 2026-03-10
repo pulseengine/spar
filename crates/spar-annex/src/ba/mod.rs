@@ -13,16 +13,16 @@
 //! conditions, actions (assignment, communication, computation),
 //! and control flow (if/elsif/else, for, forall, while, do-until).
 
-pub mod syntax_kind;
+mod grammar;
 mod lexer;
 mod parser;
-mod grammar;
+pub mod syntax_kind;
 
 use std::mem;
 
 pub use syntax_kind::{BaKind, BaLanguage, BaSyntaxNode, BaSyntaxToken};
 
-use crate::{AnnexParser, AnnexParseResult, AnnexNode, AnnexDiagnostic, Span, Severity};
+use crate::{AnnexDiagnostic, AnnexNode, AnnexParseResult, AnnexParser, Severity, Span};
 
 /// Result of parsing BA annex content.
 pub struct BaParse {
@@ -170,11 +170,7 @@ fn resolve_events(mut events: Vec<parser::Event>) -> Vec<ResolvedEvent> {
     resolved
 }
 
-fn build_tree(
-    input: &str,
-    tokens: &[(BaKind, usize)],
-    events: Vec<parser::Event>,
-) -> BaParse {
+fn build_tree(input: &str, tokens: &[(BaKind, usize)], events: Vec<parser::Event>) -> BaParse {
     let mut builder = rowan::GreenNodeBuilder::new();
     let mut errors = Vec::new();
 

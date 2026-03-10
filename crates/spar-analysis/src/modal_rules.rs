@@ -11,7 +11,7 @@
 
 use spar_hir_def::instance::SystemInstance;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates modal rules on the instance model.
 ///
@@ -85,11 +85,7 @@ impl Analysis for ModalRuleAnalysis {
                         .as_ref()
                         .map(|n| n.as_str().to_string())
                         .unwrap_or_else(|| {
-                            format!(
-                                "{}-[]->{}",
-                                mt.source.as_str(),
-                                mt.destination.as_str()
-                            )
+                            format!("{}-[]->{}", mt.source.as_str(), mt.destination.as_str())
                         });
 
                     // Check source mode
@@ -158,13 +154,7 @@ impl Analysis for ModalRuleAnalysis {
                 // Check that all modes are reachable via transitions
                 // (a mode with no incoming transition other than initial is
                 // potentially unreachable)
-                check_mode_reachability(
-                    &modes,
-                    &transitions,
-                    comp,
-                    &path,
-                    &mut diags,
-                );
+                check_mode_reachability(&modes, &transitions, comp, &path, &mut diags);
             }
         }
 
@@ -197,12 +187,7 @@ fn check_mode_reachability(
 
     while let Some(current) = queue.pop() {
         for mt in transitions {
-            if mt
-                .source
-                .as_str()
-                .to_ascii_lowercase()
-                == current
-            {
+            if mt.source.as_str().to_ascii_lowercase() == current {
                 let dst = mt.destination.as_str().to_ascii_lowercase();
                 if !reachable.contains(&dst) {
                     reachable.push(dst.clone());
@@ -281,12 +266,7 @@ mod tests {
             })
         }
 
-        fn add_mode(
-            &mut self,
-            name: &str,
-            is_initial: bool,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_mode(&mut self, name: &str, is_initial: bool, owner: ComponentInstanceIdx) {
             let idx = self.mode_instances.alloc(ModeInstance {
                 name: Name::new(name),
                 is_initial,
@@ -303,21 +283,19 @@ mod tests {
             triggers: Vec<&str>,
             owner: ComponentInstanceIdx,
         ) {
-            let idx = self.mode_transition_instances.alloc(ModeTransitionInstance {
-                name: name.map(Name::new),
-                source: Name::new(source),
-                destination: Name::new(destination),
-                triggers: triggers.into_iter().map(Name::new).collect(),
-                owner,
-            });
+            let idx = self
+                .mode_transition_instances
+                .alloc(ModeTransitionInstance {
+                    name: name.map(Name::new),
+                    source: Name::new(source),
+                    destination: Name::new(destination),
+                    triggers: triggers.into_iter().map(Name::new).collect(),
+                    owner,
+                });
             self.components[owner].mode_transitions.push(idx);
         }
 
-        fn add_connection(
-            &mut self,
-            name: &str,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_connection(&mut self, name: &str, owner: ComponentInstanceIdx) {
             let idx = self.connections.alloc(ConnectionInstance {
                 name: Name::new(name),
                 kind: ConnectionKind::Port,
@@ -390,12 +368,7 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("none is marked"))
             .collect();
-        assert_eq!(
-            errors.len(),
-            1,
-            "no initial mode should error: {:?}",
-            diags
-        );
+        assert_eq!(errors.len(), 1, "no initial mode should error: {:?}", diags);
     }
 
     #[test]
@@ -461,8 +434,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("source mode 'missing'")
+                d.severity == Severity::Error && d.message.contains("source mode 'missing'")
             })
             .collect();
         assert_eq!(
@@ -488,8 +460,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("destination mode 'running'")
+                d.severity == Severity::Error && d.message.contains("destination mode 'running'")
             })
             .collect();
         assert_eq!(
@@ -515,12 +486,7 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("self-transition"))
             .collect();
-        assert_eq!(
-            warns.len(),
-            1,
-            "self-transition should warn: {:?}",
-            diags
-        );
+        assert_eq!(warns.len(), 1, "self-transition should warn: {:?}", diags);
     }
 
     #[test]
@@ -565,11 +531,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("not reachable"))
             .collect();
-        assert!(
-            warns.is_empty(),
-            "all modes reachable: {:?}",
-            warns
-        );
+        assert!(warns.is_empty(), "all modes reachable: {:?}", warns);
     }
 
     #[test]
@@ -591,12 +553,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("not reachable") && d.message.contains("orphan"))
             .collect();
-        assert_eq!(
-            warns.len(),
-            1,
-            "unreachable mode should warn: {:?}",
-            diags
-        );
+        assert_eq!(warns.len(), 1, "unreachable mode should warn: {:?}", diags);
     }
 
     #[test]
@@ -653,8 +610,7 @@ mod tests {
         let errors: Vec<_> = diags
             .iter()
             .filter(|d| {
-                d.severity == Severity::Error
-                    && d.message.contains("source mode 'missing'")
+                d.severity == Severity::Error && d.message.contains("source mode 'missing'")
             })
             .collect();
         assert_eq!(

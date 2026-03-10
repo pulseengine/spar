@@ -3,14 +3,14 @@
 //! Each function corresponds to a grammar production from AS5506D.
 //! Functions take a `&mut Parser` and build nodes via markers.
 
-mod packages;
+mod annexes;
 mod components;
-mod features;
 mod connections;
+mod features;
 mod flows;
 mod modes;
+mod packages;
 mod properties;
-mod annexes;
 
 use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
@@ -26,13 +26,12 @@ pub fn source_file(p: &mut Parser) {
     while !p.at_end() {
         match p.current() {
             SyntaxKind::PACKAGE_KW => packages::aadl_package(p),
-            SyntaxKind::PROPERTY_KW => {
+            SyntaxKind::PROPERTY_KW if p.nth(1) == SyntaxKind::SET_KW => {
                 // `property set Name is ...`
-                if p.nth(1) == SyntaxKind::SET_KW {
-                    properties::property_set(p);
-                } else {
-                    p.err_and_bump("expected `package` or `property set`");
-                }
+                properties::property_set(p);
+            }
+            SyntaxKind::PROPERTY_KW => {
+                p.err_and_bump("expected `package` or `property set`");
             }
             SyntaxKind::EOF => break,
             _ => {
@@ -147,8 +146,10 @@ fn prototype_binding(p: &mut Parser) {
 
     // Optional direction for feature prototype bindings:
     // `in`, `out`, `in out`, `provides`, `requires`
-    if p.at(SyntaxKind::IN_KW) || p.at(SyntaxKind::OUT_KW)
-        || p.at(SyntaxKind::PROVIDES_KW) || p.at(SyntaxKind::REQUIRES_KW)
+    if p.at(SyntaxKind::IN_KW)
+        || p.at(SyntaxKind::OUT_KW)
+        || p.at(SyntaxKind::PROVIDES_KW)
+        || p.at(SyntaxKind::REQUIRES_KW)
     {
         let d = p.start();
         if p.at(SyntaxKind::IN_KW) {
@@ -251,6 +252,7 @@ pub(crate) fn name(p: &mut Parser) -> bool {
 }
 
 /// Parse a dotted package name (e.g., `My_Package::Sub`).
+#[allow(dead_code)]
 pub(crate) fn package_name(p: &mut Parser) -> bool {
     name(p)
 }

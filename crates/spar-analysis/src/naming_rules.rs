@@ -126,7 +126,9 @@ fn check_component_type(
 
     // Rule 2a: duplicate feature names.
     check_duplicate_names(
-        ct.features.iter().map(|idx| tree.features[*idx].name.as_str()),
+        ct.features
+            .iter()
+            .map(|idx| tree.features[*idx].name.as_str()),
         "feature",
         &path,
         Severity::Error,
@@ -288,7 +290,11 @@ mod tests {
 
     /// Helper: build a minimal valid ItemTree with one package containing
     /// one component type with the given features.
-    fn tree_with_type_features(pkg_name: &str, type_name: &str, feature_names: &[&str]) -> ItemTree {
+    fn tree_with_type_features(
+        pkg_name: &str,
+        type_name: &str,
+        feature_names: &[&str],
+    ) -> ItemTree {
         let mut tree = ItemTree::default();
 
         let feat_idxs: Vec<FeatureIdx> = feature_names
@@ -413,7 +419,11 @@ mod tests {
         let tree = tree_with_type_features("Pkg", "MyType", &["alpha", "beta", "gamma"]);
         let diags = check_naming_rules(&tree);
 
-        assert!(diags.is_empty(), "expected no diagnostics, got: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            diags
+        );
     }
 
     // ── Duplicate subcomponent detection ────────────────────────────
@@ -432,8 +442,7 @@ mod tests {
 
     #[test]
     fn duplicate_subcomponents_case_insensitive() {
-        let tree =
-            tree_with_impl_subcomponents("Pkg", "Top", "impl", &["Sensor", "SENSOR"]);
+        let tree = tree_with_impl_subcomponents("Pkg", "Top", "impl", &["Sensor", "SENSOR"]);
         let diags = check_naming_rules(&tree);
 
         assert_eq!(diags.len(), 1);
@@ -651,11 +660,7 @@ mod tests {
 
         tree.packages.alloc(Package {
             name: Name::new("Pkg"),
-            with_clauses: vec![
-                Name::new("Other"),
-                Name::new("Other"),
-                Name::new("Pkg"),
-            ],
+            with_clauses: vec![Name::new("Other"), Name::new("Other"), Name::new("Pkg")],
             public_items: Vec::new(),
             private_items: Vec::new(),
             renames: Vec::new(),
@@ -665,7 +670,10 @@ mod tests {
 
         // One for duplicate "Other", one for self-reference "Pkg".
         assert_eq!(diags.len(), 2, "expected 2 diagnostics: {:?}", diags);
-        let warnings = diags.iter().filter(|d| d.severity == Severity::Warning).count();
+        let warnings = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count();
         assert_eq!(warnings, 2);
     }
 
@@ -713,7 +721,11 @@ mod tests {
 
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Error);
-        assert!(diags[0].message.contains("duplicate property definition name"));
+        assert!(
+            diags[0]
+                .message
+                .contains("duplicate property definition name")
+        );
     }
 
     #[test]
@@ -748,9 +760,11 @@ mod tests {
 
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Error);
-        assert!(diags[0]
-            .message
-            .contains("duplicate property type definition name"));
+        assert!(
+            diags[0]
+                .message
+                .contains("duplicate property type definition name")
+        );
     }
 
     // ── Valid model produces no diagnostics ─────────────────────────
@@ -998,7 +1012,13 @@ mod tests {
         assert_eq!(diags.len(), 2, "expected 2 diagnostics: {:?}", diags);
         let sub_diag = diags.iter().find(|d| d.message.contains("subcomponent"));
         let conn_diag = diags.iter().find(|d| d.message.contains("connection"));
-        assert!(sub_diag.is_some(), "expected subcomponent duplicate diagnostic");
-        assert!(conn_diag.is_some(), "expected connection duplicate diagnostic");
+        assert!(
+            sub_diag.is_some(),
+            "expected subcomponent duplicate diagnostic"
+        );
+        assert!(
+            conn_diag.is_some(),
+            "expected connection duplicate diagnostic"
+        );
     }
 }

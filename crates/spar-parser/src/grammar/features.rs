@@ -11,8 +11,11 @@ pub(crate) fn feature_section(p: &mut Parser) {
         p.bump(SyntaxKind::NONE_KW);
         p.expect(SyntaxKind::SEMICOLON);
     } else {
-        while p.at_name() || p.at(SyntaxKind::IN_KW) || p.at(SyntaxKind::OUT_KW)
-            || p.at(SyntaxKind::PROVIDES_KW) || p.at(SyntaxKind::REQUIRES_KW)
+        while p.at_name()
+            || p.at(SyntaxKind::IN_KW)
+            || p.at(SyntaxKind::OUT_KW)
+            || p.at(SyntaxKind::PROVIDES_KW)
+            || p.at(SyntaxKind::REQUIRES_KW)
         {
             feature(p);
         }
@@ -29,8 +32,11 @@ fn feature(p: &mut Parser) {
     // name : feature ;
 
     // First, try to read the name
-    if !p.at(SyntaxKind::IDENT) && !p.at(SyntaxKind::IN_KW) && !p.at(SyntaxKind::OUT_KW)
-        && !p.at(SyntaxKind::PROVIDES_KW) && !p.at(SyntaxKind::REQUIRES_KW)
+    if !p.at(SyntaxKind::IDENT)
+        && !p.at(SyntaxKind::IN_KW)
+        && !p.at(SyntaxKind::OUT_KW)
+        && !p.at(SyntaxKind::PROVIDES_KW)
+        && !p.at(SyntaxKind::REQUIRES_KW)
     {
         p.err_and_bump("expected feature declaration");
         return;

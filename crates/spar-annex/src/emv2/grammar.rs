@@ -23,7 +23,10 @@ pub(crate) fn root(p: &mut Parser) {
 fn at_library_start(p: &Parser) -> bool {
     match p.current() {
         Emv2Kind::ERROR_KW => matches!(p.nth(1), Emv2Kind::TYPES_KW | Emv2Kind::BEHAVIOR_KW),
-        Emv2Kind::TYPE_KW => matches!(p.nth(1), Emv2Kind::MAPPINGS_KW | Emv2Kind::TRANSFORMATIONS_KW),
+        Emv2Kind::TYPE_KW => matches!(
+            p.nth(1),
+            Emv2Kind::MAPPINGS_KW | Emv2Kind::TRANSFORMATIONS_KW
+        ),
         _ => false,
     }
 }
@@ -486,7 +489,9 @@ fn use_clause(p: &mut Parser) {
             m.complete(p, Emv2Kind::USE_TRANSFORMATIONS);
         }
         _ => {
-            p.err_and_bump("expected `types`, `behavior`, `mappings`, or `transformations` after `use`");
+            p.err_and_bump(
+                "expected `types`, `behavior`, `mappings`, or `transformations` after `use`",
+            );
         }
     }
 }
@@ -546,8 +551,7 @@ fn at_propagation_start(p: &Parser) -> bool {
         if p.nth(1) == Emv2Kind::DOT {
             return true;
         }
-        return p.nth(1) == Emv2Kind::COLON
-            && p.nth(2) != Emv2Kind::ERROR_KW;
+        return p.nth(1) == Emv2Kind::COLON && p.nth(2) != Emv2Kind::ERROR_KW;
     }
     p.current().is_propagation_kind()
 }
@@ -849,7 +853,9 @@ fn error_detection(p: &mut Parser) {
         match p.current() {
             Emv2Kind::INT_LIT => p.bump(Emv2Kind::INT_LIT),
             Emv2Kind::STRING_LIT => p.bump(Emv2Kind::STRING_LIT),
-            _ => { qemref(p); }
+            _ => {
+                qemref(p);
+            }
         }
         p.expect(Emv2Kind::R_PAREN);
         c.complete(p, Emv2Kind::ERROR_CODE_VALUE);
@@ -1019,8 +1025,7 @@ fn propagation_path(p: &mut Parser) {
     // Tricky: need to distinguish `Name : Source -> Target` from `Source -> Target`
     // where Source is `sub.point`. If nth(1) is COLON and nth(2) is not PROPAGATION,
     // it might be a named path.
-    if p.at(Emv2Kind::IDENT) && p.nth(1) == Emv2Kind::COLON
-        && p.nth(2) != Emv2Kind::PROPAGATION_KW
+    if p.at(Emv2Kind::IDENT) && p.nth(1) == Emv2Kind::COLON && p.nth(2) != Emv2Kind::PROPAGATION_KW
     {
         // Could be `Name : Source -> Target` or just `Source -> Target` where Source has `.`
         // Check if there's an `->` ahead suggesting it's `Source -> Target`

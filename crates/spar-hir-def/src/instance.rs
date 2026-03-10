@@ -11,8 +11,11 @@
 use la_arena::{Arena, Idx};
 use rustc_hash::FxHashMap;
 
-use crate::feature_group::{expand_feature_group, ExpandedFeature};
-use crate::item_tree::{AccessKind, ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind};
+use crate::feature_group::{ExpandedFeature, expand_feature_group};
+use crate::item_tree::{
+    AccessKind, ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction,
+    FeatureKind, FlowKind,
+};
 use crate::name::{ClassifierRef, Name};
 use crate::properties::PropertyMap;
 use crate::resolver::{GlobalScope, ResolvedClassifier};
@@ -203,8 +206,14 @@ impl SystemInstance {
         };
 
         let root_name = Name::new(&format!("{}.{}", root_type, root_impl));
-        let root_idx =
-            builder.instantiate_component(&root_name, root_package, root_type, root_impl, None, None);
+        let root_idx = builder.instantiate_component(
+            &root_name,
+            root_package,
+            root_type,
+            root_impl,
+            None,
+            None,
+        );
 
         let mut instance = SystemInstance {
             root: root_idx,
@@ -232,7 +241,9 @@ impl SystemInstance {
     }
 
     /// Iterate all component instances.
-    pub fn all_components(&self) -> impl Iterator<Item = (ComponentInstanceIdx, &ComponentInstance)> {
+    pub fn all_components(
+        &self,
+    ) -> impl Iterator<Item = (ComponentInstanceIdx, &ComponentInstance)> {
         self.components.iter()
     }
 
@@ -245,8 +256,7 @@ impl SystemInstance {
     ///
     /// Returns an empty property map if no properties are associated.
     pub fn properties_for(&self, idx: ComponentInstanceIdx) -> &PropertyMap {
-        static EMPTY: std::sync::LazyLock<PropertyMap> =
-            std::sync::LazyLock::new(PropertyMap::new);
+        static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
     }
 
@@ -320,9 +330,8 @@ impl SystemInstance {
         let mut soms: Vec<Vec<(ComponentInstanceIdx, ModeInstanceIdx)>> = vec![vec![]];
 
         for (comp_idx, mode_indices) in &modal_components {
-            let mut next = Vec::with_capacity(
-                (soms.len() * mode_indices.len()).min(Self::MAX_SOMS + 1),
-            );
+            let mut next =
+                Vec::with_capacity((soms.len() * mode_indices.len()).min(Self::MAX_SOMS + 1));
             for existing in &soms {
                 for &mode_idx in mode_indices {
                     let mut selection = existing.clone();
@@ -424,13 +433,21 @@ impl SystemInstance {
 
                             // Trace source deeper: look for up connections inside
                             // the source subcomponent that feed this port.
-                            let ultimate_src =
-                                self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
+                            let ultimate_src = self.trace_source(
+                                src_component,
+                                &src.feature,
+                                &mut path,
+                                MAX_TRACE_DEPTH,
+                            );
 
                             // Trace destination deeper: look for down connections inside
                             // the destination subcomponent that distribute from this port.
-                            let ultimate_dst =
-                                self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
+                            let ultimate_dst = self.trace_destination(
+                                dst_component,
+                                &dst.feature,
+                                &mut path,
+                                MAX_TRACE_DEPTH,
+                            );
 
                             semantic.push(SemanticConnection {
                                 name: conn_name.clone(),
@@ -456,8 +473,12 @@ impl SystemInstance {
 
                         for &src_component in &src_matches {
                             let mut path = vec![*conn_idx];
-                            let ultimate_src =
-                                self.trace_source(src_component, &src.feature, &mut path, MAX_TRACE_DEPTH);
+                            let ultimate_src = self.trace_source(
+                                src_component,
+                                &src.feature,
+                                &mut path,
+                                MAX_TRACE_DEPTH,
+                            );
 
                             semantic.push(SemanticConnection {
                                 name: conn_name.clone(),
@@ -481,8 +502,12 @@ impl SystemInstance {
 
                         for &dst_component in &dst_matches {
                             let mut path = vec![*conn_idx];
-                            let ultimate_dst =
-                                self.trace_destination(dst_component, &dst.feature, &mut path, MAX_TRACE_DEPTH);
+                            let ultimate_dst = self.trace_destination(
+                                dst_component,
+                                &dst.feature,
+                                &mut path,
+                                MAX_TRACE_DEPTH,
+                            );
 
                             semantic.push(SemanticConnection {
                                 name: conn_name.clone(),
@@ -544,12 +569,10 @@ impl SystemInstance {
             };
 
             // Look up the feature group types for both endpoints.
-            let src_expanded = self.expand_endpoint_feature_group(
-                scope, src_comp_idx, &src_end.feature,
-            );
-            let dst_expanded = self.expand_endpoint_feature_group(
-                scope, dst_comp_idx, &dst_end.feature,
-            );
+            let src_expanded =
+                self.expand_endpoint_feature_group(scope, src_comp_idx, &src_end.feature);
+            let dst_expanded =
+                self.expand_endpoint_feature_group(scope, dst_comp_idx, &dst_end.feature);
 
             let (src_features, dst_features) = match (src_expanded, dst_expanded) {
                 (Some(s), Some(d)) => (s, d),
@@ -562,16 +585,18 @@ impl SystemInstance {
                     if src_feat.name.eq_ci(&dst_feat.name) {
                         // Build the dotted feature name: group_prefix.feature_name or just feature_name
                         let src_full_name = make_expanded_name(
-                            &src_end.feature, &src_feat.group_prefix, &src_feat.name,
+                            &src_end.feature,
+                            &src_feat.group_prefix,
+                            &src_feat.name,
                         );
                         let dst_full_name = make_expanded_name(
-                            &dst_end.feature, &dst_feat.group_prefix, &dst_feat.name,
+                            &dst_end.feature,
+                            &dst_feat.group_prefix,
+                            &dst_feat.name,
                         );
 
                         expanded.push(SemanticConnection {
-                            name: Name::new(&format!(
-                                "{}.{}", conn_name, src_feat.name
-                            )),
+                            name: Name::new(&format!("{}.{}", conn_name, src_feat.name)),
                             kind: feature_kind_to_connection_kind(src_feat.kind),
                             ultimate_source: (src_comp_idx, src_full_name),
                             ultimate_destination: (dst_comp_idx, dst_full_name),
@@ -735,22 +760,22 @@ impl SystemInstance {
 
             // Up connection: source has subcomponent, destination does not,
             // and destination feature matches the one we're tracing.
-            if let (Some(src_sub_name), None) = (&src.subcomponent, &dst.subcomponent) {
-                if dst.feature.as_str() == feature.as_str() {
-                    // Found an up connection feeding this port.
-                    // Resolve the source subcomponent.
-                    let inner_matches = self.find_children_by_name(component, src_sub_name);
+            if let (Some(src_sub_name), None) = (&src.subcomponent, &dst.subcomponent)
+                && dst.feature.as_str() == feature.as_str()
+            {
+                // Found an up connection feeding this port.
+                // Resolve the source subcomponent.
+                let inner_matches = self.find_children_by_name(component, src_sub_name);
 
-                    if let Some(&inner_component) = inner_matches.first() {
-                        let src_feature = src.feature.clone();
-                        path.push(conn_idx);
-                        return self.trace_source(
-                            inner_component,
-                            &src_feature,
-                            path,
-                            depth_remaining - 1,
-                        );
-                    }
+                if let Some(&inner_component) = inner_matches.first() {
+                    let src_feature = src.feature.clone();
+                    path.push(conn_idx);
+                    return self.trace_source(
+                        inner_component,
+                        &src_feature,
+                        path,
+                        depth_remaining - 1,
+                    );
                 }
             }
         }
@@ -793,22 +818,22 @@ impl SystemInstance {
 
             // Down connection: source has no subcomponent, destination has subcomponent,
             // and source feature matches the one we're tracing.
-            if let (None, Some(dst_sub_name)) = (&src.subcomponent, &dst.subcomponent) {
-                if src.feature.as_str() == feature.as_str() {
-                    // Found a down connection distributing from this port.
-                    // Resolve the destination subcomponent.
-                    let inner_matches = self.find_children_by_name(component, dst_sub_name);
+            if let (None, Some(dst_sub_name)) = (&src.subcomponent, &dst.subcomponent)
+                && src.feature.as_str() == feature.as_str()
+            {
+                // Found a down connection distributing from this port.
+                // Resolve the destination subcomponent.
+                let inner_matches = self.find_children_by_name(component, dst_sub_name);
 
-                    if let Some(&inner_component) = inner_matches.first() {
-                        let dst_feature = dst.feature.clone();
-                        path.push(conn_idx);
-                        return self.trace_destination(
-                            inner_component,
-                            &dst_feature,
-                            path,
-                            depth_remaining - 1,
-                        );
-                    }
+                if let Some(&inner_component) = inner_matches.first() {
+                    let dst_feature = dst.feature.clone();
+                    path.push(conn_idx);
+                    return self.trace_destination(
+                        inner_component,
+                        &dst_feature,
+                        path,
+                        depth_remaining - 1,
+                    );
                 }
             }
         }
@@ -861,9 +886,9 @@ fn make_expanded_name(fg_name: &Name, prefix: &Option<Name>, feature_name: &Name
 /// Map a FeatureKind to the corresponding ConnectionKind.
 fn feature_kind_to_connection_kind(kind: FeatureKind) -> ConnectionKind {
     match kind {
-        FeatureKind::DataPort
-        | FeatureKind::EventPort
-        | FeatureKind::EventDataPort => ConnectionKind::Port,
+        FeatureKind::DataPort | FeatureKind::EventPort | FeatureKind::EventDataPort => {
+            ConnectionKind::Port
+        }
         FeatureKind::Parameter => ConnectionKind::Parameter,
         FeatureKind::DataAccess
         | FeatureKind::BusAccess
@@ -980,86 +1005,89 @@ impl<'a> Builder<'a> {
         self.build_property_map(idx, type_loc, impl_loc, subcomponent_loc);
 
         // Instantiate features and flows from the type
-        if let Some(loc) = type_loc {
-            if let Some(ct) = self.scope.get_component_type(loc) {
-                let mut feat_indices = Vec::new();
-                for &feat_idx in &ct.features {
-                    if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
-                        let feat_count = array_element_count(&feat.array_dimensions);
-                        let feat_is_array = !feat.array_dimensions.is_empty();
+        if let Some(loc) = type_loc
+            && let Some(ct) = self.scope.get_component_type(loc)
+        {
+            let mut feat_indices = Vec::new();
+            for &feat_idx in &ct.features {
+                if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
+                    let feat_count = array_element_count(&feat.array_dimensions);
+                    let feat_is_array = !feat.array_dimensions.is_empty();
 
-                        for fi_i in 0..feat_count {
-                            let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
-                            let feat_instance_name = if let Some(i) = feat_array_index {
-                                Name::new(&format!("{}[{}]", feat.name, i))
-                            } else {
-                                feat.name.clone()
-                            };
-                            let fi = self.features.alloc(FeatureInstance {
-                                name: feat_instance_name,
-                                kind: feat.kind,
-                                direction: feat.direction,
-                                owner: idx,
-                                classifier: feat.classifier.clone(),
-                                access_kind: feat.access_kind,
-                                array_index: feat_array_index,
-                            });
-                            feat_indices.push(fi);
-                        }
-                    }
-                }
-                self.components[idx].features = feat_indices;
-
-                // Instantiate flow specs from the type
-                let mut flow_indices = Vec::new();
-                for &flow_idx in &ct.flow_specs {
-                    if let Some(tree) = self.scope.tree(loc.tree) {
-                        let flow_spec = &tree.flow_specs[flow_idx];
-                        let fi = self.flow_instances.alloc(FlowInstance {
-                            name: flow_spec.name.clone(),
-                            kind: flow_spec.kind,
+                    for fi_i in 0..feat_count {
+                        let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
+                        let feat_instance_name = if let Some(i) = feat_array_index {
+                            Name::new(&format!("{}[{}]", feat.name, i))
+                        } else {
+                            feat.name.clone()
+                        };
+                        let fi = self.features.alloc(FeatureInstance {
+                            name: feat_instance_name,
+                            kind: feat.kind,
+                            direction: feat.direction,
                             owner: idx,
+                            classifier: feat.classifier.clone(),
+                            access_kind: feat.access_kind,
+                            array_index: feat_array_index,
                         });
-                        flow_indices.push(fi);
+                        feat_indices.push(fi);
                     }
                 }
-                self.components[idx].flows = flow_indices;
+            }
+            self.components[idx].features = feat_indices;
 
-                // Instantiate modes from the type
-                let mut mode_indices = Vec::new();
-                for &mode_idx in &ct.modes {
-                    if let Some(tree) = self.scope.tree(loc.tree) {
-                        let mode = &tree.modes[mode_idx];
-                        let mi = self.mode_instances.alloc(ModeInstance {
-                            name: mode.name.clone(),
-                            is_initial: mode.is_initial,
-                            owner: idx,
-                        });
-                        mode_indices.push(mi);
-                    }
+            // Instantiate flow specs from the type
+            let mut flow_indices = Vec::new();
+            for &flow_idx in &ct.flow_specs {
+                if let Some(tree) = self.scope.tree(loc.tree) {
+                    let flow_spec = &tree.flow_specs[flow_idx];
+                    let fi = self.flow_instances.alloc(FlowInstance {
+                        name: flow_spec.name.clone(),
+                        kind: flow_spec.kind,
+                        owner: idx,
+                    });
+                    flow_indices.push(fi);
                 }
+            }
+            self.components[idx].flows = flow_indices;
 
-                // Instantiate mode transitions from the type
-                let mut mt_indices = Vec::new();
-                for &mt_idx in &ct.mode_transitions {
-                    if let Some(tree) = self.scope.tree(loc.tree) {
-                        let mt = &tree.mode_transitions[mt_idx];
-                        let mti = self.mode_transition_instances.alloc(ModeTransitionInstance {
+            // Instantiate modes from the type
+            let mut mode_indices = Vec::new();
+            for &mode_idx in &ct.modes {
+                if let Some(tree) = self.scope.tree(loc.tree) {
+                    let mode = &tree.modes[mode_idx];
+                    let mi = self.mode_instances.alloc(ModeInstance {
+                        name: mode.name.clone(),
+                        is_initial: mode.is_initial,
+                        owner: idx,
+                    });
+                    mode_indices.push(mi);
+                }
+            }
+
+            // Instantiate mode transitions from the type
+            let mut mt_indices = Vec::new();
+            for &mt_idx in &ct.mode_transitions {
+                if let Some(tree) = self.scope.tree(loc.tree) {
+                    let mt = &tree.mode_transitions[mt_idx];
+                    let mti = self
+                        .mode_transition_instances
+                        .alloc(ModeTransitionInstance {
                             name: mt.name.clone(),
                             source: mt.source.clone(),
                             destination: mt.destination.clone(),
                             triggers: mt.triggers.clone(),
                             owner: idx,
                         });
-                        mt_indices.push(mti);
-                    }
+                    mt_indices.push(mti);
                 }
-                self.components[idx].modes = mode_indices;
-                self.components[idx].mode_transitions = mt_indices;
             }
+            self.components[idx].modes = mode_indices;
+            self.components[idx].mode_transitions = mt_indices;
         }
 
         // Instantiate subcomponents (recursive)
+        #[allow(clippy::collapsible_if)]
         if let Some(loc) = impl_loc {
             if self.depth < self.max_depth {
                 self.depth += 1;
@@ -1188,7 +1216,13 @@ impl<'a> Builder<'a> {
                                         array_index,
                                     });
                                     // Build property map for leaf subcomponent (type only)
-                                    self.build_leaf_property_map(child_idx, sub_pkg, &cls_ref.type_name, loc.tree, sub_idx);
+                                    self.build_leaf_property_map(
+                                        child_idx,
+                                        sub_pkg,
+                                        &cls_ref.type_name,
+                                        loc.tree,
+                                        sub_idx,
+                                    );
                                     child_indices.push(child_idx);
                                 }
                             } else {
@@ -1249,7 +1283,10 @@ impl<'a> Builder<'a> {
                         .map(|&mi| self.mode_instances[mi].name.clone())
                         .collect();
                     for (mode_name, is_initial) in impl_mode_data {
-                        if !existing_mode_names.iter().any(|n| n.as_str() == mode_name.as_str()) {
+                        if !existing_mode_names
+                            .iter()
+                            .any(|n| n.as_str() == mode_name.as_str())
+                        {
                             let mi = self.mode_instances.alloc(ModeInstance {
                                 name: mode_name,
                                 is_initial,
@@ -1261,13 +1298,15 @@ impl<'a> Builder<'a> {
 
                     // Instantiate mode transitions from the implementation
                     for (mt_name, mt_source, mt_dest, mt_triggers) in impl_mt_data {
-                        let mti = self.mode_transition_instances.alloc(ModeTransitionInstance {
-                            name: mt_name,
-                            source: mt_source,
-                            destination: mt_dest,
-                            triggers: mt_triggers,
-                            owner: idx,
-                        });
+                        let mti = self
+                            .mode_transition_instances
+                            .alloc(ModeTransitionInstance {
+                                name: mt_name,
+                                source: mt_source,
+                                destination: mt_dest,
+                                triggers: mt_triggers,
+                                owner: idx,
+                            });
                         self.components[idx].mode_transitions.push(mti);
                     }
                 }
@@ -1275,10 +1314,7 @@ impl<'a> Builder<'a> {
                 self.depth -= 1;
             } else {
                 self.diagnostics.push(InstanceDiagnostic {
-                    message: format!(
-                        "maximum instantiation depth ({}) exceeded",
-                        self.max_depth
-                    ),
+                    message: format!("maximum instantiation depth ({}) exceeded", self.max_depth),
                     path: vec![instance_name.clone()],
                 });
             }
@@ -1300,51 +1336,51 @@ impl<'a> Builder<'a> {
         let mut map = PropertyMap::new();
 
         // 1. Type-level properties
-        if let Some(loc) = type_loc {
-            if let Some(tree) = self.scope.tree(loc.tree) {
-                let ct_idx: ComponentTypeIdx =
-                    la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-                let ct = &tree.component_types[ct_idx];
-                for &pa_idx in &ct.property_associations {
-                    let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        is_append: pa.is_append,
-                    });
-                }
+        if let Some(loc) = type_loc
+            && let Some(tree) = self.scope.tree(loc.tree)
+        {
+            let ct_idx: ComponentTypeIdx =
+                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+            let ct = &tree.component_types[ct_idx];
+            for &pa_idx in &ct.property_associations {
+                let pa = &tree.property_associations[pa_idx];
+                map.add(crate::properties::PropertyValue {
+                    name: pa.name.clone(),
+                    value: pa.value.clone(),
+                    is_append: pa.is_append,
+                });
             }
         }
 
         // 2. Implementation-level properties (override type)
-        if let Some(loc) = impl_loc {
-            if let Some(tree) = self.scope.tree(loc.tree) {
-                let ci_idx: ComponentImplIdx =
-                    la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-                let ci = &tree.component_impls[ci_idx];
-                for &pa_idx in &ci.property_associations {
-                    let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        is_append: pa.is_append,
-                    });
-                }
+        if let Some(loc) = impl_loc
+            && let Some(tree) = self.scope.tree(loc.tree)
+        {
+            let ci_idx: ComponentImplIdx =
+                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+            let ci = &tree.component_impls[ci_idx];
+            for &pa_idx in &ci.property_associations {
+                let pa = &tree.property_associations[pa_idx];
+                map.add(crate::properties::PropertyValue {
+                    name: pa.name.clone(),
+                    value: pa.value.clone(),
+                    is_append: pa.is_append,
+                });
             }
         }
 
         // 3. Subcomponent-level properties (override impl)
-        if let Some((tree_idx, sub_idx)) = subcomponent_loc {
-            if let Some(tree) = self.scope.tree(tree_idx) {
-                let sub = &tree.subcomponents[sub_idx];
-                for &pa_idx in &sub.property_associations {
-                    let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        is_append: pa.is_append,
-                    });
-                }
+        if let Some((tree_idx, sub_idx)) = subcomponent_loc
+            && let Some(tree) = self.scope.tree(tree_idx)
+        {
+            let sub = &tree.subcomponents[sub_idx];
+            for &pa_idx in &sub.property_associations {
+                let pa = &tree.property_associations[pa_idx];
+                map.add(crate::properties::PropertyValue {
+                    name: pa.name.clone(),
+                    value: pa.value.clone(),
+                    is_append: pa.is_append,
+                });
             }
         }
 
@@ -1367,19 +1403,19 @@ impl<'a> Builder<'a> {
         // Resolve type to get type-level properties
         let type_ref = ClassifierRef::qualified(package.clone(), type_name.clone());
         let type_resolved = self.scope.resolve_classifier(package, &type_ref);
-        if let ResolvedClassifier::ComponentType { loc, .. } = &type_resolved {
-            if let Some(tree) = self.scope.tree(loc.tree) {
-                let ct_idx: crate::item_tree::ComponentTypeIdx =
-                    la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-                let ct = &tree.component_types[ct_idx];
-                for &pa_idx in &ct.property_associations {
-                    let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        is_append: pa.is_append,
-                    });
-                }
+        if let ResolvedClassifier::ComponentType { loc, .. } = &type_resolved
+            && let Some(tree) = self.scope.tree(loc.tree)
+        {
+            let ct_idx: crate::item_tree::ComponentTypeIdx =
+                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+            let ct = &tree.component_types[ct_idx];
+            for &pa_idx in &ct.property_associations {
+                let pa = &tree.property_associations[pa_idx];
+                map.add(crate::properties::PropertyValue {
+                    name: pa.name.clone(),
+                    value: pa.value.clone(),
+                    is_append: pa.is_append,
+                });
             }
         }
 
@@ -1431,7 +1467,9 @@ impl<'a> Builder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::item_tree::{ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction, FeatureKind};
+    use crate::item_tree::{
+        ArrayDimension, ArraySize, ComponentCategory, ConnectionKind, Direction, FeatureKind,
+    };
     use crate::name::Name;
     use la_arena::Arena;
     use rustc_hash::FxHashMap;

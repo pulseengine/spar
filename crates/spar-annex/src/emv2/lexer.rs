@@ -86,18 +86,54 @@ pub(crate) fn tokenize(source: &str) -> Vec<(Emv2Kind, usize)> {
             }
 
             // Simple single-char symbols
-            b';' => { i += 1; Emv2Kind::SEMICOLON }
-            b',' => { i += 1; Emv2Kind::COMMA }
-            b'.' => { i += 1; Emv2Kind::DOT }
-            b'*' => { i += 1; Emv2Kind::STAR }
-            b'{' => { i += 1; Emv2Kind::L_CURLY }
-            b'}' => { i += 1; Emv2Kind::R_CURLY }
-            b'(' => { i += 1; Emv2Kind::L_PAREN }
-            b')' => { i += 1; Emv2Kind::R_PAREN }
-            b'[' => { i += 1; Emv2Kind::L_BRACK }
-            b'!' => { i += 1; Emv2Kind::BANG }
-            b'^' => { i += 1; Emv2Kind::CARET }
-            b'@' => { i += 1; Emv2Kind::AT }
+            b';' => {
+                i += 1;
+                Emv2Kind::SEMICOLON
+            }
+            b',' => {
+                i += 1;
+                Emv2Kind::COMMA
+            }
+            b'.' => {
+                i += 1;
+                Emv2Kind::DOT
+            }
+            b'*' => {
+                i += 1;
+                Emv2Kind::STAR
+            }
+            b'{' => {
+                i += 1;
+                Emv2Kind::L_CURLY
+            }
+            b'}' => {
+                i += 1;
+                Emv2Kind::R_CURLY
+            }
+            b'(' => {
+                i += 1;
+                Emv2Kind::L_PAREN
+            }
+            b')' => {
+                i += 1;
+                Emv2Kind::R_PAREN
+            }
+            b'[' => {
+                i += 1;
+                Emv2Kind::L_BRACK
+            }
+            b'!' => {
+                i += 1;
+                Emv2Kind::BANG
+            }
+            b'^' => {
+                i += 1;
+                Emv2Kind::CARET
+            }
+            b'@' => {
+                i += 1;
+                Emv2Kind::AT
+            }
 
             // String literal
             b'"' => {
@@ -118,9 +154,7 @@ pub(crate) fn tokenize(source: &str) -> Vec<(Emv2Kind, usize)> {
                     i += 1;
                 }
                 let mut kind = Emv2Kind::INT_LIT;
-                if i < len && bytes[i] == b'.'
-                    && i + 1 < len && bytes[i + 1].is_ascii_digit()
-                {
+                if i < len && bytes[i] == b'.' && i + 1 < len && bytes[i + 1].is_ascii_digit() {
                     kind = Emv2Kind::REAL_LIT;
                     i += 1;
                     while i < len && bytes[i].is_ascii_digit() {
@@ -180,7 +214,12 @@ mod tests {
     fn lex_type_definition() {
         assert_eq!(
             kinds("ServiceError: type;"),
-            vec![Emv2Kind::IDENT, Emv2Kind::COLON, Emv2Kind::TYPE_KW, Emv2Kind::SEMICOLON]
+            vec![
+                Emv2Kind::IDENT,
+                Emv2Kind::COLON,
+                Emv2Kind::TYPE_KW,
+                Emv2Kind::SEMICOLON
+            ]
         );
     }
 
@@ -189,8 +228,12 @@ mod tests {
         assert_eq!(
             kinds("Operational -[ Failure ]-> FailStop ;"),
             vec![
-                Emv2Kind::IDENT, Emv2Kind::TRANS_OPEN, Emv2Kind::IDENT,
-                Emv2Kind::TRANS_CLOSE, Emv2Kind::IDENT, Emv2Kind::SEMICOLON,
+                Emv2Kind::IDENT,
+                Emv2Kind::TRANS_OPEN,
+                Emv2Kind::IDENT,
+                Emv2Kind::TRANS_CLOSE,
+                Emv2Kind::IDENT,
+                Emv2Kind::SEMICOLON,
             ]
         );
     }
@@ -200,9 +243,17 @@ mod tests {
         assert_eq!(
             kinds("[a0.failstop and a1.failstop]-> failstop;"),
             vec![
-                Emv2Kind::L_BRACK, Emv2Kind::IDENT, Emv2Kind::DOT, Emv2Kind::IDENT,
-                Emv2Kind::AND_KW, Emv2Kind::IDENT, Emv2Kind::DOT, Emv2Kind::IDENT,
-                Emv2Kind::TRANS_CLOSE, Emv2Kind::IDENT, Emv2Kind::SEMICOLON,
+                Emv2Kind::L_BRACK,
+                Emv2Kind::IDENT,
+                Emv2Kind::DOT,
+                Emv2Kind::IDENT,
+                Emv2Kind::AND_KW,
+                Emv2Kind::IDENT,
+                Emv2Kind::DOT,
+                Emv2Kind::IDENT,
+                Emv2Kind::TRANS_CLOSE,
+                Emv2Kind::IDENT,
+                Emv2Kind::SEMICOLON,
             ]
         );
     }
@@ -228,8 +279,14 @@ mod tests {
         assert_eq!(
             kinds("(Failed with 0.5, FailStop with others)"),
             vec![
-                Emv2Kind::L_PAREN, Emv2Kind::IDENT, Emv2Kind::WITH_KW, Emv2Kind::REAL_LIT,
-                Emv2Kind::COMMA, Emv2Kind::IDENT, Emv2Kind::WITH_KW, Emv2Kind::OTHERS_KW,
+                Emv2Kind::L_PAREN,
+                Emv2Kind::IDENT,
+                Emv2Kind::WITH_KW,
+                Emv2Kind::REAL_LIT,
+                Emv2Kind::COMMA,
+                Emv2Kind::IDENT,
+                Emv2Kind::WITH_KW,
+                Emv2Kind::OTHERS_KW,
                 Emv2Kind::R_PAREN,
             ]
         );
@@ -246,10 +303,13 @@ mod tests {
     #[test]
     fn byte_lengths() {
         let tokens = tokenize("error types");
-        assert_eq!(tokens, vec![
-            (Emv2Kind::ERROR_KW, 5),
-            (Emv2Kind::WHITESPACE, 1),
-            (Emv2Kind::TYPES_KW, 5),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                (Emv2Kind::ERROR_KW, 5),
+                (Emv2Kind::WHITESPACE, 1),
+                (Emv2Kind::TYPES_KW, 5),
+            ]
+        );
     }
 }

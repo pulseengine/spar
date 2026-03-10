@@ -41,7 +41,10 @@ pub struct ArchEdge {
 /// - Connection edges using the connection name as label
 pub fn build_graph(
     instance: &SystemInstance,
-) -> (Graph<ArchNode, ArchEdge>, HashMap<ComponentInstanceIdx, NodeIndex>) {
+) -> (
+    Graph<ArchNode, ArchEdge>,
+    HashMap<ComponentInstanceIdx, NodeIndex>,
+) {
     let mut graph = Graph::new();
     let mut index_map: HashMap<ComponentInstanceIdx, NodeIndex> = HashMap::new();
 
@@ -54,37 +57,28 @@ pub fn build_graph(
         // otherwise the endpoint is on the owner itself.
         // Supports array names: if the connection refers to `sub` and children
         // are `sub[1]`, `sub[2]`, etc., match the first array element.
-        let src_comp_idx = conn.src.as_ref().and_then(|end| {
-            match &end.subcomponent {
-                Some(sub_name) => {
-                    find_child_by_name(instance, conn.owner, sub_name)
-                }
-                None => Some(conn.owner),
-            }
+        let src_comp_idx = conn.src.as_ref().and_then(|end| match &end.subcomponent {
+            Some(sub_name) => find_child_by_name(instance, conn.owner, sub_name),
+            None => Some(conn.owner),
         });
 
         // Resolve destination component similarly.
-        let dst_comp_idx = conn.dst.as_ref().and_then(|end| {
-            match &end.subcomponent {
-                Some(sub_name) => {
-                    find_child_by_name(instance, conn.owner, sub_name)
-                }
-                None => Some(conn.owner),
-            }
+        let dst_comp_idx = conn.dst.as_ref().and_then(|end| match &end.subcomponent {
+            Some(sub_name) => find_child_by_name(instance, conn.owner, sub_name),
+            None => Some(conn.owner),
         });
 
-        if let (Some(src_idx), Some(dst_idx)) = (src_comp_idx, dst_comp_idx) {
-            if let (Some(&src_node), Some(&dst_node)) =
+        if let (Some(src_idx), Some(dst_idx)) = (src_comp_idx, dst_comp_idx)
+            && let (Some(&src_node), Some(&dst_node)) =
                 (index_map.get(&src_idx), index_map.get(&dst_idx))
-            {
-                graph.add_edge(
-                    src_node,
-                    dst_node,
-                    ArchEdge {
-                        label: conn.name.to_string(),
-                    },
-                );
-            }
+        {
+            graph.add_edge(
+                src_node,
+                dst_node,
+                ArchEdge {
+                    label: conn.name.to_string(),
+                },
+            );
         }
     }
 
@@ -104,9 +98,11 @@ fn find_child_by_name(
     let name_str = sub_name.as_str();
 
     // Exact match first.
-    let exact = owner_comp.children.iter().find(|&&child_idx| {
-        instance.components[child_idx].name.eq_ci(sub_name)
-    }).copied();
+    let exact = owner_comp
+        .children
+        .iter()
+        .find(|&&child_idx| instance.components[child_idx].name.eq_ci(sub_name))
+        .copied();
 
     if exact.is_some() {
         return exact;
@@ -114,15 +110,19 @@ fn find_child_by_name(
 
     // Array base name match (broadcast: return first element).
     if !name_str.contains('[') {
-        owner_comp.children.iter().find(|&&child_idx| {
-            let child_name = instance.components[child_idx].name.as_str();
-            if let Some(pos) = child_name.find('[') {
-                child_name[..pos].eq_ignore_ascii_case(name_str)
-                    && instance.components[child_idx].array_index.is_some()
-            } else {
-                false
-            }
-        }).copied()
+        owner_comp
+            .children
+            .iter()
+            .find(|&&child_idx| {
+                let child_name = instance.components[child_idx].name.as_str();
+                if let Some(pos) = child_name.find('[') {
+                    child_name[..pos].eq_ignore_ascii_case(name_str)
+                        && instance.components[child_idx].array_index.is_some()
+                } else {
+                    false
+                }
+            })
+            .copied()
     } else {
         None
     }
@@ -162,16 +162,16 @@ fn add_component_recursive(
     index_map.insert(comp_idx, node_index);
 
     // Add "contains" edge from parent to this node.
-    if let Some(parent_idx) = comp.parent {
-        if let Some(&parent_node) = index_map.get(&parent_idx) {
-            graph.add_edge(
-                parent_node,
-                node_index,
-                ArchEdge {
-                    label: "contains".to_string(),
-                },
-            );
-        }
+    if let Some(parent_idx) = comp.parent
+        && let Some(&parent_node) = index_map.get(&parent_idx)
+    {
+        graph.add_edge(
+            parent_node,
+            node_index,
+            ArchEdge {
+                label: "contains".to_string(),
+            },
+        );
     }
 
     // Recurse into children.
@@ -186,9 +186,7 @@ mod tests {
     use super::*;
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
-    use spar_hir_def::instance::{
-        ComponentInstance, ConnectionEnd, ConnectionInstance,
-    };
+    use spar_hir_def::instance::{ComponentInstance, ConnectionEnd, ConnectionInstance};
     use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind};
     use spar_hir_def::name::Name;
 
@@ -376,7 +374,10 @@ mod tests {
         let conn_edge = graph
             .edges_connecting(sensor_node, ctrl_node)
             .find(|e| e.weight().label == "c1");
-        assert!(conn_edge.is_some(), "expected connection edge c1 between sensor and ctrl");
+        assert!(
+            conn_edge.is_some(),
+            "expected connection edge c1 between sensor and ctrl"
+        );
 
         // Verify node IDs follow rivet format
         assert_eq!(graph[sensor_node].id, "AADL-HW-sensor");

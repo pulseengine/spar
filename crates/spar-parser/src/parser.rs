@@ -145,7 +145,12 @@ impl<'t> Parser<'t> {
     /// Panics if the current token is not `kind`. Use [`Parser::eat`] or
     /// [`Parser::expect`] for fallible consumption.
     pub fn bump(&mut self, kind: SyntaxKind) {
-        assert!(self.at(kind), "expected {:?}, got {:?}", kind, self.current());
+        assert!(
+            self.at(kind),
+            "expected {:?}, got {:?}",
+            kind,
+            self.current()
+        );
         self.do_bump(kind, 1);
     }
 
@@ -251,10 +256,7 @@ impl<'t> Parser<'t> {
 
     /// Internal bump: emit a Token event and advance the position.
     fn do_bump(&mut self, kind: SyntaxKind, n_raw_tokens: u8) {
-        self.push_event(Event::Token {
-            kind,
-            n_raw_tokens,
-        });
+        self.push_event(Event::Token { kind, n_raw_tokens });
         self.pos += n_raw_tokens as usize;
     }
 }
@@ -291,11 +293,11 @@ mod tests {
 
     fn make_tokens() -> Vec<(SyntaxKind, usize)> {
         vec![
-            (SyntaxKind::PACKAGE_KW, 7),   // "package"
-            (SyntaxKind::WHITESPACE, 1),    // " "
-            (SyntaxKind::IDENT, 4),         // "Test"
-            (SyntaxKind::WHITESPACE, 1),    // " "
-            (SyntaxKind::SEMICOLON, 1),     // ";"
+            (SyntaxKind::PACKAGE_KW, 7), // "package"
+            (SyntaxKind::WHITESPACE, 1), // " "
+            (SyntaxKind::IDENT, 4),      // "Test"
+            (SyntaxKind::WHITESPACE, 1), // " "
+            (SyntaxKind::SEMICOLON, 1),  // ";"
         ]
     }
 
@@ -364,7 +366,13 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(events[1], Event::Token { kind: SyntaxKind::PACKAGE_KW, .. }));
+        assert!(matches!(
+            events[1],
+            Event::Token {
+                kind: SyntaxKind::PACKAGE_KW,
+                ..
+            }
+        ));
         assert!(matches!(events[2], Event::Finish));
     }
 

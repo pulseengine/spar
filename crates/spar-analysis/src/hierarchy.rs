@@ -6,7 +6,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{component_depth, component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_depth, component_path};
 
 /// Maximum recommended nesting depth before we emit a warning.
 const MAX_RECOMMENDED_DEPTH: usize = 8;
@@ -66,10 +66,7 @@ impl Analysis for HierarchyAnalysis {
                 if !trivially_empty {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Info,
-                        message: format!(
-                            "implementation '{}' has no subcomponents",
-                            comp.name
-                        ),
+                        message: format!("implementation '{}' has no subcomponents", comp.name),
                         path: path.clone(),
                         analysis: self.name().to_string(),
                     });

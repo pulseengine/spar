@@ -11,7 +11,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::FlowKind;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates flow specification and end-to-end flow rules on the instance model.
 ///
@@ -287,10 +287,7 @@ fn extract_subcomponent(segment: &str) -> Option<&str> {
 
 /// FLOW-IMPL-COVERS-SPEC: For each component with children that have flow specs,
 /// check that the parent has end-to-end flows covering those children's flows.
-fn check_flow_coverage(
-    instance: &SystemInstance,
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
+fn check_flow_coverage(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
     for (comp_idx, comp) in instance.all_components() {
         // Only check components that have both children with flows AND
         // their own end-to-end flows
@@ -298,9 +295,10 @@ fn check_flow_coverage(
             continue;
         }
 
-        let child_has_flows = comp.children.iter().any(|&child_idx| {
-            !instance.component(child_idx).flows.is_empty()
-        });
+        let child_has_flows = comp
+            .children
+            .iter()
+            .any(|&child_idx| !instance.component(child_idx).flows.is_empty());
 
         if !child_has_flows {
             continue;
@@ -328,13 +326,11 @@ fn check_flow_coverage(
                     continue;
                 }
 
-                let flow_ref = format!("{}.{}", child.name.as_str(), flow.name.as_str())
-                    .to_ascii_lowercase();
+                let flow_ref =
+                    format!("{}.{}", child.name.as_str(), flow.name.as_str()).to_ascii_lowercase();
 
                 // Check if any E2E flow references this child flow
-                let is_covered = referenced_flows
-                    .iter()
-                    .any(|r| r == &flow_ref);
+                let is_covered = referenced_flows.iter().any(|r| r == &flow_ref);
 
                 if !is_covered && !instance.end_to_end_flows.is_empty() {
                     let path = component_path(instance, comp_idx);
@@ -343,7 +339,10 @@ fn check_flow_coverage(
                         message: format!(
                             "flow {} '{}' on subcomponent '{}' is not referenced \
                              by any end-to-end flow in '{}'",
-                            flow.kind_str(), flow.name, child.name, comp.name
+                            flow.kind_str(),
+                            flow.name,
+                            child.name,
+                            comp.name
                         ),
                         path,
                         analysis: "flow_rules".to_string(),
@@ -439,12 +438,7 @@ mod tests {
             self.components[owner].features.push(idx);
         }
 
-        fn add_flow(
-            &mut self,
-            name: &str,
-            kind: FlowKind,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_flow(&mut self, name: &str, kind: FlowKind, owner: ComponentInstanceIdx) {
             let idx = self.flow_instances.alloc(FlowInstance {
                 name: Name::new(name),
                 kind,
@@ -479,12 +473,7 @@ mod tests {
             self.components[owner].connections.push(idx);
         }
 
-        fn add_e2e(
-            &mut self,
-            name: &str,
-            owner: ComponentInstanceIdx,
-            segments: Vec<&str>,
-        ) {
+        fn add_e2e(&mut self, name: &str, owner: ComponentInstanceIdx, segments: Vec<&str>) {
             self.end_to_end_flows.alloc(EndToEndFlowInstance {
                 name: Name::new(name),
                 owner,
@@ -678,7 +667,11 @@ mod tests {
         let sensor = b.add_component("sensor", ComponentCategory::System, Some(root));
         let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
         b.add_connection("c1", root, Some("sensor"), "out", Some("ctrl"), "in");
-        b.add_e2e("e2e_flow", root, vec!["sensor.data_src", "c1", "ctrl.data_sink"]);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.data_src", "c1", "ctrl.data_sink"],
+        );
         b.set_children(root, vec![sensor, ctrl]);
 
         let inst = b.build(root);
@@ -700,7 +693,11 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
         b.add_connection("c1", root, Some("missing"), "out", Some("ctrl"), "in");
-        b.add_e2e("e2e_flow", root, vec!["missing.data_src", "c1", "ctrl.data_sink"]);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["missing.data_src", "c1", "ctrl.data_sink"],
+        );
         b.set_children(root, vec![ctrl]);
 
         let inst = b.build(root);
@@ -723,7 +720,11 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let sensor = b.add_component("sensor", ComponentCategory::System, Some(root));
         b.add_connection("c1", root, Some("sensor"), "out", Some("missing"), "in");
-        b.add_e2e("e2e_flow", root, vec!["sensor.data_src", "c1", "missing.data_sink"]);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.data_src", "c1", "missing.data_sink"],
+        );
         b.set_children(root, vec![sensor]);
 
         let inst = b.build(root);
@@ -783,12 +784,7 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("continuity"))
             .collect();
-        assert_eq!(
-            cont_warns.len(),
-            1,
-            "broken chain should warn: {:?}",
-            diags
-        );
+        assert_eq!(cont_warns.len(), 1, "broken chain should warn: {:?}", diags);
     }
 
     #[test]
@@ -798,9 +794,8 @@ mod tests {
         b.add_e2e("empty", root, vec![]);
 
         let inst = b.build(root);
-        let diags = FlowRuleAnalysis.analyze(&inst);
-        // Should not panic
-        assert!(true, "empty segments should not crash");
+        let _diags = FlowRuleAnalysis.analyze(&inst);
+        // Should not panic — if we got here, it didn't crash
     }
 
     // ── FLOW-IMPL-COVERS-SPEC tests ────────────────────────────────

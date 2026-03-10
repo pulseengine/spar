@@ -42,13 +42,15 @@
 //! ```
 
 // Re-export clean enums from hir-def that are already public-API quality.
+pub use spar_hir_def::item_tree::PropertyExpr;
 pub use spar_hir_def::item_tree::{
     AccessKind, ComponentCategory, ConnectionKind, Direction, FeatureKind, FlowKind,
 };
-pub use spar_hir_def::item_tree::PropertyExpr;
-pub use spar_hir_def::property_eval::{resolve_property_expr, lookup_property, eval_numeric, eval_range};
+pub use spar_hir_def::property_eval::{
+    eval_numeric, eval_range, lookup_property, resolve_property_expr,
+};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use spar_hir_def::item_tree::{
@@ -130,7 +132,9 @@ impl Database {
             spar_hir_def::ResolvedClassifier::FeatureGroupType { loc, .. } => {
                 let tree = self.scope.tree(loc.tree)?;
                 let fgt = self.scope.get_feature_group_type(loc)?;
-                Some(Classifier::FeatureGroupType(lower_feature_group_type(fgt, tree)))
+                Some(Classifier::FeatureGroupType(lower_feature_group_type(
+                    fgt, tree,
+                )))
             }
             spar_hir_def::ResolvedClassifier::Unresolved => None,
         }
@@ -473,38 +477,44 @@ impl Instance {
     fn build_node(&self, idx: spar_hir_def::instance::ComponentInstanceIdx) -> InstanceNode {
         let comp = self.inner.component(idx);
 
-        let features = comp.features.iter().map(|&fi| {
-            let f = &self.inner.features[fi];
-            InstanceFeature {
-                name: f.name.as_str().to_string(),
-                kind: f.kind,
-                direction: f.direction,
-                array_index: f.array_index,
-            }
-        }).collect();
+        let features = comp
+            .features
+            .iter()
+            .map(|&fi| {
+                let f = &self.inner.features[fi];
+                InstanceFeature {
+                    name: f.name.as_str().to_string(),
+                    kind: f.kind,
+                    direction: f.direction,
+                    array_index: f.array_index,
+                }
+            })
+            .collect();
 
-        let connections = comp.connections.iter().map(|&ci| {
-            let c = &self.inner.connections[ci];
-            InstanceConnection {
-                name: c.name.as_str().to_string(),
-                kind: c.kind,
-                is_bidirectional: c.is_bidirectional,
-                source: c.src.as_ref().map(|e| {
-                    match &e.subcomponent {
+        let connections = comp
+            .connections
+            .iter()
+            .map(|&ci| {
+                let c = &self.inner.connections[ci];
+                InstanceConnection {
+                    name: c.name.as_str().to_string(),
+                    kind: c.kind,
+                    is_bidirectional: c.is_bidirectional,
+                    source: c.src.as_ref().map(|e| match &e.subcomponent {
                         Some(sub) => format!("{}.{}", sub, e.feature),
                         None => e.feature.as_str().to_string(),
-                    }
-                }),
-                destination: c.dst.as_ref().map(|e| {
-                    match &e.subcomponent {
+                    }),
+                    destination: c.dst.as_ref().map(|e| match &e.subcomponent {
                         Some(sub) => format!("{}.{}", sub, e.feature),
                         None => e.feature.as_str().to_string(),
-                    }
-                }),
-            }
-        }).collect();
+                    }),
+                }
+            })
+            .collect();
 
-        let children = comp.children.iter()
+        let children = comp
+            .children
+            .iter()
             .map(|&child_idx| self.build_node(child_idx))
             .collect();
 
@@ -564,7 +574,11 @@ fn lower_package(pkg: &item_tree::Package, tree: &ItemTree) -> Package {
 
     Package {
         name: pkg.name.as_str().to_string(),
-        with_clauses: pkg.with_clauses.iter().map(|n| n.as_str().to_string()).collect(),
+        with_clauses: pkg
+            .with_clauses
+            .iter()
+            .map(|n| n.as_str().to_string())
+            .collect(),
         component_types,
         component_impls,
         feature_group_types,
@@ -576,9 +590,21 @@ fn lower_component_type(ct: &item_tree::ComponentTypeItem, tree: &ItemTree) -> C
         name: ct.name.as_str().to_string(),
         category: ct.category,
         extends: ct.extends.as_ref().map(|c| c.to_string()),
-        features: ct.features.iter().map(|&fi| lower_feature(&tree.features[fi], tree)).collect(),
-        flows: ct.flow_specs.iter().map(|&fi| lower_flow_spec(&tree.flow_specs[fi], tree)).collect(),
-        modes: ct.modes.iter().map(|&mi| lower_mode(&tree.modes[mi])).collect(),
+        features: ct
+            .features
+            .iter()
+            .map(|&fi| lower_feature(&tree.features[fi], tree))
+            .collect(),
+        flows: ct
+            .flow_specs
+            .iter()
+            .map(|&fi| lower_flow_spec(&tree.flow_specs[fi], tree))
+            .collect(),
+        modes: ct
+            .modes
+            .iter()
+            .map(|&mi| lower_mode(&tree.modes[mi]))
+            .collect(),
         mode_transitions: ct
             .mode_transitions
             .iter()
@@ -615,7 +641,11 @@ fn lower_component_impl(ci: &item_tree::ComponentImplItem, tree: &ItemTree) -> C
                     kind: flow.kind,
                     source_feature: None,
                     sink_feature: None,
-                    in_modes: flow.in_modes.iter().map(|n| n.as_str().to_string()).collect(),
+                    in_modes: flow
+                        .in_modes
+                        .iter()
+                        .map(|n| n.as_str().to_string())
+                        .collect(),
                     properties: lower_property_associations(&flow.property_associations, tree),
                 }
             })
@@ -625,7 +655,11 @@ fn lower_component_impl(ci: &item_tree::ComponentImplItem, tree: &ItemTree) -> C
             .iter()
             .map(|&ei| lower_e2e_flow(&tree.end_to_end_flows[ei], tree))
             .collect(),
-        modes: ci.modes.iter().map(|&mi| lower_mode(&tree.modes[mi])).collect(),
+        modes: ci
+            .modes
+            .iter()
+            .map(|&mi| lower_mode(&tree.modes[mi]))
+            .collect(),
         mode_transitions: ci
             .mode_transitions
             .iter()
@@ -643,7 +677,11 @@ fn lower_feature_group_type(
         name: fgt.name.as_str().to_string(),
         extends: fgt.extends.as_ref().map(|c| c.to_string()),
         inverse_of: fgt.inverse_of.as_ref().map(|c| c.to_string()),
-        features: fgt.features.iter().map(|&fi| lower_feature(&tree.features[fi], tree)).collect(),
+        features: fgt
+            .features
+            .iter()
+            .map(|&fi| lower_feature(&tree.features[fi], tree))
+            .collect(),
     }
 }
 
@@ -676,8 +714,8 @@ fn lower_connection(c: &item_tree::ConnectionItem, tree: &ItemTree) -> Connectio
         kind: c.kind,
         is_bidirectional: c.is_bidirectional,
         is_refined: c.is_refined,
-        source: c.src.as_ref().map(|e| format_connected_element(e)),
-        destination: c.dst.as_ref().map(|e| format_connected_element(e)),
+        source: c.src.as_ref().map(format_connected_element),
+        destination: c.dst.as_ref().map(format_connected_element),
         in_modes: c.in_modes.iter().map(|n| n.as_str().to_string()).collect(),
         properties: lower_property_associations(&c.property_associations, tree),
     }
@@ -1029,7 +1067,11 @@ mod tests {
         let ct = &pkgs[0].component_types[0];
         assert!(ct.properties.len() >= 2);
         // Check that property names and values were lowered
-        assert!(ct.properties.iter().any(|p| p.name.contains("Dispatch_Protocol")));
+        assert!(
+            ct.properties
+                .iter()
+                .any(|p| p.name.contains("Dispatch_Protocol"))
+        );
         assert!(ct.properties.iter().any(|p| p.value.contains("10")));
     }
 
@@ -1054,7 +1096,13 @@ end FlowPkg;
         let pkgs = db.packages();
         assert!(!pkgs.is_empty(), "expected at least 1 package");
         let ct = &pkgs[0].component_types[0];
-        assert_eq!(ct.flows.len(), 3, "expected 3 flows on {}, got {:?}", ct.name, ct.flows);
+        assert_eq!(
+            ct.flows.len(),
+            3,
+            "expected 3 flows on {}, got {:?}",
+            ct.name,
+            ct.flows
+        );
         assert_eq!(ct.flows[0].name, "f_path");
         assert_eq!(ct.flows[0].kind, FlowKind::Path);
         assert_eq!(ct.flows[0].source_feature.as_deref(), Some("inp"));
@@ -1296,8 +1344,10 @@ end E2EPkg;
         assert!(json.contains("Dispatch_Protocol"));
         assert!(json.contains("10"));
         let round: Vec<Package> = serde_json::from_str(&json).unwrap();
-        assert_eq!(round[0].component_types[0].properties.len(),
-                   pkgs[0].component_types[0].properties.len());
+        assert_eq!(
+            round[0].component_types[0].properties.len(),
+            pkgs[0].component_types[0].properties.len()
+        );
     }
 
     #[test]

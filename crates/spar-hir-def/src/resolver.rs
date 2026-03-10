@@ -51,6 +51,7 @@ impl CiName {
         Self(name.as_str().to_ascii_lowercase())
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         Self(s.to_ascii_lowercase())
     }
@@ -132,16 +133,13 @@ impl GlobalScope {
                 for &renames_idx in &pkg.renames {
                     let ri = &tree.renames[renames_idx];
                     if ri.kind == crate::item_tree::RenamesKind::Package {
-                        pkg_scope.package_renames.insert(
-                            CiName::new(&ri.alias),
-                            ri.original.clone(),
-                        );
+                        pkg_scope
+                            .package_renames
+                            .insert(CiName::new(&ri.alias), ri.original.clone());
                     }
                 }
 
-                scope
-                    .packages
-                    .insert(CiName::new(&pkg.name), pkg_scope);
+                scope.packages.insert(CiName::new(&pkg.name), pkg_scope);
             }
 
             // Top-level property sets (outside packages)
@@ -150,11 +148,7 @@ impl GlobalScope {
                     CiName::new(&ps.name),
                     PropertySetInfo {
                         name: ps.name.clone(),
-                        property_names: ps
-                            .property_defs
-                            .iter()
-                            .map(|d| d.name.clone())
-                            .collect(),
+                        property_names: ps.property_defs.iter().map(|d| d.name.clone()).collect(),
                         constant_names: ps
                             .property_constants
                             .iter()
@@ -172,17 +166,14 @@ impl GlobalScope {
         for &set_name in standard_properties::STANDARD_PROPERTY_SET_NAMES {
             let ci_key = CiName::from_str(set_name);
             // Don't overwrite a user-provided property set with the same name.
-            if !scope.property_sets.contains_key(&ci_key) {
+            scope.property_sets.entry(ci_key).or_insert_with(|| {
                 let prop_names = standard_properties::standard_properties_in_set(set_name);
-                scope.property_sets.insert(
-                    ci_key,
-                    PropertySetInfo {
-                        name: Name::new(set_name),
-                        property_names: prop_names.iter().map(|&n| Name::new(n)).collect(),
-                        constant_names: Vec::new(),
-                    },
-                );
-            }
+                PropertySetInfo {
+                    name: Name::new(set_name),
+                    property_names: prop_names.iter().map(|&n| Name::new(n)).collect(),
+                    constant_names: Vec::new(),
+                }
+            });
         }
 
         scope
@@ -273,14 +264,16 @@ impl GlobalScope {
     /// Look up a component implementation's data by its location.
     pub fn get_component_impl(&self, loc: ItemLoc) -> Option<&ComponentImplItem> {
         let tree = self.tree(loc.tree)?;
-        let idx: ComponentImplIdx = la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+        let idx: ComponentImplIdx =
+            la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
         Some(&tree.component_impls[idx])
     }
 
     /// Look up a component type's data by its location.
     pub fn get_component_type(&self, loc: ItemLoc) -> Option<&ComponentTypeItem> {
         let tree = self.tree(loc.tree)?;
-        let idx: ComponentTypeIdx = la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+        let idx: ComponentTypeIdx =
+            la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
         Some(&tree.component_types[idx])
     }
 
@@ -311,10 +304,10 @@ impl GlobalScope {
             Some(pkg_name) => {
                 let mut key = CiName::new(pkg_name);
                 // Check if the package name is a renames alias
-                if let Some(from_scope) = self.packages.get(&from_key) {
-                    if let Some(original) = from_scope.package_renames.get(&key) {
-                        key = CiName::new(original);
-                    }
+                if let Some(from_scope) = self.packages.get(&from_key)
+                    && let Some(original) = from_scope.package_renames.get(&key)
+                {
+                    key = CiName::new(original);
                 }
                 is_same_package = key == from_key;
                 key
@@ -330,14 +323,14 @@ impl GlobalScope {
         }
 
         // If no explicit package, search imports
-        if reference.package.is_none() {
-            if let Some(from_scope) = self.packages.get(&from_key) {
-                for import in &from_scope.imports {
-                    let import_key = CiName::new(import);
-                    // Resolving from an imported package — never same package
-                    if let Some(result) = self.resolve_in_package(&import_key, reference, false) {
-                        return result;
-                    }
+        if reference.package.is_none()
+            && let Some(from_scope) = self.packages.get(&from_key)
+        {
+            for import in &from_scope.imports {
+                let import_key = CiName::new(import);
+                // Resolving from an imported package — never same package
+                if let Some(result) = self.resolve_in_package(&import_key, reference, false) {
+                    return result;
                 }
             }
         }
@@ -355,10 +348,7 @@ impl GlobalScope {
 
         // Implementation reference
         if let Some(impl_name) = &reference.impl_name {
-            let key = (
-                CiName::new(&reference.type_name),
-                CiName::new(impl_name),
-            );
+            let key = (CiName::new(&reference.type_name), CiName::new(impl_name));
             if let Some(&loc) = pkg_scope.component_impls.get(&key) {
                 // Check visibility: private impls are only visible within the same package
                 if !is_same_package && pkg_scope.private_impls.contains(&key) {
@@ -401,11 +391,7 @@ impl GlobalScope {
     }
 
     /// Check if a classifier in a target package is private (not visible from outside).
-    pub fn is_private_classifier(
-        &self,
-        target_package: &Name,
-        reference: &ClassifierRef,
-    ) -> bool {
+    pub fn is_private_classifier(&self, target_package: &Name, reference: &ClassifierRef) -> bool {
         let pkg_key = CiName::new(target_package);
         let pkg_scope = match self.packages.get(&pkg_key) {
             Some(s) => s,
@@ -413,10 +399,7 @@ impl GlobalScope {
         };
 
         if let Some(impl_name) = &reference.impl_name {
-            let key = (
-                CiName::new(&reference.type_name),
-                CiName::new(impl_name),
-            );
+            let key = (CiName::new(&reference.type_name), CiName::new(impl_name));
             return pkg_scope.private_impls.contains(&key);
         }
 
@@ -431,11 +414,7 @@ impl GlobalScope {
     }
 
     /// Resolve a package name, following renames aliases if present.
-    pub fn resolve_package_name(
-        &self,
-        from_package: &Name,
-        pkg_name: &Name,
-    ) -> Option<Name> {
+    pub fn resolve_package_name(&self, from_package: &Name, pkg_name: &Name) -> Option<Name> {
         let from_key = CiName::new(from_package);
         let from_scope = self.packages.get(&from_key)?;
 
@@ -521,7 +500,7 @@ impl GlobalScope {
     pub fn all_component_types(&self) -> Vec<(&Name, &Name, crate::item_tree::ComponentCategory)> {
         let mut result = Vec::new();
         for pkg_scope in self.packages.values() {
-            for (_, loc) in &pkg_scope.component_types {
+            for loc in pkg_scope.component_types.values() {
                 if let Some(ct) = self.get_component_type(*loc) {
                     result.push((&pkg_scope.name, &ct.name, ct.category));
                 }
@@ -537,7 +516,7 @@ impl GlobalScope {
     ) -> Vec<(&Name, &Name, &Name, crate::item_tree::ComponentCategory)> {
         let mut result = Vec::new();
         for pkg_scope in self.packages.values() {
-            for (_, loc) in &pkg_scope.component_impls {
+            for loc in pkg_scope.component_impls.values() {
                 if let Some(ci) = self.get_component_impl(*loc) {
                     result.push((&pkg_scope.name, &ci.type_name, &ci.impl_name, ci.category));
                 }
@@ -551,7 +530,7 @@ impl GlobalScope {
     pub fn all_feature_group_types(&self) -> Vec<(&Name, &Name)> {
         let mut result = Vec::new();
         for pkg_scope in self.packages.values() {
-            for (_, loc) in &pkg_scope.feature_group_types {
+            for loc in pkg_scope.feature_group_types.values() {
                 if let Some(fgt) = self.get_feature_group_type(*loc) {
                     result.push((&pkg_scope.name, &fgt.name));
                 }

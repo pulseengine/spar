@@ -8,13 +8,11 @@
 //! - **CONN-CLASSIFIER-MISSING** — Info-level: one endpoint has a classifier but
 //!   the other doesn't (potential type safety gap).
 
-use spar_hir_def::instance::{
-    ComponentInstanceIdx, FeatureInstance, SystemInstance,
-};
+use spar_hir_def::instance::{ComponentInstanceIdx, FeatureInstance, SystemInstance};
 use spar_hir_def::item_tree::{ConnectionKind, FeatureKind};
 use spar_hir_def::name::Name;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates connection classifier type matching on the instance model.
 pub struct ClassifierMatchAnalysis;
@@ -225,19 +223,17 @@ fn check_access_match(
 
     // Check access kind compatibility: Provides ↔ Requires
     match (&src_feat.access_kind, &dst_feat.access_kind) {
-        (Some(src_ak), Some(dst_ak)) => {
-            if src_ak == dst_ak {
-                diags.push(AnalysisDiagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "connection '{}': both source '{}' and destination '{}' are '{}' — \
-                         access connections require provides ↔ requires pairing",
-                        conn_name, src_name, dst_name, src_ak
-                    ),
-                    path: path.to_vec(),
-                    analysis: "classifier_match".to_string(),
-                });
-            }
+        (Some(src_ak), Some(dst_ak)) if src_ak == dst_ak => {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "connection '{}': both source '{}' and destination '{}' are '{}' — \
+                     access connections require provides ↔ requires pairing",
+                    conn_name, src_name, dst_name, src_ak
+                ),
+                path: path.to_vec(),
+                analysis: "classifier_match".to_string(),
+            });
         }
         _ => {
             // One or both missing access_kind — skip (may not be resolvable)
@@ -430,15 +426,28 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "out1", FeatureKind::DataPort, Some(Direction::Out), a,
-            cls("DataTypes", "SensorData"), None,
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "SensorData"),
+            None,
         );
         b.add_feature(
-            "in1", FeatureKind::DataPort, Some(Direction::In), bb,
-            cls("DataTypes", "SensorData"), None,
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "SensorData"),
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "out1"), end(Some("b"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
@@ -457,25 +466,43 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "out1", FeatureKind::DataPort, Some(Direction::Out), a,
-            cls("DataTypes", "SensorData"), None,
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "SensorData"),
+            None,
         );
         b.add_feature(
-            "in1", FeatureKind::DataPort, Some(Direction::In), bb,
-            cls("DataTypes", "CommandData"), None,
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "CommandData"),
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "out1"), end(Some("b"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = ClassifierMatchAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("data types must match"))
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("data types must match")
+            })
             .collect();
         assert_eq!(
-            errors.len(), 1,
-            "mismatching classifiers should produce one error: {:?}", diags
+            errors.len(),
+            1,
+            "mismatching classifiers should produce one error: {:?}",
+            diags
         );
         assert!(errors[0].message.contains("SensorData"));
         assert!(errors[0].message.contains("CommandData"));
@@ -488,25 +515,41 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "out1", FeatureKind::DataPort, Some(Direction::Out), a,
-            cls("DataTypes", "SensorData"), None,
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "SensorData"),
+            None,
         );
         b.add_feature(
-            "in1", FeatureKind::DataPort, Some(Direction::In), bb,
-            None, None,
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            None,
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "out1"), end(Some("b"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = ClassifierMatchAnalysis.analyze(&inst);
-        let infos: Vec<_> = diags.iter()
+        let infos: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("type safety gap"))
             .collect();
         assert_eq!(
-            infos.len(), 1,
-            "one missing classifier should produce info: {:?}", diags
+            infos.len(),
+            1,
+            "one missing classifier should produce info: {:?}",
+            diags
         );
     }
 
@@ -517,15 +560,28 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "out1", FeatureKind::DataPort, Some(Direction::Out), a,
-            None, None,
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            None,
+            None,
         );
         b.add_feature(
-            "in1", FeatureKind::DataPort, Some(Direction::In), bb,
-            None, None,
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            None,
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "out1"), end(Some("b"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
@@ -546,25 +602,40 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "acc1", FeatureKind::DataAccess, None, a,
-            cls("DataTypes", "SharedBuffer"), Some(AccessKind::Provides),
+            "acc1",
+            FeatureKind::DataAccess,
+            None,
+            a,
+            cls("DataTypes", "SharedBuffer"),
+            Some(AccessKind::Provides),
         );
         b.add_feature(
-            "acc2", FeatureKind::DataAccess, None, bb,
-            cls("DataTypes", "SharedBuffer"), Some(AccessKind::Requires),
+            "acc2",
+            FeatureKind::DataAccess,
+            None,
+            bb,
+            cls("DataTypes", "SharedBuffer"),
+            Some(AccessKind::Requires),
         );
-        b.add_connection("c1", ConnectionKind::Access, root,
-            end(Some("a"), "acc1"), end(Some("b"), "acc2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = ClassifierMatchAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter()
+        let errors: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
         assert!(
             errors.is_empty(),
-            "provides/requires pairing should produce no errors: {:?}", errors
+            "provides/requires pairing should produce no errors: {:?}",
+            errors
         );
     }
 
@@ -575,25 +646,41 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "acc1", FeatureKind::DataAccess, None, a,
-            cls("DataTypes", "SharedBuffer"), Some(AccessKind::Provides),
+            "acc1",
+            FeatureKind::DataAccess,
+            None,
+            a,
+            cls("DataTypes", "SharedBuffer"),
+            Some(AccessKind::Provides),
         );
         b.add_feature(
-            "acc2", FeatureKind::DataAccess, None, bb,
-            cls("DataTypes", "SharedBuffer"), Some(AccessKind::Provides),
+            "acc2",
+            FeatureKind::DataAccess,
+            None,
+            bb,
+            cls("DataTypes", "SharedBuffer"),
+            Some(AccessKind::Provides),
         );
-        b.add_connection("c1", ConnectionKind::Access, root,
-            end(Some("a"), "acc1"), end(Some("b"), "acc2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = ClassifierMatchAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter()
+        let errors: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("provides"))
             .collect();
         assert_eq!(
-            errors.len(), 1,
-            "same access direction should produce an error: {:?}", diags
+            errors.len(),
+            1,
+            "same access direction should produce an error: {:?}",
+            diags
         );
     }
 
@@ -604,15 +691,28 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "evt_out", FeatureKind::EventDataPort, Some(Direction::Out), a,
-            cls("DataTypes", "AlertMsg"), None,
+            "evt_out",
+            FeatureKind::EventDataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "AlertMsg"),
+            None,
         );
         b.add_feature(
-            "evt_in", FeatureKind::EventDataPort, Some(Direction::In), bb,
-            cls("DataTypes", "AlertMsg"), None,
+            "evt_in",
+            FeatureKind::EventDataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "AlertMsg"),
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "evt_out"), end(Some("b"), "evt_in"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "evt_out"),
+            end(Some("b"), "evt_in"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
@@ -634,15 +734,28 @@ mod tests {
 
         // Features on the mid-level components
         b.add_feature(
-            "data_out", FeatureKind::DataPort, Some(Direction::Out), mid_a,
-            cls("Pkg", "Telemetry"), None,
+            "data_out",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            mid_a,
+            cls("Pkg", "Telemetry"),
+            None,
         );
         b.add_feature(
-            "data_in", FeatureKind::DataPort, Some(Direction::In), mid_b,
-            cls("pkg", "telemetry"), None, // different case — should still match
+            "data_in",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            mid_b,
+            cls("pkg", "telemetry"),
+            None, // different case — should still match
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("mid_a"), "data_out"), end(Some("mid_b"), "data_in"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("mid_a"), "data_out"),
+            end(Some("mid_b"), "data_in"),
+        );
         b.set_children(root, vec![mid_a, mid_b]);
 
         let inst = b.build(root);
@@ -661,25 +774,43 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "bus_acc", FeatureKind::BusAccess, None, a,
-            cls("HW", "PCIBus"), Some(AccessKind::Provides),
+            "bus_acc",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("HW", "PCIBus"),
+            Some(AccessKind::Provides),
         );
         b.add_feature(
-            "bus_acc", FeatureKind::BusAccess, None, bb,
-            cls("HW", "EthernetBus"), Some(AccessKind::Requires),
+            "bus_acc",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("HW", "EthernetBus"),
+            Some(AccessKind::Requires),
         );
-        b.add_connection("c1", ConnectionKind::Access, root,
-            end(Some("a"), "bus_acc"), end(Some("b"), "bus_acc"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "bus_acc"),
+            end(Some("b"), "bus_acc"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = ClassifierMatchAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("access types must match"))
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("access types must match")
+            })
             .collect();
         assert_eq!(
-            errors.len(), 1,
-            "access classifier mismatch should produce an error: {:?}", diags
+            errors.len(),
+            1,
+            "access classifier mismatch should produce an error: {:?}",
+            diags
         );
     }
 
@@ -691,15 +822,28 @@ mod tests {
         let a = b.add_component("a", ComponentCategory::Process, Some(root));
         let bb = b.add_component("b", ComponentCategory::Process, Some(root));
         b.add_feature(
-            "evt_out", FeatureKind::EventPort, Some(Direction::Out), a,
-            None, None,
+            "evt_out",
+            FeatureKind::EventPort,
+            Some(Direction::Out),
+            a,
+            None,
+            None,
         );
         b.add_feature(
-            "evt_in", FeatureKind::EventPort, Some(Direction::In), bb,
-            None, None,
+            "evt_in",
+            FeatureKind::EventPort,
+            Some(Direction::In),
+            bb,
+            None,
+            None,
         );
-        b.add_connection("c1", ConnectionKind::Port, root,
-            end(Some("a"), "evt_out"), end(Some("b"), "evt_in"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "evt_out"),
+            end(Some("b"), "evt_in"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);

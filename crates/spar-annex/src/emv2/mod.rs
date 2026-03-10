@@ -13,16 +13,16 @@
 //! error propagations through component features, composite error
 //! behavior for fault tree analysis, and type transformations/mappings.
 
-pub mod syntax_kind;
+mod grammar;
 mod lexer;
 mod parser;
-mod grammar;
+pub mod syntax_kind;
 
 use std::mem;
 
 pub use syntax_kind::{Emv2Kind, Emv2Language, Emv2SyntaxNode, Emv2SyntaxToken};
 
-use crate::{AnnexParser, AnnexParseResult, AnnexNode, AnnexDiagnostic, Span, Severity};
+use crate::{AnnexDiagnostic, AnnexNode, AnnexParseResult, AnnexParser, Severity, Span};
 
 /// Result of parsing EMV2 annex content.
 pub struct Emv2Parse {
@@ -59,13 +59,15 @@ impl Emv2Parse {
         let mut nodes = Vec::new();
         flatten_node(&root, -1, &mut nodes);
 
-        let diagnostics = self.errors.iter().map(|e| {
-            AnnexDiagnostic {
+        let diagnostics = self
+            .errors
+            .iter()
+            .map(|e| AnnexDiagnostic {
                 span: Span::new(e.offset as u32, e.offset as u32),
                 message: e.msg.clone(),
                 severity: Severity::Error,
-            }
-        }).collect();
+            })
+            .collect();
 
         AnnexParseResult { nodes, diagnostics }
     }
@@ -130,14 +132,20 @@ fn resolve_events(mut events: Vec<parser::Event>) -> Vec<ResolvedEvent> {
 
     for i in 0..events.len() {
         match mem::replace(&mut events[i], parser::Event::Tombstone) {
-            parser::Event::Start { kind, forward_parent } => {
+            parser::Event::Start {
+                kind,
+                forward_parent,
+            } => {
                 forward_parents.push(kind);
                 let mut idx = i;
                 let mut fp = forward_parent;
                 while let Some(fwd) = fp {
                     idx += fwd as usize;
                     fp = match mem::replace(&mut events[idx], parser::Event::Tombstone) {
-                        parser::Event::Start { kind, forward_parent } => {
+                        parser::Event::Start {
+                            kind,
+                            forward_parent,
+                        } => {
                             forward_parents.push(kind);
                             forward_parent
                         }
@@ -162,11 +170,7 @@ fn resolve_events(mut events: Vec<parser::Event>) -> Vec<ResolvedEvent> {
     resolved
 }
 
-fn build_tree(
-    input: &str,
-    tokens: &[(Emv2Kind, usize)],
-    events: Vec<parser::Event>,
-) -> Emv2Parse {
+fn build_tree(input: &str, tokens: &[(Emv2Kind, usize)], events: Vec<parser::Event>) -> Emv2Parse {
     let mut builder = rowan::GreenNodeBuilder::new();
     let mut errors = Vec::new();
 
@@ -196,12 +200,28 @@ fn build_tree(
         match event {
             ResolvedEvent::StartNode(kind) => {
                 if depth > 0 {
-                    eat_trivia(&mut builder, tokens, input, &token_starts, &mut raw_pos, nt_pos, &non_trivia);
+                    eat_trivia(
+                        &mut builder,
+                        tokens,
+                        input,
+                        &token_starts,
+                        &mut raw_pos,
+                        nt_pos,
+                        &non_trivia,
+                    );
                 }
                 depth += 1;
                 builder.start_node((*kind).into());
                 if depth == 1 {
-                    eat_trivia(&mut builder, tokens, input, &token_starts, &mut raw_pos, nt_pos, &non_trivia);
+                    eat_trivia(
+                        &mut builder,
+                        tokens,
+                        input,
+                        &token_starts,
+                        &mut raw_pos,
+                        nt_pos,
+                        &non_trivia,
+                    );
                 }
             }
             ResolvedEvent::Token { kind, n_raw_tokens } => {
@@ -243,7 +263,10 @@ fn build_tree(
                 } else {
                     0
                 };
-                errors.push(Emv2Error { msg: msg.clone(), offset });
+                errors.push(Emv2Error {
+                    msg: msg.clone(),
+                    offset,
+                });
             }
         }
     }

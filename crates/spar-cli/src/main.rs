@@ -131,7 +131,10 @@ fn cmd_items(args: &[String]) {
     }
 
     if format.as_deref() == Some("json") {
-        let sources: Vec<_> = file_args.iter().map(|f| (f.clone(), read_file(f))).collect();
+        let sources: Vec<_> = file_args
+            .iter()
+            .map(|f| (f.clone(), read_file(f)))
+            .collect();
         let hir_db = spar_hir::Database::from_aadl(&sources);
         let pkgs = hir_db.packages();
         println!("{}", serde_json::to_string_pretty(&pkgs).unwrap());
@@ -149,7 +152,13 @@ fn cmd_items(args: &[String]) {
 
         for (_idx, pkg) in tree.packages.iter() {
             println!("  package {}", pkg.name);
-            println!("    with: {:?}", pkg.with_clauses.iter().map(|n| n.as_str()).collect::<Vec<_>>());
+            println!(
+                "    with: {:?}",
+                pkg.with_clauses
+                    .iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+            );
             print_items("    public", &pkg.public_items, &tree);
             print_items("    private", &pkg.private_items, &tree);
         }
@@ -181,8 +190,15 @@ fn print_items(
                 for &fi in &ct.features {
                     let f = &tree.features[fi];
                     let dir = f.direction.map(|d| format!("{:?} ", d)).unwrap_or_default();
-                    let cls = f.classifier.as_ref().map(|c| format!(" {}", c)).unwrap_or_default();
-                    println!("{}  feature {} : {}{:?}{}", prefix, f.name, dir, f.kind, cls);
+                    let cls = f
+                        .classifier
+                        .as_ref()
+                        .map(|c| format!(" {}", c))
+                        .unwrap_or_default();
+                    println!(
+                        "{}  feature {} : {}{:?}{}",
+                        prefix, f.name, dir, f.kind, cls
+                    );
                 }
                 for &fsi in &ct.flow_specs {
                     let fs = &tree.flow_specs[fsi];
@@ -197,8 +213,15 @@ fn print_items(
                 );
                 for &si in &ci.subcomponents {
                     let s = &tree.subcomponents[si];
-                    let cls = s.classifier.as_ref().map(|c| format!(" {}", c)).unwrap_or_default();
-                    println!("{}  subcomponent {} : {}{}", prefix, s.name, s.category, cls);
+                    let cls = s
+                        .classifier
+                        .as_ref()
+                        .map(|c| format!(" {}", c))
+                        .unwrap_or_default();
+                    println!(
+                        "{}  subcomponent {} : {}{}",
+                        prefix, s.name, s.category, cls
+                    );
                 }
                 for &coni in &ci.connections {
                     let c = &tree.connections[coni];
@@ -430,6 +453,7 @@ fn cmd_analyze(args: &[String]) {
 fn run_all_analyses(
     inst: &spar_hir_def::instance::SystemInstance,
 ) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    use spar_analysis::AnalysisRunner;
     use spar_analysis::arinc653::Arinc653Analysis;
     use spar_analysis::binding_check::BindingCheckAnalysis;
     use spar_analysis::binding_rules::BindingRuleAnalysis;
@@ -447,7 +471,6 @@ fn run_all_analyses(
     use spar_analysis::property_rules::PropertyRuleAnalysis;
     use spar_analysis::resource_budget::ResourceBudgetAnalysis;
     use spar_analysis::scheduling::SchedulingAnalysis;
-    use spar_analysis::AnalysisRunner;
 
     let mut runner = AnalysisRunner::new();
     runner.register(Box::new(ConnectivityAnalysis));
@@ -585,4 +608,3 @@ fn read_file(path: &str) -> String {
         process::exit(1);
     })
 }
-

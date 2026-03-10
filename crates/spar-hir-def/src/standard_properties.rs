@@ -36,7 +36,10 @@ const TIMING_PROPERTIES: &[(&str, &str)] = &[
     ("Deadline", "Time"),
     ("Compute_Execution_Time", "Time_Range"),
     ("Clock_Period", "Time"),
-    ("Reference_Time", "list of reference (applies to processor, device)"),
+    (
+        "Reference_Time",
+        "list of reference (applies to processor, device)",
+    ),
     (
         "Dispatch_Protocol",
         "enumeration (Periodic, Sporadic, Aperiodic, Timed, Hybrid, Background)",
@@ -82,10 +85,7 @@ const COMMUNICATION_PROPERTIES: &[(&str, &str)] = &[
         "Not_Collocated",
         "record (Targets: list of reference; Location: classifier)",
     ),
-    (
-        "Actual_Connection_Binding",
-        "list of reference",
-    ),
+    ("Actual_Connection_Binding", "list of reference"),
 ];
 
 // ── Memory_Properties ───────────────────────────────────────────────
@@ -180,10 +180,7 @@ const PROGRAMMING_PROPERTIES: &[(&str, &str)] = &[
     ("Source_Text", "list of aadlstring"),
     ("Source_Name", "aadlstring"),
     ("Type_Source_Name", "aadlstring"),
-    (
-        "Hardware_Description_Source_Text",
-        "list of aadlstring",
-    ),
+    ("Hardware_Description_Source_Text", "list of aadlstring"),
     (
         "Hardware_Source_Language",
         "Supported_Hardware_Source_Languages",
@@ -198,19 +195,13 @@ const PROGRAMMING_PROPERTIES: &[(&str, &str)] = &[
         "classifier (subprogram classifier)",
     ),
     ("Initialize_Entrypoint_Source_Text", "aadlstring"),
-    (
-        "Compute_Entrypoint",
-        "classifier (subprogram classifier)",
-    ),
+    ("Compute_Entrypoint", "classifier (subprogram classifier)"),
     (
         "Compute_Entrypoint_Call_Sequence",
         "classifier (subprogram classifier)",
     ),
     ("Compute_Entrypoint_Source_Text", "aadlstring"),
-    (
-        "Activate_Entrypoint",
-        "classifier (subprogram classifier)",
-    ),
+    ("Activate_Entrypoint", "classifier (subprogram classifier)"),
     (
         "Activate_Entrypoint_Call_Sequence",
         "classifier (subprogram classifier)",
@@ -225,19 +216,13 @@ const PROGRAMMING_PROPERTIES: &[(&str, &str)] = &[
         "classifier (subprogram classifier)",
     ),
     ("Deactivate_Entrypoint_Source_Text", "aadlstring"),
-    (
-        "Finalize_Entrypoint",
-        "classifier (subprogram classifier)",
-    ),
+    ("Finalize_Entrypoint", "classifier (subprogram classifier)"),
     (
         "Finalize_Entrypoint_Call_Sequence",
         "classifier (subprogram classifier)",
     ),
     ("Finalize_Entrypoint_Source_Text", "aadlstring"),
-    (
-        "Recover_Entrypoint",
-        "classifier (subprogram classifier)",
-    ),
+    ("Recover_Entrypoint", "classifier (subprogram classifier)"),
     (
         "Recover_Entrypoint_Call_Sequence",
         "classifier (subprogram classifier)",
@@ -319,11 +304,19 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     let mut result = Vec::new();
 
     collect_properties(TIMING_PROPERTIES, "Timing_Properties", &mut result);
-    collect_properties(COMMUNICATION_PROPERTIES, "Communication_Properties", &mut result);
+    collect_properties(
+        COMMUNICATION_PROPERTIES,
+        "Communication_Properties",
+        &mut result,
+    );
     collect_properties(MEMORY_PROPERTIES, "Memory_Properties", &mut result);
     collect_properties(DEPLOYMENT_PROPERTIES, "Deployment_Properties", &mut result);
     collect_properties(THREAD_PROPERTIES, "Thread_Properties", &mut result);
-    collect_properties(PROGRAMMING_PROPERTIES, "Programming_Properties", &mut result);
+    collect_properties(
+        PROGRAMMING_PROPERTIES,
+        "Programming_Properties",
+        &mut result,
+    );
     collect_properties(MODELING_PROPERTIES, "Modeling_Properties", &mut result);
     collect_properties(AADL_PROJECT, "AADL_Project", &mut result);
 
@@ -668,10 +661,7 @@ mod tests {
             standard_property_type("Timing_Properties", "Nonexistent"),
             None
         );
-        assert_eq!(
-            standard_property_type("Nonexistent", "Period"),
-            None
-        );
+        assert_eq!(standard_property_type("Nonexistent", "Period"), None);
     }
 
     #[test]
@@ -684,10 +674,7 @@ mod tests {
         let scope = GlobalScope::from_trees(vec![]);
 
         // Resolve Timing_Properties::Period
-        let result = scope.resolve_property(
-            &Name::new("Timing_Properties"),
-            &Name::new("Period"),
-        );
+        let result = scope.resolve_property(&Name::new("Timing_Properties"), &Name::new("Period"));
         assert!(
             matches!(result, ResolvedProperty::PropertyDef { .. }),
             "expected PropertyDef, got {:?}",
@@ -706,10 +693,8 @@ mod tests {
         );
 
         // Resolve Thread_Properties::Priority
-        let result = scope.resolve_property(
-            &Name::new("Thread_Properties"),
-            &Name::new("Priority"),
-        );
+        let result =
+            scope.resolve_property(&Name::new("Thread_Properties"), &Name::new("Priority"));
         assert!(
             matches!(result, ResolvedProperty::PropertyDef { .. }),
             "expected PropertyDef, got {:?}",
@@ -737,10 +722,8 @@ mod tests {
             result
         );
 
-        let result = scope.resolve_property(
-            &Name::new("AADL_Project"),
-            &Name::new("Max_Memory_Size"),
-        );
+        let result =
+            scope.resolve_property(&Name::new("AADL_Project"), &Name::new("Max_Memory_Size"));
         assert!(
             matches!(result, ResolvedProperty::PropertyDef { .. }),
             "expected PropertyDef for AADL_Project::Max_Memory_Size, got {:?}",
@@ -748,20 +731,14 @@ mod tests {
         );
 
         // Case-insensitive resolution
-        let result = scope.resolve_property(
-            &Name::new("timing_properties"),
-            &Name::new("period"),
-        );
+        let result = scope.resolve_property(&Name::new("timing_properties"), &Name::new("period"));
         assert!(
             matches!(result, ResolvedProperty::PropertyDef { .. }),
             "expected case-insensitive match, got {:?}",
             result
         );
 
-        let result = scope.resolve_property(
-            &Name::new("aadl_project"),
-            &Name::new("max_urgency"),
-        );
+        let result = scope.resolve_property(&Name::new("aadl_project"), &Name::new("max_urgency"));
         assert!(
             matches!(result, ResolvedProperty::PropertyDef { .. }),
             "expected case-insensitive match for AADL_Project, got {:?}",
@@ -769,10 +746,8 @@ mod tests {
         );
 
         // Unknown property in a standard set should be Unresolved
-        let result = scope.resolve_property(
-            &Name::new("Timing_Properties"),
-            &Name::new("Nonexistent"),
-        );
+        let result =
+            scope.resolve_property(&Name::new("Timing_Properties"), &Name::new("Nonexistent"));
         assert!(
             matches!(result, ResolvedProperty::Unresolved),
             "expected Unresolved, got {:?}",
@@ -780,10 +755,7 @@ mod tests {
         );
 
         // Unknown property set should be Unresolved
-        let result = scope.resolve_property(
-            &Name::new("Custom_Properties"),
-            &Name::new("Foo"),
-        );
+        let result = scope.resolve_property(&Name::new("Custom_Properties"), &Name::new("Foo"));
         assert!(
             matches!(result, ResolvedProperty::Unresolved),
             "expected Unresolved, got {:?}",

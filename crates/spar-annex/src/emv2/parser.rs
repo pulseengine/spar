@@ -18,7 +18,9 @@ pub(crate) enum Event {
         n_raw_tokens: u8,
     },
     Finish,
-    Error { msg: String },
+    Error {
+        msg: String,
+    },
     Tombstone,
 }
 
@@ -31,7 +33,10 @@ pub(crate) struct Marker {
 
 impl Marker {
     fn new(pos: u32) -> Self {
-        Marker { pos, completed: false }
+        Marker {
+            pos,
+            completed: false,
+        }
     }
 
     pub(crate) fn complete(mut self, p: &mut Parser<'_>, kind: Emv2Kind) -> CompletedMarker {
@@ -44,12 +49,16 @@ impl Marker {
         CompletedMarker { pos: self.pos }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn abandon(mut self, p: &mut Parser<'_>) {
         self.completed = true;
         let idx = self.pos as usize;
         if idx == p.events.len() - 1 {
             match p.events.pop() {
-                Some(Event::Start { kind: Emv2Kind::TOMBSTONE, forward_parent: None }) => {}
+                Some(Event::Start {
+                    kind: Emv2Kind::TOMBSTONE,
+                    forward_parent: None,
+                }) => {}
                 _ => unreachable!(),
             }
         } else {
@@ -68,10 +77,12 @@ impl Drop for Marker {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompletedMarker {
+    #[allow(dead_code)]
     pos: u32,
 }
 
 impl CompletedMarker {
+    #[allow(dead_code)]
     pub(crate) fn precede(self, p: &mut Parser<'_>) -> Marker {
         let new_pos = p.events.len() as u32;
         p.events.push(Event::Start {
@@ -89,6 +100,7 @@ impl CompletedMarker {
 
 // -- Parser --
 
+#[allow(dead_code)]
 pub(crate) struct Parser<'t> {
     all_tokens: &'t [(Emv2Kind, usize)],
     non_trivia: Vec<usize>,
@@ -147,6 +159,7 @@ impl<'t> Parser<'t> {
     }
 
     /// Get the source text of the current token.
+    #[allow(dead_code)]
     pub(crate) fn current_text(&self) -> &str {
         if self.at_end() {
             return "";
@@ -160,7 +173,12 @@ impl<'t> Parser<'t> {
     // -- Token consumption --
 
     pub(crate) fn bump(&mut self, kind: Emv2Kind) {
-        assert!(self.at(kind), "expected {:?}, got {:?}", kind, self.current());
+        assert!(
+            self.at(kind),
+            "expected {:?}, got {:?}",
+            kind,
+            self.current()
+        );
         self.do_bump(kind);
     }
 
@@ -225,18 +243,22 @@ impl<'t> Parser<'t> {
 
     // -- Accessors for tree builder --
 
+    #[allow(dead_code)]
     pub(crate) fn all_tokens(&self) -> &[(Emv2Kind, usize)] {
         self.all_tokens
     }
 
+    #[allow(dead_code)]
     pub(crate) fn non_trivia_indices(&self) -> &[usize] {
         &self.non_trivia
     }
 
+    #[allow(dead_code)]
     pub(crate) fn token_starts(&self) -> &[usize] {
         &self.token_starts
     }
 
+    #[allow(dead_code)]
     pub(crate) fn source(&self) -> &str {
         self.source
     }

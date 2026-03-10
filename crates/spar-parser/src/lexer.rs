@@ -26,6 +26,7 @@ impl<'a> Cursor<'a> {
 
     /// Returns the remaining (unconsumed) slice.
     #[inline]
+    #[allow(dead_code)]
     fn rest(&self) -> &'a str {
         &self.input[self.pos..]
     }
@@ -71,6 +72,7 @@ impl<'a> Cursor<'a> {
 
     /// Returns `true` if the remaining input starts with `prefix`.
     #[inline]
+    #[allow(dead_code)]
     fn starts_with(&self, prefix: &str) -> bool {
         self.rest().as_bytes().starts_with(prefix.as_bytes())
     }
@@ -655,8 +657,8 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                SEMICOLON, COLON, COMMA, DOT, L_PAREN, R_PAREN, L_CURLY, R_CURLY,
-                L_BRACKET, R_BRACKET, PLUS, MINUS, STAR, HASH,
+                SEMICOLON, COLON, COMMA, DOT, L_PAREN, R_PAREN, L_CURLY, R_CURLY, L_BRACKET,
+                R_BRACKET, PLUS, MINUS, STAR, HASH,
             ]
         );
     }
@@ -667,17 +669,23 @@ mod tests {
         let kinds: Vec<_> = tokens.iter().map(|(k, _)| *k).collect();
         assert_eq!(
             kinds,
-            vec![DOT_DOT, ARROW, BIDI_ARROW, FAT_ARROW, PLUS_ARROW, COLON_COLON, DASH_BRACKET, BRACKET_ARROW]
+            vec![
+                DOT_DOT,
+                ARROW,
+                BIDI_ARROW,
+                FAT_ARROW,
+                PLUS_ARROW,
+                COLON_COLON,
+                DASH_BRACKET,
+                BRACKET_ARROW
+            ]
         );
     }
 
     #[test]
     fn annex_delimiters() {
         let tokens = lex_tokens("{** **}");
-        assert_eq!(
-            tokens,
-            vec![(ANNEX_OPEN, "{**"), (ANNEX_CLOSE, "**}")]
-        );
+        assert_eq!(tokens, vec![(ANNEX_OPEN, "{**"), (ANNEX_CLOSE, "**}")]);
     }
 
     // -- Identifiers --
@@ -846,8 +854,15 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                IDENT, COLON, IN_KW, DATA_KW, PORT_KW, IDENT, COLON_COLON,
-                IDENT, SEMICOLON,
+                IDENT,
+                COLON,
+                IN_KW,
+                DATA_KW,
+                PORT_KW,
+                IDENT,
+                COLON_COLON,
+                IDENT,
+                SEMICOLON,
             ]
         );
     }
@@ -902,7 +917,16 @@ mod tests {
         let kinds: Vec<_> = tokens.iter().map(|(k, _)| *k).collect();
         assert_eq!(
             kinds,
-            vec![ANNEX_KW, IDENT, ANNEX_OPEN, IDENT, ANNEX_KW, IDENT, ANNEX_CLOSE, SEMICOLON]
+            vec![
+                ANNEX_KW,
+                IDENT,
+                ANNEX_OPEN,
+                IDENT,
+                ANNEX_KW,
+                IDENT,
+                ANNEX_CLOSE,
+                SEMICOLON
+            ]
         );
     }
 
@@ -929,12 +953,7 @@ mod tests {
         // "package" = 7, " " = 1, "Foo" = 3, ";" = 1
         assert_eq!(
             tokens,
-            vec![
-                (PACKAGE_KW, 7),
-                (WHITESPACE, 1),
-                (IDENT, 3),
-                (SEMICOLON, 1),
-            ]
+            vec![(PACKAGE_KW, 7), (WHITESPACE, 1), (IDENT, 3), (SEMICOLON, 1),]
         );
     }
 
@@ -967,10 +986,10 @@ mod tests {
     fn lexed_str_text_range() {
         let input = "end Foo;";
         let lexed = LexedStr::new(input);
-        assert_eq!(lexed.text_range(0), (0, 3));  // "end"
-        assert_eq!(lexed.text_range(1), (3, 4));  // " "
-        assert_eq!(lexed.text_range(2), (4, 7));  // "Foo"
-        assert_eq!(lexed.text_range(3), (7, 8));  // ";"
+        assert_eq!(lexed.text_range(0), (0, 3)); // "end"
+        assert_eq!(lexed.text_range(1), (3, 4)); // " "
+        assert_eq!(lexed.text_range(2), (4, 7)); // "Foo"
+        assert_eq!(lexed.text_range(3), (7, 8)); // ";"
     }
 
     #[test]

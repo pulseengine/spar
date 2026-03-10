@@ -46,9 +46,7 @@ pub fn check_category_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
                         "{} implementation '{}.{}' cannot contain {} subcomponent '{}'",
                         ci.category, ci.type_name, ci.impl_name, sub.category, sub.name
                     ),
-                    path: vec![
-                        format!("{}.{}", ci.type_name, ci.impl_name),
-                    ],
+                    path: vec![format!("{}.{}", ci.type_name, ci.impl_name)],
                     analysis: "category_check".to_string(),
                 });
             }
@@ -61,14 +59,10 @@ pub fn check_category_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use la_arena::Arena;
     use spar_hir_def::item_tree::*;
     use spar_hir_def::name::Name;
 
-    fn make_tree_with_feature(
-        category: ComponentCategory,
-        feat_kind: FeatureKind,
-    ) -> ItemTree {
+    fn make_tree_with_feature(category: ComponentCategory, feat_kind: FeatureKind) -> ItemTree {
         let mut tree = ItemTree::default();
         let feat_idx = tree.features.alloc(Feature {
             name: Name::new("test_feat"),
@@ -139,7 +133,10 @@ mod tests {
     fn data_disallows_bus_access() {
         let tree = make_tree_with_feature(ComponentCategory::Data, FeatureKind::BusAccess);
         let diags = check_category_rules(&tree);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "data cannot have bus access: {:?}", diags);
         assert!(errors[0].message.contains("bus access"));
     }
@@ -155,17 +152,26 @@ mod tests {
     fn system_disallows_parameter() {
         let tree = make_tree_with_feature(ComponentCategory::System, FeatureKind::Parameter);
         let diags = check_category_rules(&tree);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "system cannot have parameter: {:?}", diags);
     }
 
     #[test]
     fn abstract_allows_everything() {
         for kind in [
-            FeatureKind::DataPort, FeatureKind::EventPort, FeatureKind::EventDataPort,
-            FeatureKind::Parameter, FeatureKind::DataAccess, FeatureKind::BusAccess,
-            FeatureKind::SubprogramAccess, FeatureKind::SubprogramGroupAccess,
-            FeatureKind::FeatureGroup, FeatureKind::AbstractFeature,
+            FeatureKind::DataPort,
+            FeatureKind::EventPort,
+            FeatureKind::EventDataPort,
+            FeatureKind::Parameter,
+            FeatureKind::DataAccess,
+            FeatureKind::BusAccess,
+            FeatureKind::SubprogramAccess,
+            FeatureKind::SubprogramGroupAccess,
+            FeatureKind::FeatureGroup,
+            FeatureKind::AbstractFeature,
         ] {
             let tree = make_tree_with_feature(ComponentCategory::Abstract, kind);
             let diags = check_category_rules(&tree);
@@ -175,22 +181,28 @@ mod tests {
 
     #[test]
     fn system_allows_process_subcomponent() {
-        let tree = make_tree_with_subcomponent(ComponentCategory::System, ComponentCategory::Process);
+        let tree =
+            make_tree_with_subcomponent(ComponentCategory::System, ComponentCategory::Process);
         let diags = check_category_rules(&tree);
         assert!(diags.is_empty(), "system allows process: {:?}", diags);
     }
 
     #[test]
     fn system_disallows_thread_subcomponent() {
-        let tree = make_tree_with_subcomponent(ComponentCategory::System, ComponentCategory::Thread);
+        let tree =
+            make_tree_with_subcomponent(ComponentCategory::System, ComponentCategory::Thread);
         let diags = check_category_rules(&tree);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "system cannot contain thread: {:?}", diags);
     }
 
     #[test]
     fn process_allows_thread_subcomponent() {
-        let tree = make_tree_with_subcomponent(ComponentCategory::Process, ComponentCategory::Thread);
+        let tree =
+            make_tree_with_subcomponent(ComponentCategory::Process, ComponentCategory::Thread);
         let diags = check_category_rules(&tree);
         assert!(diags.is_empty(), "process allows thread: {:?}", diags);
     }
@@ -199,7 +211,10 @@ mod tests {
     fn bus_disallows_thread_subcomponent() {
         let tree = make_tree_with_subcomponent(ComponentCategory::Bus, ComponentCategory::Thread);
         let diags = check_category_rules(&tree);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "bus cannot contain thread: {:?}", diags);
     }
 }

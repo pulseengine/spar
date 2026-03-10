@@ -169,10 +169,7 @@ impl PropertyMap {
     }
 
     /// Collect properties from a list of property association indices.
-    pub fn from_associations(
-        tree: &ItemTree,
-        indices: &[PropertyAssociationIdx],
-    ) -> PropertyMap {
+    pub fn from_associations(tree: &ItemTree, indices: &[PropertyAssociationIdx]) -> PropertyMap {
         let mut map = PropertyMap::new();
         for &pa_idx in indices {
             let pa = &tree.property_associations[pa_idx];

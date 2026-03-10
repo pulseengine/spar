@@ -55,10 +55,10 @@ pub fn render_aadl_from_fs(root: &str, highlight: &[String]) -> Result<String, R
     if let Ok(entries) = std::fs::read_dir(".") {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "aadl") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    sources.push((path.display().to_string(), content));
-                }
+            if path.extension().is_some_and(|e| e == "aadl")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                sources.push((path.display().to_string(), content));
             }
         }
     }
@@ -67,14 +67,21 @@ pub fn render_aadl_from_fs(root: &str, highlight: &[String]) -> Result<String, R
     }
 
     let db = Database::from_aadl(
-        &sources.iter().map(|(f, c)| (f.clone(), c.clone())).collect::<Vec<_>>(),
+        &sources
+            .iter()
+            .map(|(f, c)| (f.clone(), c.clone()))
+            .collect::<Vec<_>>(),
     );
 
     let instance = db
         .instantiate(root)
         .ok_or_else(|| RenderError::NoRoot(format!("cannot instantiate {}", root)))?;
 
-    if instance.diagnostics().iter().any(|d| d.contains("Unresolved")) {
+    if instance
+        .diagnostics()
+        .iter()
+        .any(|d| d.contains("Unresolved"))
+    {
         return Err(RenderError::NoRoot(format!(
             "root {} has unresolved components",
             root
@@ -96,10 +103,10 @@ pub fn analyze_aadl_from_fs(
     if let Ok(entries) = std::fs::read_dir(".") {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "aadl") {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    sources.push((path.display().to_string(), content));
-                }
+            if path.extension().is_some_and(|e| e == "aadl")
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                sources.push((path.display().to_string(), content));
             }
         }
     }
@@ -108,14 +115,21 @@ pub fn analyze_aadl_from_fs(
     }
 
     let db = Database::from_aadl(
-        &sources.iter().map(|(f, c)| (f.clone(), c.clone())).collect::<Vec<_>>(),
+        &sources
+            .iter()
+            .map(|(f, c)| (f.clone(), c.clone()))
+            .collect::<Vec<_>>(),
     );
 
     let instance = db
         .instantiate(root)
         .ok_or_else(|| RenderError::NoRoot(format!("cannot instantiate {}", root)))?;
 
-    if instance.diagnostics().iter().any(|d| d.contains("Unresolved")) {
+    if instance
+        .diagnostics()
+        .iter()
+        .any(|d| d.contains("Unresolved"))
+    {
         return Err(RenderError::NoRoot(format!(
             "root {} has unresolved components",
             root
@@ -132,15 +146,27 @@ pub fn analyze_aadl_from_fs(
     runner.register(Box::new(spar_analysis::modal_rules::ModalRuleAnalysis));
     runner.register(Box::new(spar_analysis::binding_check::BindingCheckAnalysis));
     runner.register(Box::new(spar_analysis::binding_rules::BindingRuleAnalysis));
-    runner.register(Box::new(spar_analysis::property_rules::PropertyRuleAnalysis));
+    runner.register(Box::new(
+        spar_analysis::property_rules::PropertyRuleAnalysis,
+    ));
     runner.register(Box::new(spar_analysis::scheduling::SchedulingAnalysis));
     runner.register(Box::new(spar_analysis::latency::LatencyAnalysis));
-    runner.register(Box::new(spar_analysis::resource_budget::ResourceBudgetAnalysis));
-    runner.register(Box::new(spar_analysis::direction_rules::DirectionRuleAnalysis));
-    runner.register(Box::new(spar_analysis::connection_rules::ConnectionRuleAnalysis));
-    runner.register(Box::new(spar_analysis::classifier_match::ClassifierMatchAnalysis));
+    runner.register(Box::new(
+        spar_analysis::resource_budget::ResourceBudgetAnalysis,
+    ));
+    runner.register(Box::new(
+        spar_analysis::direction_rules::DirectionRuleAnalysis,
+    ));
+    runner.register(Box::new(
+        spar_analysis::connection_rules::ConnectionRuleAnalysis,
+    ));
+    runner.register(Box::new(
+        spar_analysis::classifier_match::ClassifierMatchAnalysis,
+    ));
     runner.register(Box::new(spar_analysis::mode_rules::ModeRuleAnalysis));
-    runner.register(Box::new(spar_analysis::subcomponent_rules::SubcomponentRuleAnalysis));
+    runner.register(Box::new(
+        spar_analysis::subcomponent_rules::SubcomponentRuleAnalysis,
+    ));
     runner.register(Box::new(spar_analysis::emv2_analysis::Emv2Analysis));
 
     Ok(runner.run_all(instance.inner()))
@@ -151,11 +177,7 @@ pub fn analyze_aadl_from_fs(
 /// `source` is the raw AADL text.  `root` is a qualified name such as
 /// `"Pkg::Type.Impl"`.  `highlight` is a list of node IDs (e.g.
 /// `"AADL-Pkg-sub1"`) that should be visually emphasized.
-pub fn render_aadl(
-    source: &str,
-    root: &str,
-    highlight: &[String],
-) -> Result<String, RenderError> {
+pub fn render_aadl(source: &str, root: &str, highlight: &[String]) -> Result<String, RenderError> {
     let db = Database::from_aadl(&[("input.aadl".into(), source.into())]);
 
     let instance = db
@@ -362,8 +384,15 @@ pub fn render_graph_to_svg(
         .unwrap();
 
         render_node_shape(
-            &mut svg, pos.x, pos.y, node_w, node_h,
-            node.category, fill, stroke_c, stroke_w,
+            &mut svg,
+            pos.x,
+            pos.y,
+            node_w,
+            node_h,
+            node.category,
+            fill,
+            stroke_c,
+            stroke_w,
         );
 
         // Adjust text center for 3D shapes (processor, device)
@@ -485,6 +514,7 @@ fn category_is_dashed(cat: ComponentCategory) -> bool {
 /// - Data: rectangle with separator line
 /// - Subprogram: ellipse
 /// - Abstract: rectangle (dashed)
+#[allow(clippy::too_many_arguments)]
 fn render_node_shape(
     svg: &mut String,
     x: f64,
@@ -501,9 +531,7 @@ fn render_node_shape(
     } else {
         ""
     };
-    let base = format!(
-        "fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{stroke_w}\"{dash}"
-    );
+    let base = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{stroke_w}\"{dash}");
 
     match cat {
         // System: rounded rectangle (large radius)
@@ -522,10 +550,14 @@ fn render_node_shape(
             writeln!(
                 svg,
                 "        <polygon points=\"{},{} {},{} {},{} {},{}\" {base} />",
-                x + s, y,
-                x + w, y,
-                x + w - s, y + h,
-                x, y + h,
+                x + s,
+                y,
+                x + w,
+                y,
+                x + w - s,
+                y + h,
+                x,
+                y + h,
             )
             .unwrap();
         }
@@ -547,12 +579,18 @@ fn render_node_shape(
             writeln!(
                 svg,
                 "        <path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" {base} />",
-                x, y + d,
-                x + d, y,
-                x + w, y,
-                x + w, y + h - d,
-                x + w - d, y + h,
-                x, y + h,
+                x,
+                y + d,
+                x + d,
+                y,
+                x + w,
+                y,
+                x + w,
+                y + h - d,
+                x + w - d,
+                y + h,
+                x,
+                y + h,
             )
             .unwrap();
             // Internal 3D edges (lighter)
@@ -560,11 +598,16 @@ fn render_node_shape(
                 svg,
                 "        <path d=\"M {},{} L {},{} L {},{} M {},{} L {},{}\" \
                  fill=\"none\" stroke=\"{stroke}\" stroke-width=\"0.8\" opacity=\"0.5\"{dash} />",
-                x, y + d,
-                x + w - d, y + d,
-                x + w, y,
-                x + w - d, y + d,
-                x + w - d, y + h,
+                x,
+                y + d,
+                x + w - d,
+                y + d,
+                x + w,
+                y,
+                x + w - d,
+                y + d,
+                x + w - d,
+                y + h,
             )
             .unwrap();
         }
@@ -576,10 +619,16 @@ fn render_node_shape(
             writeln!(
                 svg,
                 "        <path d=\"M {},{} L {},{} A {} {} 0 0 0 {},{} L {},{} Z\" {base} />",
-                x, y + ry,
-                x, y + h - ry,
-                w / 2.0, ry, x + w, y + h - ry,
-                x + w, y + ry,
+                x,
+                y + ry,
+                x,
+                y + h - ry,
+                w / 2.0,
+                ry,
+                x + w,
+                y + h - ry,
+                x + w,
+                y + ry,
             )
             .unwrap();
             // Top ellipse cap
@@ -621,7 +670,9 @@ fn render_node_shape(
             writeln!(
                 svg,
                 "        <rect x=\"{x}\" y=\"{}\" width=\"{}\" height=\"{}\" {base} />",
-                y + d, w - d, h - d,
+                y + d,
+                w - d,
+                h - d,
             )
             .unwrap();
             // Top face (slightly transparent fill)
@@ -733,80 +784,259 @@ mod tests {
     fn aadl_standard_shapes() {
         // System: rounded rectangle
         let mut svg = String::new();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::System, "#b3d9ff", "#333", "1.5");
-        assert!(svg.contains("<rect") && svg.contains("rx=\"12\""), "system should be rounded rect");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::System,
+            "#b3d9ff",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<rect") && svg.contains("rx=\"12\""),
+            "system should be rounded rect"
+        );
 
         // Process: parallelogram (solid)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Process, "#d4edda", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Process,
+            "#d4edda",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<polygon"), "process should be polygon");
         assert!(!svg.contains("stroke-dasharray"), "process should be solid");
 
         // Thread: parallelogram (solid)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Thread, "#fff3cd", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Thread,
+            "#fff3cd",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<polygon"), "thread should be polygon");
         assert!(!svg.contains("stroke-dasharray"), "thread should be solid");
 
         // ThreadGroup: rounded rect, dashed
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::ThreadGroup, "#fff3cd", "#333", "1.5");
-        assert!(svg.contains("<rect") && svg.contains("rx=\"12\""), "thread group should be rounded rect");
-        assert!(svg.contains("stroke-dasharray"), "thread group should be dashed");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::ThreadGroup,
+            "#fff3cd",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<rect") && svg.contains("rx=\"12\""),
+            "thread group should be rounded rect"
+        );
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "thread group should be dashed"
+        );
 
         // Processor: 3D isometric box
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Processor, "#f8d7da", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Processor,
+            "#f8d7da",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<path"), "processor should use path");
-        assert!(svg.contains("opacity=\"0.5\""), "processor should have 3D internal lines");
+        assert!(
+            svg.contains("opacity=\"0.5\""),
+            "processor should have 3D internal lines"
+        );
 
         // VirtualProcessor: 3D box, dashed
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::VirtualProcessor, "#f8d7da", "#333", "1.5");
-        assert!(svg.contains("stroke-dasharray"), "virtual processor should be dashed");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::VirtualProcessor,
+            "#f8d7da",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "virtual processor should be dashed"
+        );
 
         // Memory: cylinder (path + ellipse)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Memory, "#e8e8e8", "#333", "1.5");
-        assert!(svg.contains("<path") && svg.contains("<ellipse"), "memory should be cylinder");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Memory,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<path") && svg.contains("<ellipse"),
+            "memory should be cylinder"
+        );
 
         // Bus: double-headed arrow
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Bus, "#e8e8e8", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Bus,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<polygon"), "bus should be polygon");
         assert!(!svg.contains("stroke-dasharray"), "bus should be solid");
 
         // VirtualBus: dashed
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::VirtualBus, "#e8e8e8", "#333", "1.5");
-        assert!(svg.contains("stroke-dasharray"), "virtual bus should be dashed");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::VirtualBus,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "virtual bus should be dashed"
+        );
 
         // Device: 3D raised rectangle (rect + polygons)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Device, "#e2d5f1", "#333", "1.5");
-        assert!(svg.contains("<rect") && svg.contains("<polygon"), "device should have rect + polygons");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Device,
+            "#e2d5f1",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<rect") && svg.contains("<polygon"),
+            "device should have rect + polygons"
+        );
 
         // Data: rectangle with separator line
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Data, "#fce4ec", "#333", "1.5");
-        assert!(svg.contains("<rect") && svg.contains("<line"), "data should be rect with separator");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Data,
+            "#fce4ec",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<rect") && svg.contains("<line"),
+            "data should be rect with separator"
+        );
 
         // Subprogram: ellipse (solid)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Subprogram, "#e8e8e8", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Subprogram,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<ellipse"), "subprogram should be ellipse");
-        assert!(!svg.contains("stroke-dasharray"), "subprogram should be solid");
+        assert!(
+            !svg.contains("stroke-dasharray"),
+            "subprogram should be solid"
+        );
 
         // SubprogramGroup: ellipse (dashed)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::SubprogramGroup, "#e8e8e8", "#333", "1.5");
-        assert!(svg.contains("<ellipse"), "subprogram group should be ellipse");
-        assert!(svg.contains("stroke-dasharray"), "subprogram group should be dashed");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::SubprogramGroup,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
+        assert!(
+            svg.contains("<ellipse"),
+            "subprogram group should be ellipse"
+        );
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "subprogram group should be dashed"
+        );
 
         // Abstract: rectangle (dashed)
         svg.clear();
-        render_node_shape(&mut svg, 0.0, 0.0, 180.0, 50.0, ComponentCategory::Abstract, "#e8e8e8", "#333", "1.5");
+        render_node_shape(
+            &mut svg,
+            0.0,
+            0.0,
+            180.0,
+            50.0,
+            ComponentCategory::Abstract,
+            "#e8e8e8",
+            "#333",
+            "1.5",
+        );
         assert!(svg.contains("<rect"), "abstract should be rect");
-        assert!(svg.contains("stroke-dasharray"), "abstract should be dashed");
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "abstract should be dashed"
+        );
     }
 }

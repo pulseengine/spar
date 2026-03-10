@@ -233,8 +233,7 @@ impl Emv2Kind {
     /// Returns true if this is a keyword token.
     #[inline]
     pub fn is_keyword(self) -> bool {
-        (self as u16) >= (Self::ACCESS_KW as u16)
-            && (self as u16) <= (Self::WITH_KW as u16)
+        (self as u16) >= (Self::ACCESS_KW as u16) && (self as u16) <= (Self::WITH_KW as u16)
     }
 
     /// Returns true if this is a propagation kind keyword.

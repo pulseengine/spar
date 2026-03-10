@@ -63,8 +63,7 @@ fn e2e_renders_valid_svg() {
 
 #[test]
 fn e2e_nodes_have_category_classes() {
-    let svg =
-        render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
     // Root is a system
     assert!(svg.contains("type-system"));
@@ -74,8 +73,7 @@ fn e2e_nodes_have_category_classes() {
 
 #[test]
 fn e2e_highlight_changes_stroke() {
-    let plain =
-        render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+    let plain = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
     let highlighted = render_aadl(
         FLIGHT_CONTROL,
         "FlightControl::Controller.Basic",
@@ -92,13 +90,10 @@ fn e2e_highlight_changes_stroke() {
 
 #[test]
 fn e2e_svg_has_edges() {
-    let svg =
-        render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
     // Should have edge elements (connections + hierarchy)
-    assert!(
-        svg.contains("class=\"edge\"") || svg.contains("class=\"edges\"")
-    );
+    assert!(svg.contains("class=\"edge\"") || svg.contains("class=\"edges\""));
     assert!(svg.contains("<path"));
 }
 
@@ -118,8 +113,7 @@ fn e2e_empty_source_returns_error() {
 fn e2e_svg_write_to_file() {
     // This test writes SVG to a file for manual inspection.
     // Run with: cargo test -p spar-wasm --test integration e2e_svg_write_to_file -- --nocapture
-    let svg =
-        render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
     let out_dir = std::env::temp_dir().join("spar-wasm-test");
     std::fs::create_dir_all(&out_dir).ok();

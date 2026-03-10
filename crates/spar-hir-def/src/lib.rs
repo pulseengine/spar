@@ -143,16 +143,13 @@ public
   end Controller;
 end Consumer;
 "#;
-        let file =
-            spar_base_db::SourceFile::new(&db, "consumer.aadl".to_string(), src.to_string());
+        let file = spar_base_db::SourceFile::new(&db, "consumer.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
 
         let pkg = &tree.packages[tree.packages.iter().next().unwrap().0];
         assert_eq!(pkg.name.as_str(), "Consumer");
         assert!(
-            pkg.with_clauses
-                .iter()
-                .any(|n| n.as_str() == "DataTypes"),
+            pkg.with_clauses.iter().any(|n| n.as_str() == "DataTypes"),
             "with_clauses: {:?}",
             pkg.with_clauses
         );
@@ -212,8 +209,7 @@ public
   end S.impl;
 end P;
 "#;
-        let file =
-            spar_base_db::SourceFile::new(&db, "conn.aadl".to_string(), src.to_string());
+        let file = spar_base_db::SourceFile::new(&db, "conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
 
         assert_eq!(tree.connections.len(), 2);
@@ -243,8 +239,7 @@ public
   end S;
 end P;
 "#;
-        let file =
-            spar_base_db::SourceFile::new(&db, "flow.aadl".to_string(), src.to_string());
+        let file = spar_base_db::SourceFile::new(&db, "flow.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
 
         assert_eq!(tree.flow_specs.len(), 2);
@@ -271,11 +266,8 @@ public
   end Controller;
 end Consumer;
 "#;
-        let f1 = spar_base_db::SourceFile::new(
-            &db,
-            "datatypes.aadl".to_string(),
-            types_src.to_string(),
-        );
+        let f1 =
+            spar_base_db::SourceFile::new(&db, "datatypes.aadl".to_string(), types_src.to_string());
         let f2 = spar_base_db::SourceFile::new(
             &db,
             "consumer.aadl".to_string(),
@@ -289,10 +281,7 @@ end Consumer;
         let scope = GlobalScope::from_trees(vec![tree1, tree2]);
 
         // Resolve DataTypes::Temperature from Consumer
-        let reference = ClassifierRef::qualified(
-            Name::new("DataTypes"),
-            Name::new("Temperature"),
-        );
+        let reference = ClassifierRef::qualified(Name::new("DataTypes"), Name::new("Temperature"));
         let resolved = scope.resolve_classifier(&Name::new("Consumer"), &reference);
         assert!(
             matches!(resolved, ResolvedClassifier::ComponentType { .. }),
@@ -344,11 +333,7 @@ public
   end Controller.basic;
 end FlightControl;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "flight.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "flight.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -401,11 +386,7 @@ public
   end Mid.impl;
 end Sys;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "nested.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "nested.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -457,16 +438,10 @@ public
   end ECU.impl;
 end Vehicle;
 "#;
-        let f1 = spar_base_db::SourceFile::new(
-            &db,
-            "sensor.aadl".to_string(),
-            types_src.to_string(),
-        );
-        let f2 = spar_base_db::SourceFile::new(
-            &db,
-            "vehicle.aadl".to_string(),
-            main_src.to_string(),
-        );
+        let f1 =
+            spar_base_db::SourceFile::new(&db, "sensor.aadl".to_string(), types_src.to_string());
+        let f2 =
+            spar_base_db::SourceFile::new(&db, "vehicle.aadl".to_string(), main_src.to_string());
         let t1 = file_item_tree(&db, f1);
         let t2 = file_item_tree(&db, f2);
         let scope = GlobalScope::from_trees(vec![t1, t2]);
@@ -527,7 +502,10 @@ end P;
 
         // Check first property: Deployment::Priority => 5
         let pa0 = &tree.property_associations[ct.property_associations[0]];
-        assert_eq!(pa0.name.property_set.as_ref().unwrap().as_str(), "Deployment");
+        assert_eq!(
+            pa0.name.property_set.as_ref().unwrap().as_str(),
+            "Deployment"
+        );
         assert_eq!(pa0.name.property_name.as_str(), "Priority");
         assert_eq!(pa0.value, "5");
         assert!(!pa0.is_append);
@@ -602,7 +580,12 @@ end P;
 
         // The root has 1 child
         let root = inst.component(inst.root);
-        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
 
         let child_idx = root.children[0];
         let props = inst.properties_for(child_idx);
@@ -667,16 +650,10 @@ public
   end ECU.impl;
 end Vehicle;
 "#;
-        let f1 = spar_base_db::SourceFile::new(
-            &db,
-            "timing.aadl".to_string(),
-            props_src.to_string(),
-        );
-        let f2 = spar_base_db::SourceFile::new(
-            &db,
-            "vehicle.aadl".to_string(),
-            main_src.to_string(),
-        );
+        let f1 =
+            spar_base_db::SourceFile::new(&db, "timing.aadl".to_string(), props_src.to_string());
+        let f2 =
+            spar_base_db::SourceFile::new(&db, "vehicle.aadl".to_string(), main_src.to_string());
         let t1 = file_item_tree(&db, f1);
         let t2 = file_item_tree(&db, f2);
         let scope = GlobalScope::from_trees(vec![t1, t2]);
@@ -706,8 +683,8 @@ end Vehicle;
 
     #[test]
     fn property_map_basic_operations() {
-        use properties::{PropertyMap, PropertyValue};
         use name::PropertyRef;
+        use properties::{PropertyMap, PropertyValue};
 
         let mut map = PropertyMap::new();
         assert!(map.is_empty());
@@ -793,7 +770,12 @@ end P;
         );
 
         let root = inst.component(inst.root);
-        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
 
         let s1_idx = root.children[0];
         let props = inst.properties_for(s1_idx);
@@ -802,7 +784,12 @@ end P;
         assert_eq!(props.get("", "Period"), Some("20 ms"), "props: {:?}", props);
 
         // Deadline: type says 5ms, subcomponent says 15ms -> subcomponent wins
-        assert_eq!(props.get("", "Deadline"), Some("15 ms"), "props: {:?}", props);
+        assert_eq!(
+            props.get("", "Deadline"),
+            Some("15 ms"),
+            "props: {:?}",
+            props
+        );
 
         // Priority: only on impl -> inherited
         assert_eq!(props.get("", "Priority"), Some("3"), "props: {:?}", props);
@@ -828,7 +815,8 @@ public
   end S.impl;
 end P;
 "#;
-        let file = spar_base_db::SourceFile::new(&db, "flow_inst.aadl".to_string(), src.to_string());
+        let file =
+            spar_base_db::SourceFile::new(&db, "flow_inst.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -977,7 +965,11 @@ end P;
         assert!(summary.contains("Features: 2"), "summary: {}", summary);
         assert!(summary.contains("Connections: 1"), "summary: {}", summary);
         assert!(summary.contains("Flows: 2"), "summary: {}", summary);
-        assert!(summary.contains("End-to-end flows: 1"), "summary: {}", summary);
+        assert!(
+            summary.contains("End-to-end flows: 1"),
+            "summary: {}",
+            summary
+        );
         assert!(summary.contains("Diagnostics: 0"), "summary: {}", summary);
     }
 
@@ -1029,11 +1021,8 @@ public
   end FlightControl.full;
 end FlightSystem;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "flight_system.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "flight_system.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1112,7 +1101,11 @@ end FlightSystem;
         // Summary check
         let summary = inst.summary();
         assert!(summary.contains("Components: 4"), "summary:\n{}", summary);
-        assert!(summary.contains("End-to-end flows: 1"), "summary:\n{}", summary);
+        assert!(
+            summary.contains("End-to-end flows: 1"),
+            "summary:\n{}",
+            summary
+        );
     }
 
     // ── Mode instance tests ───────────────────────────────────────────
@@ -1133,11 +1126,7 @@ public
   end Controller.impl;
 end ModePkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "modes.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "modes.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1182,7 +1171,11 @@ end ModePkg;
         // Summary includes modes
         let summary = inst.summary();
         assert!(summary.contains("Modes: 3"), "summary:\n{}", summary);
-        assert!(summary.contains("Mode transitions: 0"), "summary:\n{}", summary);
+        assert!(
+            summary.contains("Mode transitions: 0"),
+            "summary:\n{}",
+            summary
+        );
     }
 
     #[test]
@@ -1205,11 +1198,8 @@ public
   end Controller.impl;
 end TransPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "transitions.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "transitions.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1222,7 +1212,11 @@ end TransPkg;
 
         let root = inst.component(inst.root);
         assert_eq!(root.modes.len(), 2, "expected 2 modes");
-        assert_eq!(root.mode_transitions.len(), 2, "expected 2 mode transitions");
+        assert_eq!(
+            root.mode_transitions.len(),
+            2,
+            "expected 2 mode transitions"
+        );
 
         let mt0 = &inst.mode_transition_instances[root.mode_transitions[0]];
         assert_eq!(mt0.source.as_str(), "idle");
@@ -1242,7 +1236,11 @@ end TransPkg;
 
         // Summary
         let summary = inst.summary();
-        assert!(summary.contains("Mode transitions: 2"), "summary:\n{}", summary);
+        assert!(
+            summary.contains("Mode transitions: 2"),
+            "summary:\n{}",
+            summary
+        );
     }
 
     #[test]
@@ -1260,11 +1258,8 @@ public
   end Controller.impl;
 end ImplModePkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "impl_modes.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "impl_modes.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1316,11 +1311,8 @@ public
   end Top.impl;
 end SubModePkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "sub_modes.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "sub_modes.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1390,8 +1382,7 @@ public
   end Top.impl;
 end P;
 "#;
-        let file =
-            spar_base_db::SourceFile::new(&db, "sem_conn.aadl".to_string(), src.to_string());
+        let file = spar_base_db::SourceFile::new(&db, "sem_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1469,11 +1460,8 @@ public
   end FlightControl.full;
 end FlightSystem;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "multi_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "multi_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1537,11 +1525,8 @@ public
   end S.impl;
 end P;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "skip_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "skip_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1591,11 +1576,8 @@ public
   end Top.impl;
 end P;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "summary_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "summary_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1643,11 +1625,7 @@ public
   end Inner.i;
 end UpPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "up_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "up_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1707,11 +1685,8 @@ public
   end Controller.i;
 end DownPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "down_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "down_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1812,11 +1787,8 @@ public
   end Top.impl;
 end MultiPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "multi_conn.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "multi_conn.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1897,11 +1869,7 @@ public
   end Top.impl;
 end UpSkipPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "up_skip.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "up_skip.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -1956,11 +1924,7 @@ public
   end Top.impl;
 end NoModePkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "no_mode.aadl".to_string(),
-            src.to_string(),
-        );
+        let file = spar_base_db::SourceFile::new(&db, "no_mode.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -2000,11 +1964,8 @@ public
   end Controller.impl;
 end SingleModalPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "single_modal.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "single_modal.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -2068,11 +2029,8 @@ public
   end Top.impl;
 end TwoModalPkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "two_modal.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "two_modal.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -2157,11 +2115,8 @@ public
   end Top.impl;
 end SomNamePkg;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "som_names.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "som_names.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -2234,10 +2189,7 @@ end P;
         let val = lower_first_typed_value(src);
         assert_eq!(
             val,
-            Some(item_tree::PropertyExpr::Integer(
-                10,
-                Some(Name::new("ms"))
-            )),
+            Some(item_tree::PropertyExpr::Integer(10, Some(Name::new("ms")))),
             "expected Integer(10, Some(ms)), got {:?}",
             val
         );
@@ -2553,15 +2505,9 @@ end P;
         let pa = &tree.property_associations[*pa_idx];
 
         // Raw value should still be set
-        assert!(
-            !pa.value.is_empty(),
-            "raw value string should not be empty"
-        );
+        assert!(!pa.value.is_empty(), "raw value string should not be empty");
         // Typed value should also be set
-        assert!(
-            pa.typed_value.is_some(),
-            "typed_value should be Some"
-        );
+        assert!(pa.typed_value.is_some(), "typed_value should be Some");
     }
 
     #[test]
@@ -2710,7 +2656,10 @@ end MyProps;
         let def = &ps.property_defs[0];
         match &def.type_def {
             Some(item_tree::PropertyTypeDef::ListOf(inner)) => {
-                assert!(matches!(inner.as_ref(), item_tree::PropertyTypeDef::AadlString));
+                assert!(matches!(
+                    inner.as_ref(),
+                    item_tree::PropertyTypeDef::AadlString
+                ));
             }
             other => panic!("expected ListOf(AadlString), got {:?}", other),
         }
@@ -2926,7 +2875,11 @@ end MyProps;
         let def = &ps.property_defs[0];
         // The parser produces COMPONENT_CATEGORY nodes for component keywords
         // or IDENT tokens that get mapped via parse_applies_to_name
-        assert!(def.applies_to.len() >= 2, "expected at least 2 applies_to entries, got {:?}", def.applies_to);
+        assert!(
+            def.applies_to.len() >= 2,
+            "expected at least 2 applies_to entries, got {:?}",
+            def.applies_to
+        );
     }
 
     // ── Property constant lowering tests ───────────────────────
@@ -3063,7 +3016,11 @@ end P;
         let pa = &tree.property_associations[*pa_idx];
         assert!(pa.applies_to.is_some(), "expected applies_to to be set");
         let at = pa.applies_to.as_ref().unwrap();
-        assert!(at.contains("sub1"), "expected applies_to to contain 'sub1', got '{}'", at);
+        assert!(
+            at.contains("sub1"),
+            "expected applies_to to contain 'sub1', got '{}'",
+            at
+        );
     }
 
     #[test]
@@ -3084,8 +3041,16 @@ end P;
         let pa = &tree.property_associations[*pa_idx];
         assert!(pa.applies_to.is_some(), "expected applies_to to be set");
         let at = pa.applies_to.as_ref().unwrap();
-        assert!(at.contains("sub1"), "expected path to contain 'sub1', got '{}'", at);
-        assert!(at.contains("feat1"), "expected path to contain 'feat1', got '{}'", at);
+        assert!(
+            at.contains("sub1"),
+            "expected path to contain 'sub1', got '{}'",
+            at
+        );
+        assert!(
+            at.contains("feat1"),
+            "expected path to contain 'feat1', got '{}'",
+            at
+        );
     }
 
     // ── Record type definition test ────────────────────────────
@@ -3103,9 +3068,15 @@ end MyProps;
             Some(item_tree::PropertyTypeDef::RecordType(fields)) => {
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0].0.as_str(), "x");
-                assert!(matches!(fields[0].1, item_tree::PropertyTypeDef::AadlInteger { .. }));
+                assert!(matches!(
+                    fields[0].1,
+                    item_tree::PropertyTypeDef::AadlInteger { .. }
+                ));
                 assert_eq!(fields[1].0.as_str(), "y");
-                assert!(matches!(fields[1].1, item_tree::PropertyTypeDef::AadlString));
+                assert!(matches!(
+                    fields[1].1,
+                    item_tree::PropertyTypeDef::AadlString
+                ));
             }
             other => panic!("expected RecordType, got {:?}", other),
         }

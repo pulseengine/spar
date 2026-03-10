@@ -80,9 +80,7 @@ impl CompletedMarker {
         // Store as delta from child → parent (forward direction).
         let delta = new_pos - self.pos;
         match &mut p.events[self.pos as usize] {
-            Event::Start {
-                forward_parent, ..
-            } => {
+            Event::Start { forward_parent, .. } => {
                 *forward_parent = Some(delta);
             }
             _ => unreachable!("expected Start event at completed marker position"),

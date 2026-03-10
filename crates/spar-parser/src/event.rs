@@ -18,9 +18,7 @@ pub enum Event {
     /// Finish the current node.
     Finish,
     /// Attach an error message to the current position.
-    Error {
-        msg: String,
-    },
+    Error { msg: String },
     /// Tombstone placeholder, will be removed.
     Tombstone,
 }

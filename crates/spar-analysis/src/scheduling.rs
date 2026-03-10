@@ -18,7 +18,7 @@ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 use spar_hir_def::property_value::parse_time_value;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Rate Monotonic scheduling analysis.
 pub struct SchedulingAnalysis;
@@ -89,12 +89,15 @@ impl Analysis for SchedulingAnalysis {
             let proc_key = binding.unwrap_or_else(|| "__unbound__".to_string());
 
             if let (Some(period), Some(exec)) = (period_ps, exec_ps) {
-                processor_threads.entry(proc_key).or_default().push(ThreadInfo {
-                    name: comp.name.as_str().to_string(),
-                    period_ps: period,
-                    exec_ps: exec,
-                    comp_idx,
-                });
+                processor_threads
+                    .entry(proc_key)
+                    .or_default()
+                    .push(ThreadInfo {
+                        name: comp.name.as_str().to_string(),
+                        period_ps: period,
+                        exec_ps: exec,
+                        comp_idx,
+                    });
             }
         }
 
@@ -189,10 +192,7 @@ fn rma_utilization_bound(n: usize) -> f64 {
 }
 
 /// Extract a timing property (Period, Deadline, etc.) in picoseconds.
-fn get_timing_property(
-    props: &spar_hir_def::properties::PropertyMap,
-    name: &str,
-) -> Option<u64> {
+fn get_timing_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
     // Try with Timing_Properties property set first, then unqualified
     let raw = props
         .get("Timing_Properties", name)
@@ -204,9 +204,7 @@ fn get_timing_property(
 ///
 /// This property is typically a range (e.g., "1 ms .. 5 ms"). We take the
 /// worst case (max). If it's a single value, we use that.
-fn get_execution_time(
-    props: &spar_hir_def::properties::PropertyMap,
-) -> Option<u64> {
+fn get_execution_time(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
     let raw = props
         .get("Timing_Properties", "Compute_Execution_Time")
         .or_else(|| props.get("", "Compute_Execution_Time"))?;
@@ -221,9 +219,7 @@ fn get_execution_time(
 }
 
 /// Extract processor binding target name from property.
-fn get_processor_binding(
-    props: &spar_hir_def::properties::PropertyMap,
-) -> Option<String> {
+fn get_processor_binding(props: &spar_hir_def::properties::PropertyMap) -> Option<String> {
     let raw = props
         .get("Deployment_Properties", "Actual_Processor_Binding")
         .or_else(|| props.get("", "Actual_Processor_Binding"))?;
@@ -266,7 +262,6 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
-    use spar_hir_def::item_tree::*;
     use spar_hir_def::name::{Name, PropertyRef};
     use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
@@ -310,21 +305,23 @@ mod tests {
             })
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
-        fn set_property(
-            &mut self,
-            comp: ComponentInstanceIdx,
-            set: &str,
-            name: &str,
-            value: &str,
-        ) {
-            let map = self.property_maps.entry(comp).or_insert_with(PropertyMap::new);
+        fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
+            let map = self.property_maps.entry(comp).or_default();
             map.add(PropertyValue {
                 name: PropertyRef {
-                    property_set: if set.is_empty() { None } else { Some(Name::new(set)) },
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
@@ -375,23 +372,51 @@ mod tests {
         // t1: period=10ms, exec=1ms -> U=0.1
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         // t2: period=20ms, exec=2ms -> U=0.1
         b.set_property(t2, "Timing_Properties", "Period", "20 ms");
         b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "2 ms");
-        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
         // Total U = 0.2, well under RMA bound of 0.828 for 2 tasks
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "schedulable system should have no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "schedulable system should have no errors: {:?}",
+            errors
+        );
 
-        let infos: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Info && d.message.contains("utilization")).collect();
-        assert!(!infos.is_empty(), "should report utilization info: {:?}", diags);
-        assert!(infos[0].message.contains("20.0%"), "utilization should be 20%: {}", infos[0].message);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert!(
+            !infos.is_empty(),
+            "should report utilization info: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("20.0%"),
+            "utilization should be 20%: {}",
+            infos[0].message
+        );
     }
 
     #[test]
@@ -409,20 +434,37 @@ mod tests {
         // t1: period=10ms, exec=8ms -> U=0.8
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "8 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         // t2: period=10ms, exec=5ms -> U=0.5
         // Total: 1.3 > 1.0
         b.set_property(t2, "Timing_Properties", "Period", "10 ms");
         b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "5 ms");
-        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 1, "should have 1 overload error: {:?}", diags);
-        assert!(errors[0].message.contains("overloaded"), "error should mention overload: {}", errors[0].message);
+        assert!(
+            errors[0].message.contains("overloaded"),
+            "error should mention overload: {}",
+            errors[0].message
+        );
     }
 
     #[test]
@@ -440,10 +482,16 @@ mod tests {
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
-        let period_warns: Vec<_> = diags.iter()
+        let period_warns: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("Period"))
             .collect();
-        assert_eq!(period_warns.len(), 1, "should warn about missing Period: {:?}", diags);
+        assert_eq!(
+            period_warns.len(),
+            1,
+            "should warn about missing Period: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -462,10 +510,18 @@ mod tests {
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
-        let binding_warns: Vec<_> = diags.iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("Actual_Processor_Binding"))
+        let binding_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning && d.message.contains("Actual_Processor_Binding")
+            })
             .collect();
-        assert_eq!(binding_warns.len(), 1, "should warn about missing binding: {:?}", diags);
+        assert_eq!(
+            binding_warns.len(),
+            1,
+            "should warn about missing binding: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -480,18 +536,33 @@ mod tests {
         b.set_children(proc, vec![t1]);
 
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms .. 5 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms .. 5 ms",
+        );
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
         // U = 5/10 = 0.5 = 50%
-        let infos: Vec<_> = diags.iter()
+        let infos: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
             .collect();
         assert!(!infos.is_empty(), "should report utilization: {:?}", diags);
-        assert!(infos[0].message.contains("50.0%"), "should be 50%: {}", infos[0].message);
+        assert!(
+            infos[0].message.contains("50.0%"),
+            "should be 50%: {}",
+            infos[0].message
+        );
     }
 
     #[test]
@@ -510,19 +581,37 @@ mod tests {
         for t in [t1, t2, t3] {
             b.set_property(t, "Timing_Properties", "Period", "10 ms");
             b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "3 ms");
-            b.set_property(t, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
         }
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
         // U = 0.9, RMA bound for 3 tasks ≈ 0.780
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "should not be error (U < 1.0): {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "should not be error (U < 1.0): {:?}",
+            errors
+        );
 
-        let warnings: Vec<_> = diags.iter()
+        let warnings: Vec<_> = diags
+            .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("RMA bound"))
             .collect();
-        assert_eq!(warnings.len(), 1, "should warn about exceeding RMA bound: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about exceeding RMA bound: {:?}",
+            diags
+        );
     }
 }

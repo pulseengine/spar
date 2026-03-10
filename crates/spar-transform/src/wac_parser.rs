@@ -162,12 +162,11 @@ impl<'a> Parser<'a> {
     fn eat_keyword(&mut self, kw: &str) -> bool {
         self.skip_ws_and_comments();
         let rem = self.remaining();
-        if rem.starts_with(kw) {
-            let after = &rem[kw.len()..];
-            if after.is_empty() || !is_ident_continue(after.as_bytes()[0]) {
-                self.pos += kw.len();
-                return true;
-            }
+        if let Some(after) = rem.strip_prefix(kw)
+            && (after.is_empty() || !is_ident_continue(after.as_bytes()[0]))
+        {
+            self.pos += kw.len();
+            return true;
         }
         false
     }

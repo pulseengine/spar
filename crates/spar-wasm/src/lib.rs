@@ -11,7 +11,7 @@ mod graph;
 mod render;
 
 pub use graph::{ArchEdge, ArchNode, build_graph};
-pub use render::{analyze_aadl_from_fs, render_aadl, render_aadl_from_fs, RenderError};
+pub use render::{RenderError, analyze_aadl_from_fs, render_aadl, render_aadl_from_fs};
 
 // ---------------------------------------------------------------------------
 // WIT guest bindings (WASM component only)
@@ -26,9 +26,7 @@ mod bindings {
 }
 
 #[cfg(target_arch = "wasm32")]
-use bindings::exports::pulseengine::rivet::adapter::{
-    self as wit_adapter, Guest as AdapterGuest,
-};
+use bindings::exports::pulseengine::rivet::adapter::{self as wit_adapter, Guest as AdapterGuest};
 #[cfg(target_arch = "wasm32")]
 use bindings::exports::pulseengine::rivet::renderer::{
     AnalysisDiagnostic as WitDiagnostic, Guest as RendererGuest, RenderError as WitRenderError,

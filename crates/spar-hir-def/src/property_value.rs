@@ -39,13 +39,13 @@ fn check_typed(expr: &PropertyExpr, type_def: &PropertyTypeDef) -> TypeCheckResu
     match (expr, type_def) {
         // ── Integer ─────────────────────────────────────────────
         (PropertyExpr::Integer(val, _units), PropertyTypeDef::AadlInteger { range, .. }) => {
-            if let Some((lo, hi)) = range {
-                if val < lo || val > hi {
-                    return TypeCheckResult::Error(format!(
-                        "integer value {} is outside range {} .. {}",
-                        val, lo, hi
-                    ));
-                }
+            if let Some((lo, hi)) = range
+                && (val < lo || val > hi)
+            {
+                return TypeCheckResult::Error(format!(
+                    "integer value {} is outside range {} .. {}",
+                    val, lo, hi
+                ));
             }
             TypeCheckResult::Ok
         }
@@ -94,10 +94,7 @@ fn check_typed(expr: &PropertyExpr, type_def: &PropertyTypeDef) -> TypeCheckResu
                 match check_typed(item, elem_type) {
                     TypeCheckResult::Ok | TypeCheckResult::Skipped => {}
                     TypeCheckResult::Error(e) => {
-                        return TypeCheckResult::Error(format!(
-                            "list element [{}]: {}",
-                            i, e
-                        ));
+                        return TypeCheckResult::Error(format!("list element [{}]: {}", i, e));
                     }
                 }
             }
@@ -107,7 +104,9 @@ fn check_typed(expr: &PropertyExpr, type_def: &PropertyTypeDef) -> TypeCheckResu
         // ── Record ──────────────────────────────────────────────
         (PropertyExpr::Record(fields), PropertyTypeDef::RecordType(field_types)) => {
             for (field_name, field_val) in fields {
-                if let Some((_name, field_type)) = field_types.iter().find(|(n, _)| n.eq_ci(field_name)) {
+                if let Some((_name, field_type)) =
+                    field_types.iter().find(|(n, _)| n.eq_ci(field_name))
+                {
                     match check_typed(field_val, field_type) {
                         TypeCheckResult::Ok | TypeCheckResult::Skipped => {}
                         TypeCheckResult::Error(e) => {
@@ -128,10 +127,7 @@ fn check_typed(expr: &PropertyExpr, type_def: &PropertyTypeDef) -> TypeCheckResu
         }
 
         // ── Range ───────────────────────────────────────────────
-        (
-            PropertyExpr::Range { min, max, .. },
-            PropertyTypeDef::Range(inner_type),
-        ) => {
+        (PropertyExpr::Range { min, max, .. }, PropertyTypeDef::Range(inner_type)) => {
             let min_result = check_typed(min, inner_type);
             if let TypeCheckResult::Error(e) = min_result {
                 return TypeCheckResult::Error(format!("range min: {}", e));
@@ -151,9 +147,7 @@ fn check_typed(expr: &PropertyExpr, type_def: &PropertyTypeDef) -> TypeCheckResu
         }
 
         // ── Reference ───────────────────────────────────────────
-        (PropertyExpr::ReferenceValue(_), PropertyTypeDef::Reference(_)) => {
-            TypeCheckResult::Ok
-        }
+        (PropertyExpr::ReferenceValue(_), PropertyTypeDef::Reference(_)) => TypeCheckResult::Ok,
 
         // ── Type mismatch ───────────────────────────────────────
         _ => TypeCheckResult::Error(format!(
@@ -279,10 +273,10 @@ pub fn parse_time_value(s: &str) -> Option<u64> {
 pub fn parse_size_value(s: &str) -> Option<u64> {
     let s = s.trim();
     for &(unit_name, factor) in SIZE_UNITS {
-        if let Some(num_str) = s.strip_suffix(unit_name).map(|s| s.trim()) {
-            if let Ok(val) = num_str.parse::<u64>() {
-                return Some(val * factor);
-            }
+        if let Some(num_str) = s.strip_suffix(unit_name).map(|s| s.trim())
+            && let Ok(val) = num_str.parse::<u64>()
+        {
+            return Some(val * factor);
         }
     }
     None
@@ -356,10 +350,7 @@ mod tests {
     #[test]
     fn enum_invalid_variant() {
         let expr = PropertyExpr::Enum(Name::new("Unknown"));
-        let ty = PropertyTypeDef::Enumeration(vec![
-            Name::new("Periodic"),
-            Name::new("Sporadic"),
-        ]);
+        let ty = PropertyTypeDef::Enumeration(vec![Name::new("Periodic"), Name::new("Sporadic")]);
         assert!(matches!(check_type(&expr, &ty), TypeCheckResult::Error(_)));
     }
 
@@ -403,7 +394,13 @@ mod tests {
             (Name::new("y"), PropertyExpr::StringLit("hello".to_string())),
         ]);
         let ty = PropertyTypeDef::RecordType(vec![
-            (Name::new("x"), PropertyTypeDef::AadlInteger { range: None, units: None }),
+            (
+                Name::new("x"),
+                PropertyTypeDef::AadlInteger {
+                    range: None,
+                    units: None,
+                },
+            ),
             (Name::new("y"), PropertyTypeDef::AadlString),
         ]);
         assert_eq!(check_type(&expr, &ty), TypeCheckResult::Ok);
@@ -411,12 +408,14 @@ mod tests {
 
     #[test]
     fn record_unknown_field() {
-        let expr = PropertyExpr::Record(vec![
-            (Name::new("z"), PropertyExpr::Integer(10, None)),
-        ]);
-        let ty = PropertyTypeDef::RecordType(vec![
-            (Name::new("x"), PropertyTypeDef::AadlInteger { range: None, units: None }),
-        ]);
+        let expr = PropertyExpr::Record(vec![(Name::new("z"), PropertyExpr::Integer(10, None))]);
+        let ty = PropertyTypeDef::RecordType(vec![(
+            Name::new("x"),
+            PropertyTypeDef::AadlInteger {
+                range: None,
+                units: None,
+            },
+        )]);
         assert!(matches!(check_type(&expr, &ty), TypeCheckResult::Error(_)));
     }
 
@@ -466,10 +465,8 @@ mod tests {
 
     #[test]
     fn unit_value_unwraps_correctly() {
-        let expr = PropertyExpr::UnitValue(
-            Box::new(PropertyExpr::Integer(10, None)),
-            Name::new("ms"),
-        );
+        let expr =
+            PropertyExpr::UnitValue(Box::new(PropertyExpr::Integer(10, None)), Name::new("ms"));
         let ty = PropertyTypeDef::AadlInteger {
             range: Some((0, 100)),
             units: Some(Name::new("Time")),
@@ -479,9 +476,9 @@ mod tests {
 
     #[test]
     fn classifier_value_accepted() {
-        let expr = PropertyExpr::ClassifierValue(crate::name::ClassifierRef::type_only(
-            Name::new("MyType"),
-        ));
+        let expr = PropertyExpr::ClassifierValue(crate::name::ClassifierRef::type_only(Name::new(
+            "MyType",
+        )));
         let ty = PropertyTypeDef::Classifier(None);
         assert_eq!(check_type(&expr, &ty), TypeCheckResult::Ok);
     }

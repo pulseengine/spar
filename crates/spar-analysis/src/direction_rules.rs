@@ -11,7 +11,7 @@ use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::{ConnectionKind, Direction, FeatureKind};
 use spar_hir_def::name::Name;
 
-use crate::{component_path, Analysis, AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates port direction compatibility on connections.
 ///
@@ -43,10 +43,7 @@ impl Analysis for DirectionRuleAnalysis {
                 };
 
                 // Classify the connection pattern
-                let pattern = classify_connection(
-                    &src_end.subcomponent,
-                    &dst_end.subcomponent,
-                );
+                let pattern = classify_connection(&src_end.subcomponent, &dst_end.subcomponent);
 
                 // Look up source and destination feature directions
                 let src_dir = find_feature_direction(
@@ -62,12 +59,8 @@ impl Analysis for DirectionRuleAnalysis {
                     &dst_end.feature,
                 );
 
-                let src_kind = find_feature_kind(
-                    instance,
-                    comp_idx,
-                    &src_end.subcomponent,
-                    &src_end.feature,
-                );
+                let src_kind =
+                    find_feature_kind(instance, comp_idx, &src_end.subcomponent, &src_end.feature);
 
                 // Skip direction checks for access connections — they use
                 // provides/requires semantics instead.
@@ -194,7 +187,10 @@ impl Analysis for DirectionRuleAnalysis {
                 }
 
                 // Event ports: same direction rules apply but we note it's an event
-                if matches!(src_kind, Some(FeatureKind::EventPort | FeatureKind::EventDataPort)) {
+                if matches!(
+                    src_kind,
+                    Some(FeatureKind::EventPort | FeatureKind::EventDataPort)
+                ) {
                     // Event port direction rules are the same as data port rules
                     // (already checked above), but we could add event-specific checks here
                 }
@@ -246,10 +242,8 @@ fn find_feature_direction(
         owner_comp
             .children
             .iter()
-            .find(|&&child_idx| {
-                instance.component(child_idx).name.eq_ci(sub_name)
-            })
-            .map(|&idx| idx)?
+            .find(|&&child_idx| instance.component(child_idx).name.eq_ci(sub_name))
+            .copied()?
     } else {
         owner
     };
@@ -276,10 +270,8 @@ fn find_feature_kind(
         owner_comp
             .children
             .iter()
-            .find(|&&child_idx| {
-                instance.component(child_idx).name.eq_ci(sub_name)
-            })
-            .map(|&idx| idx)?
+            .find(|&&child_idx| instance.component(child_idx).name.eq_ci(sub_name))
+            .copied()?
     } else {
         owner
     };
@@ -393,7 +385,11 @@ mod tests {
             idx
         }
 
-        fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
             self.components[parent].children = children;
         }
 
@@ -430,14 +426,27 @@ mod tests {
         let bb = b.add_component("b", ComponentCategory::System, Some(root));
         b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), a);
         b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), bb);
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(Some("a"), "out1"), end(Some("b"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "valid across should have no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "valid across should have no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -449,14 +458,28 @@ mod tests {
         // Wrong: in -> out for across connection
         b.add_feature("port1", FeatureKind::DataPort, Some(Direction::In), a);
         b.add_feature("port2", FeatureKind::DataPort, Some(Direction::Out), bb);
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(Some("a"), "port1"), end(Some("b"), "port2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(Some("a"), "port1"),
+            end(Some("b"), "port2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert_eq!(errors.len(), 2, "should flag both src (in) and dst (out): {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            2,
+            "should flag both src (in) and dst (out): {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -467,14 +490,27 @@ mod tests {
         b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), child);
         b.add_feature("ext_out", FeatureKind::DataPort, Some(Direction::Out), root);
         // Up: child.out1 -> ext_out (on enclosing)
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(Some("child"), "out1"), end(None, "ext_out"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(Some("child"), "out1"),
+            end(None, "ext_out"),
+        );
         b.set_children(root, vec![child]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "valid up should have no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "valid up should have no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -485,14 +521,27 @@ mod tests {
         b.add_feature("ext_in", FeatureKind::DataPort, Some(Direction::In), root);
         b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), child);
         // Down: ext_in (on enclosing) -> child.in1
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(None, "ext_in"), end(Some("child"), "in1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(None, "ext_in"),
+            end(Some("child"), "in1"),
+        );
         b.set_children(root, vec![child]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "valid down should have no errors: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "valid down should have no errors: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -503,13 +552,22 @@ mod tests {
         // Wrong: out -> out for down connection
         b.add_feature("ext_out", FeatureKind::DataPort, Some(Direction::Out), root);
         b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), child);
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(None, "ext_out"), end(Some("child"), "out1"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(None, "ext_out"),
+            end(Some("child"), "out1"),
+        );
         b.set_children(root, vec![child]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
         assert_eq!(errors.len(), 2, "should flag both ends: {:?}", errors);
     }
 
@@ -521,14 +579,27 @@ mod tests {
         let bb = b.add_component("b", ComponentCategory::System, Some(root));
         b.add_feature("p1", FeatureKind::DataPort, Some(Direction::InOut), a);
         b.add_feature("p2", FeatureKind::DataPort, Some(Direction::InOut), bb);
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(Some("a"), "p1"), end(Some("b"), "p2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(Some("a"), "p1"),
+            end(Some("b"), "p2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "in out is compatible everywhere: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "in out is compatible everywhere: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -540,16 +611,28 @@ mod tests {
         // Bidirectional but src is only 'out'
         b.add_feature("p1", FeatureKind::DataPort, Some(Direction::Out), a);
         b.add_feature("p2", FeatureKind::DataPort, Some(Direction::In), bb);
-        b.add_connection("c1", ConnectionKind::Port, true, root,
-            end(Some("a"), "p1"), end(Some("b"), "p2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            true,
+            root,
+            end(Some("a"), "p1"),
+            end(Some("b"), "p2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let bidi_errors: Vec<_> = diags.iter()
+        let bidi_errors: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("bidirectional"))
             .collect();
-        assert_eq!(bidi_errors.len(), 2, "both ends need in out: {:?}", bidi_errors);
+        assert_eq!(
+            bidi_errors.len(),
+            2,
+            "both ends need in out: {:?}",
+            bidi_errors
+        );
     }
 
     #[test]
@@ -561,14 +644,27 @@ mod tests {
         // Access features with 'in' direction (provides/requires isn't modeled as direction)
         b.add_feature("acc1", FeatureKind::DataAccess, Some(Direction::In), a);
         b.add_feature("acc2", FeatureKind::DataAccess, Some(Direction::In), bb);
-        b.add_connection("c1", ConnectionKind::Access, false, root,
-            end(Some("a"), "acc1"), end(Some("b"), "acc2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            false,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(errors.is_empty(), "access connections skip direction: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "access connections skip direction: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -580,14 +676,27 @@ mod tests {
         // Wrong direction: in -> out for event port
         b.add_feature("evt1", FeatureKind::EventPort, Some(Direction::In), a);
         b.add_feature("evt2", FeatureKind::EventPort, Some(Direction::Out), bb);
-        b.add_connection("c1", ConnectionKind::Port, false, root,
-            end(Some("a"), "evt1"), end(Some("b"), "evt2"));
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            false,
+            root,
+            end(Some("a"), "evt1"),
+            end(Some("b"), "evt2"),
+        );
         b.set_children(root, vec![a, bb]);
 
         let inst = b.build(root);
         let diags = DirectionRuleAnalysis.analyze(&inst);
-        let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
-        assert!(!errors.is_empty(), "event ports follow same direction rules: {:?}", errors);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            !errors.is_empty(),
+            "event ports follow same direction rules: {:?}",
+            errors
+        );
     }
 
     #[test]
