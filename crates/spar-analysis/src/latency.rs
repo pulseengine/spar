@@ -134,6 +134,20 @@ impl Analysis for LatencyAnalysis {
             }
         }
 
+        // STPA-REQ-017: Note modal awareness
+        if !instance.system_operation_modes.is_empty() {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "{} analysis used default property values; {} system operation mode(s) exist but modal property evaluation is not yet fully supported",
+                    self.name(),
+                    instance.system_operation_modes.len()
+                ),
+                path: vec!["root".to_string()],
+                analysis: self.name().to_string(),
+            });
+        }
+
         diags
     }
 }
