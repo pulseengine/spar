@@ -1,16 +1,25 @@
-//! Rate Monotonic Scheduling analysis (AS5506 timing properties).
+//! Scheduling analysis (AS5506 timing properties).
 //!
-//! Performs Rate Monotonic Analysis (RMA) on threads grouped by processor
-//! binding. Checks utilization bounds to determine schedulability.
+//! Implements three scheduling analyses (STPA-REQ-024, STPA-REQ-025):
 //!
-//! # Algorithm
+//! 1. **Rate Monotonic Analysis (RMA)** — utilization bound check
+//! 2. **Response Time Analysis (RTA)** — exact worst-case response time
+//!    with higher-priority interference
+//! 3. **EDF feasibility** — Earliest Deadline First utilization test
 //!
-//! For each processor with bound threads:
-//! 1. Compute utilization U = Σ(Ci/Ti) where Ci is worst-case execution time
-//!    and Ti is the period.
-//! 2. If U > 1.0, the processor is overloaded (error).
-//! 3. If U ≤ RMA bound n(2^(1/n) - 1), guaranteed schedulable.
-//! 4. If RMA bound < U ≤ 1.0, schedulability is uncertain (warning).
+//! Also reports scheduling margin (STPA-REQ-026) and warns when
+//! algorithm assumptions may be violated (STPA-REQ-027).
+//!
+//! # Algorithms
+//!
+//! **RMA**: U = Σ(Ci/Ti). If U ≤ n(2^(1/n) - 1), guaranteed schedulable.
+//!
+//! **RTA**: For each task i sorted by priority (shortest period = highest),
+//! iteratively compute Ri = Ci + Σ_{j∈hp(i)} ⌈Ri/Tj⌉ × Cj until fixed point.
+//! If Ri > Di (deadline), task misses deadline.
+//!
+//! **EDF**: U = Σ(Ci/Ti). If U ≤ 1.0, schedulable (sufficient AND necessary
+//! for independent tasks with D=T).
 
 use rustc_hash::FxHashMap;
 
@@ -20,7 +29,7 @@ use spar_hir_def::item_tree::ComponentCategory;
 use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
-/// Rate Monotonic scheduling analysis.
+/// Scheduling analysis with RMA, RTA, and EDF.
 pub struct SchedulingAnalysis;
 
 impl Analysis for SchedulingAnalysis {
@@ -30,13 +39,12 @@ impl Analysis for SchedulingAnalysis {
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         // Severity rationale (STPA-REQ-016):
-        //   Error   — processor utilization exceeds 100%
-        //   Warning — missing Period/Execution_Time/binding, utilization exceeds RMA bound
-        //   Info    — processor utilization summary, modal awareness note
+        //   Error   — processor utilization > 100%, or RTA response time > deadline
+        //   Warning — utilization exceeds RMA bound, narrow margin, missing properties
+        //   Info    — processor utilization summary, RTA results, modal awareness
         let mut diags = Vec::new();
 
         // Collect thread timing info and group by processor binding.
-        // Key: processor name (or "__unbound__" for threads without binding).
         let mut processor_threads: FxHashMap<String, Vec<ThreadInfo>> = FxHashMap::default();
 
         for (comp_idx, comp) in instance.all_components() {
@@ -47,10 +55,9 @@ impl Analysis for SchedulingAnalysis {
             let path = component_path(instance, comp_idx);
             let props = instance.properties_for(comp_idx);
 
-            // Extract Period
             let period_ps = get_timing_property(props, "Period");
-            // Extract Compute_Execution_Time (worst case from range, or single value)
             let exec_ps = get_execution_time(props);
+            let deadline_ps = get_timing_property(props, "Deadline");
 
             if period_ps.is_none() {
                 diags.push(AnalysisDiagnostic {
@@ -76,7 +83,6 @@ impl Analysis for SchedulingAnalysis {
                 });
             }
 
-            // Get processor binding
             let binding = get_processor_binding(props);
             if binding.is_none() {
                 diags.push(AnalysisDiagnostic {
@@ -93,6 +99,8 @@ impl Analysis for SchedulingAnalysis {
             let proc_key = binding.unwrap_or_else(|| "__unbound__".to_string());
 
             if let (Some(period), Some(exec)) = (period_ps, exec_ps) {
+                // Default deadline = period if not specified (implicit deadline)
+                let deadline = deadline_ps.unwrap_or(period);
                 processor_threads
                     .entry(proc_key)
                     .or_default()
@@ -100,15 +108,14 @@ impl Analysis for SchedulingAnalysis {
                         name: comp.name.as_str().to_string(),
                         period_ps: period,
                         exec_ps: exec,
+                        deadline_ps: deadline,
                         comp_idx,
                     });
             }
         }
 
-        // For each processor, compute utilization and check RMA bound
         for (proc_name, threads) in &processor_threads {
             if proc_name == "__unbound__" {
-                // Skip unbound threads for RMA check (already warned above)
                 continue;
             }
 
@@ -117,15 +124,15 @@ impl Analysis for SchedulingAnalysis {
                 continue;
             }
 
+            let proc_path = find_processor_path(instance, proc_name);
+
             let utilization: f64 = threads
                 .iter()
                 .map(|t| t.exec_ps as f64 / t.period_ps as f64)
                 .sum();
 
+            // ── RMA utilization bound ────────────────────────────────
             let rma_bound = rma_utilization_bound(n);
-
-            // Find processor component for the path
-            let proc_path = find_processor_path(instance, proc_name);
 
             if utilization > 1.0 {
                 diags.push(AnalysisDiagnostic {
@@ -155,20 +162,150 @@ impl Analysis for SchedulingAnalysis {
                 });
             }
 
-            // Always emit info with utilization
+            // ── Margin reporting (STPA-REQ-026) ─────────────────────
+            let limit = if utilization <= rma_bound {
+                rma_bound
+            } else {
+                1.0
+            };
+            let margin_pct = (limit - utilization) * 100.0;
+            if utilization <= 1.0 {
+                if margin_pct < 1.0 {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "processor '{}' has critically narrow scheduling margin: {:.1} percentage points \
+                             (utilization {:.1}% vs limit {:.1}%)",
+                            proc_name, margin_pct, utilization * 100.0, limit * 100.0
+                        ),
+                        path: proc_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                } else if margin_pct < 5.0 {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "processor '{}' near scheduling limit: margin {:.1} percentage points \
+                             (utilization {:.1}% vs limit {:.1}%)",
+                            proc_name, margin_pct, utilization * 100.0, limit * 100.0
+                        ),
+                        path: proc_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+            }
+
+            // ── EDF feasibility (STPA-REQ-025) ─────────────────────
+            // For implicit-deadline tasks (D=T), EDF is schedulable iff U ≤ 1.0.
+            // This is both sufficient and necessary (unlike RMA).
+            let all_implicit_deadline = threads.iter().all(|t| t.deadline_ps == t.period_ps);
+            if utilization <= 1.0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "processor '{}' EDF feasible: utilization {:.1}% ≤ 100%{}",
+                        proc_name,
+                        utilization * 100.0,
+                        if all_implicit_deadline {
+                            " (sufficient and necessary for implicit-deadline tasks)"
+                        } else {
+                            " (sufficient only — tasks have explicit deadlines)"
+                        }
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            } else {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "processor '{}' NOT EDF feasible: utilization {:.1}% > 100%",
+                        proc_name,
+                        utilization * 100.0
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // ── Response Time Analysis (STPA-REQ-024) ───────────────
+            // Sort threads by period (shortest period = highest RM priority).
+            let mut sorted: Vec<&ThreadInfo> = threads.iter().collect();
+            sorted.sort_by_key(|t| t.period_ps);
+
+            for (i, task) in sorted.iter().enumerate() {
+                let rta_result = compute_response_time(task, &sorted[..i]);
+                match rta_result {
+                    RtaResult::Converged(response_ps) => {
+                        if response_ps > task.deadline_ps {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Error,
+                                message: format!(
+                                    "RTA: thread '{}' on '{}' misses deadline — response time {:.2} ms > deadline {:.2} ms",
+                                    task.name,
+                                    proc_name,
+                                    ps_to_ms(response_ps),
+                                    ps_to_ms(task.deadline_ps)
+                                ),
+                                path: proc_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                        } else {
+                            let margin_ms = ps_to_ms(task.deadline_ps) - ps_to_ms(response_ps);
+                            let margin_ratio = margin_ms / ps_to_ms(task.deadline_ps);
+                            if margin_ratio < 0.05 {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Warning,
+                                    message: format!(
+                                        "RTA: thread '{}' on '{}' has tight margin — response time {:.2} ms, deadline {:.2} ms, margin {:.2} ms ({:.0}%)",
+                                        task.name, proc_name, ps_to_ms(response_ps), ps_to_ms(task.deadline_ps), margin_ms, margin_ratio * 100.0
+                                    ),
+                                    path: proc_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                            }
+                        }
+                    }
+                    RtaResult::Diverged => {
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Error,
+                            message: format!(
+                                "RTA: thread '{}' on '{}' response time diverges (unschedulable)",
+                                task.name, proc_name
+                            ),
+                            path: proc_path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                    }
+                }
+            }
+
+            // Utilization info (always)
             diags.push(AnalysisDiagnostic {
                 severity: Severity::Info,
                 message: format!(
-                    "processor '{}' utilization: {:.1}% ({} threads, RMA bound: {:.1}%)",
+                    "processor '{}' utilization: {:.1}% ({} threads, RMA bound: {:.1}%, margin: {:.1} pp)",
                     proc_name,
                     utilization * 100.0,
                     n,
-                    rma_bound * 100.0
+                    rma_bound * 100.0,
+                    margin_pct,
                 ),
                 path: proc_path,
                 analysis: self.name().to_string(),
             });
         }
+
+        // STPA-REQ-031: Analysis limitation documentation
+        diags.push(AnalysisDiagnostic {
+            severity: Severity::Info,
+            message: "scheduling: checks RMA utilization bound, EDF feasibility, and RTA response \
+                      times. Does not account for: blocking time, priority inversion, \
+                      non-preemptive sections, or inter-processor interference. For systems with \
+                      shared resources, consider external tools (Cheddar, MAST).".to_string(),
+            path: vec!["root".to_string()],
+            analysis: self.name().to_string(),
+        });
 
         // STPA-REQ-017: Note modal awareness
         if !instance.system_operation_modes.is_empty() {
@@ -190,12 +327,61 @@ impl Analysis for SchedulingAnalysis {
 
 /// Thread timing information extracted from properties.
 struct ThreadInfo {
-    #[allow(dead_code)]
     name: String,
     period_ps: u64,
     exec_ps: u64,
+    deadline_ps: u64,
     #[allow(dead_code)]
     comp_idx: ComponentInstanceIdx,
+}
+
+/// Result of Response Time Analysis for a single task.
+enum RtaResult {
+    /// Converged to a fixed-point response time (in picoseconds).
+    Converged(u64),
+    /// Response time exceeded the task's period (unschedulable).
+    Diverged,
+}
+
+/// Compute worst-case response time for a task under fixed-priority scheduling.
+///
+/// `higher_priority` contains all tasks with higher priority (shorter period
+/// under RM assignment), sorted by period.
+///
+/// Algorithm: iteratively compute R = C + Σ_{j∈hp} ⌈R/Tj⌉ × Cj
+/// until R converges or exceeds the task's period.
+fn compute_response_time(task: &ThreadInfo, higher_priority: &[&ThreadInfo]) -> RtaResult {
+    let mut r = task.exec_ps;
+    let max_iterations = 100;
+
+    for _ in 0..max_iterations {
+        let mut interference: u64 = 0;
+        for hp in higher_priority {
+            // ⌈R / Tj⌉ × Cj
+            let activations = (r + hp.period_ps - 1) / hp.period_ps;
+            interference = interference.saturating_add(activations.saturating_mul(hp.exec_ps));
+        }
+
+        let new_r = task.exec_ps.saturating_add(interference);
+
+        if new_r == r {
+            return RtaResult::Converged(r);
+        }
+
+        if new_r > task.period_ps {
+            return RtaResult::Diverged;
+        }
+
+        r = new_r;
+    }
+
+    // Did not converge within iteration limit
+    RtaResult::Diverged
+}
+
+/// Convert picoseconds to milliseconds for display.
+fn ps_to_ms(ps: u64) -> f64 {
+    ps as f64 / 1_000_000_000.0
 }
 
 /// Compute the RMA utilization bound: n(2^(1/n) - 1).
@@ -419,15 +605,21 @@ mod tests {
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
 
-        let errors: Vec<_> = diags
+        let overload_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
+            .collect();
+        assert_eq!(overload_errors.len(), 1, "should have 1 overload error: {:?}", diags);
+
+        // Also expect EDF infeasible and RTA divergence errors
+        let all_errors: Vec<_> = diags
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
-        assert_eq!(errors.len(), 1, "should have 1 overload error: {:?}", diags);
         assert!(
-            errors[0].message.contains("overloaded"),
-            "error should mention overload: {}",
-            errors[0].message
+            all_errors.len() >= 2,
+            "should have overload + EDF/RTA errors: {:?}",
+            all_errors
         );
     }
 
@@ -651,25 +843,222 @@ mod tests {
         let diags = SchedulingAnalysis.analyze(&inst);
 
         // U = 0.9, RMA bound for 3 tasks ≈ 0.780
-        let errors: Vec<_> = diags
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        assert!(
-            errors.is_empty(),
-            "should not be error (U < 1.0): {:?}",
-            errors
-        );
-
-        let warnings: Vec<_> = diags
+        // RTA will catch deadline misses here
+        let rma_warnings: Vec<_> = diags
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("RMA bound"))
             .collect();
         assert_eq!(
-            warnings.len(),
+            rma_warnings.len(),
             1,
             "should warn about exceeding RMA bound: {:?}",
             diags
         );
+    }
+
+    // ── RTA tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn rta_tight_margin_warning() {
+        // T1(period=10ms, exec=8ms), T2(period=30ms, exec=3ms)
+        // RM priority: T1 > T2
+        // T2 response time: R = 3 + ⌈R/10⌉*8
+        //   R=3:  3 + ⌈3/10⌉*8  = 3 + 8  = 11
+        //   R=11: 3 + ⌈11/10⌉*8 = 3 + 16 = 19
+        //   R=19: 3 + ⌈19/10⌉*8 = 3 + 16 = 19 (converged)
+        // Deadline = 30ms (implicit), R=19ms, margin = 11/30 = 36.7% → no warning
+        //
+        // Use explicit deadline to make it tight:
+        // T2 deadline = 20ms, R=19ms, margin = 1/20 = 5.0% → exactly at threshold
+        // Make deadline = 19.5ms → margin 0.5/19.5 = 2.6% → tight margin
+        // Actually: deadline in ps must be integer. 20ms deadline, R=19ms, margin=5%.
+        // So let's do: T1(period=5ms,exec=4ms), T2(period=10ms,exec=1ms)
+        // T2: R = 1 + ⌈R/5⌉*4
+        //   R=1: 1 + 4 = 5
+        //   R=5: 1 + 4 = 5 (converged at 5ms)
+        // Deadline = 10ms, margin = 5/10 = 50% → too wide
+        //
+        // T1(period=10ms,exec=9ms), T2(period=100ms,exec=3ms)
+        // T2: R = 3 + ⌈R/10⌉*9
+        //   R=3:  3 + 9  = 12
+        //   R=12: 3 + 18 = 21
+        //   R=21: 3 + 27 = 30
+        //   R=30: 3 + 27 = 30 (converged)
+        // Deadline = 100ms (implicit), margin = 70/100 = 70% → too wide
+        // Use explicit deadline = 31ms: margin = 1/31 = 3.2% → tight!
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "9 ms");
+        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        b.set_property(t2, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+        b.set_property(t2, "Timing_Properties", "Deadline", "31 ms");
+        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let rta_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
+            .collect();
+        assert!(rta_errors.is_empty(), "T2 should not miss deadline: {:?}", rta_errors);
+
+        let tight: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("tight margin") && d.message.contains("t2"))
+            .collect();
+        assert!(!tight.is_empty(), "T2 should have tight margin warning: {:?}", diags);
+    }
+
+    #[test]
+    fn rta_deadline_miss_with_explicit_deadline() {
+        // Thread with explicit short deadline that RMA wouldn't catch
+        // T1: period=10ms, exec=3ms, deadline=10ms (implicit, fine)
+        // T2: period=20ms, exec=5ms, deadline=8ms (explicit, tight)
+        // T2 response time: R = 5 + ⌈R/10⌉*3
+        //   R=5: 5 + ⌈5/10⌉*3 = 5 + 3 = 8
+        //   R=8: 5 + ⌈8/10⌉*3 = 5 + 3 = 8 (converged at 8ms)
+        // Deadline = 8ms, R=8ms → exactly at deadline, no miss
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        b.set_property(t2, "Timing_Properties", "Period", "20 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "5 ms");
+        b.set_property(t2, "Timing_Properties", "Deadline", "8 ms");
+        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // R=8ms exactly equals deadline 8ms → no miss but zero margin
+        let rta_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
+            .collect();
+        assert!(rta_errors.is_empty(), "R=D should not be error: {:?}", rta_errors);
+    }
+
+    #[test]
+    fn rta_diverges_on_overloaded_system() {
+        // Overloaded: U > 1.0 → RTA should diverge
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "8 ms");
+        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        b.set_property(t2, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "5 ms");
+        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let rta_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
+            .collect();
+        assert!(!rta_errors.is_empty(), "overloaded system should have RTA errors: {:?}", diags);
+    }
+
+    // ── EDF tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn edf_feasible_reported() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let edf_info: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("EDF feasible"))
+            .collect();
+        assert!(!edf_info.is_empty(), "should report EDF feasibility: {:?}", diags);
+    }
+
+    // ── Margin tests ──────────────────────────────────────────────
+
+    #[test]
+    fn narrow_margin_warning() {
+        // Utilization very close to RMA bound → narrow margin warning
+        // For n=1, RMA bound = 1.0. Put utilization at 0.96 (4% margin)
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 96/100 = 0.96 → margin 4% (< 5% threshold)
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "96 ms");
+        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let margin_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("margin"))
+            .collect();
+        assert!(!margin_warns.is_empty(), "should warn about narrow margin: {:?}", diags);
+    }
+
+    // ── Limitation documentation test ─────────────────────────────
+
+    #[test]
+    fn limitation_documentation_emitted() {
+        // STPA-REQ-031: analysis must document its limitations
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_children(root, vec![]);
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let limitation: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Does not account for"))
+            .collect();
+        assert!(!limitation.is_empty(), "should document limitations: {:?}", diags);
     }
 }
