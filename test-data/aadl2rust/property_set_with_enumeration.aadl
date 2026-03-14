@@ -1,0 +1,4 @@
+property set CustomEnums is
+  Priority_Level : type enumeration (low, medium, high, critical);
+  TaskPriority : CustomEnums::Priority_Level applies to (thread);
+end CustomEnums;

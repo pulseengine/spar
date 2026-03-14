@@ -1,0 +1,22 @@
+package AnnexSubclauseComponent
+public
+  system Controller
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        dataOut : out propagation {ValueError};
+      end propagations;
+    **};
+    features
+      dataOut : out data port;
+  end Controller;
+
+  system implementation Controller.i
+    annex EMV2 {**
+      component error behavior
+        transitions
+          all -[Failure]-> FailStop;
+      end component;
+    **};
+  end Controller.i;
+end AnnexSubclauseComponent;

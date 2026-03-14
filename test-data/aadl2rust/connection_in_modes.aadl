@@ -1,0 +1,30 @@
+package ConnectionInModes
+public
+  system S
+    features
+      trigger : in event port;
+      inp : in data port;
+      outp : out data port;
+    modes
+      m1 : initial mode;
+      m2 : mode;
+      t1 : m1 -[trigger]-> m2;
+  end S;
+
+  system implementation S.i
+    subcomponents
+      primary : process Proc;
+      backup : process Proc;
+    connections
+      c1 : port inp -> primary.inp in modes (m1);
+      c2 : port inp -> backup.inp in modes (m2);
+      c3 : port primary.outp -> outp in modes (m1);
+      c4 : port backup.outp -> outp in modes (m2);
+  end S.i;
+
+  process Proc
+    features
+      inp : in data port;
+      outp : out data port;
+  end Proc;
+end ConnectionInModes;

@@ -313,3 +313,98 @@ artifacts:
       thread components with scheduling properties.
     status: planned
     tags: [transform, wasi-p3]
+
+  # ── STPA Analysis Coverage Records (STPA-REQ-022) ────────────────
+
+  - id: COVERAGE-CH4
+    type: stpa-coverage
+    title: "AS5506 Ch.4: Components — containment rules"
+    description: >
+      hierarchy.rs validates all 14 category containment rules per
+      section 4.5. naming_rules.rs checks naming legality.
+    status: implemented
+    covers: [REQ-MODEL-001, REQ-MODEL-002, REQ-ANALYSIS-007]
+
+  - id: COVERAGE-CH5
+    type: stpa-coverage
+    title: "AS5506 Ch.5: Flows — end-to-end flow analysis"
+    description: >
+      flow_check.rs validates flow path continuity. flow_rules.rs checks
+      flow spec legality. latency.rs computes best/worst-case latency.
+    status: implemented
+    covers: [REQ-ANALYSIS-003, REQ-ANALYSIS-007]
+
+  - id: COVERAGE-CH8
+    type: stpa-coverage
+    title: "AS5506 Ch.8: Features — direction and type rules"
+    description: >
+      direction_rules.rs validates port direction compatibility.
+      classifier_match.rs validates data type compatibility on connections.
+    status: implemented
+    covers: [REQ-MODEL-003, REQ-ANALYSIS-008]
+
+  - id: COVERAGE-CH9
+    type: stpa-coverage
+    title: "AS5506 Ch.9: Connections — well-formedness rules"
+    description: >
+      connection_rules.rs validates connection endpoint compatibility.
+      connectivity.rs checks for unconnected required ports.
+    status: implemented
+    covers: [REQ-MODEL-004, REQ-ANALYSIS-001]
+
+  - id: COVERAGE-CH10
+    type: stpa-coverage
+    title: "AS5506 Ch.10: Modes — mode completeness and transitions"
+    description: >
+      mode_check.rs validates initial mode presence and uniqueness.
+      mode_rules.rs checks mode transition legality. modal_rules.rs
+      validates in_modes references.
+    status: implemented
+    covers: [REQ-ANALYSIS-007]
+
+  - id: COVERAGE-CH11
+    type: stpa-coverage
+    title: "AS5506 Ch.11: Properties — type validation and evaluation"
+    description: >
+      property_rules.rs validates property applicability and types.
+      property_accessors.rs provides typed access with unit conversion.
+    status: implemented
+    covers: [REQ-PROP-001, REQ-PROP-002, REQ-PROP-003]
+
+  - id: COVERAGE-CH12
+    type: stpa-coverage
+    title: "AS5506 Ch.12: System Operation Modes"
+    description: >
+      modal.rs computes SOMs. Scheduling and latency analyses evaluate
+      per-SOM when modal property associations exist.
+    status: partial
+    covers: [REQ-INST-004]
+
+  - id: COVERAGE-CH13
+    type: stpa-coverage
+    title: "AS5506 Ch.13: ARINC 653 partition scheduling"
+    description: >
+      arinc653.rs validates partition window scheduling, inter-partition
+      communication isolation, and process-to-partition bindings.
+    status: implemented
+    covers: [REQ-ANALYSIS-006]
+
+  - id: COVERAGE-CH14
+    type: stpa-coverage
+    title: "AS5506 Ch.14: Instance model construction"
+    description: >
+      instance.rs handles recursive instantiation, array expansion,
+      semantic connection tracing, and circular containment detection.
+    status: implemented
+    covers: [REQ-INST-001, REQ-INST-002, REQ-INST-003]
+
+  - id: COVERAGE-GAPS
+    type: stpa-coverage
+    title: Known analysis gaps
+    description: >
+      Not yet covered: Ch.6 (type extensions — partial in extends_rules.rs),
+      Ch.7 (prototypes — parsed but not analyzed), property expression
+      evaluation (value(), arithmetic, record field access). See also
+      REQ-PROP-002 (partial).
+    status: partial
+    covers: [REQ-MODEL-005, REQ-PROP-002]

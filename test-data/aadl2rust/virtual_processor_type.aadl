@@ -1,0 +1,19 @@
+package VirtualProcessorType
+public
+  virtual processor Partition
+    properties
+      Scheduling_Protocol => (ARINC653);
+  end Partition;
+
+  virtual processor implementation Partition.i
+  end Partition.i;
+
+  processor MainCPU
+  end MainCPU;
+
+  processor implementation MainCPU.i
+    subcomponents
+      part1 : virtual processor Partition.i;
+      part2 : virtual processor Partition.i;
+  end MainCPU.i;
+end VirtualProcessorType;

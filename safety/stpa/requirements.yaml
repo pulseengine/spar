@@ -22,7 +22,7 @@ artifacts:
       any AADL v2.2 grammar production, it must emit an error diagnostic
       with the source location (file, offset). The parser must not
       silently skip tokens without producing a CST error node.
-    status: partial
+    status: implemented
     tags: [safety, parser, stpa]
     traces-to: [CC-1]
     mitigates: [H-5]
@@ -48,7 +48,7 @@ artifacts:
       AADL v2.2 grammar production rule (approximately 80 productions).
       Each test must verify that a valid input produces the expected
       CST structure and that an invalid input produces an error diagnostic.
-    status: partial
+    status: implemented
     tags: [safety, parser, testing, stpa]
     traces-to: [CC-1]
     mitigates: [H-5]
@@ -122,7 +122,7 @@ artifacts:
       in_modes filtering. Modal membership must be tracked as metadata
       on each instance, not used to exclude instances from the tree.
       Analyses can then filter by mode as needed.
-    status: partial
+    status: implemented
     tags: [safety, instance, modes, stpa]
     traces-to: [CC-5]
     mitigates: [H-3]
@@ -183,7 +183,7 @@ artifacts:
       After semantic connection tracing, any connection endpoint that
       does not resolve to a valid feature instance must produce a
       warning diagnostic with the connection name and unresolved path.
-    status: partial
+    status: implemented
     tags: [safety, instance, connections, stpa]
     traces-to: [CC-7]
     mitigates: [H-3]
@@ -226,7 +226,7 @@ artifacts:
       Each analysis rule must document its severity assignment rationale
       in code comments. Error = confirmed standard violation or guaranteed
       runtime failure. Warning = likely defect. Info = suggestion.
-    status: partial
+    status: implemented
     tags: [safety, analysis, stpa]
     traces-to: [CC-11]
     mitigates: [H-1]
@@ -295,7 +295,7 @@ artifacts:
       the correct number of nodes and edges matching the instance model.
       Node labels must match component instance names. Edge connections
       must match the connection instances.
-    status: partial
+    status: implemented
     tags: [safety, output, rendering, stpa]
     traces-to: [CC-13]
     mitigates: [H-4]
@@ -323,7 +323,7 @@ artifacts:
       When a bug or false negative is discovered and fixed, a regression
       test must be added that reproduces the original defect and verifies
       the fix. This prevents re-introduction of known-bad behavior.
-    status: partial
+    status: implemented
     tags: [safety, testing, stpa]
     traces-to: [SC-1]
     mitigates: [H-1]

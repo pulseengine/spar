@@ -1,0 +1,18 @@
+package VirtualBusType
+public
+  virtual bus SecureChannel
+    properties
+      Classifier_Matching_Rule => Subset;
+  end SecureChannel;
+
+  virtual bus implementation SecureChannel.TLS
+  end SecureChannel.TLS;
+
+  system Network
+  end Network;
+
+  system implementation Network.i
+    subcomponents
+      chan : virtual bus SecureChannel.TLS;
+  end Network.i;
+end VirtualBusType;

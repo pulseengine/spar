@@ -1,0 +1,5 @@
+package RenamesPackage
+public
+  with RenamesSource;
+  MyPkg renames package RenamesSource;
+end RenamesPackage;

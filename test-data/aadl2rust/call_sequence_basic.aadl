@@ -1,0 +1,18 @@
+package CallSequenceBasic
+public
+  subprogram DoWork
+    features
+      x : in parameter;
+      y : out parameter;
+  end DoWork;
+
+  thread Worker
+  end Worker;
+
+  thread implementation Worker.i
+    calls
+      seq : {
+        c1 : subprogram DoWork;
+      };
+  end Worker.i;
+end CallSequenceBasic;

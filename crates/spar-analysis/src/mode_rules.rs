@@ -23,6 +23,9 @@ impl Analysis for ModeRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — duplicate mode names within a component
+        //   Warning — mode transition trigger is not an event or event data port
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

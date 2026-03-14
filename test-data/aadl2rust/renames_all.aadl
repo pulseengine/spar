@@ -1,0 +1,5 @@
+package RenamesAll
+public
+  with RenamesSource;
+  renames RenamesSource::all;
+end RenamesAll;

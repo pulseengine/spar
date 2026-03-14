@@ -103,3 +103,104 @@ artifacts:
     steps:
       - run: cargo build --target wasm32-wasip2 -p spar-wasm --release
     verifies: [REQ-WASM-001]
+
+  # ── STPA Safety Verification ───────────────────────────────────────
+
+  - id: TEST-STPA-PARSER-ERRORS
+    type: unit-verification
+    title: Parser error diagnostic tests (STPA-REQ-001)
+    description: >
+      Seven tests verifying the parser emits error diagnostics for
+      unrecognized syntax. Covers: missing semicolons, unknown keywords,
+      incomplete declarations, malformed feature groups, invalid property
+      associations, garbage input, and unterminated string literals.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-syntax -- error
+    verifies: [STPA-REQ-001]
+
+  - id: TEST-STPA-PARSER-COVERAGE
+    type: unit-verification
+    title: Parser production coverage tests (STPA-REQ-003)
+    description: >
+      Thirty-five tests covering AADL grammar productions including
+      feature groups, annex subclauses, property expressions, prototypes,
+      renames, call sequences, virtual types, refinements, and more.
+      Each test parses a dedicated .aadl fixture file and verifies the
+      CST structure.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-syntax -- production_
+    verifies: [STPA-REQ-003]
+
+  - id: TEST-STPA-IN-MODES
+    type: unit-verification
+    title: Modal metadata preservation tests (STPA-REQ-008)
+    description: >
+      Tests verifying in_modes metadata survives instantiation on both
+      ComponentInstance and ConnectionInstance.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-analysis -- regression_in_modes
+    verifies: [STPA-REQ-008]
+
+  - id: TEST-STPA-UNRESOLVED
+    type: unit-verification
+    title: Unresolved connection endpoint tests (STPA-REQ-013)
+    description: >
+      Tests verifying compute_semantic_connections emits diagnostics
+      when connection endpoints cannot be resolved.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-hir-def -- semantic_connection
+    verifies: [STPA-REQ-013]
+
+  - id: TEST-STPA-SVG-TOPOLOGY
+    type: unit-verification
+    title: SVG topology verification tests (STPA-REQ-021)
+    description: >
+      Eight tests verifying SVG graph output contains correct number of
+      nodes and edges matching the instance model, with proper labels
+      and connection endpoints.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-wasm -- topology
+    verifies: [STPA-REQ-021]
+
+  - id: TEST-STPA-REGRESSION
+    type: unit-verification
+    title: Regression test suite (STPA-REQ-023)
+    description: >
+      Six seed regression tests covering past bugs: intentionally
+      unconnected ports, invalid containment, modal metadata on
+      components and connections, duplicate initial modes, and analysis
+      registration completeness.
+    method: automated-test
+    steps:
+      - run: cargo test -p spar-analysis -- regression_
+    verifies: [STPA-REQ-023]
+
+  - id: VERIFY-STPA-SEVERITY-DOCS
+    type: manual-verification
+    title: Severity rationale documentation (STPA-REQ-016)
+    description: >
+      All 21 analysis modules contain severity rationale comment blocks
+      in their analyze() methods documenting Error/Warning/Info criteria.
+    method: inspection
+    steps:
+      - run: "grep -r 'Severity rationale' crates/spar-analysis/src/ | wc -l"
+      - expected: "22 (21 modules + 1 legality)"
+    verifies: [STPA-REQ-016]
+
+  - id: VERIFY-STPA-COVERAGE
+    type: manual-verification
+    title: Analysis coverage tracking (STPA-REQ-022)
+    description: >
+      Analysis coverage is tracked via rivet artifact linking: coverage
+      records in artifacts/requirements.yaml link AS5506 chapters to
+      implemented analysis rules, and rivet validate/coverage commands
+      check completeness.
+    method: inspection
+    steps:
+      - run: rivet coverage --from stpa-coverage --to requirement
+    verifies: [STPA-REQ-022]

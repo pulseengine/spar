@@ -25,6 +25,10 @@ impl Analysis for CompletenessAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — unresolved classifier reference (instance-level)
+        //   Warning — component has no classifier reference
+        //   Info    — type-only subcomponent without implementation, featureless component
         let mut diags = Vec::new();
 
         // Track which type names have implementations.

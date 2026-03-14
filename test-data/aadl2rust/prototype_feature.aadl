@@ -1,0 +1,15 @@
+package PrototypeFeature
+public
+  system GenericSys
+    prototypes
+      feat_proto : feature;
+    features
+      fp : feature;
+  end GenericSys;
+
+  data MyData
+  end MyData;
+
+  system BoundSys extends GenericSys (feat_proto => in data port MyData)
+  end BoundSys;
+end PrototypeFeature;

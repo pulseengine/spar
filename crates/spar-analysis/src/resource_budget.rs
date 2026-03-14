@@ -27,6 +27,10 @@ impl Analysis for ResourceBudgetAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — memory budget exceeded
+        //   Warning — bus bandwidth exceeded
+        //   Info    — memory utilization within budget, modal awareness note
         let mut diags = Vec::new();
 
         check_memory_budgets(instance, &mut diags);

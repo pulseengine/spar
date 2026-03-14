@@ -1,0 +1,26 @@
+package CallSequenceMultipleCalls
+public
+  subprogram Setup
+  end Setup;
+
+  subprogram Transform
+    features
+      inp : in parameter;
+      outp : out parameter;
+  end Transform;
+
+  subprogram Cleanup
+  end Cleanup;
+
+  thread Controller
+  end Controller;
+
+  thread implementation Controller.i
+    calls
+      main_seq : {
+        step1 : subprogram Setup;
+        step2 : subprogram Transform;
+        step3 : subprogram Cleanup;
+      };
+  end Controller.i;
+end CallSequenceMultipleCalls;

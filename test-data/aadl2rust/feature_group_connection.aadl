@@ -1,0 +1,32 @@
+package FeatureGroupConnection
+public
+  feature group SensorOutput
+    features
+      temp : out data port;
+      pressure : out data port;
+  end SensorOutput;
+
+  feature group SensorInput inverse of SensorOutput
+  end SensorInput;
+
+  system Sensor
+    features
+      output : feature group SensorOutput;
+  end Sensor;
+
+  system Monitor
+    features
+      input : feature group SensorInput;
+  end Monitor;
+
+  system Top
+  end Top;
+
+  system implementation Top.i
+    subcomponents
+      sens : system Sensor;
+      mon : system Monitor;
+    connections
+      c1 : feature group sens.output -> mon.input;
+  end Top.i;
+end FeatureGroupConnection;

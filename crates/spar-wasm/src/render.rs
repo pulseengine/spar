@@ -1039,4 +1039,242 @@ mod tests {
             "abstract should be dashed"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // STPA-REQ-021: SVG topology verification tests
+    // -----------------------------------------------------------------------
+
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+    use spar_hir_def::instance::{ComponentInstance, ConnectionEnd, ConnectionInstance};
+    use spar_hir_def::item_tree::ConnectionKind;
+    use spar_hir_def::name::Name;
+
+    /// Helper: build a `SystemInstance` with `n` child components and
+    /// `connections` described as `(src_child_index, dst_child_index)` pairs
+    /// (0-based indices into the children list).
+    fn make_topology_instance(
+        n_children: usize,
+        conn_pairs: &[(usize, usize)],
+    ) -> spar_hir_def::instance::SystemInstance {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let connections_arena: Arena<ConnectionInstance> = Arena::default();
+
+        // Root system
+        let root_idx = components.alloc(ComponentInstance {
+            name: Name::new("root"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Root"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // Allocate children
+        let mut child_indices = Vec::new();
+        for i in 0..n_children {
+            let cat = match i % 3 {
+                0 => ComponentCategory::Process,
+                1 => ComponentCategory::Thread,
+                _ => ComponentCategory::Device,
+            };
+            let child = components.alloc(ComponentInstance {
+                name: Name::new(&format!("comp{}", i)),
+                category: cat,
+                type_name: Name::new(&format!("Comp{}", i)),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root_idx),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            });
+            child_indices.push(child);
+        }
+        components[root_idx].children = child_indices.clone();
+
+        // Build connections arena separately so we can populate it
+        let mut conns: Arena<ConnectionInstance> = connections_arena;
+        for (ci, &(src, dst)) in conn_pairs.iter().enumerate() {
+            let src_name = format!("comp{}", src);
+            let dst_name = format!("comp{}", dst);
+            conns.alloc(ConnectionInstance {
+                name: Name::new(&format!("c{}", ci)),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                owner: root_idx,
+                src: Some(ConnectionEnd {
+                    subcomponent: Some(Name::new(&src_name)),
+                    feature: Name::new("out_port"),
+                }),
+                dst: Some(ConnectionEnd {
+                    subcomponent: Some(Name::new(&dst_name)),
+                    feature: Name::new("in_port"),
+                }),
+                in_modes: Vec::new(),
+            });
+        }
+
+        spar_hir_def::instance::SystemInstance {
+            root: root_idx,
+            components,
+            features: Arena::default(),
+            connections: conns,
+            flow_instances: Arena::default(),
+            end_to_end_flows: Arena::default(),
+            mode_instances: Arena::default(),
+            mode_transition_instances: Arena::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn svg_contains_correct_node_count() {
+        // 4 children + 1 root = 5 nodes total in the graph
+        let instance = make_topology_instance(4, &[]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        let node_count = svg.matches("<g class=\"node ").count();
+        assert_eq!(node_count, 5, "expected 5 node groups in SVG");
+    }
+
+    #[test]
+    fn svg_contains_correct_edge_count() {
+        // 3 children → 3 "contains" edges + 2 connection edges = 5
+        let instance = make_topology_instance(3, &[(0, 1), (1, 2)]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        let edge_count = svg.matches("<g class=\"edge\"").count();
+        assert_eq!(edge_count, 5, "expected 3 contains + 2 connection edges");
+    }
+
+    #[test]
+    fn svg_node_labels_match_instance_names() {
+        let instance = make_topology_instance(3, &[]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        // Root label
+        assert!(
+            svg.contains(">root</text>"),
+            "SVG should contain root label"
+        );
+        // Child labels
+        for i in 0..3 {
+            let label = format!(">comp{}</text>", i);
+            assert!(
+                svg.contains(&label),
+                "SVG should contain label for comp{}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn svg_edge_connections_match_instance() {
+        // Connection from comp0 → comp1
+        let instance = make_topology_instance(2, &[(0, 1)]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        // The connection edge should have data-source and data-target attributes
+        // matching the ArchNode IDs of the connected components.
+        assert!(
+            svg.contains("data-source=\"AADL-Pkg-comp0\" data-target=\"AADL-Pkg-comp1\""),
+            "SVG should contain edge from comp0 to comp1"
+        );
+    }
+
+    #[test]
+    fn svg_preserves_hierarchy() {
+        // With 2 children, we expect "contains" edges from root to each child.
+        let instance = make_topology_instance(2, &[]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        // "contains" edges go from root to children, so we should see edges
+        // with data-source="AADL-Pkg-root" and data-target="AADL-Pkg-comp{0,1}"
+        assert!(
+            svg.contains("data-source=\"AADL-Pkg-root\" data-target=\"AADL-Pkg-comp0\""),
+            "SVG should have contains edge from root to comp0"
+        );
+        assert!(
+            svg.contains("data-source=\"AADL-Pkg-root\" data-target=\"AADL-Pkg-comp1\""),
+            "SVG should have contains edge from root to comp1"
+        );
+    }
+
+    #[test]
+    fn svg_empty_graph_produces_minimal_svg() {
+        let graph: Graph<ArchNode, ArchEdge> = Graph::new();
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+
+        assert!(svg.contains("<svg"), "minimal SVG should have svg element");
+        assert!(svg.contains("</svg>"), "minimal SVG should be closed");
+        // No nodes or edges
+        assert_eq!(
+            svg.matches("<g class=\"node ").count(),
+            0,
+            "empty graph should have no nodes"
+        );
+        assert_eq!(
+            svg.matches("<g class=\"edge\"").count(),
+            0,
+            "empty graph should have no edges"
+        );
+    }
+
+    #[test]
+    fn svg_node_count_matches_graph_node_count() {
+        // Parametric test: check several sizes
+        for n_children in [0, 1, 3, 5, 8] {
+            let instance = make_topology_instance(n_children, &[]);
+            let (graph, _) = crate::graph::build_graph(&instance);
+            let expected_nodes = n_children + 1; // children + root
+            assert_eq!(graph.node_count(), expected_nodes);
+
+            let svg = render_graph_to_svg(&graph, &[]).unwrap();
+            let svg_node_count = svg.matches("<g class=\"node ").count();
+            assert_eq!(
+                svg_node_count, expected_nodes,
+                "SVG node count should match graph for n_children={}",
+                n_children
+            );
+        }
+    }
+
+    #[test]
+    fn svg_edge_count_matches_graph_edge_count() {
+        // Multiple connections: 4 children, 3 data connections + 4 contains = 7
+        let instance = make_topology_instance(4, &[(0, 1), (1, 2), (2, 3)]);
+        let (graph, _) = crate::graph::build_graph(&instance);
+
+        let expected_edges = 4 + 3; // 4 contains + 3 connections
+        assert_eq!(graph.edge_count(), expected_edges);
+
+        let svg = render_graph_to_svg(&graph, &[]).unwrap();
+        let svg_edge_count = svg.matches("<g class=\"edge\"").count();
+        assert_eq!(
+            svg_edge_count, expected_edges,
+            "SVG edge count should match graph edge count"
+        );
+    }
 }

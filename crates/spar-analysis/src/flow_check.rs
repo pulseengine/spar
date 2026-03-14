@@ -26,6 +26,10 @@ impl Analysis for FlowCheckAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — end-to-end flow with no segments
+        //   Warning — flow source/sink/path with wrong port direction, E2E even segment count,
+        //             unknown connection segment
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

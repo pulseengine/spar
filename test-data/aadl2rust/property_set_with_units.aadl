@@ -1,0 +1,4 @@
+property set CustomUnits is
+  Frequency_Units : type units (Hz, KHz => Hz * 1000, MHz => KHz * 1000, GHz => MHz * 1000);
+  ClockFreq : CustomUnits::Frequency_Units applies to (processor);
+end CustomUnits;

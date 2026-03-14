@@ -1,0 +1,15 @@
+package FeatureGroupWithProperties
+public
+  feature group SensorIO
+    features
+      reading : out data port;
+      command : in data port;
+    properties
+      Classifier_Matching_Rule => Subset;
+  end SensorIO;
+
+  system Sensor
+    features
+      io : feature group SensorIO;
+  end Sensor;
+end FeatureGroupWithProperties;

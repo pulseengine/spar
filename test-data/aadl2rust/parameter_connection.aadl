@@ -1,0 +1,32 @@
+package ParameterConnection
+public
+  data SensorData
+  end SensorData;
+
+  subprogram ReadSensor
+    features
+      result : out parameter SensorData;
+  end ReadSensor;
+
+  subprogram ProcessData
+    features
+      input : in parameter SensorData;
+      output : out parameter SensorData;
+  end ProcessData;
+
+  thread SensorThread
+    features
+      outp : out data port SensorData;
+  end SensorThread;
+
+  thread implementation SensorThread.i
+    calls
+      seq : {
+        read : subprogram ReadSensor;
+        proc : subprogram ProcessData;
+      };
+    connections
+      c1 : parameter read.result -> proc.input;
+      c2 : parameter proc.output -> outp;
+  end SensorThread.i;
+end ParameterConnection;

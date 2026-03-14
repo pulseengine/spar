@@ -1,0 +1,8 @@
+package PropertyComputedValue
+public
+  thread T
+    properties
+      Compute_Execution_Time => compute (ComputeET);
+      Period => 20 ms;
+  end T;
+end PropertyComputedValue;

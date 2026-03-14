@@ -29,6 +29,9 @@ impl Analysis for DirectionRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error — port direction incompatibility for across/up/down connections,
+        //           bidirectional connection requires in-out ports
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

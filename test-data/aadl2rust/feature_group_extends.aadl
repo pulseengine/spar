@@ -1,0 +1,17 @@
+package FeatureGroupExtends
+public
+  feature group BaseIO
+    features
+      p1 : out data port;
+  end BaseIO;
+
+  feature group ExtendedIO extends BaseIO
+    features
+      p2 : in event port;
+  end ExtendedIO;
+
+  system S
+    features
+      io : feature group ExtendedIO;
+  end S;
+end FeatureGroupExtends;

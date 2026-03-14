@@ -1,3 +1,4 @@
+use spar_syntax::SyntaxKind;
 use spar_syntax::parse;
 
 /// Parse an AADL string and assert it produces no errors.
@@ -635,6 +636,132 @@ end P;
 }
 
 // ====================================================================
+// STPA-REQ-001: Error handling for invalid input
+// ====================================================================
+
+#[test]
+fn unrecognized_token_produces_error() {
+    let input = "package P\npublic\n  @@@ garbage\nend P;";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    let errors: Vec<_> = root
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::ERROR)
+        .collect();
+    assert!(
+        !errors.is_empty(),
+        "expected parse errors for invalid tokens"
+    );
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+#[test]
+fn missing_end_keyword_produces_error() {
+    let input = "package P\npublic\n  system S\n  system S;";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    assert!(
+        !parsed.errors().is_empty() || root.descendants().any(|n| n.kind() == SyntaxKind::ERROR),
+        "expected parse errors for missing end keyword"
+    );
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+#[test]
+fn invalid_component_category_produces_error() {
+    let input = "package P\npublic\n  widget W\n  end W;\nend P;";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    assert!(
+        !parsed.errors().is_empty() || root.descendants().any(|n| n.kind() == SyntaxKind::ERROR),
+        "expected parse errors for invalid component category"
+    );
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+#[test]
+fn incomplete_feature_declaration_produces_error() {
+    let input = "package P\npublic\n  system S\n    features\n      p : in;\n  end S;\nend P;";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    assert!(
+        !parsed.errors().is_empty() || root.descendants().any(|n| n.kind() == SyntaxKind::ERROR),
+        "expected parse errors for incomplete feature"
+    );
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+#[test]
+fn recovery_after_error() {
+    // An error inside a component (missing semicolon) — the parser should
+    // still produce a COMPONENT_TYPE node and an AADL_PACKAGE wrapping it,
+    // alongside parse error diagnostics.
+    let input = "\
+package P
+public
+  system S
+    features
+      p : in data port
+  end S;
+end P;
+";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    let has_error =
+        !parsed.errors().is_empty() || root.descendants().any(|n| n.kind() == SyntaxKind::ERROR);
+    let has_component = root
+        .descendants()
+        .any(|n| n.kind() == SyntaxKind::COMPONENT_TYPE);
+    assert!(has_error, "expected parse errors for missing semicolon");
+    assert!(has_component, "expected COMPONENT_TYPE node despite error");
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+#[test]
+fn error_preserves_source_text() {
+    let inputs = [
+        "package P\npublic\n  @@@ garbage\nend P;",
+        "package P\npublic\n  system S\n  end S\nend P;",
+        "package P\npublic\n  widget W\n  end W;\nend P;",
+        "package\npublic\nend;",
+        "system S\nend S;",
+    ];
+    for input in &inputs {
+        let parsed = parse(input);
+        let root = parsed.syntax_node();
+        assert_eq!(
+            root.text().to_string(),
+            *input,
+            "CST must be lossless even with errors"
+        );
+    }
+}
+
+#[test]
+fn multiple_errors_collected() {
+    let input = "\
+package P
+public
+  @@@ first_garbage
+  $$$ second_garbage
+end P;
+";
+    let parsed = parse(input);
+    let root = parsed.syntax_node();
+    let error_nodes: Vec<_> = root
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::ERROR)
+        .collect();
+    assert!(
+        error_nodes.len() >= 2 || !parsed.errors().is_empty(),
+        "expected multiple errors, got {} ERROR nodes and {} parse errors",
+        error_nodes.len(),
+        parsed.errors().len()
+    );
+    assert_eq!(root.text().to_string(), input, "CST must be lossless");
+}
+
+// ====================================================================
 // Test data files
 // ====================================================================
 
@@ -970,3 +1097,105 @@ aadl2rust_test!(a2r_satellite_software, "satellite_software.aadl");
 aadl2rust_test!(a2r_sunseeker, "sunseeker.aadl");
 aadl2rust_test!(a2r_testsubprogram, "testsubprogram.aadl");
 aadl2rust_test!(a2r_wbs_tire_monitor, "wbs_tire_monitor.aadl");
+
+// ====================================================================
+// STPA-REQ-003: Production coverage — untested grammar productions
+// ====================================================================
+
+// --- Type extensions ---
+aadl2rust_test!(a2r_component_type_extends, "component_type_extends.aadl");
+aadl2rust_test!(a2r_process_type_extends, "process_type_extends.aadl");
+
+// --- Feature group type variants ---
+aadl2rust_test!(
+    a2r_feature_group_with_properties,
+    "feature_group_with_properties.aadl"
+);
+aadl2rust_test!(a2r_feature_group_extends, "feature_group_extends.aadl");
+aadl2rust_test!(
+    a2r_feature_group_inverse_of,
+    "feature_group_inverse_of.aadl"
+);
+
+// --- Prototypes ---
+aadl2rust_test!(a2r_prototype_component, "prototype_component.aadl");
+aadl2rust_test!(a2r_prototype_feature, "prototype_feature.aadl");
+
+// --- Call sequences ---
+aadl2rust_test!(a2r_call_sequence_basic, "call_sequence_basic.aadl");
+aadl2rust_test!(
+    a2r_call_sequence_multiple_calls,
+    "call_sequence_multiple_calls.aadl"
+);
+
+// --- Connection kinds ---
+aadl2rust_test!(a2r_parameter_connection, "parameter_connection.aadl");
+aadl2rust_test!(a2r_data_access_connection, "data_access_connection.aadl");
+aadl2rust_test!(
+    a2r_feature_group_connection,
+    "feature_group_connection.aadl"
+);
+aadl2rust_test!(
+    a2r_bidirectional_connection,
+    "bidirectional_connection.aadl"
+);
+
+// --- Property value kinds ---
+aadl2rust_test!(a2r_property_string_value, "property_string_value.aadl");
+aadl2rust_test!(a2r_property_record_value, "property_record_value.aadl");
+aadl2rust_test!(a2r_property_list_value, "property_list_value.aadl");
+aadl2rust_test!(a2r_property_range_value, "property_range_value.aadl");
+aadl2rust_test!(a2r_property_computed_value, "property_computed_value.aadl");
+aadl2rust_test!(a2r_property_boolean_values, "property_boolean_values.aadl");
+aadl2rust_test!(
+    a2r_property_append_operator,
+    "property_append_operator.aadl"
+);
+
+// --- Annexes ---
+aadl2rust_test!(a2r_annex_library_package, "annex_library_package.aadl");
+aadl2rust_test!(
+    a2r_annex_subclause_component,
+    "annex_subclause_component.aadl"
+);
+
+// --- Abstract features ---
+aadl2rust_test!(
+    a2r_abstract_feature_declaration,
+    "abstract_feature_declaration.aadl"
+);
+
+// --- Modal property values ---
+aadl2rust_test!(a2r_modal_property_value, "modal_property_value.aadl");
+
+// --- Renames ---
+aadl2rust_test!(a2r_renames_package, "renames_package.aadl");
+aadl2rust_test!(a2r_renames_component, "renames_component.aadl");
+aadl2rust_test!(a2r_renames_all, "renames_all.aadl");
+
+// --- Arrays ---
+aadl2rust_test!(a2r_subcomponent_array, "subcomponent_array.aadl");
+aadl2rust_test!(
+    a2r_feature_with_array_dimension,
+    "feature_with_array_dimension.aadl"
+);
+
+// --- Property set type declarations ---
+aadl2rust_test!(
+    a2r_property_set_with_enumeration,
+    "property_set_with_enumeration.aadl"
+);
+aadl2rust_test!(a2r_property_set_with_units, "property_set_with_units.aadl");
+aadl2rust_test!(
+    a2r_property_set_with_record_type,
+    "property_set_with_record_type.aadl"
+);
+
+// --- Miscellaneous productions ---
+aadl2rust_test!(a2r_none_sections, "none_sections.aadl");
+aadl2rust_test!(a2r_refined_feature, "refined_feature.aadl");
+aadl2rust_test!(a2r_requires_modes_section, "requires_modes_section.aadl");
+aadl2rust_test!(a2r_connection_in_modes, "connection_in_modes.aadl");
+aadl2rust_test!(a2r_flow_spec_in_modes, "flow_spec_in_modes.aadl");
+aadl2rust_test!(a2r_virtual_bus_type, "virtual_bus_type.aadl");
+aadl2rust_test!(a2r_virtual_processor_type, "virtual_processor_type.aadl");

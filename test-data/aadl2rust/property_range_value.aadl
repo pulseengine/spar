@@ -1,0 +1,14 @@
+package PropertyRangeValue
+public
+  thread RealTimeTask
+    properties
+      Compute_Execution_Time => 1 ms .. 5 ms;
+      Period => 20 ms;
+      Deadline => 15 ms;
+  end RealTimeTask;
+
+  processor CPU
+    properties
+      Clock_Period => 1 ns .. 10 ns;
+  end CPU;
+end PropertyRangeValue;

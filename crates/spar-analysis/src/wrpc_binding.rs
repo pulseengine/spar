@@ -29,6 +29,8 @@ impl Analysis for WrpcBindingAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Warning — cross-processor connection missing Actual_Connection_Binding to a bus
         let mut diagnostics = Vec::new();
 
         // Only run if the model has multiple processors — otherwise cross-processor

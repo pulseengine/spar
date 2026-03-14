@@ -1,0 +1,23 @@
+package ProcessTypeExtends
+public
+  process BaseProc
+    features
+      inp : in data port;
+  end BaseProc;
+
+  process ExtendedProc extends BaseProc
+    features
+      outp : out data port;
+  end ExtendedProc;
+
+  process implementation BaseProc.i
+  end BaseProc.i;
+
+  process implementation ExtendedProc.i
+    subcomponents
+      t : thread Worker;
+  end ExtendedProc.i;
+
+  thread Worker
+  end Worker;
+end ProcessTypeExtends;

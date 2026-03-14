@@ -357,3 +357,117 @@ artifacts:
     implements: [STPA-REQ-019]
     source-files:
       - crates/spar-hir/src/lib.rs  # serde_round_trip_tests module
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Batch 3: STPA-REQ-001, 003, 008, 013, 016, 021, 022, 023
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-019
+    type: design-decision
+    title: Parser error handling and production coverage tests
+    description: >
+      Added 48 parser tests: 7 error-handling tests (STPA-REQ-001) verifying
+      ERROR nodes are produced for invalid syntax while CST remains lossless,
+      and 41 production coverage tests (STPA-REQ-003) covering previously
+      untested grammar productions (extends, prototypes, call sequences,
+      access connections, property expressions, annexes, renames, etc.).
+    rationale: >
+      Parser correctness is the foundation of all downstream analysis.
+      Error tests ensure the parser never silently drops tokens. Production
+      coverage tests ensure every AADL construct is parsed correctly.
+    implements: [STPA-REQ-001, STPA-REQ-003]
+    source-files:
+      - crates/spar-syntax/tests/parser_tests.rs
+
+  - id: ARCH-020
+    type: architecture-decision
+    title: Modal membership metadata on instance model
+    description: >
+      Added in_modes: Vec<Name> to ComponentInstance and ConnectionInstance.
+      The field is populated during instantiation from SubcomponentItem and
+      ConnectionItem in_modes. All subcomponents are instantiated regardless
+      of mode; modal membership is tracked as metadata for analyses to filter.
+    rationale: >
+      Filtering subcomponents during instantiation would lose components
+      that are active in non-default modes. Tracking as metadata lets each
+      analysis decide how to handle modal components.
+    implements: [STPA-REQ-008]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # in_modes field on ComponentInstance, ConnectionInstance
+
+  - id: ARCH-021
+    type: design-decision
+    title: Unresolved connection endpoint diagnostics
+    description: >
+      compute_semantic_connections() now emits diagnostics for connections
+      with missing endpoints (src/dst None) and unresolved subcomponent
+      references in connection endpoints.
+    rationale: >
+      Silent failure to resolve connection endpoints masks modeling errors.
+      Diagnostics identify exactly which connection and which subcomponent
+      reference failed to resolve.
+    implements: [STPA-REQ-013]
+    source-files:
+      - crates/spar-hir-def/src/instance.rs  # endpoint_diagnostics in compute_semantic_connections
+
+  - id: ARCH-022
+    type: design-decision
+    title: Severity rationale comments in all analysis modules
+    description: >
+      All 22 analysis modules have a severity rationale comment block at the
+      top of their analyze() function documenting Error/Warning/Info criteria.
+    rationale: >
+      Consistent severity assignment prevents over/under-reporting. The
+      comment block ensures new diagnostic additions follow the established
+      criteria for each analysis.
+    implements: [STPA-REQ-016]
+    source-files:
+      - crates/spar-analysis/src/  # All 22 analysis modules
+
+  - id: ARCH-023
+    type: design-decision
+    title: SVG topology verification tests
+    description: >
+      Added 8 tests verifying SVG output contains correct node count,
+      edge count, node labels matching instance names, edge source/target
+      attributes, hierarchy preservation, and parametric size checks.
+    rationale: >
+      SVG rendering must faithfully represent the instance model topology.
+      These tests prevent regressions where nodes or edges are silently
+      dropped or mislabeled.
+    implements: [STPA-REQ-021]
+    source-files:
+      - crates/spar-wasm/src/render.rs  # SVG topology tests
+
+  - id: ARCH-024
+    type: architecture-decision
+    title: Coverage tracking via rivet artifacts
+    description: >
+      Analysis coverage of AS5506 sections is tracked as rivet artifacts
+      with traces-to links in artifacts/requirements.yaml, not as a
+      standalone COMPLIANCE.md document. rivet validate and rivet coverage
+      commands verify completeness.
+    rationale: >
+      Rivet's traceability system is purpose-built for coverage tracking.
+      Standalone documents duplicate what rivet already does and go stale.
+    implements: [STPA-REQ-022]
+    source-files:
+      - artifacts/requirements.yaml   # COVERAGE-* artifacts
+      - artifacts/verification.yaml   # VERIFY-STPA-COVERAGE
+
+  - id: ARCH-025
+    type: architecture-decision
+    title: Regression test module for closed issues
+    description: >
+      Created regression_tests.rs in spar-analysis with 6 seed tests
+      covering past bugs (intentionally_unconnected suppression, invalid
+      containment detection, in_modes preservation, duplicate initial modes,
+      register_all completeness). Each test documents the original bug.
+    rationale: >
+      Regression tests prevent re-introduction of known-bad behavior. The
+      module convention (regression_ prefix, doc comments describing the
+      original bug) makes it easy to add new regressions as bugs are found.
+    implements: [STPA-REQ-023]
+    source-files:
+      - crates/spar-analysis/src/regression_tests.rs
+      - crates/spar-analysis/src/lib.rs  # mod regression_tests

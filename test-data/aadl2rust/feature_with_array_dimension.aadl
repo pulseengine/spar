@@ -1,0 +1,8 @@
+package FeatureWithArrayDimension
+public
+  system Router
+    features
+      input_ports : in data port [8];
+      output_ports : out data port [8];
+  end Router;
+end FeatureWithArrayDimension;

@@ -1,0 +1,24 @@
+package PrototypeComponent
+public
+  system Generic
+    prototypes
+      sub_proto : process;
+      data_proto : data;
+    features
+      p : in data port;
+  end Generic;
+
+  system implementation Generic.i
+    subcomponents
+      sub : process sub_proto;
+  end Generic.i;
+
+  process Concrete
+  end Concrete;
+
+  data ConcreteData
+  end ConcreteData;
+
+  system Bound extends Generic (sub_proto => process Concrete, data_proto => data ConcreteData)
+  end Bound;
+end PrototypeComponent;

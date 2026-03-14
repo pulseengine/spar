@@ -1,0 +1,12 @@
+package PropertyAppendOperator
+public
+  system Base
+    properties
+      Source_Text => ("base.c");
+  end Base;
+
+  system Extended extends Base
+    properties
+      Source_Text +=> ("extra.c");
+  end Extended;
+end PropertyAppendOperator;

@@ -1,0 +1,28 @@
+package DataAccessConnection
+public
+  data SharedBuffer
+  end SharedBuffer;
+
+  thread Producer
+    features
+      buf : requires data access SharedBuffer;
+  end Producer;
+
+  thread Consumer
+    features
+      buf : requires data access SharedBuffer;
+  end Consumer;
+
+  process Controller
+  end Controller;
+
+  process implementation Controller.i
+    subcomponents
+      shared : data SharedBuffer;
+      prod : thread Producer;
+      cons : thread Consumer;
+    connections
+      c1 : data access shared -> prod.buf;
+      c2 : data access shared -> cons.buf;
+  end Controller.i;
+end DataAccessConnection;

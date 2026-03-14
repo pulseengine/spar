@@ -23,6 +23,9 @@ impl Analysis for ClassifierMatchAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error — mismatching classifiers between endpoints, same access kind on both ends
+        //   Info  — one endpoint has classifier but other does not (type safety gap)
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

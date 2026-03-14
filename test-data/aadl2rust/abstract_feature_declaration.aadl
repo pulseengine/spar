@@ -1,0 +1,14 @@
+package AbstractFeatureDeclaration
+public
+  system GenericComponent
+    features
+      f1 : feature;
+      f2 : in feature;
+      f3 : out feature;
+  end GenericComponent;
+
+  abstract GenericAbstract
+    features
+      af : feature;
+  end GenericAbstract;
+end AbstractFeatureDeclaration;

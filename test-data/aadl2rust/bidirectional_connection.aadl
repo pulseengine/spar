@@ -1,0 +1,26 @@
+package BidirectionalConnection
+public
+  data SharedState
+  end SharedState;
+
+  system NodeA
+    features
+      data_io : in out data port SharedState;
+  end NodeA;
+
+  system NodeB
+    features
+      data_io : in out data port SharedState;
+  end NodeB;
+
+  system Network
+  end Network;
+
+  system implementation Network.i
+    subcomponents
+      a : system NodeA;
+      b : system NodeB;
+    connections
+      c1 : port a.data_io <-> b.data_io;
+  end Network.i;
+end BidirectionalConnection;

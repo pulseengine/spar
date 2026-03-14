@@ -32,6 +32,10 @@ impl Analysis for PropertyRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — inverted range ordering, unbalanced parentheses
+        //   Warning — duplicate non-append property, empty property value, mixed list element
+        //             types, malformed reference expression, property applied to wrong category
         let mut diags = Vec::new();
 
         for (comp_idx, _comp) in instance.all_components() {

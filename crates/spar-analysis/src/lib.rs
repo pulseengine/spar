@@ -197,4 +197,6 @@ pub(crate) fn component_depth(instance: &SystemInstance, idx: ComponentInstanceI
 }
 
 #[cfg(test)]
+mod regression_tests;
+#[cfg(test)]
 mod tests;

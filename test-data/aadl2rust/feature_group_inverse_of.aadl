@@ -1,0 +1,21 @@
+package FeatureGroupInverseOf
+public
+  feature group SenderIO
+    features
+      data_out : out data port;
+      ack_in : in event port;
+  end SenderIO;
+
+  feature group ReceiverIO inverse of SenderIO
+  end ReceiverIO;
+
+  system Sender
+    features
+      io : feature group SenderIO;
+  end Sender;
+
+  system Receiver
+    features
+      io : feature group ReceiverIO;
+  end Receiver;
+end FeatureGroupInverseOf;

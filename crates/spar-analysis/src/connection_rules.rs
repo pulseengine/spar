@@ -27,6 +27,8 @@ impl Analysis for ConnectionRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error — feature kind mismatch between connection endpoints, self-loop connection
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

@@ -1,0 +1,13 @@
+package AnnexLibraryPackage
+public
+  annex EMV2 {**
+    error types
+      SensorFailure : type;
+      ActuatorFailure : type;
+      NetworkError : type;
+    end types;
+  **};
+
+  system S
+  end S;
+end AnnexLibraryPackage;

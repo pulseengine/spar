@@ -29,6 +29,11 @@ impl Analysis for Arinc653Analysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — partition window overcommitted (>100% utilization)
+        //   Warning — processor has no partitions, process not bound to partition,
+        //             direct connection crosses partition boundary
+        //   Info    — partition window utilization within budget
         let mut diags = Vec::new();
 
         check_processor_has_partitions(instance, &mut diags);

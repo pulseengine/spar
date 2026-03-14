@@ -27,6 +27,8 @@ impl Analysis for SubcomponentRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error — invalid containment per AS5506 section 4.5, duplicate subcomponent names
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {
