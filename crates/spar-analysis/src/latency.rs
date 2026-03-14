@@ -10,8 +10,8 @@
 //! - Worst case: sum of execution times + sum of periods (sampling delays)
 
 use spar_hir_def::instance::SystemInstance;
-use spar_hir_def::property_value::parse_time_value;
 
+use crate::property_accessors::{get_execution_time, get_timing_property};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// End-to-end flow latency analysis.
@@ -150,30 +150,6 @@ impl Analysis for LatencyAnalysis {
 
         diags
     }
-}
-
-/// Extract a timing property in picoseconds.
-fn get_timing_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
-    let raw = props
-        .get("Timing_Properties", name)
-        .or_else(|| props.get("", name))?;
-    parse_time_value(raw)
-}
-
-/// Extract Compute_Execution_Time in picoseconds.
-/// Takes worst case from range format "min .. max".
-fn get_execution_time(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
-    let raw = props
-        .get("Timing_Properties", "Compute_Execution_Time")
-        .or_else(|| props.get("", "Compute_Execution_Time"))?;
-
-    // Try range format: "min .. max"
-    if let Some((_, max_str)) = raw.split_once("..") {
-        return parse_time_value(max_str.trim());
-    }
-
-    // Single value
-    parse_time_value(raw)
 }
 
 #[cfg(test)]

@@ -16,8 +16,8 @@ use rustc_hash::FxHashMap;
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
-use spar_hir_def::property_value::parse_time_value;
 
+use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Rate Monotonic scheduling analysis.
@@ -203,61 +203,6 @@ fn rma_utilization_bound(n: usize) -> f64 {
     }
     let n_f = n as f64;
     n_f * (2.0_f64.powf(1.0 / n_f) - 1.0)
-}
-
-/// Extract a timing property (Period, Deadline, etc.) in picoseconds.
-fn get_timing_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
-    // Try with Timing_Properties property set first, then unqualified
-    let raw = props
-        .get("Timing_Properties", name)
-        .or_else(|| props.get("", name))?;
-    parse_time_value(raw)
-}
-
-/// Extract Compute_Execution_Time in picoseconds.
-///
-/// This property is typically a range (e.g., "1 ms .. 5 ms"). We take the
-/// worst case (max). If it's a single value, we use that.
-fn get_execution_time(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
-    let raw = props
-        .get("Timing_Properties", "Compute_Execution_Time")
-        .or_else(|| props.get("", "Compute_Execution_Time"))?;
-
-    // Try range format: "min .. max"
-    if let Some((_, max_str)) = raw.split_once("..") {
-        return parse_time_value(max_str.trim());
-    }
-
-    // Single value
-    parse_time_value(raw)
-}
-
-/// Extract processor binding target name from property.
-fn get_processor_binding(props: &spar_hir_def::properties::PropertyMap) -> Option<String> {
-    let raw = props
-        .get("Deployment_Properties", "Actual_Processor_Binding")
-        .or_else(|| props.get("", "Actual_Processor_Binding"))?;
-
-    // Parse "reference (name)" or "(reference (name))"
-    extract_reference_target(raw).map(|s| s.to_string())
-}
-
-/// Extract the target name from a `reference(name)` string.
-fn extract_reference_target(val: &str) -> Option<&str> {
-    let trimmed = val.trim();
-    if let Some(start) = trimmed.find("reference") {
-        let after_ref = &trimmed[start + "reference".len()..];
-        if let Some(paren_start) = after_ref.find('(') {
-            let inner = &after_ref[paren_start + 1..];
-            if let Some(paren_end) = inner.find(')') {
-                let target = inner[..paren_end].trim();
-                if !target.is_empty() {
-                    return Some(target);
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Find the path to a processor component by name for diagnostic reporting.

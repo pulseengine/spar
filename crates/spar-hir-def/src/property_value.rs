@@ -559,4 +559,517 @@ mod tests {
     fn parse_invalid_time() {
         assert_eq!(parse_time_value("not a time"), None);
     }
+
+    // ── STPA-REQ-005: Unit conversion factor validation ─────────
+    //
+    // Validates unit conversion factors against AS5506 Appendix A values
+    // with explicit tests for all unit pairs.
+
+    // ── Time unit conversion factors (all pairs) ────────────────
+
+    #[test]
+    fn time_ns_to_ps() {
+        assert_eq!(convert_units(1.0, "ns", "ps"), Some(1_000.0));
+    }
+
+    #[test]
+    fn time_us_to_ns() {
+        assert_eq!(convert_units(1.0, "us", "ns"), Some(1_000.0));
+    }
+
+    #[test]
+    fn time_us_to_ps() {
+        assert_eq!(convert_units(1.0, "us", "ps"), Some(1_000_000.0));
+    }
+
+    #[test]
+    fn time_ms_to_us() {
+        assert_eq!(convert_units(1.0, "ms", "us"), Some(1_000.0));
+    }
+
+    #[test]
+    fn time_ms_to_ns() {
+        assert_eq!(convert_units(1.0, "ms", "ns"), Some(1_000_000.0));
+    }
+
+    #[test]
+    fn time_ms_to_ps() {
+        assert_eq!(convert_units(1.0, "ms", "ps"), Some(1_000_000_000.0));
+    }
+
+    #[test]
+    fn time_sec_to_ms() {
+        assert_eq!(convert_units(1.0, "sec", "ms"), Some(1_000.0));
+    }
+
+    #[test]
+    fn time_sec_to_us() {
+        assert_eq!(convert_units(1.0, "sec", "us"), Some(1_000_000.0));
+    }
+
+    #[test]
+    fn time_sec_to_ns() {
+        assert_eq!(convert_units(1.0, "sec", "ns"), Some(1_000_000_000.0));
+    }
+
+    #[test]
+    fn time_sec_to_ps() {
+        assert_eq!(convert_units(1.0, "sec", "ps"), Some(1_000_000_000_000.0));
+    }
+
+    #[test]
+    fn time_min_to_sec() {
+        assert_eq!(convert_units(1.0, "min", "sec"), Some(60.0));
+    }
+
+    #[test]
+    fn time_min_to_ms() {
+        assert_eq!(convert_units(1.0, "min", "ms"), Some(60_000.0));
+    }
+
+    #[test]
+    fn time_min_to_us() {
+        assert_eq!(convert_units(1.0, "min", "us"), Some(60_000_000.0));
+    }
+
+    #[test]
+    fn time_min_to_ns() {
+        assert_eq!(convert_units(1.0, "min", "ns"), Some(60_000_000_000.0));
+    }
+
+    #[test]
+    fn time_min_to_ps() {
+        assert_eq!(convert_units(1.0, "min", "ps"), Some(60_000_000_000_000.0));
+    }
+
+    #[test]
+    fn time_hr_to_min() {
+        assert_eq!(convert_units(1.0, "hr", "min"), Some(60.0));
+    }
+
+    #[test]
+    fn time_hr_to_sec() {
+        assert_eq!(convert_units(1.0, "hr", "sec"), Some(3_600.0));
+    }
+
+    #[test]
+    fn time_hr_to_ms() {
+        assert_eq!(convert_units(1.0, "hr", "ms"), Some(3_600_000.0));
+    }
+
+    #[test]
+    fn time_hr_to_us() {
+        assert_eq!(convert_units(1.0, "hr", "us"), Some(3_600_000_000.0));
+    }
+
+    #[test]
+    fn time_hr_to_ns() {
+        assert_eq!(convert_units(1.0, "hr", "ns"), Some(3_600_000_000_000.0));
+    }
+
+    #[test]
+    fn time_hr_to_ps() {
+        assert_eq!(
+            convert_units(1.0, "hr", "ps"),
+            Some(3_600_000_000_000_000.0)
+        );
+    }
+
+    // ── Time: reverse conversions (small → large) ───────────────
+
+    #[test]
+    fn time_ps_to_ns() {
+        assert_eq!(convert_units(1_000.0, "ps", "ns"), Some(1.0));
+    }
+
+    #[test]
+    fn time_ns_to_us() {
+        assert_eq!(convert_units(1_000.0, "ns", "us"), Some(1.0));
+    }
+
+    #[test]
+    fn time_us_to_ms() {
+        assert_eq!(convert_units(1_000.0, "us", "ms"), Some(1.0));
+    }
+
+    #[test]
+    fn time_ms_to_sec() {
+        assert_eq!(convert_units(1_000.0, "ms", "sec"), Some(1.0));
+    }
+
+    #[test]
+    fn time_sec_to_min() {
+        assert_eq!(convert_units(60.0, "sec", "min"), Some(1.0));
+    }
+
+    #[test]
+    fn time_min_to_hr() {
+        assert_eq!(convert_units(60.0, "min", "hr"), Some(1.0));
+    }
+
+    // ── Time: identity conversions ──────────────────────────────
+
+    #[test]
+    fn time_identity() {
+        for unit in &["ps", "ns", "us", "ms", "sec", "min", "hr"] {
+            assert_eq!(
+                convert_units(42.0, unit, unit),
+                Some(42.0),
+                "identity conversion failed for {}",
+                unit
+            );
+        }
+    }
+
+    // ── Size unit conversion factors (all pairs) ────────────────
+
+    #[test]
+    fn size_bytes_to_bits() {
+        assert_eq!(convert_units(1.0, "Bytes", "bits"), Some(8.0));
+    }
+
+    #[test]
+    fn size_kbyte_to_bytes() {
+        assert_eq!(convert_units(1.0, "KByte", "Bytes"), Some(1_024.0));
+    }
+
+    #[test]
+    fn size_kbyte_to_bits() {
+        assert_eq!(convert_units(1.0, "KByte", "bits"), Some(8_192.0));
+    }
+
+    #[test]
+    fn size_mbyte_to_kbyte() {
+        assert_eq!(convert_units(1.0, "MByte", "KByte"), Some(1_024.0));
+    }
+
+    #[test]
+    fn size_mbyte_to_bytes() {
+        assert_eq!(convert_units(1.0, "MByte", "Bytes"), Some(1_048_576.0));
+    }
+
+    #[test]
+    fn size_mbyte_to_bits() {
+        assert_eq!(convert_units(1.0, "MByte", "bits"), Some(8_388_608.0));
+    }
+
+    #[test]
+    fn size_gbyte_to_mbyte() {
+        assert_eq!(convert_units(1.0, "GByte", "MByte"), Some(1_024.0));
+    }
+
+    #[test]
+    fn size_gbyte_to_kbyte() {
+        assert_eq!(convert_units(1.0, "GByte", "KByte"), Some(1_048_576.0));
+    }
+
+    #[test]
+    fn size_gbyte_to_bytes() {
+        assert_eq!(convert_units(1.0, "GByte", "Bytes"), Some(1_073_741_824.0));
+    }
+
+    #[test]
+    fn size_gbyte_to_bits() {
+        assert_eq!(convert_units(1.0, "GByte", "bits"), Some(8_589_934_592.0));
+    }
+
+    #[test]
+    fn size_tbyte_to_gbyte() {
+        assert_eq!(convert_units(1.0, "TByte", "GByte"), Some(1_024.0));
+    }
+
+    #[test]
+    fn size_tbyte_to_mbyte() {
+        assert_eq!(convert_units(1.0, "TByte", "MByte"), Some(1_048_576.0));
+    }
+
+    #[test]
+    fn size_tbyte_to_kbyte() {
+        assert_eq!(convert_units(1.0, "TByte", "KByte"), Some(1_073_741_824.0));
+    }
+
+    #[test]
+    fn size_tbyte_to_bytes() {
+        assert_eq!(
+            convert_units(1.0, "TByte", "Bytes"),
+            Some(1_099_511_627_776.0)
+        );
+    }
+
+    #[test]
+    fn size_tbyte_to_bits() {
+        assert_eq!(
+            convert_units(1.0, "TByte", "bits"),
+            Some(8_796_093_022_208.0)
+        );
+    }
+
+    // ── Size: reverse conversions (small → large) ───────────────
+
+    #[test]
+    fn size_bits_to_bytes() {
+        assert_eq!(convert_units(8.0, "bits", "Bytes"), Some(1.0));
+    }
+
+    #[test]
+    fn size_bytes_to_kbyte() {
+        assert_eq!(convert_units(1_024.0, "Bytes", "KByte"), Some(1.0));
+    }
+
+    #[test]
+    fn size_kbyte_to_mbyte() {
+        assert_eq!(convert_units(1_024.0, "KByte", "MByte"), Some(1.0));
+    }
+
+    #[test]
+    fn size_mbyte_to_gbyte() {
+        assert_eq!(convert_units(1_024.0, "MByte", "GByte"), Some(1.0));
+    }
+
+    #[test]
+    fn size_gbyte_to_tbyte() {
+        assert_eq!(convert_units(1_024.0, "GByte", "TByte"), Some(1.0));
+    }
+
+    // ── Size: identity conversions ──────────────────────────────
+
+    #[test]
+    fn size_identity() {
+        for unit in &["bits", "Bytes", "KByte", "MByte", "GByte", "TByte"] {
+            assert_eq!(
+                convert_units(99.0, unit, unit),
+                Some(99.0),
+                "identity conversion failed for {}",
+                unit
+            );
+        }
+    }
+
+    // ── parse_time_value: comprehensive ─────────────────────────
+
+    #[test]
+    fn parse_time_10ms_to_ps() {
+        assert_eq!(parse_time_value("10 ms"), Some(10_000_000_000));
+    }
+
+    #[test]
+    fn parse_time_1sec_to_ps() {
+        assert_eq!(parse_time_value("1 sec"), Some(1_000_000_000_000));
+    }
+
+    #[test]
+    fn parse_time_500us_to_ps() {
+        assert_eq!(parse_time_value("500 us"), Some(500_000_000));
+    }
+
+    #[test]
+    fn parse_time_1ns_to_ps() {
+        assert_eq!(parse_time_value("1 ns"), Some(1_000));
+    }
+
+    #[test]
+    fn parse_time_100ps_to_ps() {
+        assert_eq!(parse_time_value("100 ps"), Some(100));
+    }
+
+    #[test]
+    fn parse_time_2min_to_ps() {
+        assert_eq!(parse_time_value("2 min"), Some(120_000_000_000_000));
+    }
+
+    #[test]
+    fn parse_time_1hr_to_ps() {
+        assert_eq!(parse_time_value("1 hr"), Some(3_600_000_000_000_000));
+    }
+
+    // ── parse_size_value: comprehensive ─────────────────────────
+
+    #[test]
+    fn parse_size_256kbyte_to_bits() {
+        assert_eq!(parse_size_value("256 KByte"), Some(256 * 8 * 1024));
+    }
+
+    #[test]
+    fn parse_size_1mbyte_to_bits() {
+        assert_eq!(parse_size_value("1 MByte"), Some(8_388_608));
+    }
+
+    #[test]
+    fn parse_size_64bytes_to_bits() {
+        assert_eq!(parse_size_value("64 Bytes"), Some(512));
+    }
+
+    #[test]
+    fn parse_size_1024bits_to_bits() {
+        assert_eq!(parse_size_value("1024 bits"), Some(1024));
+    }
+
+    #[test]
+    fn parse_size_2gbyte_to_bits() {
+        assert_eq!(
+            parse_size_value("2 GByte"),
+            Some(2 * 8 * 1024 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn parse_size_1tbyte_to_bits() {
+        assert_eq!(
+            parse_size_value("1 TByte"),
+            Some(8 * 1024 * 1024 * 1024 * 1024)
+        );
+    }
+
+    // ── Case insensitivity tests ────────────────────────────────
+
+    #[test]
+    fn convert_units_case_insensitive_time() {
+        // "MS", "Ms", "ms" should all work
+        assert_eq!(convert_units(1.0, "MS", "us"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "Ms", "us"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "ms", "us"), Some(1_000.0));
+
+        assert_eq!(convert_units(1.0, "SEC", "ms"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "Sec", "ms"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "NS", "ps"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "US", "ns"), Some(1_000.0));
+        assert_eq!(convert_units(1.0, "PS", "PS"), Some(1.0));
+        assert_eq!(convert_units(1.0, "MIN", "sec"), Some(60.0));
+        assert_eq!(convert_units(1.0, "HR", "min"), Some(60.0));
+    }
+
+    #[test]
+    fn convert_units_case_insensitive_size() {
+        assert_eq!(convert_units(1.0, "BYTES", "bits"), Some(8.0));
+        assert_eq!(convert_units(1.0, "bytes", "bits"), Some(8.0));
+        assert_eq!(convert_units(1.0, "kbyte", "bytes"), Some(1_024.0));
+        assert_eq!(convert_units(1.0, "KBYTE", "BYTES"), Some(1_024.0));
+        assert_eq!(convert_units(1.0, "mbyte", "kbyte"), Some(1_024.0));
+        assert_eq!(convert_units(1.0, "gbyte", "mbyte"), Some(1_024.0));
+        assert_eq!(convert_units(1.0, "tbyte", "gbyte"), Some(1_024.0));
+        assert_eq!(convert_units(1.0, "BITS", "BITS"), Some(1.0));
+    }
+
+    // ── Cross-family and unknown unit failures ──────────────────
+
+    #[test]
+    fn convert_cross_family_time_to_size() {
+        assert_eq!(convert_units(1.0, "ms", "KByte"), None);
+        assert_eq!(convert_units(1.0, "sec", "bits"), None);
+    }
+
+    #[test]
+    fn convert_cross_family_size_to_time() {
+        assert_eq!(convert_units(1.0, "KByte", "ms"), None);
+        assert_eq!(convert_units(1.0, "bits", "sec"), None);
+    }
+
+    #[test]
+    fn convert_unknown_units() {
+        assert_eq!(convert_units(1.0, "furlongs", "ms"), None);
+        assert_eq!(convert_units(1.0, "ms", "furlongs"), None);
+        assert_eq!(convert_units(1.0, "foo", "bar"), None);
+    }
+
+    // ── parse_time_value edge cases ─────────────────────────────
+
+    #[test]
+    fn parse_time_no_space() {
+        // "10ms" should also work (strip_suffix doesn't require space)
+        assert_eq!(parse_time_value("10ms"), Some(10_000_000_000));
+    }
+
+    #[test]
+    fn parse_time_leading_trailing_whitespace() {
+        assert_eq!(parse_time_value("  10 ms  "), Some(10_000_000_000));
+    }
+
+    #[test]
+    fn parse_time_invalid_unit() {
+        assert_eq!(parse_time_value("10 furlongs"), None);
+    }
+
+    #[test]
+    fn parse_time_invalid_number() {
+        assert_eq!(parse_time_value("abc ms"), None);
+    }
+
+    // ── parse_size_value edge cases ─────────────────────────────
+
+    #[test]
+    fn parse_size_no_space() {
+        assert_eq!(parse_size_value("256KByte"), Some(256 * 8 * 1024));
+    }
+
+    #[test]
+    fn parse_size_invalid_unit() {
+        assert_eq!(parse_size_value("256 furlongs"), None);
+    }
+
+    #[test]
+    fn parse_size_invalid_number() {
+        assert_eq!(parse_size_value("abc KByte"), None);
+    }
+
+    // ── Conversion factor constants validation ──────────────────
+    // Verify the raw conversion factors in TIME_UNITS and SIZE_UNITS
+    // match AS5506 Appendix A exactly.
+
+    #[test]
+    fn time_unit_factors_as5506() {
+        let factors: Vec<(&str, u64)> = TIME_UNITS.to_vec();
+        assert_eq!(factors.len(), 7);
+        assert_eq!(factors[0], ("ps", 1));
+        assert_eq!(factors[1], ("ns", 1_000));
+        assert_eq!(factors[2], ("us", 1_000_000));
+        assert_eq!(factors[3], ("ms", 1_000_000_000));
+        assert_eq!(factors[4], ("sec", 1_000_000_000_000));
+        assert_eq!(factors[5], ("min", 60_000_000_000_000));
+        assert_eq!(factors[6], ("hr", 3_600_000_000_000_000));
+    }
+
+    #[test]
+    fn size_unit_factors_as5506() {
+        let factors: Vec<(&str, u64)> = SIZE_UNITS.to_vec();
+        assert_eq!(factors.len(), 6);
+        assert_eq!(factors[0], ("bits", 1));
+        assert_eq!(factors[1], ("Bytes", 8));
+        assert_eq!(factors[2], ("KByte", 8 * 1024));
+        assert_eq!(factors[3], ("MByte", 8 * 1024 * 1024));
+        assert_eq!(factors[4], ("GByte", 8 * 1024 * 1024 * 1024));
+        assert_eq!(factors[5], ("TByte", 8 * 1024 * 1024 * 1024 * 1024));
+    }
+
+    // ── Derived factor relationships ────────────────────────────
+    // Verify the multiplicative relationships between adjacent units.
+
+    #[test]
+    fn time_adjacent_ratios() {
+        // ns/ps = 1000
+        assert_eq!(TIME_UNITS[1].1 / TIME_UNITS[0].1, 1_000);
+        // us/ns = 1000
+        assert_eq!(TIME_UNITS[2].1 / TIME_UNITS[1].1, 1_000);
+        // ms/us = 1000
+        assert_eq!(TIME_UNITS[3].1 / TIME_UNITS[2].1, 1_000);
+        // sec/ms = 1000
+        assert_eq!(TIME_UNITS[4].1 / TIME_UNITS[3].1, 1_000);
+        // min/sec = 60
+        assert_eq!(TIME_UNITS[5].1 / TIME_UNITS[4].1, 60);
+        // hr/min = 60
+        assert_eq!(TIME_UNITS[6].1 / TIME_UNITS[5].1, 60);
+    }
+
+    #[test]
+    fn size_adjacent_ratios() {
+        // Bytes/bits = 8
+        assert_eq!(SIZE_UNITS[1].1 / SIZE_UNITS[0].1, 8);
+        // KByte/Bytes = 1024
+        assert_eq!(SIZE_UNITS[2].1 / SIZE_UNITS[1].1, 1024);
+        // MByte/KByte = 1024
+        assert_eq!(SIZE_UNITS[3].1 / SIZE_UNITS[2].1, 1024);
+        // GByte/MByte = 1024
+        assert_eq!(SIZE_UNITS[4].1 / SIZE_UNITS[3].1, 1024);
+        // TByte/GByte = 1024
+        assert_eq!(SIZE_UNITS[5].1 / SIZE_UNITS[4].1, 1024);
+    }
 }

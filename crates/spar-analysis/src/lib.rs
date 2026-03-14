@@ -35,6 +35,7 @@ pub mod modal_rules;
 pub mod mode_check;
 pub mod mode_rules;
 pub mod naming_rules;
+pub mod property_accessors;
 pub mod property_rules;
 pub mod resource_budget;
 pub mod scheduling;
@@ -89,6 +90,65 @@ impl AnalysisRunner {
     /// Register an analysis to be run.
     pub fn register(&mut self, analysis: Box<dyn Analysis>) {
         self.analyses.push(analysis);
+    }
+
+    /// Register all built-in instance-level analysis passes.
+    ///
+    /// This includes all analyses that implement the [`Analysis`] trait:
+    /// connectivity, hierarchy, completeness, direction rules, classifier
+    /// matching, binding checks, binding rules, flow checks, flow rules,
+    /// mode checks, mode rules, modal rules, property rules, connection
+    /// rules, subcomponent rules, scheduling, latency, resource budget,
+    /// EMV2 fault-tree, ARINC 653, and wRPC binding.
+    pub fn register_all(&mut self) {
+        use arinc653::Arinc653Analysis;
+        use binding_check::BindingCheckAnalysis;
+        use binding_rules::BindingRuleAnalysis;
+        use classifier_match::ClassifierMatchAnalysis;
+        use completeness::CompletenessAnalysis;
+        use connection_rules::ConnectionRuleAnalysis;
+        use connectivity::ConnectivityAnalysis;
+        use direction_rules::DirectionRuleAnalysis;
+        use emv2_analysis::Emv2Analysis;
+        use flow_check::FlowCheckAnalysis;
+        use flow_rules::FlowRuleAnalysis;
+        use hierarchy::HierarchyAnalysis;
+        use latency::LatencyAnalysis;
+        use modal_rules::ModalRuleAnalysis;
+        use mode_check::ModeCheckAnalysis;
+        use mode_rules::ModeRuleAnalysis;
+        use property_rules::PropertyRuleAnalysis;
+        use resource_budget::ResourceBudgetAnalysis;
+        use scheduling::SchedulingAnalysis;
+        use subcomponent_rules::SubcomponentRuleAnalysis;
+        use wrpc_binding::WrpcBindingAnalysis;
+
+        self.register(Box::new(ConnectivityAnalysis));
+        self.register(Box::new(HierarchyAnalysis));
+        self.register(Box::new(CompletenessAnalysis));
+        self.register(Box::new(DirectionRuleAnalysis));
+        self.register(Box::new(ClassifierMatchAnalysis));
+        self.register(Box::new(BindingCheckAnalysis));
+        self.register(Box::new(BindingRuleAnalysis));
+        self.register(Box::new(FlowCheckAnalysis));
+        self.register(Box::new(FlowRuleAnalysis));
+        self.register(Box::new(ModeCheckAnalysis));
+        self.register(Box::new(ModeRuleAnalysis));
+        self.register(Box::new(ModalRuleAnalysis));
+        self.register(Box::new(PropertyRuleAnalysis));
+        self.register(Box::new(ConnectionRuleAnalysis));
+        self.register(Box::new(SubcomponentRuleAnalysis));
+        self.register(Box::new(SchedulingAnalysis));
+        self.register(Box::new(LatencyAnalysis));
+        self.register(Box::new(ResourceBudgetAnalysis));
+        self.register(Box::new(Emv2Analysis));
+        self.register(Box::new(Arinc653Analysis));
+        self.register(Box::new(WrpcBindingAnalysis));
+    }
+
+    /// Return the number of registered analyses.
+    pub fn count(&self) -> usize {
+        self.analyses.len()
     }
 
     /// Run all registered analyses and collect their diagnostics.

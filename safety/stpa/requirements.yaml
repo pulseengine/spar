@@ -80,7 +80,7 @@ artifacts:
       explicit tests for every unit type (Time, Size, Data_Rate) verifying
       that conversion between all unit pairs produces correct results.
       Example: 1 ms = 1_000 us = 1_000_000 ns.
-    status: partial
+    status: implemented
     tags: [safety, properties, units, stpa]
     traces-to: [CC-3]
     mitigates: [H-6]
@@ -201,7 +201,7 @@ artifacts:
       compile-time or inventory-based discovery to prevent omission.
       An integration test must verify the count of registered analyses
       matches the count of Analysis trait implementations.
-    status: partial
+    status: implemented
     tags: [safety, analysis, stpa]
     traces-to: [CC-9]
     mitigates: [H-1]
@@ -214,7 +214,7 @@ artifacts:
       functions (e.g., get_period() -> Option<Duration>) that perform
       unit conversion and type validation. Direct string parsing of
       property values in analysis code is prohibited.
-    status: partial
+    status: implemented
     tags: [safety, analysis, properties, stpa]
     traces-to: [CC-10]
     mitigates: [H-1, H-6]
@@ -252,7 +252,7 @@ artifacts:
       unconnected (e.g., via a property SPAR_Properties::Intentionally_Unconnected).
       Connectivity analysis must suppress warnings for annotated ports
       to reduce false positives and alert fatigue.
-    status: not-implemented
+    status: implemented
     tags: [safety, analysis, false-positive, stpa]
     traces-to: [CC-12]
     mitigates: [H-2]
@@ -269,7 +269,7 @@ artifacts:
       JSON, deserialize it back, and verify structural equality. This
       test must run on a non-trivial AADL model with instances, arrays,
       modes, properties, and connections.
-    status: partial
+    status: implemented
     tags: [safety, output, serde, stpa]
     traces-to: [CC-13]
     mitigates: [H-4]
