@@ -97,7 +97,7 @@ impl TestInstanceBuilder {
         let map = self
             .property_maps
             .entry(comp)
-            .or_insert_with(PropertyMap::new);
+            .or_default();
         map.add(PropertyValue {
             name: PropertyRef {
                 property_set: Some(Name::new(set)),
