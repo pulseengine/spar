@@ -362,6 +362,141 @@ artifacts:
     status: passing
 
   # ══════════════════════════════════════════════════════════════════════
+  # Batch 2: STPA-REQ-005, 014, 015, 018, 019
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: VAL-029
+    type: validation
+    title: Intentionally unconnected port suppresses warning
+    description: >
+      Verifies that a port annotated with SPAR_Properties::
+      Intentionally_Unconnected does not produce a connectivity warning.
+      Tests cover single feature, "all" variant, parenthesized list,
+      and case-insensitive matching.
+    method: unit-test
+    validates: [STPA-REQ-018, ARCH-014]
+    test-location: crates/spar-analysis/src/connectivity.rs
+    test-name: tests::intentionally_unconnected_*
+    status: passing
+
+  - id: VAL-030
+    type: validation
+    title: Unannotated port still warns
+    description: >
+      Regression guard verifying that ports without the
+      Intentionally_Unconnected property still produce connectivity
+      warnings.
+    method: unit-test
+    validates: [STPA-REQ-018, ARCH-014]
+    test-location: crates/spar-analysis/src/connectivity.rs
+    test-name: tests::no_property_still_warns
+    status: passing
+
+  - id: VAL-031
+    type: validation
+    title: register_all registers all analyses
+    description: >
+      Verifies that AnalysisRunner::register_all() registers exactly
+      21 analysis passes and that the count matches expectations.
+    method: unit-test
+    validates: [STPA-REQ-014, ARCH-015]
+    test-location: crates/spar-analysis/src/lib.rs
+    test-name: tests::test_register_all_count
+    status: passing
+
+  - id: VAL-032
+    type: validation
+    title: Time unit conversion pairs validated against AS5506
+    description: >
+      80+ tests validate every time unit conversion pair (ps, ns, us,
+      ms, sec, min, hr) against AS5506 Appendix A values. Includes
+      forward/reverse conversions, adjacent ratio verification, and
+      raw factor validation.
+    method: unit-test
+    validates: [STPA-REQ-005, ARCH-016]
+    test-location: crates/spar-hir-def/src/property_value.rs
+    test-name: tests::time_* and tests::size_*
+    status: passing
+
+  - id: VAL-033
+    type: validation
+    title: Size unit conversion pairs validated
+    description: >
+      Tests validate size unit conversions (bits, Bytes, KByte, MByte,
+      GByte, TByte) with factor verification (8x for bits/Bytes, 1024x
+      for powers).
+    method: unit-test
+    validates: [STPA-REQ-005, ARCH-016]
+    test-location: crates/spar-hir-def/src/property_value.rs
+    test-name: tests::size_* and tests::adjacent_ratio_*
+    status: passing
+
+  - id: VAL-034
+    type: validation
+    title: Unit conversion case insensitivity
+    description: >
+      Verifies that unit names are matched case-insensitively (e.g.,
+      "MS", "Ms", "ms" all work).
+    method: unit-test
+    validates: [STPA-REQ-005, ARCH-016]
+    test-location: crates/spar-hir-def/src/property_value.rs
+    test-name: tests::case_insensitive_*
+    status: passing
+
+  - id: VAL-035
+    type: validation
+    title: Typed property accessors parse correctly
+    description: >
+      Verifies that shared property accessors (get_timing_property,
+      get_execution_time, get_size_property, get_processor_binding,
+      extract_reference_target) parse property values correctly.
+    method: unit-test
+    validates: [STPA-REQ-015, ARCH-017]
+    test-location: crates/spar-analysis/src/property_accessors.rs
+    test-name: tests::*
+    status: passing
+
+  - id: VAL-036
+    type: validation
+    title: Analyses use shared accessors (no duplicate parsing)
+    description: >
+      Verifies that scheduling, latency, resource_budget, arinc653,
+      binding_check, and binding_rules all import from
+      property_accessors instead of defining private helpers.
+    method: code-review
+    validates: [STPA-REQ-015, ARCH-017]
+    evidence: >
+      6 analysis modules updated to use crate::property_accessors::*.
+      212 lines of duplicate code removed.
+    status: passing
+
+  - id: VAL-037
+    type: validation
+    title: Serde round-trip for all public types
+    description: >
+      24 tests serialize each spar-hir public type to JSON, deserialize
+      back, and assert structural equality. Covers all 16 serializable
+      types plus all enum variants.
+    method: unit-test
+    validates: [STPA-REQ-019, ARCH-018]
+    test-location: crates/spar-hir/src/lib.rs
+    test-name: serde_round_trip_tests::*
+    status: passing
+
+  - id: VAL-038
+    type: validation
+    title: Nested InstanceNode round-trip
+    description: >
+      Verifies that a complex InstanceNode tree (system > process >
+      thread) with features, connections, array indices, and diagnostics
+      survives JSON serialization round-trip.
+    method: unit-test
+    validates: [STPA-REQ-019, ARCH-018]
+    test-location: crates/spar-hir/src/lib.rs
+    test-name: serde_round_trip_tests::instance_node_nested_tree_round_trip
+    status: passing
+
+  # ══════════════════════════════════════════════════════════════════════
   # Aggregate Test Coverage
   # ══════════════════════════════════════════════════════════════════════
 
@@ -369,19 +504,24 @@ artifacts:
     type: validation-summary
     title: Full test suite execution
     description: >
-      All 1,007 tests in the spar workspace pass after the STPA safety
+      All 1,140 tests in the spar workspace pass after batch 2
       implementation. cargo clippy --workspace reports no warnings.
     method: integration-test
     validates:
       - STPA-REQ-002
       - STPA-REQ-004
+      - STPA-REQ-005
       - STPA-REQ-006
       - STPA-REQ-007
       - STPA-REQ-009
       - STPA-REQ-010
       - STPA-REQ-011
       - STPA-REQ-012
+      - STPA-REQ-014
+      - STPA-REQ-015
       - STPA-REQ-017
+      - STPA-REQ-018
+      - STPA-REQ-019
     command: cargo test --workspace
-    result: "1,007 passed, 0 failed"
+    result: "1,140 passed, 0 failed"
     status: passing

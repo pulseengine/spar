@@ -253,3 +253,107 @@ artifacts:
       - crates/spar-analysis/src/scheduling.rs       # SOM check in analyze()
       - crates/spar-analysis/src/latency.rs           # SOM check in analyze()
       - crates/spar-analysis/src/resource_budget.rs   # SOM check in analyze()
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Batch 2: STPA-REQ-005, 014, 015, 018, 019
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-014
+    type: architecture-decision
+    title: Intentionally_Unconnected property suppresses connectivity warnings
+    description: >
+      ConnectivityAnalysis checks SPAR_Properties::Intentionally_Unconnected
+      on each component before emitting unconnected port warnings. The
+      property value supports three formats: "true"/"all" (suppress all),
+      a single feature name, or a comma-separated list (with optional
+      parentheses). Matching is case-insensitive.
+    rationale: >
+      False positive connectivity warnings for debug/monitoring ports cause
+      alert fatigue (Loss Scenario LS-8). This annotation lets engineers
+      explicitly mark ports as intentionally unconnected, reducing noise
+      while preserving warnings for genuinely forgotten connections.
+    implements: [STPA-REQ-018]
+    source-files:
+      - crates/spar-analysis/src/connectivity.rs  # is_intentionally_unconnected helper + integration
+
+  - id: ARCH-015
+    type: architecture-decision
+    title: AnalysisRunner::register_all() for automatic analysis registration
+    description: >
+      Added register_all() method to AnalysisRunner that registers all 21
+      Analysis trait implementations. The CLI now calls register_all()
+      instead of individual register() calls. Added count() method for
+      test verification.
+    rationale: >
+      Manual registration (Loss Scenario LS-5) risks omitting new analyses.
+      register_all() is the single point of registration. An integration
+      test verifies the count matches expectations. When a new analysis is
+      added, the developer must add it to register_all() and update the
+      count assertion.
+    implements: [STPA-REQ-014]
+    source-files:
+      - crates/spar-analysis/src/lib.rs    # register_all() and count()
+      - crates/spar-cli/src/main.rs        # Updated to use register_all()
+
+  - id: ARCH-016
+    type: architecture-decision
+    title: Comprehensive unit conversion validation tests
+    description: >
+      Added 80+ tests to property_value.rs validating every unit conversion
+      pair for both TIME_UNITS (7 units) and SIZE_UNITS (6 units) against
+      AS5506 Appendix A values. Tests include forward/reverse conversions,
+      adjacent ratio verification, case insensitivity, cross-family failure,
+      and edge cases.
+    rationale: >
+      Unit conversion errors (Loss Scenario LS-2) can cause analyses to
+      compute with values off by orders of magnitude. Exhaustive pair-wise
+      testing ensures every factor matches the standard. Adjacent ratio
+      tests (1000x for time sub-second, 60x for min, 3600x for hr, 8x
+      for bits/Bytes, 1024x for size powers) provide a second validation
+      dimension.
+    implements: [STPA-REQ-005]
+    source-files:
+      - crates/spar-hir-def/src/property_value.rs  # TIME_UNITS, SIZE_UNITS, conversion tests
+
+  - id: ARCH-017
+    type: architecture-decision
+    title: Shared typed property accessors module
+    description: >
+      Created property_accessors.rs consolidating duplicate property
+      parsing helpers from 6 analysis modules into 7 shared functions:
+      get_timing_property, get_execution_time, get_execution_time_or_exec,
+      get_processor_binding, get_size_property, get_memory_binding,
+      extract_reference_target. Each returns typed values (u64 picoseconds,
+      u64 bits, String reference name).
+    rationale: >
+      Duplicate parsing logic across analysis modules (scheduling, latency,
+      resource_budget, arinc653, binding_check, binding_rules) risks
+      inconsistent behavior if one copy is fixed but others aren't. A
+      single module ensures all analyses parse properties identically.
+      Typed return values (u64 instead of &str) prevent downstream
+      parsing errors.
+    implements: [STPA-REQ-015]
+    source-files:
+      - crates/spar-analysis/src/property_accessors.rs  # Shared accessors
+      - crates/spar-analysis/src/lib.rs                  # pub mod property_accessors
+
+  - id: ARCH-018
+    type: architecture-decision
+    title: Serde round-trip tests for all public types
+    description: >
+      Added 24 round-trip tests to spar-hir covering every Serialize+
+      Deserialize type: Package, ComponentType, ComponentImpl, Feature,
+      Subcomponent, Connection, FlowSpec, EndToEndFlow, Mode,
+      ModeTransition, PropertyAssociation, Classifier (all variants),
+      InstanceNode (with nested tree), InstanceFeature, InstanceConnection,
+      plus all enum types (ComponentCategory, Direction, FeatureKind,
+      ConnectionKind, FlowKind, AccessKind).
+    rationale: >
+      Serialization bugs (Loss Scenario LS-6) cause downstream consumers
+      to see incomplete data. Round-trip tests verify that every field
+      survives serialize→deserialize. Testing includes nested structures
+      (InstanceNode with children, features, connections) and optional
+      fields (array_index, applies_to, in_modes).
+    implements: [STPA-REQ-019]
+    source-files:
+      - crates/spar-hir/src/lib.rs  # serde_round_trip_tests module
