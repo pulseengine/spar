@@ -327,3 +327,119 @@ artifacts:
     tags: [safety, testing, stpa]
     traces-to: [SC-1]
     mitigates: [H-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Analysis Scope Safety Requirements (from STPA wave 2: tool landscape)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-024
+    type: requirement
+    title: Response Time Analysis for scheduling
+    description: >
+      Scheduling analysis must implement Response Time Analysis (RTA)
+      in addition to RM utilization bound. RTA computes exact worst-case
+      response time including blocking, preemption, and priority
+      inversion. When response time exceeds deadline, emit error.
+      When RM bound is met but RTA shows tight margin, emit warning.
+    status: not-implemented
+    tags: [safety, analysis, scheduling, stpa]
+    traces-to: [CC-15, CC-16]
+    mitigates: [H-7, H-1]
+
+  - id: STPA-REQ-025
+    type: requirement
+    title: EDF schedulability analysis
+    description: >
+      Scheduling analysis must support Earliest Deadline First (EDF)
+      policy in addition to Rate Monotonic. EDF necessary test is
+      U <= 1.0 (sufficient and necessary for independent tasks).
+      Spar must detect when thread Scheduling_Protocol is EDF and
+      apply the correct feasibility test.
+    status: not-implemented
+    tags: [safety, analysis, scheduling, stpa]
+    traces-to: [CC-15]
+    mitigates: [H-7]
+
+  - id: STPA-REQ-026
+    type: requirement
+    title: Scheduling margin and sensitivity reporting
+    description: >
+      Scheduling and latency analyses must report margin between
+      computed value and limit. Format: "utilization 68.3% vs bound
+      69.3%, margin 1.0 percentage points." When margin < 5%, emit
+      warning "near scheduling limit." When margin < 1%, emit warning
+      "critically narrow scheduling margin."
+    status: not-implemented
+    tags: [safety, analysis, scheduling, stpa]
+    traces-to: [CC-16]
+    mitigates: [H-7]
+
+  - id: STPA-REQ-027
+    type: requirement
+    title: Scheduling assumption violation detection
+    description: >
+      When RM scheduling analysis is run on a model containing shared
+      resources (data components with concurrent access), priority
+      ceiling protocols, or non-preemptive sections, the analysis must
+      emit a warning that the RM utilization bound does not account for
+      these factors and the result may be optimistic.
+    status: not-implemented
+    tags: [safety, analysis, scheduling, stpa]
+    traces-to: [CC-15]
+    mitigates: [H-7]
+
+  - id: STPA-REQ-028
+    type: requirement
+    title: Fault tree generation from EMV2 error models
+    description: >
+      When EMV2 error propagation annotations are present, spar must
+      generate a fault tree following error flows from component error
+      sources through error paths to system-level error sinks. The
+      fault tree must identify minimal cut sets. If FTA generation is
+      not yet implemented, emit an info diagnostic stating the gap.
+    status: not-implemented
+    tags: [safety, analysis, emv2, stpa]
+    traces-to: [CC-17]
+    mitigates: [H-8, H-1]
+
+  - id: STPA-REQ-029
+    type: requirement
+    title: FMEA table generation from EMV2 error models
+    description: >
+      When EMV2 error models specify error sources with occurrence
+      properties, spar must generate an FMEA table listing each
+      component, failure modes (error types), effects (propagated
+      errors), and severity. Output as structured JSON.
+    status: not-implemented
+    tags: [safety, analysis, emv2, stpa]
+    traces-to: [CC-17]
+    mitigates: [H-8]
+
+  - id: STPA-REQ-030
+    type: requirement
+    title: Deployment feasibility cross-check
+    description: >
+      An analysis pass must cross-check deployment bindings against
+      combined resource constraints: CPU utilization per processor
+      (from scheduling), memory usage per memory component (from
+      resource budget), and bandwidth per bus (from bandwidth budget).
+      When any single resource exceeds 90% capacity, emit warning.
+      When any exceeds 100%, emit error.
+    status: not-implemented
+    tags: [safety, analysis, deployment, stpa]
+    traces-to: [CC-18]
+    mitigates: [H-7]
+
+  - id: STPA-REQ-031
+    type: requirement
+    title: Analysis limitation documentation in output
+    description: >
+      Each analysis pass must include in its info-level diagnostic
+      output a statement of what it checks and what it does not.
+      Example: "Scheduling: RM utilization bound (does not account
+      for blocking, priority inversion, or non-preemptive sections.
+      Consider RTA for stronger guarantees)."
+    status: not-implemented
+    tags: [safety, analysis, documentation, stpa]
+    traces-to: [CC-15, SC-7]
+    mitigates: [H-7]
