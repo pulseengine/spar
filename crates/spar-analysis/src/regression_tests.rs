@@ -94,10 +94,7 @@ impl TestInstanceBuilder {
     }
 
     fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
-        let map = self
-            .property_maps
-            .entry(comp)
-            .or_default();
+        let map = self.property_maps.entry(comp).or_default();
         map.add(PropertyValue {
             name: PropertyRef {
                 property_set: Some(Name::new(set)),
