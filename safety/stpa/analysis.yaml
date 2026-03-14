@@ -109,6 +109,32 @@ artifacts:
     severity: critical
     losses: [L-1]
 
+  - id: H-7
+    type: hazard
+    title: Analysis scope creates false confidence
+    description: >
+      Spar provides an analysis verdict (e.g., "schedulable") using an
+      algorithm with unstated limitations (e.g., RM utilization bound
+      assumes no blocking). Engineer trusts the verdict. The system
+      fails at runtime because the actual conditions violate the
+      algorithm's assumptions. The hazard is not a bug — spar's
+      analysis is correct within its assumptions — but the assumptions
+      are insufficient for the model.
+    severity: critical
+    losses: [L-1, L-3]
+
+  - id: H-8
+    type: hazard
+    title: Missing safety analysis output for certification
+    description: >
+      Safety reviewer expects standard certification artifacts (fault
+      trees, FMEA tables, scheduling simulation traces) from the AADL
+      model. Spar parses the relevant model data (EMV2, timing) but
+      does not produce the expected output format. Reviewer must fall
+      back to manual analysis, negating the tool's value.
+    severity: marginal
+    losses: [L-3, L-4]
+
   # ══════════════════════════════════════════════════════════════════════
   # STEP 1c: System-Level Constraints
   # ══════════════════════════════════════════════════════════════════════
@@ -166,6 +192,26 @@ artifacts:
       defaults, and inheritance chains. Unit conversion factors must match
       the AS5506 standard.
     hazards: [H-6]
+
+  - id: SC-7
+    type: system-constraint
+    title: Analysis must communicate its limitations
+    description: >
+      Each analysis pass must clearly state what it checks AND what it
+      does not check. When an algorithm's assumptions may be violated
+      by the model (e.g., RM scheduling with blocking threads), the
+      analysis must warn that its verdict may be insufficient.
+    hazards: [H-7]
+
+  - id: SC-8
+    type: system-constraint
+    title: Standard safety outputs must be producible
+    description: >
+      When spar parses safety-relevant model data (EMV2 error models,
+      timing properties), it must produce standard safety analysis
+      outputs (fault trees, FMEA tables, schedulability proofs) or
+      clearly document that these outputs are not yet supported.
+    hazards: [H-8]
 
   # ══════════════════════════════════════════════════════════════════════
   # STEP 2: Control Structure
@@ -497,6 +543,79 @@ artifacts:
     controller: CTRL-ANALYSIS
     hazards: [H-2]
 
+  # ── Analysis Scope UCAs (from tool landscape review) ──────────────────
+
+  - id: UCA-17
+    type: uca
+    title: Scheduling analysis gives misleading verdict
+    uca-type: providing
+    context: >
+      When the model has threads with blocking resources, priority
+      inversion, or non-preemptive sections, but scheduling analysis
+      only checks the RM utilization bound (which assumes pure
+      preemptive scheduling with no blocking).
+    rationale: >
+      RM bound is a sufficient condition only. A system that passes
+      RM may still miss deadlines. Response Time Analysis (RTA) accounts
+      for blocking and would detect the failure. Engineer trusts "within
+      RM bound" as "schedulable" when it means "possibly schedulable."
+      Cheddar and MAST both provide RTA; spar does not.
+    controller: CTRL-ANALYSIS
+    hazards: [H-7]
+
+  - id: UCA-18
+    type: uca
+    title: Analysis does not report margin/sensitivity
+    uca-type: not-providing
+    context: >
+      When the system is schedulable but with minimal margin (e.g.,
+      utilization 0.68 vs RM bound 0.69), and no sensitivity analysis
+      is provided to indicate proximity to failure.
+    rationale: >
+      Engineer sees "schedulable" (green) with no indication that a
+      1% increase in execution time would cause deadline misses. MAST
+      provides sensitivity analysis showing exactly how much slack
+      exists. Without margin information, engineers make optimization
+      decisions (adding features, reducing processor speed) that push
+      the system past the tipping point.
+    controller: CTRL-ANALYSIS
+    hazards: [H-7, H-1]
+
+  - id: UCA-19
+    type: uca
+    title: EMV2 data parsed but no safety artifacts generated
+    uca-type: not-providing
+    context: >
+      When the model contains EMV2 error propagation annotations and
+      the engineer expects fault tree, FMEA, or FHA output, but spar
+      only reports "EMV2 annotations found" as info diagnostics.
+    rationale: >
+      EMV2 parsing without FTA/FMEA generation is like parsing AADL
+      without analysis — the data exists but no actionable output is
+      produced. Safety reviewer cannot use spar results for DO-178C
+      certification evidence. EMFTA (SEI/CMU) generates fault trees
+      from EMV2; spar does not.
+    controller: CTRL-ANALYSIS
+    hazards: [H-8, H-1]
+
+  - id: UCA-20
+    type: uca
+    title: No cross-analysis deployment feasibility check
+    uca-type: not-providing
+    context: >
+      When resource budget analysis passes (memory fits) and scheduling
+      analysis passes (per-processor utilization OK) independently, but
+      the combined deployment is infeasible because analyses do not
+      cross-check their results.
+    rationale: >
+      Each analysis runs independently via the Analysis trait. No
+      analysis considers the combined effect of bindings across
+      scheduling, memory, bandwidth, and timing. ArcheOpterix solves
+      this with multi-objective optimization. Spar has no combined
+      deployment feasibility check.
+    controller: CTRL-ANALYSIS
+    hazards: [H-7]
+
   # ── Output Controller UCAs ────────────────────────────────────────────
 
   - id: UCA-14
@@ -694,6 +813,54 @@ artifacts:
     ucas: [UCA-16]
     hazards: [H-1]
 
+  - id: CC-15
+    type: controller-constraint
+    title: Analysis must warn when algorithm assumptions are violated
+    constraint: >
+      When a scheduling/timing analysis uses an algorithm with
+      assumptions (e.g., RM assumes no blocking), the analysis must
+      check whether the model violates those assumptions. If assumptions
+      are violated, the analysis must emit a warning stating that
+      the verdict is insufficient and recommending a stronger analysis.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-17]
+    hazards: [H-7]
+
+  - id: CC-16
+    type: controller-constraint
+    title: Scheduling analysis must report margin
+    constraint: >
+      Scheduling and latency analyses must report the margin between
+      the computed value and the limit (e.g., "utilization 68.3% vs
+      bound 69.3%, margin 1.0%"). Near-miss conditions (margin < 5%)
+      must be flagged as warnings.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-18]
+    hazards: [H-7]
+
+  - id: CC-17
+    type: controller-constraint
+    title: EMV2 analysis must produce standard safety outputs or document gap
+    constraint: >
+      When EMV2 error model annotations are present, the analysis must
+      either produce fault tree / FMEA output or emit an info diagnostic
+      stating "EMV2 annotations found but FTA/FMEA generation not yet
+      implemented" so the engineer knows the gap exists.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-19]
+    hazards: [H-8]
+
+  - id: CC-18
+    type: controller-constraint
+    title: Deployment analyses must cross-check resource constraints
+    constraint: >
+      When multiple analyses (scheduling, memory budget, bandwidth)
+      operate on overlapping deployment bindings, at least one analysis
+      must check the combined feasibility of the deployment.
+    controller: CTRL-ANALYSIS
+    ucas: [UCA-20]
+    hazards: [H-7]
+
   # ══════════════════════════════════════════════════════════════════════
   # STEP 4: Loss Scenarios
   # ══════════════════════════════════════════════════════════════════════
@@ -836,3 +1003,90 @@ artifacts:
       - Alert fatigue causes engineer to ignore diagnostics
     uca: [UCA-13]
     hazards: [H-2, H-1]
+
+  - id: LS-9
+    type: loss-scenario
+    title: RM utilization bound masks deadline miss
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A system has 4 threads bound to one processor. Spar's scheduling
+      analysis computes utilization 0.68, below the RM bound of 0.69
+      for n=4. It reports "schedulable." However, thread T3 has a
+      shared resource protected by priority ceiling, adding 2ms of
+      blocking time. Response Time Analysis would show that T4's
+      response time (12ms) exceeds its deadline (10ms). The system
+      WILL miss deadlines at runtime. Spar's RM-only analysis cannot
+      detect this because RMA does not model blocking.
+    causal-factors:
+      - Scheduling analysis implements only RM utilization bound
+      - RM bound assumes pure preemptive scheduling with no blocking
+      - No Response Time Analysis (RTA) implemented
+      - No warning emitted when blocking resources exist in the model
+    uca: [UCA-17]
+    hazards: [H-7, H-1]
+
+  - id: LS-10
+    type: loss-scenario
+    title: No margin visibility before system change
+    scenario-type: inadequate-feedback
+    description: >
+      A system passes scheduling analysis at utilization 68.3% vs RM
+      bound 69.3%. The engineer adds a new monitoring thread (execution
+      time 0.5ms, period 50ms, utilization 1.0%). The new utilization
+      is 69.3% — exactly at the bound. Spar says "within bound" (pass).
+      The engineer adds one more thread. Now utilization is 70.1% —
+      above the bound. Spar says "may miss deadlines" (warning). The
+      engineer is surprised because the previous analysis gave no
+      indication they were on the edge. With sensitivity analysis,
+      spar would have reported "margin: 1.0%, 0.5ms of additional
+      WCET would exceed bound" on the first analysis.
+    causal-factors:
+      - No sensitivity/margin analysis
+      - Binary pass/fail verdict with no proximity information
+      - Engineer has no visibility into how close to failure
+    uca: [UCA-18]
+    hazards: [H-7]
+
+  - id: LS-11
+    type: loss-scenario
+    title: EMV2 present but no fault tree for certification
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An engineer models error propagation paths for a flight control
+      system using EMV2 annex (error sources, error paths, error sinks).
+      They run `spar analyze`. The emv2_analysis pass reports "EMV2
+      annotations found on 12 components" (info). No fault tree is
+      generated. The safety reviewer asks for the FTA required by
+      ARP4761. The engineer expected spar to produce it — after all,
+      spar parsed the EMV2. They must fall back to manual FTA
+      construction, defeating the purpose of modeling error flows
+      in AADL.
+    causal-factors:
+      - EMV2 parsing complete but no FTA generation algorithm
+      - emv2_analysis only checks for annotation presence
+      - No clear communication that FTA is not implemented
+      - Engineer assumed parsing EMV2 implies analysis EMV2
+    uca: [UCA-19]
+    hazards: [H-8, H-1]
+
+  - id: LS-12
+    type: loss-scenario
+    title: Independent analyses miss combined deployment infeasibility
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A system has 8 threads on 2 processors. Memory budget analysis
+      says each processor has sufficient RAM. Scheduling analysis says
+      each processor is below RM bound. Bandwidth analysis says each
+      bus has capacity. But: 6 threads are bound to processor 1 and
+      only 2 to processor 2, because the binding_check analysis
+      validated existing bindings rather than checking optimality.
+      Processor 1 is at 95% utilization while processor 2 is at 15%.
+      Any execution time variation on processor 1 causes failures.
+      No analysis flagged the imbalanced deployment.
+    causal-factors:
+      - Analyses run independently (no cross-analysis)
+      - binding_check validates consistency but not feasibility
+      - No deployment optimization or load balancing analysis
+      - Resource budget and scheduling don't share results
+    uca: [UCA-20]
+    hazards: [H-7, H-1]
