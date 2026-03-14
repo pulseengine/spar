@@ -111,10 +111,7 @@ impl TestInstanceBuilder {
         property_name: &str,
         value: &str,
     ) {
-        let map = self
-            .property_maps
-            .entry(comp)
-            .or_default();
+        let map = self.property_maps.entry(comp).or_default();
         map.add(PropertyValue {
             name: PropertyRef {
                 property_set: Some(Name::new(property_set)),
