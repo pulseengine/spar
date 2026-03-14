@@ -200,6 +200,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
@@ -233,6 +234,7 @@ mod tests {
                     subcomponent: Some(Name::new(dst_sub)),
                     feature: Name::new(dst_feat),
                 }),
+                in_modes: Vec::new(),
             });
             self.components[owner].connections.push(conn_idx);
             conn_idx

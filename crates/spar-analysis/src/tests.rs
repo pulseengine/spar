@@ -58,6 +58,7 @@ impl TestInstanceBuilder {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         })
     }
 
@@ -95,6 +96,7 @@ impl TestInstanceBuilder {
             owner,
             src: None,
             dst: None,
+            in_modes: Vec::new(),
         });
         self.components[owner].connections.push(idx);
         idx

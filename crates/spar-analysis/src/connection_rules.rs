@@ -209,6 +209,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
@@ -247,6 +248,7 @@ mod tests {
                 owner,
                 src: Some(src),
                 dst: Some(dst),
+                in_modes: Vec::new(),
             });
             self.components[owner].connections.push(idx);
             idx
@@ -525,6 +527,7 @@ mod tests {
             owner: root,
             src: None,
             dst: None,
+            in_modes: Vec::new(),
         });
         b.components[root].connections.push(idx);
 
