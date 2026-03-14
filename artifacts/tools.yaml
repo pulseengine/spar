@@ -560,6 +560,170 @@ artifacts:
         export for timing verification is a natural extension. ~400 LOC.
       spar-status: partial
 
+  # ── Code Generation & Model Processing ────────────────────────────
+
+  - id: TOOL-HAMR
+    type: aadl-tool
+    title: Sireum HAMR — High Assurance Modeling and Rapid-engineering
+    description: >
+      Multi-platform code generation framework from Kansas State University.
+      Generates Rust, C, and Slang (safety-critical Scala) from AADL models.
+      JVM-based simulation for rapid prototyping. Code-level verification
+      via Verus (Rust) and Logika (Slang). Now supports SysML v2.
+    fields:
+      tool-url: https://hamr.sireum.org
+      origin: academic
+      maintainer: Kansas State University
+      tool-status: active
+      category: code-generation
+      capabilities:
+        - Rust code generation from AADL thread/process models
+        - C code generation
+        - Slang (safety-critical Scala) code generation
+        - JVM-based simulation framework for rapid prototyping
+        - Code-level formal verification via Verus (Rust)
+        - SysML v2 support
+        - ARINC 653 and seL4 runtime targets
+      differentiator: >
+        Only tool generating Rust from AADL. Verus integration enables
+        formally verified Rust code from architecture models. JVM simulation
+        allows testing before deploying to embedded targets.
+      adoption-potential: >
+        Priority HIGH: Rust skeleton generation is directly aligned with
+        spar's ecosystem. Could study HAMR's AADL-to-Rust mapping for
+        thread dispatch, port read/write, and scheduling. Verus integration
+        for formal verification of generated code is unique. ~800 LOC
+        for basic Rust skeleton generation.
+      spar-status: not-started
+
+  - id: TOOL-AWAS
+    type: aadl-tool
+    title: Sireum Awas — Architecture-Wide Analysis Suite
+    description: >
+      Information flow and error propagation analysis from Kansas State
+      University. Unified analysis of data/control flows, security
+      information flows, and EMV2 error propagation paths with
+      interactive visualization.
+    fields:
+      tool-url: https://awas.sireum.org
+      origin: academic
+      maintainer: Kansas State University
+      tool-status: active
+      category: safety
+      capabilities:
+        - Security-oriented information flow analysis
+        - Interactive flow visualization with querying
+        - Unified functional and error flow analysis
+        - DSL for safety and security property checking
+        - Applied to medical devices and avionics
+      differentiator: >
+        Only tool unifying security information flow analysis with EMV2
+        error propagation in a single framework. Interactive visualization
+        with dynamic querying is unique. Increasingly important for
+        DO-326A airborne security compliance.
+      adoption-potential: >
+        Priority MEDIUM: Security information flow analysis is a gap in
+        spar. Could extend our existing flow_check and emv2_analysis to
+        include security flow tracking. Interactive visualization could
+        enhance spar-render.
+      spar-status: not-started
+
+  - id: TOOL-EMFTA
+    type: aadl-tool
+    title: EMFTA — EMV2-based Fault Tree Analysis
+    description: >
+      Open-source fault tree analysis tool from SEI/CMU. Generates fault
+      trees from AADL EMV2 annotations with automatic optimization,
+      probability propagation, and minimal cut set computation.
+    fields:
+      tool-url: https://github.com/cmu-sei/emfta
+      origin: academic
+      maintainer: SEI/CMU
+      tool-status: active
+      category: safety
+      capabilities:
+        - Automatic FTA generation from EMV2 error models
+        - Fault tree optimization (removing useless events)
+        - Probability propagation to root node
+        - Minimal cut set computation
+        - Synchronized tree diagram and table views
+      differentiator: >
+        Open-source BSD-licensed FTA tool with automatic tree
+        optimization. Probability consistency checking ensures
+        quantitative fault tree results are valid.
+      adoption-potential: >
+        Priority HIGH: Better reference than FASTAR for implementing
+        FTA in spar. BSD license allows studying the algorithms.
+        Tree optimization and probability propagation are ~300 LOC
+        on top of basic fault tree construction.
+      spar-status: partial
+    links:
+      - type: traces-to
+        target: TOOL-FASTAR
+
+  - id: TOOL-COMPASS
+    type: aadl-tool
+    title: COMPASS — Correctness, Modeling, Performance of Aerospace Systems
+    description: >
+      ESA-sponsored formal verification and safety analysis suite.
+      Uses SLIM (AADL dialect) as input. Backends include nuXmv (model
+      checking), OCRA (contract-based verification), MRMC (probabilistic
+      model checking), and xSAP (safety analysis).
+    fields:
+      origin: government
+      maintainer: ESA / Fondazione Bruno Kessler (FBK)
+      tool-status: maintained
+      category: verification
+      capabilities:
+        - LTL/CTL model checking via nuXmv
+        - Contract-based compositional verification (OCRA)
+        - Automatic fault injection from error models
+        - Probabilistic model checking (Markov chains)
+        - FTA, FMEA, and diagnosability analysis
+        - Statistical model checking
+        - FDIR (Fault Detection Isolation Recovery) analysis
+      differentiator: >
+        Most comprehensive formal verification suite for AADL-like models.
+        Combines functional verification, safety analysis, and
+        probabilistic reliability in one framework. Automatic fault
+        injection produces faulty model variants from nominal + error specs.
+      adoption-potential: >
+        Priority LOW for direct integration (ESA restricted access), but
+        concepts are valuable. Automatic fault injection from EMV2 error
+        models could enhance spar's emv2_analysis. Probabilistic
+        reliability computation is a gap. FDIR analysis is unique.
+      spar-status: not-started
+
+  - id: TOOL-MASIW
+    type: aadl-tool
+    title: MASIW — Modular Avionics Software Integration Workbench
+    description: >
+      Eclipse-based IDE from ISP RAS targeting Integrated Modular Avionics.
+      AFDX network analysis, QEMU co-simulation, automatic distribution
+      optimization, and fault tree analysis.
+    fields:
+      tool-url: https://forge.ispras.ru/projects/masiw-oss
+      origin: academic
+      maintainer: ISP RAS (Russia)
+      tool-status: active
+      category: analysis
+      capabilities:
+        - AFDX network latency and port queue analysis
+        - QEMU-based software-in-the-loop co-simulation
+        - Automatic software distribution across modules
+        - Resource-constrained bin packing optimization
+        - Fault tree analysis with probability computation
+      differentiator: >
+        Only AADL tool with AFDX network-level timing simulation
+        and QEMU hardware co-simulation. Distribution optimization
+        solves the deployment problem with real resource constraints.
+      adoption-potential: >
+        Priority MEDIUM: AFDX/bus-level timing analysis is a gap.
+        Spar validates bus bindings but doesn't simulate network
+        latency. Distribution optimization aligns with our deployment
+        optimization plans.
+      spar-status: not-started
+
   # ── Summary: Spar Competitive Position ──────────────────────────────
 
   - id: TOOL-SPAR
