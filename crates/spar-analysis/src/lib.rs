@@ -35,6 +35,7 @@ pub mod modal_rules;
 pub mod mode_check;
 pub mod mode_rules;
 pub mod naming_rules;
+pub mod property_accessors;
 pub mod property_rules;
 pub mod resource_budget;
 pub mod scheduling;

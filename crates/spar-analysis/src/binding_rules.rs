@@ -9,6 +9,7 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::property_accessors::extract_reference_target;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Validates extended binding rules on the instance model.
@@ -136,10 +137,10 @@ fn check_binding_target(
     path: &[String],
     diags: &mut Vec<AnalysisDiagnostic>,
 ) {
-    let target_name = extract_reference_target(binding_val);
-    if target_name.is_empty() {
-        return;
-    }
+    let target_name = match extract_reference_target(binding_val) {
+        Some(name) => name,
+        None => return,
+    };
 
     // BIND-TARGET-EXISTS: Try to find the target
     let mut found = false;
@@ -181,21 +182,6 @@ fn check_binding_target(
             analysis: "binding_rules".to_string(),
         });
     }
-}
-
-/// Extract the target name from a `reference(name)` or `(reference(name))` string.
-fn extract_reference_target(val: &str) -> &str {
-    let trimmed = val.trim();
-    if let Some(start) = trimmed.find("reference") {
-        let after_ref = &trimmed[start + "reference".len()..];
-        if let Some(paren_start) = after_ref.find('(') {
-            let inner = &after_ref[paren_start + 1..];
-            if let Some(paren_end) = inner.find(')') {
-                return inner[..paren_end].trim();
-            }
-        }
-    }
-    ""
 }
 
 #[cfg(test)]
@@ -633,10 +619,10 @@ mod tests {
 
     #[test]
     fn extract_reference_patterns() {
-        assert_eq!(extract_reference_target("reference (cpu1)"), "cpu1");
-        assert_eq!(extract_reference_target("(reference (cpu1))"), "cpu1");
-        assert_eq!(extract_reference_target("reference(mem)"), "mem");
-        assert_eq!(extract_reference_target("invalid"), "");
-        assert_eq!(extract_reference_target(""), "");
+        assert_eq!(extract_reference_target("reference (cpu1)"), Some("cpu1"));
+        assert_eq!(extract_reference_target("(reference (cpu1))"), Some("cpu1"));
+        assert_eq!(extract_reference_target("reference(mem)"), Some("mem"));
+        assert_eq!(extract_reference_target("invalid"), None);
+        assert_eq!(extract_reference_target(""), None);
     }
 }

@@ -14,8 +14,10 @@
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
-use spar_hir_def::property_value::parse_time_value;
 
+use crate::property_accessors::{
+    extract_reference_target, get_execution_time_or_exec, get_timing_property,
+};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// ARINC 653 partition scheduling analysis.
@@ -104,24 +106,6 @@ fn owning_partition(
                 && comp.category == ComponentCategory::VirtualProcessor
             {
                 return Some(comp_idx);
-            }
-        }
-    }
-    None
-}
-
-/// Extract the target name from a `reference(name)` string.
-fn extract_reference_target(val: &str) -> Option<&str> {
-    let trimmed = val.trim();
-    if let Some(start) = trimmed.find("reference") {
-        let after_ref = &trimmed[start + "reference".len()..];
-        if let Some(paren_start) = after_ref.find('(') {
-            let inner = &after_ref[paren_start + 1..];
-            if let Some(paren_end) = inner.find(')') {
-                let target = inner[..paren_end].trim();
-                if !target.is_empty() {
-                    return Some(target);
-                }
             }
         }
     }
@@ -326,7 +310,7 @@ fn check_window_utilization(instance: &SystemInstance, diags: &mut Vec<AnalysisD
 
         for &vp_idx in &vp_children {
             let vp_props = instance.properties_for(vp_idx);
-            if let Some(exec_ps) = get_execution_time(vp_props) {
+            if let Some(exec_ps) = get_execution_time_or_exec(vp_props) {
                 total_exec_ps += exec_ps;
                 vps_with_exec += 1;
             }
@@ -373,34 +357,6 @@ fn check_window_utilization(instance: &SystemInstance, diags: &mut Vec<AnalysisD
             }
         }
     }
-}
-
-/// Extract a timing property (Period, Execution_Time, etc.) in picoseconds.
-fn get_timing_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
-    let raw = props
-        .get("Timing_Properties", name)
-        .or_else(|| props.get("", name))?;
-    parse_time_value(raw)
-}
-
-/// Extract Execution_Time in picoseconds.
-///
-/// This property is typically a range (e.g., "1 ms .. 5 ms"). We take the
-/// worst case (max). If it's a single value, we use that.
-fn get_execution_time(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
-    let raw = props
-        .get("Timing_Properties", "Execution_Time")
-        .or_else(|| props.get("", "Execution_Time"))
-        .or_else(|| props.get("Timing_Properties", "Compute_Execution_Time"))
-        .or_else(|| props.get("", "Compute_Execution_Time"))?;
-
-    // Try range format: "min .. max"
-    if let Some((_, max_str)) = raw.split_once("..") {
-        return parse_time_value(max_str.trim());
-    }
-
-    // Single value
-    parse_time_value(raw)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────

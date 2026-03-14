@@ -14,8 +14,8 @@
 
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
-use spar_hir_def::property_value::parse_size_value;
 
+use crate::property_accessors::{get_memory_binding, get_size_property};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Resource budget analysis (memory, MIPS, bandwidth).
@@ -218,40 +218,6 @@ fn compute_memory_demand(props: &spar_hir_def::properties::PropertyMap) -> u64 {
     code_size
         .saturating_add(data_size)
         .saturating_add(stack_size)
-}
-
-/// Get a size property in bits.
-fn get_size_property(props: &spar_hir_def::properties::PropertyMap, name: &str) -> Option<u64> {
-    let raw = props
-        .get("Memory_Properties", name)
-        .or_else(|| props.get("", name))?;
-    parse_size_value(raw)
-}
-
-/// Extract memory binding target name from property.
-fn get_memory_binding(props: &spar_hir_def::properties::PropertyMap) -> Option<String> {
-    let raw = props
-        .get("Deployment_Properties", "Actual_Memory_Binding")
-        .or_else(|| props.get("", "Actual_Memory_Binding"))?;
-    extract_reference_target(raw).map(|s| s.to_string())
-}
-
-/// Extract the target name from a `reference(name)` string.
-fn extract_reference_target(val: &str) -> Option<&str> {
-    let trimmed = val.trim();
-    if let Some(start) = trimmed.find("reference") {
-        let after_ref = &trimmed[start + "reference".len()..];
-        if let Some(paren_start) = after_ref.find('(') {
-            let inner = &after_ref[paren_start + 1..];
-            if let Some(paren_end) = inner.find(')') {
-                let target = inner[..paren_end].trim();
-                if !target.is_empty() {
-                    return Some(target);
-                }
-            }
-        }
-    }
-    None
 }
 
 /// Parse a data rate value string like "100 KBytesps" into bits per second.
