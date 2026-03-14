@@ -3,124 +3,160 @@
 artifacts:
 
   - id: TEST-PARSER
-    type: unit-verification
+    type: feature
     title: Parser unit tests
     description: Test all AADL syntax constructs parse correctly with error recovery.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-parser
-    verifies: [ARCH-PARSER]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-parser
+    links:
+      - type: satisfies
+        target: ARCH-PARSER
 
   - id: TEST-SYNTAX
-    type: unit-verification
+    type: feature
     title: Syntax tree unit tests
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-syntax
-    verifies: [ARCH-SYNTAX]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-syntax
+    links:
+      - type: satisfies
+        target: ARCH-SYNTAX
 
   - id: TEST-HIR-DEF
-    type: unit-verification
+    type: feature
     title: HIR definition unit tests
     description: >
       Tests for ItemTree lowering, instance model construction,
       name resolution, and standard property definitions.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-hir-def
-    verifies: [ARCH-HIR-DEF]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def
+    links:
+      - type: satisfies
+        target: ARCH-HIR-DEF
 
   - id: TEST-HIR
-    type: unit-verification
+    type: feature
     title: HIR facade unit tests
     description: Tests for public API, serde round-trips, and Database queries.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-hir
-    verifies: [ARCH-HIR]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir
+    links:
+      - type: satisfies
+        target: ARCH-HIR
 
   - id: TEST-ANALYSIS
-    type: unit-verification
+    type: feature
     title: Analysis pass unit tests
     description: >
       Tests for all 19+ analysis passes including connectivity, scheduling,
       latency, resource budget, EMV2, ARINC 653, legality, and classifier matching.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-analysis
-    verifies: [ARCH-ANALYSIS]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis
+    links:
+      - type: satisfies
+        target: ARCH-ANALYSIS
 
   - id: TEST-TRANSFORM
-    type: unit-verification
+    type: feature
     title: Transform unit tests
     description: WIT-to-AADL and AADL-to-WIT round-trip tests.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-transform
-    verifies: [ARCH-TRANSFORM]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-transform
+    links:
+      - type: satisfies
+        target: ARCH-TRANSFORM
 
   - id: TEST-CLI
-    type: sw-integration-verification
+    type: feature
     title: CLI integration tests
     description: >
       End-to-end tests for CLI subcommands including LSP, format output,
       code actions, rename, and formatting.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-cli
-    verifies: [ARCH-CLI]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-cli
+    links:
+      - type: satisfies
+        target: ARCH-CLI
 
   - id: TEST-WASM
-    type: sw-integration-verification
+    type: feature
     title: WASM component tests
     description: >
       Unit and integration tests for the WASM component including
       render and analyze functions.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-wasm
-    verifies: [ARCH-WASM]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm
+    links:
+      - type: satisfies
+        target: ARCH-WASM
 
   - id: TEST-WORKSPACE
-    type: sw-verification
+    type: feature
     title: Full workspace test suite
     description: Run all tests across all 10 crates (962+ tests).
-    method: automated-test
-    steps:
-      - run: cargo test --workspace
-    verifies:
-      - REQ-PARSE-001
-      - REQ-MODEL-001
-      - REQ-INST-001
-      - REQ-ANALYSIS-001
-      - REQ-SERDE-001
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test --workspace
+    links:
+      - type: satisfies
+        target: REQ-PARSE-001
+      - type: satisfies
+        target: REQ-MODEL-001
+      - type: satisfies
+        target: REQ-INST-001
+      - type: satisfies
+        target: REQ-ANALYSIS-001
+      - type: satisfies
+        target: REQ-SERDE-001
 
   - id: TEST-WASM-BUILD
-    type: sw-verification
+    type: feature
     title: WASM compilation verification
     description: Verify spar-wasm compiles to wasm32-wasip2 target.
-    method: automated-test
-    steps:
-      - run: cargo build --target wasm32-wasip2 -p spar-wasm --release
-    verifies: [REQ-WASM-001]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo build --target wasm32-wasip2 -p spar-wasm --release
+    links:
+      - type: satisfies
+        target: REQ-WASM-001
 
   # ── STPA Safety Verification ───────────────────────────────────────
 
   - id: TEST-STPA-PARSER-ERRORS
-    type: unit-verification
+    type: feature
     title: Parser error diagnostic tests (STPA-REQ-001)
     description: >
       Seven tests verifying the parser emits error diagnostics for
       unrecognized syntax. Covers: missing semicolons, unknown keywords,
       incomplete declarations, malformed feature groups, invalid property
       associations, garbage input, and unterminated string literals.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-syntax -- error
-    verifies: [STPA-REQ-001]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-syntax -- error
+    links:
+      - type: satisfies
+        target: STPA-REQ-001
 
   - id: TEST-STPA-PARSER-COVERAGE
-    type: unit-verification
+    type: feature
     title: Parser production coverage tests (STPA-REQ-003)
     description: >
       Thirty-five tests covering AADL grammar productions including
@@ -128,79 +164,115 @@ artifacts:
       renames, call sequences, virtual types, refinements, and more.
       Each test parses a dedicated .aadl fixture file and verifies the
       CST structure.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-syntax -- production_
-    verifies: [STPA-REQ-003]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-syntax -- production_
+    links:
+      - type: satisfies
+        target: STPA-REQ-003
 
   - id: TEST-STPA-IN-MODES
-    type: unit-verification
+    type: feature
     title: Modal metadata preservation tests (STPA-REQ-008)
     description: >
       Tests verifying in_modes metadata survives instantiation on both
       ComponentInstance and ConnectionInstance.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-analysis -- regression_in_modes
-    verifies: [STPA-REQ-008]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- regression_in_modes
+    links:
+      - type: satisfies
+        target: STPA-REQ-008
 
   - id: TEST-STPA-UNRESOLVED
-    type: unit-verification
+    type: feature
     title: Unresolved connection endpoint tests (STPA-REQ-013)
     description: >
       Tests verifying compute_semantic_connections emits diagnostics
       when connection endpoints cannot be resolved.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-hir-def -- semantic_connection
-    verifies: [STPA-REQ-013]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def -- semantic_connection
+    links:
+      - type: satisfies
+        target: STPA-REQ-013
 
   - id: TEST-STPA-SVG-TOPOLOGY
-    type: unit-verification
+    type: feature
     title: SVG topology verification tests (STPA-REQ-021)
     description: >
       Eight tests verifying SVG graph output contains correct number of
       nodes and edges matching the instance model, with proper labels
       and connection endpoints.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-wasm -- topology
-    verifies: [STPA-REQ-021]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- topology
+    links:
+      - type: satisfies
+        target: STPA-REQ-021
 
   - id: TEST-STPA-REGRESSION
-    type: unit-verification
+    type: feature
     title: Regression test suite (STPA-REQ-023)
     description: >
       Six seed regression tests covering past bugs: intentionally
       unconnected ports, invalid containment, modal metadata on
       components and connections, duplicate initial modes, and analysis
       registration completeness.
-    method: automated-test
-    steps:
-      - run: cargo test -p spar-analysis -- regression_
-    verifies: [STPA-REQ-023]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- regression_
+    links:
+      - type: satisfies
+        target: STPA-REQ-023
 
   - id: VERIFY-STPA-SEVERITY-DOCS
-    type: manual-verification
+    type: feature
     title: Severity rationale documentation (STPA-REQ-016)
     description: >
       All 21 analysis modules contain severity rationale comment blocks
       in their analyze() methods documenting Error/Warning/Info criteria.
-    method: inspection
-    steps:
-      - run: "grep -r 'Severity rationale' crates/spar-analysis/src/ | wc -l"
-      - expected: "22 (21 modules + 1 legality)"
-    verifies: [STPA-REQ-016]
+    fields:
+      method: inspection
+      steps:
+        - run: "grep -r 'Severity rationale' crates/spar-analysis/src/ | wc -l"
+        - expected: "22 (21 modules + 1 legality)"
+    links:
+      - type: satisfies
+        target: STPA-REQ-016
 
   - id: VERIFY-STPA-COVERAGE
-    type: manual-verification
+    type: feature
     title: Analysis coverage tracking (STPA-REQ-022)
     description: >
       Analysis coverage is tracked via rivet artifact linking: coverage
       records in artifacts/requirements.yaml link AS5506 chapters to
       implemented analysis rules, and rivet validate/coverage commands
       check completeness.
-    method: inspection
-    steps:
-      - run: rivet coverage --from stpa-coverage --to requirement
-    verifies: [STPA-REQ-022]
+    fields:
+      method: inspection
+      steps:
+        - run: rivet coverage --from stpa-coverage --to requirement
+    links:
+      - type: satisfies
+        target: STPA-REQ-022
+
+  - id: TEST-MODE-REACHABILITY
+    type: feature
+    title: Mode reachability analysis and NuSMV export tests
+    description: >
+      16 tests covering reachability matrix computation (linear chains,
+      cycles, multi-component), unreachable mode detection, dead transition
+      detection, NuSMV export formatting, and Analysis trait integration.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- mode_reachability
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-009

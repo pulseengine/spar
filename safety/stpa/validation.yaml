@@ -12,516 +12,723 @@ artifacts:
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-001
-    type: validation
+    type: feature
     title: Annex library diagnostic emission
     description: >
       Verifies that parsing AADL with an annex library produces a
       LoweringDiagnostic containing "annex" with Warning severity.
-    method: unit-test
-    validates: [STPA-REQ-002, ARCH-002]
-    test-location: crates/spar-hir-def/src/item_tree/lower.rs
-    test-name: lowering_diagnostic_tests::annex_library_emits_diagnostic
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/item_tree/lower.rs
+      test-name: lowering_diagnostic_tests::annex_library_emits_diagnostic
+    links:
+      - type: satisfies
+        target: STPA-REQ-002
+      - type: satisfies
+        target: ARCH-002
 
   - id: VAL-002
-    type: validation
+    type: feature
     title: No spurious unhandled warnings for known constructs
     description: >
       Verifies that parsing a clean AADL package with a system type
       produces no "unhandled" warnings. This validates that the
       explicit no-op arms correctly cover all non-semantic SyntaxKinds.
-    method: unit-test
-    validates: [STPA-REQ-004, ARCH-003]
-    test-location: crates/spar-hir-def/src/item_tree/lower.rs
-    test-name: lowering_diagnostic_tests::known_syntax_kinds_no_spurious_warnings
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/item_tree/lower.rs
+      test-name: lowering_diagnostic_tests::known_syntax_kinds_no_spurious_warnings
+    links:
+      - type: satisfies
+        target: STPA-REQ-004
+      - type: satisfies
+        target: ARCH-003
 
   - id: VAL-003
-    type: validation
+    type: feature
     title: Clean package produces no diagnostics
     description: >
       Verifies that a complete AADL package with types, implementations,
       features, and subcomponents produces zero lowering diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-002, STPA-REQ-004, ARCH-001]
-    test-location: crates/spar-hir-def/src/item_tree/lower.rs
-    test-name: lowering_diagnostic_tests::no_diagnostics_for_clean_package
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/item_tree/lower.rs
+      test-name: lowering_diagnostic_tests::no_diagnostics_for_clean_package
+    links:
+      - type: satisfies
+        target: STPA-REQ-002
+      - type: satisfies
+        target: STPA-REQ-004
+      - type: satisfies
+        target: ARCH-001
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream B: Property & Resolution
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-004
-    type: validation
+    type: feature
     title: Integer matches AadlInteger type
     description: >
       Verifies that an integer expression validates successfully against
       an AadlInteger property type definition.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::integer_matches_aadl_integer
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::integer_matches_aadl_integer
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-005
-    type: validation
+    type: feature
     title: String mismatches integer type
     description: >
       Verifies that a string expression against an integer type produces
       a type mismatch diagnostic.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::string_mismatches_aadl_integer
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::string_mismatches_aadl_integer
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-006
-    type: validation
+    type: feature
     title: Invalid enumeration literal detected
     description: >
       Verifies that an enumeration value not in the declared variant
       list produces a diagnostic.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::invalid_enum_value
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::invalid_enum_value
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-007
-    type: validation
+    type: feature
     title: Case-insensitive enum matching
     description: >
       Verifies that enumeration matching is case-insensitive per AADL spec.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::valid_enum_value_case_insensitive
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::valid_enum_value_case_insensitive
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-008
-    type: validation
+    type: feature
     title: List element type checking
     description: >
       Verifies that list elements are individually checked against the
       list element type, and mismatched elements produce diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::list_element_type_checking
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::list_element_type_checking
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-009
-    type: validation
+    type: feature
     title: Opaque values skip validation
     description: >
       Verifies that opaque (unparsed) property values do not produce
       false positive type mismatch diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::opaque_skips_validation
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::opaque_skips_validation
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-010
-    type: validation
+    type: feature
     title: Boolean type matching and mismatching
     description: >
       Verifies boolean expressions match AadlBoolean and mismatch
       AadlString with appropriate diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::boolean_matches_aadl_boolean, tests::boolean_mismatches_aadl_string
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::boolean_matches_aadl_boolean, tests::boolean_mismatches_aadl_string
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-011
-    type: validation
+    type: feature
     title: Range inner type checking
     description: >
       Verifies that range min/max expressions are checked against the
       inner type, and mismatched bounds produce diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::range_with_correct_inner_type, tests::range_with_wrong_inner_type
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::range_with_correct_inner_type, tests::range_with_wrong_inner_type
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-012
-    type: validation
+    type: feature
     title: Record field type checking
     description: >
       Verifies that record field expressions are checked against the
       corresponding field type in the RecordType definition.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::record_field_type_checking
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::record_field_type_checking
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-013
-    type: validation
+    type: feature
     title: UnitValue inner expression checking
     description: >
       Verifies that UnitValue delegates type checking to its inner
       expression.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::unit_value_checks_inner
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::unit_value_checks_inner
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-014
-    type: validation
+    type: feature
     title: Classifier and reference value matching
     description: >
       Verifies that classifier values match Classifier types and
       reference values match Reference types.
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::classifier_value_matches_classifier, tests::reference_value_matches_reference
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::classifier_value_matches_classifier, tests::reference_value_matches_reference
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-015
-    type: validation
+    type: feature
     title: ComputedValue and TypeRef skip validation
     description: >
       Verifies that computed values and type references skip validation
       (cannot be checked statically).
-    method: unit-test
-    validates: [STPA-REQ-006, ARCH-005]
-    test-location: crates/spar-hir-def/src/property_check.rs
-    test-name: tests::computed_value_skips_validation, tests::type_ref_skips_validation
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_check.rs
+      test-name: tests::computed_value_skips_validation, tests::type_ref_skips_validation
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: ARCH-005
 
   - id: VAL-016
-    type: validation
+    type: feature
     title: Ambiguous classifier reference warns
     description: >
       Verifies that when two imported packages both export a classifier
       with the same unqualified name, resolution produces an "ambiguous"
       warning listing the candidate packages.
-    method: unit-test
-    validates: [STPA-REQ-007, ARCH-006]
-    test-location: crates/spar-hir-def/src/resolver.rs
-    test-name: tests::unqualified_ref_matching_multiple_imports_collects_candidates
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/resolver.rs
+      test-name: tests::unqualified_ref_matching_multiple_imports_collects_candidates
+    links:
+      - type: satisfies
+        target: STPA-REQ-007
+      - type: satisfies
+        target: ARCH-006
 
   - id: VAL-017
-    type: validation
+    type: feature
     title: Qualified reference no ambiguity warning
     description: >
       Verifies that fully qualified references (Pkg::Type) do not
       produce ambiguity warnings.
-    method: unit-test
-    validates: [STPA-REQ-007, ARCH-006]
-    test-location: crates/spar-hir-def/src/resolver.rs
-    test-name: tests::qualified_ref_no_ambiguity_warning
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/resolver.rs
+      test-name: tests::qualified_ref_no_ambiguity_warning
+    links:
+      - type: satisfies
+        target: STPA-REQ-007
+      - type: satisfies
+        target: ARCH-006
 
   - id: VAL-018
-    type: validation
+    type: feature
     title: Same-package reference no ambiguity warning
     description: >
       Verifies that references resolved within the same package do not
       produce ambiguity warnings even when imports have matching names.
-    method: unit-test
-    validates: [STPA-REQ-007, ARCH-006]
-    test-location: crates/spar-hir-def/src/resolver.rs
-    test-name: tests::same_package_ref_no_ambiguity_warning
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/resolver.rs
+      test-name: tests::same_package_ref_no_ambiguity_warning
+    links:
+      - type: satisfies
+        target: STPA-REQ-007
+      - type: satisfies
+        target: ARCH-006
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream C: Instance Builder Safety
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-019
-    type: validation
+    type: feature
     title: Circular containment detected
     description: >
       Verifies that a model with mutual containment (A.Impl contains
       B, B.Impl contains A) produces a diagnostic containing "circular"
       or "cycle".
-    method: unit-test
-    validates: [STPA-REQ-012, ARCH-007]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_circular_containment_direct_cycle
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_circular_containment_direct_cycle
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
+      - type: satisfies
+        target: ARCH-007
 
   - id: VAL-020
-    type: validation
+    type: feature
     title: Circular containment via instantiate integration
     description: >
       Verifies that SystemInstance::instantiate produces a circular
       containment diagnostic when given a model with cycles.
-    method: integration-test
-    validates: [STPA-REQ-012, ARCH-007]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_circular_containment_produces_diagnostic_via_instantiate
     status: passing
+    fields:
+      method: integration-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_circular_containment_produces_diagnostic_via_instantiate
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
+      - type: satisfies
+        target: ARCH-007
 
   - id: VAL-021
-    type: validation
+    type: feature
     title: Non-circular model no extra diagnostics
     description: >
       Verifies that a linear (non-circular) hierarchy does not produce
       spurious circular containment diagnostics.
-    method: unit-test
-    validates: [STPA-REQ-012, ARCH-007]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_no_circular_containment, tests::test_non_circular_model_no_extra_diagnostics
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_no_circular_containment, tests::test_non_circular_model_no_extra_diagnostics
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
+      - type: satisfies
+        target: ARCH-007
 
   - id: VAL-022
-    type: validation
+    type: feature
     title: Zero-dimension array produces diagnostic
     description: >
       Verifies that an array with dimension 0 produces a diagnostic
       and the function returns 1 as fallback.
-    method: unit-test
-    validates: [STPA-REQ-009, ARCH-009]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_array_element_count_zero_dimension
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_array_element_count_zero_dimension
+    links:
+      - type: satisfies
+        target: STPA-REQ-009
+      - type: satisfies
+        target: ARCH-009
 
   - id: VAL-023
-    type: validation
+    type: feature
     title: Positive array dimension no false positive
     description: >
       Verifies that a valid positive array dimension produces no
       diagnostic.
-    method: unit-test
-    validates: [STPA-REQ-009, ARCH-009]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_array_element_count_positive_no_diagnostic
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_array_element_count_positive_no_diagnostic
+    links:
+      - type: satisfies
+        target: STPA-REQ-009
+      - type: satisfies
+        target: ARCH-009
 
   - id: VAL-024
-    type: validation
+    type: feature
     title: Max depth increased to 100
     description: >
       Indirectly verifies that the Builder max_depth is 100 by testing
       that instantiation of deep hierarchies succeeds.
-    method: unit-test
-    validates: [STPA-REQ-012, ARCH-008]
-    test-location: crates/spar-hir-def/src/instance.rs
-    test-name: tests::test_max_depth_is_100
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/instance.rs
+      test-name: tests::test_max_depth_is_100
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
+      - type: satisfies
+        target: ARCH-008
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream D: Modal-Aware Analysis
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-025
-    type: validation
+    type: feature
     title: has_modes returns false for non-modal instance
     description: >
       Verifies that has_modes() returns false when the instance has
       no system operation modes.
-    method: unit-test
-    validates: [STPA-REQ-017, ARCH-012]
-    test-location: crates/spar-analysis/src/modal.rs
-    test-name: tests::instance_with_no_soms
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/modal.rs
+      test-name: tests::instance_with_no_soms
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
+      - type: satisfies
+        target: ARCH-012
 
   - id: VAL-026
-    type: validation
+    type: feature
     title: has_modes and mode_names for modal instance
     description: >
       Verifies that has_modes() returns true and mode_names() returns
       the correct list when the instance has SOMs.
-    method: unit-test
-    validates: [STPA-REQ-017, ARCH-012]
-    test-location: crates/spar-analysis/src/modal.rs
-    test-name: tests::instance_with_soms
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/modal.rs
+      test-name: tests::instance_with_soms
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
+      - type: satisfies
+        target: ARCH-012
 
   - id: VAL-027
-    type: validation
+    type: feature
     title: Scheduling emits SOM awareness diagnostic
     description: >
       Verifies that SchedulingAnalysis emits an Info diagnostic
       mentioning "system operation mode" when the instance has SOMs.
-    method: unit-test
-    validates: [STPA-REQ-017, ARCH-013]
-    test-location: crates/spar-analysis/src/scheduling.rs
-    test-name: tests::modal_awareness_diagnostic_when_soms_present
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::modal_awareness_diagnostic_when_soms_present
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
+      - type: satisfies
+        target: ARCH-013
 
   - id: VAL-028
-    type: validation
+    type: feature
     title: No SOM diagnostic without modes
     description: >
       Verifies that scheduling analysis does not emit the SOM awareness
       diagnostic when the instance has no system operation modes.
-    method: unit-test
-    validates: [STPA-REQ-017, ARCH-013]
-    test-location: crates/spar-analysis/src/scheduling.rs
-    test-name: tests::no_modal_diagnostic_without_soms
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::no_modal_diagnostic_without_soms
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
+      - type: satisfies
+        target: ARCH-013
 
   # ══════════════════════════════════════════════════════════════════════
   # Batch 2: STPA-REQ-005, 014, 015, 018, 019
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-029
-    type: validation
+    type: feature
     title: Intentionally unconnected port suppresses warning
     description: >
       Verifies that a port annotated with SPAR_Properties::
       Intentionally_Unconnected does not produce a connectivity warning.
       Tests cover single feature, "all" variant, parenthesized list,
       and case-insensitive matching.
-    method: unit-test
-    validates: [STPA-REQ-018, ARCH-014]
-    test-location: crates/spar-analysis/src/connectivity.rs
-    test-name: tests::intentionally_unconnected_*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/connectivity.rs
+      test-name: tests::intentionally_unconnected_*
+    links:
+      - type: satisfies
+        target: STPA-REQ-018
+      - type: satisfies
+        target: ARCH-014
 
   - id: VAL-030
-    type: validation
+    type: feature
     title: Unannotated port still warns
     description: >
       Regression guard verifying that ports without the
       Intentionally_Unconnected property still produce connectivity
       warnings.
-    method: unit-test
-    validates: [STPA-REQ-018, ARCH-014]
-    test-location: crates/spar-analysis/src/connectivity.rs
-    test-name: tests::no_property_still_warns
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/connectivity.rs
+      test-name: tests::no_property_still_warns
+    links:
+      - type: satisfies
+        target: STPA-REQ-018
+      - type: satisfies
+        target: ARCH-014
 
   - id: VAL-031
-    type: validation
+    type: feature
     title: register_all registers all analyses
     description: >
       Verifies that AnalysisRunner::register_all() registers exactly
       21 analysis passes and that the count matches expectations.
-    method: unit-test
-    validates: [STPA-REQ-014, ARCH-015]
-    test-location: crates/spar-analysis/src/lib.rs
-    test-name: tests::test_register_all_count
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/lib.rs
+      test-name: tests::test_register_all_count
+    links:
+      - type: satisfies
+        target: STPA-REQ-014
+      - type: satisfies
+        target: ARCH-015
 
   - id: VAL-032
-    type: validation
+    type: feature
     title: Time unit conversion pairs validated against AS5506
     description: >
       80+ tests validate every time unit conversion pair (ps, ns, us,
       ms, sec, min, hr) against AS5506 Appendix A values. Includes
       forward/reverse conversions, adjacent ratio verification, and
       raw factor validation.
-    method: unit-test
-    validates: [STPA-REQ-005, ARCH-016]
-    test-location: crates/spar-hir-def/src/property_value.rs
-    test-name: tests::time_* and tests::size_*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_value.rs
+      test-name: tests::time_* and tests::size_*
+    links:
+      - type: satisfies
+        target: STPA-REQ-005
+      - type: satisfies
+        target: ARCH-016
 
   - id: VAL-033
-    type: validation
+    type: feature
     title: Size unit conversion pairs validated
     description: >
       Tests validate size unit conversions (bits, Bytes, KByte, MByte,
       GByte, TByte) with factor verification (8x for bits/Bytes, 1024x
       for powers).
-    method: unit-test
-    validates: [STPA-REQ-005, ARCH-016]
-    test-location: crates/spar-hir-def/src/property_value.rs
-    test-name: tests::size_* and tests::adjacent_ratio_*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_value.rs
+      test-name: tests::size_* and tests::adjacent_ratio_*
+    links:
+      - type: satisfies
+        target: STPA-REQ-005
+      - type: satisfies
+        target: ARCH-016
 
   - id: VAL-034
-    type: validation
+    type: feature
     title: Unit conversion case insensitivity
     description: >
       Verifies that unit names are matched case-insensitively (e.g.,
       "MS", "Ms", "ms" all work).
-    method: unit-test
-    validates: [STPA-REQ-005, ARCH-016]
-    test-location: crates/spar-hir-def/src/property_value.rs
-    test-name: tests::case_insensitive_*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir-def/src/property_value.rs
+      test-name: tests::case_insensitive_*
+    links:
+      - type: satisfies
+        target: STPA-REQ-005
+      - type: satisfies
+        target: ARCH-016
 
   - id: VAL-035
-    type: validation
+    type: feature
     title: Typed property accessors parse correctly
     description: >
       Verifies that shared property accessors (get_timing_property,
       get_execution_time, get_size_property, get_processor_binding,
       extract_reference_target) parse property values correctly.
-    method: unit-test
-    validates: [STPA-REQ-015, ARCH-017]
-    test-location: crates/spar-analysis/src/property_accessors.rs
-    test-name: tests::*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/property_accessors.rs
+      test-name: tests::*
+    links:
+      - type: satisfies
+        target: STPA-REQ-015
+      - type: satisfies
+        target: ARCH-017
 
   - id: VAL-036
-    type: validation
+    type: feature
     title: Analyses use shared accessors (no duplicate parsing)
     description: >
       Verifies that scheduling, latency, resource_budget, arinc653,
       binding_check, and binding_rules all import from
       property_accessors instead of defining private helpers.
-    method: code-review
-    validates: [STPA-REQ-015, ARCH-017]
-    evidence: >
-      6 analysis modules updated to use crate::property_accessors::*.
-      212 lines of duplicate code removed.
     status: passing
+    fields:
+      method: code-review
+      evidence: >
+        6 analysis modules updated to use crate::property_accessors::*.
+        212 lines of duplicate code removed.
+    links:
+      - type: satisfies
+        target: STPA-REQ-015
+      - type: satisfies
+        target: ARCH-017
 
   - id: VAL-037
-    type: validation
+    type: feature
     title: Serde round-trip for all public types
     description: >
       24 tests serialize each spar-hir public type to JSON, deserialize
       back, and assert structural equality. Covers all 16 serializable
       types plus all enum variants.
-    method: unit-test
-    validates: [STPA-REQ-019, ARCH-018]
-    test-location: crates/spar-hir/src/lib.rs
-    test-name: serde_round_trip_tests::*
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir/src/lib.rs
+      test-name: serde_round_trip_tests::*
+    links:
+      - type: satisfies
+        target: STPA-REQ-019
+      - type: satisfies
+        target: ARCH-018
 
   - id: VAL-038
-    type: validation
+    type: feature
     title: Nested InstanceNode round-trip
     description: >
       Verifies that a complex InstanceNode tree (system > process >
       thread) with features, connections, array indices, and diagnostics
       survives JSON serialization round-trip.
-    method: unit-test
-    validates: [STPA-REQ-019, ARCH-018]
-    test-location: crates/spar-hir/src/lib.rs
-    test-name: serde_round_trip_tests::instance_node_nested_tree_round_trip
     status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-hir/src/lib.rs
+      test-name: serde_round_trip_tests::instance_node_nested_tree_round_trip
+    links:
+      - type: satisfies
+        target: STPA-REQ-019
+      - type: satisfies
+        target: ARCH-018
 
   # ══════════════════════════════════════════════════════════════════════
   # Aggregate Test Coverage
   # ══════════════════════════════════════════════════════════════════════
 
   - id: VAL-SUITE
-    type: validation-summary
+    type: feature
     title: Full test suite execution
     description: >
       All 1,140 tests in the spar workspace pass after batch 2
       implementation. cargo clippy --workspace reports no warnings.
-    method: integration-test
-    validates:
-      - STPA-REQ-002
-      - STPA-REQ-004
-      - STPA-REQ-005
-      - STPA-REQ-006
-      - STPA-REQ-007
-      - STPA-REQ-009
-      - STPA-REQ-010
-      - STPA-REQ-011
-      - STPA-REQ-012
-      - STPA-REQ-014
-      - STPA-REQ-015
-      - STPA-REQ-017
-      - STPA-REQ-018
-      - STPA-REQ-019
-    command: cargo test --workspace
-    result: "1,140 passed, 0 failed"
     status: passing
+    fields:
+      method: integration-test
+      command: cargo test --workspace
+      result: "1,140 passed, 0 failed"
+    links:
+      - type: satisfies
+        target: STPA-REQ-002
+      - type: satisfies
+        target: STPA-REQ-004
+      - type: satisfies
+        target: STPA-REQ-005
+      - type: satisfies
+        target: STPA-REQ-006
+      - type: satisfies
+        target: STPA-REQ-007
+      - type: satisfies
+        target: STPA-REQ-009
+      - type: satisfies
+        target: STPA-REQ-010
+      - type: satisfies
+        target: STPA-REQ-011
+      - type: satisfies
+        target: STPA-REQ-012
+      - type: satisfies
+        target: STPA-REQ-014
+      - type: satisfies
+        target: STPA-REQ-015
+      - type: satisfies
+        target: STPA-REQ-017
+      - type: satisfies
+        target: STPA-REQ-018
+      - type: satisfies
+        target: STPA-REQ-019

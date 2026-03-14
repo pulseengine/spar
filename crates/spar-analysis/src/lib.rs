@@ -33,6 +33,7 @@ pub mod legality;
 pub mod modal;
 pub mod modal_rules;
 pub mod mode_check;
+pub mod mode_reachability;
 pub mod mode_rules;
 pub mod naming_rules;
 pub mod property_accessors;
@@ -121,6 +122,7 @@ impl AnalysisRunner {
         use resource_budget::ResourceBudgetAnalysis;
         use scheduling::SchedulingAnalysis;
         use subcomponent_rules::SubcomponentRuleAnalysis;
+        use mode_reachability::ModeReachabilityAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
 
         self.register(Box::new(ConnectivityAnalysis));
@@ -144,6 +146,7 @@ impl AnalysisRunner {
         self.register(Box::new(Emv2Analysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
+        self.register(Box::new(ModeReachabilityAnalysis));
     }
 
     /// Return the number of registered analyses.

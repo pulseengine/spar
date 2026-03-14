@@ -348,11 +348,11 @@ fn regression_duplicate_initial_mode_detected() {
 fn regression_register_all_includes_all_analyses() {
     let mut runner = crate::AnalysisRunner::new();
     runner.register_all();
-    // As of batch 3, there are 23 analysis passes.
+    // As of issue #7 (mode reachability), there are 22 analysis passes.
     // This count must be updated when new analyses are added.
     assert!(
-        runner.count() >= 21,
-        "register_all() should register at least 21 analyses, got {}",
+        runner.count() >= 22,
+        "register_all() should register at least 22 analyses, got {}",
         runner.count()
     );
 }
