@@ -1453,3 +1453,854 @@ end E2EPkg;
         assert_eq!(consumer.features[0].access_kind, Some(AccessKind::Requires));
     }
 }
+
+// ── STPA-REQ-019: Serde round-trip tests ───────────────────────────
+//
+// Serializes every spar-hir public type to JSON and deserializes back,
+// verifying structural equality.
+
+#[cfg(test)]
+mod serde_round_trip_tests {
+    use super::*;
+
+    /// Helper: serialize to JSON and deserialize back, asserting equality.
+    fn round_trip<T>(val: &T) -> T
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned + std::fmt::Debug + PartialEq + Eq,
+    {
+        let json = serde_json::to_string_pretty(val).expect("serialize");
+        let back: T = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            val,
+            &back,
+            "round-trip mismatch for {}",
+            std::any::type_name::<T>()
+        );
+        back
+    }
+
+    // ── Mode ────────────────────────────────────────────────────
+
+    #[test]
+    fn mode_round_trip() {
+        let mode = Mode {
+            name: "active".to_string(),
+            is_initial: true,
+        };
+        round_trip(&mode);
+
+        let mode2 = Mode {
+            name: "standby".to_string(),
+            is_initial: false,
+        };
+        round_trip(&mode2);
+    }
+
+    // ── ModeTransition ──────────────────────────────────────────
+
+    #[test]
+    fn mode_transition_round_trip() {
+        let mt = ModeTransition {
+            name: Some("t1".to_string()),
+            source: "init".to_string(),
+            triggers: vec!["start".to_string(), "ready".to_string()],
+            destination: "running".to_string(),
+        };
+        round_trip(&mt);
+
+        // Anonymous transition (no name)
+        let mt_anon = ModeTransition {
+            name: None,
+            source: "running".to_string(),
+            triggers: vec!["stop".to_string()],
+            destination: "halted".to_string(),
+        };
+        round_trip(&mt_anon);
+    }
+
+    // ── PropertyAssociation ─────────────────────────────────────
+
+    #[test]
+    fn property_association_round_trip() {
+        let pa = PropertyAssociation {
+            name: "Timing_Properties::Period".to_string(),
+            value: "10 ms".to_string(),
+            typed_value: None,
+            is_append: false,
+            applies_to: None,
+            in_modes: vec![],
+        };
+        round_trip(&pa);
+
+        // With append, applies_to, and in_modes
+        let pa2 = PropertyAssociation {
+            name: "SEI::WeightLimit".to_string(),
+            value: "100 kg".to_string(),
+            typed_value: None,
+            is_append: true,
+            applies_to: Some("sensor".to_string()),
+            in_modes: vec!["active".to_string(), "standby".to_string()],
+        };
+        round_trip(&pa2);
+    }
+
+    // ── Feature ─────────────────────────────────────────────────
+
+    #[test]
+    fn feature_round_trip() {
+        let feat = Feature {
+            name: "sensor_out".to_string(),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            access_kind: None,
+            classifier: Some("Nav::Position".to_string()),
+            is_refined: false,
+            properties: vec![PropertyAssociation {
+                name: "Data_Model::Data_Representation".to_string(),
+                value: "Struct".to_string(),
+                typed_value: None,
+                is_append: false,
+                applies_to: None,
+                in_modes: vec![],
+            }],
+        };
+        round_trip(&feat);
+
+        // Access feature
+        let feat_access = Feature {
+            name: "shared_mem".to_string(),
+            kind: FeatureKind::DataAccess,
+            direction: None,
+            access_kind: Some(AccessKind::Requires),
+            classifier: None,
+            is_refined: true,
+            properties: vec![],
+        };
+        round_trip(&feat_access);
+
+        // Every feature kind
+        for kind in [
+            FeatureKind::DataPort,
+            FeatureKind::EventPort,
+            FeatureKind::EventDataPort,
+            FeatureKind::Parameter,
+            FeatureKind::DataAccess,
+            FeatureKind::BusAccess,
+            FeatureKind::SubprogramAccess,
+            FeatureKind::SubprogramGroupAccess,
+            FeatureKind::FeatureGroup,
+            FeatureKind::AbstractFeature,
+        ] {
+            let f = Feature {
+                name: format!("f_{:?}", kind),
+                kind,
+                direction: Some(Direction::In),
+                access_kind: None,
+                classifier: None,
+                is_refined: false,
+                properties: vec![],
+            };
+            round_trip(&f);
+        }
+    }
+
+    // ── Direction enum ──────────────────────────────────────────
+
+    #[test]
+    fn direction_round_trip() {
+        for dir in [Direction::In, Direction::Out, Direction::InOut] {
+            round_trip(&dir);
+        }
+    }
+
+    // ── AccessKind enum ─────────────────────────────────────────
+
+    #[test]
+    fn access_kind_round_trip() {
+        for ak in [AccessKind::Provides, AccessKind::Requires] {
+            round_trip(&ak);
+        }
+    }
+
+    // ── ComponentCategory enum ──────────────────────────────────
+
+    #[test]
+    fn component_category_round_trip() {
+        for cat in [
+            ComponentCategory::System,
+            ComponentCategory::Process,
+            ComponentCategory::Thread,
+            ComponentCategory::ThreadGroup,
+            ComponentCategory::Processor,
+            ComponentCategory::VirtualProcessor,
+            ComponentCategory::Memory,
+            ComponentCategory::Bus,
+            ComponentCategory::VirtualBus,
+            ComponentCategory::Device,
+            ComponentCategory::Subprogram,
+            ComponentCategory::SubprogramGroup,
+            ComponentCategory::Data,
+            ComponentCategory::Abstract,
+        ] {
+            round_trip(&cat);
+        }
+    }
+
+    // ── ConnectionKind enum ─────────────────────────────────────
+
+    #[test]
+    fn connection_kind_round_trip() {
+        for ck in [
+            ConnectionKind::Port,
+            ConnectionKind::Access,
+            ConnectionKind::FeatureGroup,
+            ConnectionKind::Feature,
+            ConnectionKind::Parameter,
+        ] {
+            round_trip(&ck);
+        }
+    }
+
+    // ── FlowKind enum ───────────────────────────────────────────
+
+    #[test]
+    fn flow_kind_round_trip() {
+        for fk in [FlowKind::Source, FlowKind::Sink, FlowKind::Path] {
+            round_trip(&fk);
+        }
+    }
+
+    // ── Subcomponent ────────────────────────────────────────────
+
+    #[test]
+    fn subcomponent_round_trip() {
+        let sub = Subcomponent {
+            name: "nav_proc".to_string(),
+            category: ComponentCategory::Process,
+            classifier: Some("Navigation::NavProcess".to_string()),
+            is_refined: false,
+            in_modes: vec!["active".to_string()],
+            properties: vec![PropertyAssociation {
+                name: "Deployment_Properties::Actual_Processor_Binding".to_string(),
+                value: "(reference (cpu1))".to_string(),
+                typed_value: None,
+                is_append: false,
+                applies_to: None,
+                in_modes: vec![],
+            }],
+        };
+        round_trip(&sub);
+
+        // Minimal subcomponent
+        let sub_min = Subcomponent {
+            name: "empty".to_string(),
+            category: ComponentCategory::Abstract,
+            classifier: None,
+            is_refined: false,
+            in_modes: vec![],
+            properties: vec![],
+        };
+        round_trip(&sub_min);
+    }
+
+    // ── Connection ──────────────────────────────────────────────
+
+    #[test]
+    fn connection_round_trip() {
+        let conn = Connection {
+            name: "c1".to_string(),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            is_refined: false,
+            source: Some("sensor.data_out".to_string()),
+            destination: Some("controller.data_in".to_string()),
+            in_modes: vec!["active".to_string()],
+            properties: vec![],
+        };
+        round_trip(&conn);
+
+        // Bidirectional, refined, no endpoints
+        let conn2 = Connection {
+            name: "bus_conn".to_string(),
+            kind: ConnectionKind::Access,
+            is_bidirectional: true,
+            is_refined: true,
+            source: None,
+            destination: None,
+            in_modes: vec![],
+            properties: vec![],
+        };
+        round_trip(&conn2);
+    }
+
+    // ── FlowSpec ────────────────────────────────────────────────
+
+    #[test]
+    fn flow_spec_round_trip() {
+        // Path flow
+        let flow_path = FlowSpec {
+            name: "data_flow".to_string(),
+            kind: FlowKind::Path,
+            source_feature: Some("inp".to_string()),
+            sink_feature: Some("outp".to_string()),
+            in_modes: vec![],
+            properties: vec![PropertyAssociation {
+                name: "Latency".to_string(),
+                value: "1 ms .. 5 ms".to_string(),
+                typed_value: None,
+                is_append: false,
+                applies_to: None,
+                in_modes: vec![],
+            }],
+        };
+        round_trip(&flow_path);
+
+        // Source flow
+        let flow_src = FlowSpec {
+            name: "temp_out".to_string(),
+            kind: FlowKind::Source,
+            source_feature: Some("outp".to_string()),
+            sink_feature: None,
+            in_modes: vec!["active".to_string()],
+            properties: vec![],
+        };
+        round_trip(&flow_src);
+
+        // Sink flow
+        let flow_sink = FlowSpec {
+            name: "cmd_in".to_string(),
+            kind: FlowKind::Sink,
+            source_feature: Some("inp".to_string()),
+            sink_feature: None,
+            in_modes: vec![],
+            properties: vec![],
+        };
+        round_trip(&flow_sink);
+    }
+
+    // ── EndToEndFlow ────────────────────────────────────────────
+
+    #[test]
+    fn end_to_end_flow_round_trip() {
+        let e2e = EndToEndFlow {
+            name: "critical_path".to_string(),
+            segments: vec![
+                "sensor.f_src".to_string(),
+                "c1".to_string(),
+                "controller.f_path".to_string(),
+                "c2".to_string(),
+                "actuator.f_sink".to_string(),
+            ],
+            in_modes: vec!["active".to_string()],
+            properties: vec![PropertyAssociation {
+                name: "Latency".to_string(),
+                value: "1 ms .. 20 ms".to_string(),
+                typed_value: None,
+                is_append: false,
+                applies_to: None,
+                in_modes: vec![],
+            }],
+        };
+        round_trip(&e2e);
+
+        // Minimal
+        let e2e_min = EndToEndFlow {
+            name: "simple".to_string(),
+            segments: vec![],
+            in_modes: vec![],
+            properties: vec![],
+        };
+        round_trip(&e2e_min);
+    }
+
+    // ── ComponentType ───────────────────────────────────────────
+
+    #[test]
+    fn component_type_round_trip() {
+        let ct = ComponentType {
+            name: "Controller".to_string(),
+            category: ComponentCategory::System,
+            extends: Some("Base::AbstractController".to_string()),
+            features: vec![
+                Feature {
+                    name: "cmd_in".to_string(),
+                    kind: FeatureKind::EventDataPort,
+                    direction: Some(Direction::In),
+                    access_kind: None,
+                    classifier: Some("Types::Command".to_string()),
+                    is_refined: false,
+                    properties: vec![],
+                },
+                Feature {
+                    name: "status_out".to_string(),
+                    kind: FeatureKind::DataPort,
+                    direction: Some(Direction::Out),
+                    access_kind: None,
+                    classifier: None,
+                    is_refined: false,
+                    properties: vec![],
+                },
+            ],
+            flows: vec![FlowSpec {
+                name: "cmd_to_status".to_string(),
+                kind: FlowKind::Path,
+                source_feature: Some("cmd_in".to_string()),
+                sink_feature: Some("status_out".to_string()),
+                in_modes: vec![],
+                properties: vec![],
+            }],
+            modes: vec![
+                Mode {
+                    name: "init".to_string(),
+                    is_initial: true,
+                },
+                Mode {
+                    name: "running".to_string(),
+                    is_initial: false,
+                },
+            ],
+            mode_transitions: vec![ModeTransition {
+                name: Some("startup".to_string()),
+                source: "init".to_string(),
+                triggers: vec!["cmd_in".to_string()],
+                destination: "running".to_string(),
+            }],
+            properties: vec![PropertyAssociation {
+                name: "Deployment_Properties::Dispatch_Protocol".to_string(),
+                value: "Periodic".to_string(),
+                typed_value: None,
+                is_append: false,
+                applies_to: None,
+                in_modes: vec![],
+            }],
+        };
+        round_trip(&ct);
+    }
+
+    // ── ComponentImpl ───────────────────────────────────────────
+
+    #[test]
+    fn component_impl_round_trip() {
+        let ci = ComponentImpl {
+            name: "Controller.Basic".to_string(),
+            category: ComponentCategory::System,
+            type_name: "Controller".to_string(),
+            impl_name: "Basic".to_string(),
+            extends: None,
+            subcomponents: vec![
+                Subcomponent {
+                    name: "nav".to_string(),
+                    category: ComponentCategory::Process,
+                    classifier: Some("Nav::NavProcess".to_string()),
+                    is_refined: false,
+                    in_modes: vec![],
+                    properties: vec![],
+                },
+                Subcomponent {
+                    name: "guidance".to_string(),
+                    category: ComponentCategory::Process,
+                    classifier: Some("Guidance::GuidanceProcess".to_string()),
+                    is_refined: false,
+                    in_modes: vec!["active".to_string()],
+                    properties: vec![],
+                },
+            ],
+            connections: vec![Connection {
+                name: "c1".to_string(),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                is_refined: false,
+                source: Some("nav.pos_out".to_string()),
+                destination: Some("guidance.pos_in".to_string()),
+                in_modes: vec![],
+                properties: vec![],
+            }],
+            flows: vec![],
+            e2e_flows: vec![EndToEndFlow {
+                name: "nav_to_guidance".to_string(),
+                segments: vec![
+                    "nav.f_src".to_string(),
+                    "c1".to_string(),
+                    "guidance.f_sink".to_string(),
+                ],
+                in_modes: vec![],
+                properties: vec![],
+            }],
+            modes: vec![Mode {
+                name: "active".to_string(),
+                is_initial: true,
+            }],
+            mode_transitions: vec![],
+            properties: vec![],
+        };
+        round_trip(&ci);
+    }
+
+    // ── FeatureGroupType ────────────────────────────────────────
+
+    #[test]
+    fn feature_group_type_round_trip() {
+        let fgt = FeatureGroupType {
+            name: "SensorBus".to_string(),
+            extends: Some("Base::GenericBus".to_string()),
+            inverse_of: Some("ActuatorBus".to_string()),
+            features: vec![
+                Feature {
+                    name: "temp".to_string(),
+                    kind: FeatureKind::DataPort,
+                    direction: Some(Direction::Out),
+                    access_kind: None,
+                    classifier: None,
+                    is_refined: false,
+                    properties: vec![],
+                },
+                Feature {
+                    name: "pressure".to_string(),
+                    kind: FeatureKind::DataPort,
+                    direction: Some(Direction::Out),
+                    access_kind: None,
+                    classifier: None,
+                    is_refined: false,
+                    properties: vec![],
+                },
+            ],
+        };
+        round_trip(&fgt);
+
+        // Minimal
+        let fgt_min = FeatureGroupType {
+            name: "Empty".to_string(),
+            extends: None,
+            inverse_of: None,
+            features: vec![],
+        };
+        round_trip(&fgt_min);
+    }
+
+    // ── Package ─────────────────────────────────────────────────
+
+    #[test]
+    fn package_round_trip() {
+        let pkg = Package {
+            name: "FlightControl".to_string(),
+            with_clauses: vec!["Navigation".to_string(), "Guidance".to_string()],
+            component_types: vec![ComponentType {
+                name: "Controller".to_string(),
+                category: ComponentCategory::System,
+                extends: None,
+                features: vec![Feature {
+                    name: "inp".to_string(),
+                    kind: FeatureKind::DataPort,
+                    direction: Some(Direction::In),
+                    access_kind: None,
+                    classifier: None,
+                    is_refined: false,
+                    properties: vec![],
+                }],
+                flows: vec![],
+                modes: vec![],
+                mode_transitions: vec![],
+                properties: vec![],
+            }],
+            component_impls: vec![ComponentImpl {
+                name: "Controller.Impl".to_string(),
+                category: ComponentCategory::System,
+                type_name: "Controller".to_string(),
+                impl_name: "Impl".to_string(),
+                extends: None,
+                subcomponents: vec![],
+                connections: vec![],
+                flows: vec![],
+                e2e_flows: vec![],
+                modes: vec![],
+                mode_transitions: vec![],
+                properties: vec![],
+            }],
+            feature_group_types: vec![],
+        };
+        round_trip(&pkg);
+    }
+
+    // ── Classifier enum ─────────────────────────────────────────
+
+    #[test]
+    fn classifier_type_round_trip() {
+        let cls = Classifier::Type(ComponentType {
+            name: "GPS".to_string(),
+            category: ComponentCategory::Device,
+            extends: None,
+            features: vec![Feature {
+                name: "pos".to_string(),
+                kind: FeatureKind::DataPort,
+                direction: Some(Direction::Out),
+                access_kind: None,
+                classifier: None,
+                is_refined: false,
+                properties: vec![],
+            }],
+            flows: vec![],
+            modes: vec![],
+            mode_transitions: vec![],
+            properties: vec![],
+        });
+        round_trip(&cls);
+    }
+
+    #[test]
+    fn classifier_implementation_round_trip() {
+        let cls = Classifier::Implementation(ComponentImpl {
+            name: "GPS.Basic".to_string(),
+            category: ComponentCategory::Device,
+            type_name: "GPS".to_string(),
+            impl_name: "Basic".to_string(),
+            extends: None,
+            subcomponents: vec![],
+            connections: vec![],
+            flows: vec![],
+            e2e_flows: vec![],
+            modes: vec![],
+            mode_transitions: vec![],
+            properties: vec![],
+        });
+        round_trip(&cls);
+    }
+
+    #[test]
+    fn classifier_feature_group_type_round_trip() {
+        let cls = Classifier::FeatureGroupType(FeatureGroupType {
+            name: "SensorData".to_string(),
+            extends: None,
+            inverse_of: None,
+            features: vec![],
+        });
+        round_trip(&cls);
+    }
+
+    // ── InstanceFeature ─────────────────────────────────────────
+
+    #[test]
+    fn instance_feature_round_trip() {
+        let feat = InstanceFeature {
+            name: "data_in".to_string(),
+            kind: FeatureKind::EventDataPort,
+            direction: Some(Direction::In),
+            array_index: None,
+        };
+        round_trip(&feat);
+
+        // With array index
+        let feat_arr = InstanceFeature {
+            name: "sensor".to_string(),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            array_index: Some(3),
+        };
+        round_trip(&feat_arr);
+    }
+
+    // ── InstanceConnection ──────────────────────────────────────
+
+    #[test]
+    fn instance_connection_round_trip() {
+        let conn = InstanceConnection {
+            name: "c1".to_string(),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            source: Some("sensor.data_out".to_string()),
+            destination: Some("controller.data_in".to_string()),
+        };
+        round_trip(&conn);
+
+        // No endpoints, bidirectional
+        let conn2 = InstanceConnection {
+            name: "bus_access".to_string(),
+            kind: ConnectionKind::Access,
+            is_bidirectional: true,
+            source: None,
+            destination: None,
+        };
+        round_trip(&conn2);
+    }
+
+    // ── InstanceNode (complex nested tree) ──────────────────────
+
+    #[test]
+    fn instance_node_round_trip() {
+        let node = InstanceNode {
+            name: "Platform.Dual".to_string(),
+            category: ComponentCategory::System,
+            package: "IMA".to_string(),
+            type_name: "Platform".to_string(),
+            impl_name: Some("Dual".to_string()),
+            array_index: None,
+            features: vec![InstanceFeature {
+                name: "eth".to_string(),
+                kind: FeatureKind::DataPort,
+                direction: Some(Direction::InOut),
+                array_index: None,
+            }],
+            connections: vec![InstanceConnection {
+                name: "bus_link".to_string(),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                source: Some("cpu1.data_out".to_string()),
+                destination: Some("cpu2.data_in".to_string()),
+            }],
+            children: vec![
+                InstanceNode {
+                    name: "cpu1".to_string(),
+                    category: ComponentCategory::Processor,
+                    package: "IMA".to_string(),
+                    type_name: "CPU".to_string(),
+                    impl_name: None,
+                    array_index: None,
+                    features: vec![InstanceFeature {
+                        name: "data_out".to_string(),
+                        kind: FeatureKind::DataPort,
+                        direction: Some(Direction::Out),
+                        array_index: None,
+                    }],
+                    connections: vec![],
+                    children: vec![],
+                    diagnostics: vec![],
+                },
+                InstanceNode {
+                    name: "cpu2".to_string(),
+                    category: ComponentCategory::Processor,
+                    package: "IMA".to_string(),
+                    type_name: "CPU".to_string(),
+                    impl_name: None,
+                    array_index: Some(1),
+                    features: vec![InstanceFeature {
+                        name: "data_in".to_string(),
+                        kind: FeatureKind::DataPort,
+                        direction: Some(Direction::In),
+                        array_index: Some(2),
+                    }],
+                    connections: vec![],
+                    children: vec![],
+                    diagnostics: vec!["unresolved classifier".to_string()],
+                },
+            ],
+            diagnostics: vec![],
+        };
+        round_trip(&node);
+    }
+
+    // ── InstanceNode with deeply nested children ────────────────
+
+    #[test]
+    fn instance_node_deeply_nested_round_trip() {
+        // Three levels deep: system > process > thread
+        let thread = InstanceNode {
+            name: "worker".to_string(),
+            category: ComponentCategory::Thread,
+            package: "App".to_string(),
+            type_name: "WorkerThread".to_string(),
+            impl_name: Some("Impl".to_string()),
+            array_index: None,
+            features: vec![InstanceFeature {
+                name: "trigger".to_string(),
+                kind: FeatureKind::EventPort,
+                direction: Some(Direction::In),
+                array_index: None,
+            }],
+            connections: vec![],
+            children: vec![],
+            diagnostics: vec![],
+        };
+
+        let process = InstanceNode {
+            name: "app_proc".to_string(),
+            category: ComponentCategory::Process,
+            package: "App".to_string(),
+            type_name: "AppProcess".to_string(),
+            impl_name: Some("Impl".to_string()),
+            array_index: None,
+            features: vec![],
+            connections: vec![],
+            children: vec![thread],
+            diagnostics: vec![],
+        };
+
+        let root = InstanceNode {
+            name: "Top.Impl".to_string(),
+            category: ComponentCategory::System,
+            package: "App".to_string(),
+            type_name: "Top".to_string(),
+            impl_name: Some("Impl".to_string()),
+            array_index: None,
+            features: vec![],
+            connections: vec![],
+            children: vec![process],
+            diagnostics: vec![],
+        };
+        round_trip(&root);
+    }
+
+    // ── End-to-end: parse AADL, lower, serialize, deserialize ──
+
+    #[test]
+    fn full_model_round_trip() {
+        let db = Database::from_aadl(&[(
+            "test.aadl".to_string(),
+            r#"
+            package FullTest
+            public
+              system Sensor
+                features
+                  outp : out data port;
+                flows
+                  f_src : flow source outp;
+              end Sensor;
+
+              system Actuator
+                features
+                  inp : in data port;
+                flows
+                  f_sink : flow sink inp;
+              end Actuator;
+
+              system Top
+                features
+                  ext_in : in event port;
+              end Top;
+
+              system implementation Top.Impl
+                subcomponents
+                  s : system Sensor;
+                  a : system Actuator;
+                connections
+                  c1 : port s.outp -> a.inp;
+                flows
+                  e1 : end to end flow s.f_src -> c1 -> a.f_sink;
+                modes
+                  active : initial mode;
+                  standby : mode;
+                  active -[ext_in]-> standby;
+              end Top.Impl;
+            end FullTest;
+            "#
+            .to_string(),
+        )]);
+
+        // Round-trip packages
+        let pkgs = db.packages();
+        let json = serde_json::to_string_pretty(&pkgs).unwrap();
+        let back: Vec<Package> = serde_json::from_str(&json).unwrap();
+        assert_eq!(pkgs, back);
+
+        // Round-trip classifier
+        let cls = db.find_classifier("FullTest::Top.Impl").unwrap();
+        let json = serde_json::to_string(&cls).unwrap();
+        let back: Classifier = serde_json::from_str(&json).unwrap();
+        assert_eq!(cls, back);
+
+        // Round-trip instance tree
+        let inst = db.instantiate("FullTest::Top.Impl").unwrap();
+        let tree = inst.to_serializable();
+        let json = serde_json::to_string_pretty(&tree).unwrap();
+        let back: InstanceNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(tree, back);
+    }
+}
