@@ -61,6 +61,12 @@ impl Analysis for ConnectivityAnalysis {
                 }
 
                 if !has_conns {
+                    // Check if this feature is annotated as intentionally unconnected
+                    // via the SPAR_Properties::Intentionally_Unconnected property.
+                    if is_intentionally_unconnected(instance, comp_idx, feat.name.as_str()) {
+                        continue;
+                    }
+
                     // No connections at all on this component or parent.
                     let path = component_path(instance, comp_idx);
                     match feat.direction {
@@ -153,4 +159,42 @@ fn is_port_feature(_feat_idx: FeatureInstanceIdx, instance: &SystemInstance) -> 
         feat.kind,
         FeatureKind::DataPort | FeatureKind::EventPort | FeatureKind::EventDataPort
     )
+}
+
+/// Check if a feature is annotated as intentionally unconnected.
+///
+/// Looks for the `SPAR_Properties::Intentionally_Unconnected` property on the
+/// component that owns the feature. The property value can be:
+/// - `"all"` — all ports on the component are intentionally unconnected
+/// - `"true"` — same as "all"
+/// - A comma-separated list of feature names (case-insensitive), e.g. `"(feat1, feat2)"`
+///   or `"feat1, feat2"`
+fn is_intentionally_unconnected(
+    instance: &SystemInstance,
+    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
+    feature_name: &str,
+) -> bool {
+    let props = instance.properties_for(comp_idx);
+    let value = match props.get("SPAR_Properties", "Intentionally_Unconnected") {
+        Some(v) => v,
+        None => return false,
+    };
+
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+
+    // "all" or "true" means every port is intentionally unconnected.
+    if lower == "all" || lower == "true" {
+        return true;
+    }
+
+    // Strip optional surrounding parentheses.
+    let inner = lower
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(&lower);
+
+    // Split by comma and check if the feature name appears in the list.
+    let feat_lower = feature_name.to_ascii_lowercase();
+    inner.split(',').any(|item| item.trim() == feat_lower)
 }

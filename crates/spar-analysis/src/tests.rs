@@ -5,7 +5,8 @@ use rustc_hash::FxHashMap;
 
 use spar_hir_def::instance::*;
 use spar_hir_def::item_tree::*;
-use spar_hir_def::name::Name;
+use spar_hir_def::name::{Name, PropertyRef};
+use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
 use crate::completeness::CompletenessAnalysis;
 use crate::connectivity::ConnectivityAnalysis;
@@ -20,6 +21,7 @@ struct TestInstanceBuilder {
     features: Arena<FeatureInstance>,
     connections: Arena<ConnectionInstance>,
     diagnostics: Vec<InstanceDiagnostic>,
+    property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
 }
 
 impl TestInstanceBuilder {
@@ -29,6 +31,7 @@ impl TestInstanceBuilder {
             features: Arena::default(),
             connections: Arena::default(),
             diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
         }
     }
 
@@ -101,6 +104,27 @@ impl TestInstanceBuilder {
         self.components[parent].children = children;
     }
 
+    fn set_property(
+        &mut self,
+        comp: ComponentInstanceIdx,
+        property_set: &str,
+        property_name: &str,
+        value: &str,
+    ) {
+        let map = self
+            .property_maps
+            .entry(comp)
+            .or_default();
+        map.add(PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new(property_set)),
+                property_name: Name::new(property_name),
+            },
+            value: value.to_string(),
+            is_append: false,
+        });
+    }
+
     fn add_diagnostic(&mut self, message: &str, path: Vec<&str>) {
         self.diagnostics.push(InstanceDiagnostic {
             message: message.to_string(),
@@ -119,7 +143,7 @@ impl TestInstanceBuilder {
             mode_instances: Arena::default(),
             mode_transition_instances: Arena::default(),
             diagnostics: self.diagnostics,
-            property_maps: FxHashMap::default(),
+            property_maps: self.property_maps,
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -1290,4 +1314,275 @@ fn component_depth_calculated_correctly() {
     assert_eq!(crate::component_depth(&instance, root), 0);
     assert_eq!(crate::component_depth(&instance, mid), 1);
     assert_eq!(crate::component_depth(&instance, leaf), 2);
+}
+
+// ── Intentional No-Connection (STPA-REQ-018) Tests ──────────────────
+
+#[test]
+fn connectivity_intentionally_unconnected_suppresses_warning() {
+    // A port annotated with Intentionally_Unconnected should NOT produce a warning.
+    let mut b = TestInstanceBuilder::new();
+
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
+
+    b.add_feature("data_in", FeatureKind::DataPort, Some(Direction::In), child);
+    b.add_feature(
+        "data_out",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        child,
+    );
+    b.set_children(root, vec![child]);
+
+    // Mark data_in as intentionally unconnected.
+    b.set_property(
+        child,
+        "SPAR_Properties",
+        "Intentionally_Unconnected",
+        "data_in",
+    );
+
+    let instance = b.build(root);
+    let analysis = ConnectivityAnalysis;
+    let diags = analysis.analyze(&instance);
+
+    // data_in should be suppressed, data_out should still warn.
+    let in_warnings = diags_containing(&diags, "no incoming connection");
+    let out_warnings = diags_containing(&diags, "no outgoing connection");
+    assert!(
+        in_warnings.is_empty(),
+        "data_in should be suppressed: {:?}",
+        diags
+    );
+    assert_eq!(
+        out_warnings.len(),
+        1,
+        "data_out should still warn: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn connectivity_intentionally_unconnected_all_suppresses_all() {
+    // Setting the property to "all" suppresses warnings for every port.
+    let mut b = TestInstanceBuilder::new();
+
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        Some("basic"),
+        "Pkg",
+        Some(root),
+    );
+
+    b.add_feature("data_in", FeatureKind::DataPort, Some(Direction::In), child);
+    b.add_feature(
+        "data_out",
+        FeatureKind::DataPort,
+        Some(Direction::Out),
+        child,
+    );
+    b.set_children(root, vec![child]);
+
+    b.set_property(child, "SPAR_Properties", "Intentionally_Unconnected", "all");
+
+    let instance = b.build(root);
+    let analysis = ConnectivityAnalysis;
+    let diags = analysis.analyze(&instance);
+
+    let port_warnings: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.message.contains("no incoming connection")
+                || d.message.contains("no outgoing connection")
+        })
+        .collect();
+    assert!(
+        port_warnings.is_empty(),
+        "'all' should suppress all port warnings: {:?}",
+        port_warnings
+    );
+}
+
+#[test]
+fn connectivity_intentionally_unconnected_list_syntax() {
+    // A parenthesized comma-separated list should suppress listed features.
+    let mut b = TestInstanceBuilder::new();
+
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "handler",
+        ComponentCategory::System,
+        "Handler",
+        Some("impl"),
+        "Pkg",
+        Some(root),
+    );
+
+    b.add_feature("port_a", FeatureKind::DataPort, Some(Direction::In), child);
+    b.add_feature("port_b", FeatureKind::DataPort, Some(Direction::In), child);
+    b.add_feature("port_c", FeatureKind::DataPort, Some(Direction::Out), child);
+    b.set_children(root, vec![child]);
+
+    // Mark port_a and port_c as intentionally unconnected, but not port_b.
+    b.set_property(
+        child,
+        "SPAR_Properties",
+        "Intentionally_Unconnected",
+        "(port_a, port_c)",
+    );
+
+    let instance = b.build(root);
+    let analysis = ConnectivityAnalysis;
+    let diags = analysis.analyze(&instance);
+
+    // port_a and port_c should be suppressed.
+    let port_a_warnings = diags_containing(&diags, "'port_a'");
+    let port_c_warnings = diags_containing(&diags, "'port_c'");
+    let port_b_warnings = diags_containing(&diags, "'port_b'");
+
+    assert!(
+        port_a_warnings.is_empty(),
+        "port_a should be suppressed: {:?}",
+        diags
+    );
+    assert!(
+        port_c_warnings.is_empty(),
+        "port_c should be suppressed: {:?}",
+        diags
+    );
+    assert_eq!(
+        port_b_warnings.len(),
+        1,
+        "port_b should still warn: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn connectivity_without_property_still_warns() {
+    // Ensure that without the property, warnings are still emitted (regression guard).
+    let mut b = TestInstanceBuilder::new();
+
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        None,
+        "Pkg",
+        Some(root),
+    );
+
+    b.add_feature("data_in", FeatureKind::DataPort, Some(Direction::In), child);
+    b.set_children(root, vec![child]);
+
+    // No Intentionally_Unconnected property set.
+    let instance = b.build(root);
+    let analysis = ConnectivityAnalysis;
+    let diags = analysis.analyze(&instance);
+
+    let in_warnings = diags_containing(&diags, "no incoming connection");
+    assert_eq!(
+        in_warnings.len(),
+        1,
+        "without annotation, should still warn: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn connectivity_intentionally_unconnected_case_insensitive() {
+    // Property value matching should be case-insensitive.
+    let mut b = TestInstanceBuilder::new();
+
+    let root = b.add_component(
+        "root",
+        ComponentCategory::System,
+        "Top",
+        Some("impl"),
+        "Pkg",
+        None,
+    );
+    let child = b.add_component(
+        "sensor",
+        ComponentCategory::System,
+        "Sensor",
+        None,
+        "Pkg",
+        Some(root),
+    );
+
+    b.add_feature("Data_In", FeatureKind::DataPort, Some(Direction::In), child);
+    b.set_children(root, vec![child]);
+
+    // Use different case in the property value.
+    b.set_property(
+        child,
+        "SPAR_Properties",
+        "Intentionally_Unconnected",
+        "data_in",
+    );
+
+    let instance = b.build(root);
+    let analysis = ConnectivityAnalysis;
+    let diags = analysis.analyze(&instance);
+
+    let in_warnings = diags_containing(&diags, "no incoming connection");
+    assert!(
+        in_warnings.is_empty(),
+        "case-insensitive match should suppress: {:?}",
+        diags
+    );
+}
+
+// ── register_all Tests (STPA-REQ-014) ───────────────────────────────
+
+#[test]
+fn test_register_all_count() {
+    let mut runner = AnalysisRunner::new();
+    runner.register_all();
+    assert_eq!(
+        runner.count(),
+        21,
+        "register_all should register all 21 instance-level analyses"
+    );
 }
