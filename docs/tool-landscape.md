@@ -5,10 +5,12 @@
 
 ## The Landscape
 
-The AADL ecosystem has ~15 tools spanning IDEs, analysis, verification,
+The AADL ecosystem has 22+ tools spanning IDEs, analysis, verification,
 code generation, scheduling, safety, and optimization. Most are academic
 prototypes or Eclipse plugins tightly coupled to OSATE2. The commercial
 segment is small (Ellidiss: [[TOOL-STOOD]], [[TOOL-AADL-INSPECTOR]]).
+Notable recent entrants: [[TOOL-HAMR]] (Rust code gen), [[TOOL-AWAS]]
+(security flow analysis), [[TOOL-MASIW]] (IMA/AFDX).
 
 Spar ([[TOOL-SPAR]]) occupies a unique position: the only AADL toolchain
 that is (a) a standalone Rust binary, (b) compiles to WASM, (c) has
@@ -90,6 +92,26 @@ Spar already exports NuSMV for mode reachability. Adding UPPAAL timed
 automata export enables timing property verification — a natural
 extension. ~400 LOC.
 
+### 6. Rust Skeleton Code Generation (from [[TOOL-HAMR]])
+
+Sireum HAMR is the only tool generating Rust from AADL. Spar is uniquely
+positioned to do this better — we already have the instance model and
+WIT transforms. Generate:
+- Thread task function stubs with dispatch protocol
+- Port read/write API (matching AADL port semantics)
+- Cargo.toml with correct dependencies
+- ARINC 653 partition boilerplate
+
+~800 LOC. Pairs with our existing WIT/WAC transforms for a complete
+AADL-to-WASM-component pipeline.
+
+### 7. Security Information Flow Analysis (from [[TOOL-AWAS]])
+
+No current spar analysis covers security flows. With DO-326A airborne
+security gaining traction, tracking information flow paths through
+the architecture (which components can influence which data) would
+differentiate spar. Extends our existing flow_check. ~600 LOC.
+
 ## What Spar Should NOT Adopt
 
 - **Graphical editor** ([[TOOL-STOOD]]) — LSP + VS Code/Neovim is
@@ -107,9 +129,10 @@ extension. ~400 LOC.
 |---|---|---|---|---|
 | 1 | RTA + EDF + OPA scheduling | [[TOOL-CHEDDAR]] | ~850 | Critical |
 | 2 | Deployment optimization | [[TOOL-ARCHEOPTERIX]] | ~1500 | High |
-| 3 | FTA + minimal cut sets | [[TOOL-FASTAR]] | ~1100 | High |
-| 4 | UPPAAL timed automata export | [[TOOL-UPPAAL]] | ~400 | Medium |
-| 5 | AGREE annex parsing | [[TOOL-AGREE]] | ~600 | Medium |
-| 6 | Rust skeleton code gen | [[TOOL-OCARINA]] | ~800 | Medium |
+| 3 | FTA + minimal cut sets | [[TOOL-EMFTA]] | ~1100 | High |
+| 4 | Rust skeleton code gen | [[TOOL-HAMR]] | ~800 | High |
+| 5 | UPPAAL timed automata export | [[TOOL-UPPAAL]] | ~400 | Medium |
+| 6 | AGREE annex parsing | [[TOOL-AGREE]] | ~600 | Medium |
 | 7 | Sensitivity analysis | [[TOOL-MAST]] | ~200 | Medium |
-| 8 | Cyber threat analysis | [[TOOL-VERDICT]] | ~1000 | Low |
+| 8 | Security flow analysis | [[TOOL-AWAS]] | ~600 | Medium |
+| 9 | Cyber threat analysis | [[TOOL-VERDICT]] | ~1000 | Low |
