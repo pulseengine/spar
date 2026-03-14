@@ -520,8 +520,7 @@ fn cmd_modes(args: &[String]) {
         }
         _ => {
             // Text output: show reachability matrices
-            let matrices =
-                spar_analysis::mode_reachability::compute_reachability_matrices(&inst);
+            let matrices = spar_analysis::mode_reachability::compute_reachability_matrices(&inst);
 
             if matrices.is_empty() {
                 eprintln!("No modal components found.");
@@ -567,10 +566,7 @@ fn cmd_modes(args: &[String]) {
                 println!();
 
                 if !matrix.unreachable.is_empty() {
-                    println!(
-                        "Unreachable modes: {}",
-                        matrix.unreachable.join(", ")
-                    );
+                    println!("Unreachable modes: {}", matrix.unreachable.join(", "));
                 }
                 if !matrix.dead_transitions.is_empty() {
                     println!("Dead transitions:");

@@ -117,12 +117,12 @@ impl AnalysisRunner {
         use latency::LatencyAnalysis;
         use modal_rules::ModalRuleAnalysis;
         use mode_check::ModeCheckAnalysis;
+        use mode_reachability::ModeReachabilityAnalysis;
         use mode_rules::ModeRuleAnalysis;
         use property_rules::PropertyRuleAnalysis;
         use resource_budget::ResourceBudgetAnalysis;
         use scheduling::SchedulingAnalysis;
         use subcomponent_rules::SubcomponentRuleAnalysis;
-        use mode_reachability::ModeReachabilityAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
 
         self.register(Box::new(ConnectivityAnalysis));
