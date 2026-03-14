@@ -116,6 +116,10 @@ impl Analysis for Emv2Analysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Warning — single point of failure detected in fault tree
+        //   Info    — missing error model annotation on safety-relevant component,
+        //             fault tree summary with cut set counts
         let mut diags = Vec::new();
 
         // Check for components that could propagate errors without handling
@@ -329,6 +333,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 

@@ -28,6 +28,10 @@ impl Analysis for FlowRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — flow source/sink/path missing required port directions
+        //   Warning — E2E flow continuity broken, E2E segment references nonexistent subcomponent
+        //   Info    — flow spec not referenced by any end-to-end flow
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {
@@ -416,6 +420,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
@@ -469,6 +474,7 @@ mod tests {
                     subcomponent: dst_sub.map(Name::new),
                     feature: Name::new(dst_feat),
                 }),
+                in_modes: Vec::new(),
             });
             self.components[owner].connections.push(idx);
         }

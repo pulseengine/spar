@@ -1,0 +1,13 @@
+package PropertyStringValue
+public
+  thread Worker
+    properties
+      Source_Name => "worker_main";
+      Source_Text => ("worker.c", "worker.h");
+  end Worker;
+
+  data Config
+    properties
+      Source_Name => "config_struct";
+  end Config;
+end PropertyStringValue;

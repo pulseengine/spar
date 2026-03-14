@@ -18,6 +18,9 @@ const ANALYSIS_NAME: &str = "extends_rules";
 
 /// Check all extends/inheritance rules on an ItemTree. Returns diagnostics.
 pub fn check_extends_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
+    // Severity rationale (STPA-REQ-016):
+    //   Error — self-extension cycle, category mismatch in extends, incompatible feature
+    //           kind refinement, implementation/type category mismatch
     let mut diags = Vec::new();
 
     for (_idx, pkg) in tree.packages.iter() {

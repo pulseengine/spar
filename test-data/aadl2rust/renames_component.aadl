@@ -1,0 +1,5 @@
+package RenamesComponent
+public
+  with RenamesSource;
+  MySys renames system RenamesSource::S;
+end RenamesComponent;

@@ -7,6 +7,8 @@ project:
     STPA safety analysis, and verification evidence.
   schemas:
     - common
+    - dev
+    - aspice
     - stpa
     - aadl
 
@@ -15,6 +17,12 @@ sources:
     format: generic-yaml
   - path: safety/stpa
     format: stpa-yaml
+  - path: safety/stpa/requirements.yaml
+    format: generic-yaml
+  - path: safety/stpa/architecture.yaml
+    format: generic-yaml
+  - path: safety/stpa/validation.yaml
+    format: generic-yaml
 
 docs:
   - docs

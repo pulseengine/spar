@@ -1,0 +1,13 @@
+package PropertyBooleanValues
+public
+  system S
+    properties
+      Synchronized_Component => true;
+  end S;
+
+  thread T
+    properties
+      Active_Thread_Handling_Protocol => complete_one;
+      Synchronized_Component => false;
+  end T;
+end PropertyBooleanValues;

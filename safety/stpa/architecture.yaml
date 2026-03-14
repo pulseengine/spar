@@ -11,7 +11,7 @@ artifacts:
   # ══════════════════════════════════════════════════════════════════════
 
   - id: ARCH-001
-    type: architecture-decision
+    type: design-decision
     title: LoweringDiagnostic infrastructure in ItemTree
     description: >
       Added LoweringDiagnostic and LoweringSeverity types to the ItemTree
@@ -19,15 +19,20 @@ artifacts:
       populated during CST→ItemTree lowering. This allows the lowering
       pass to report issues without aborting — diagnostics are collected
       and surfaced through the normal diagnostic pipeline.
-    rationale: >
-      Diagnostics are collected rather than emitted immediately because
-      lowering must complete to provide a usable (if incomplete) ItemTree
-      for downstream processing. This follows the existing pattern where
-      SystemInstance.diagnostics collects instance-level issues.
-    implements: [STPA-REQ-002, STPA-REQ-004]
-    source-files:
-      - crates/spar-hir-def/src/item_tree/mod.rs  # LoweringDiagnostic, LoweringSeverity, diagnostics field
-      - crates/spar-hir-def/src/item_tree/lower.rs # Threading through lower_file/lower_package/lower_section
+    fields:
+      rationale: >
+        Diagnostics are collected rather than emitted immediately because
+        lowering must complete to provide a usable (if incomplete) ItemTree
+        for downstream processing. This follows the existing pattern where
+        SystemInstance.diagnostics collects instance-level issues.
+      source-files:
+        - crates/spar-hir-def/src/item_tree/mod.rs  # LoweringDiagnostic, LoweringSeverity, diagnostics field
+        - crates/spar-hir-def/src/item_tree/lower.rs # Threading through lower_file/lower_package/lower_section
+    links:
+      - type: satisfies
+        target: STPA-REQ-002
+      - type: satisfies
+        target: STPA-REQ-004
 
   - id: ARCH-002
     type: design-decision
@@ -37,14 +42,17 @@ artifacts:
       it pushes a Warning-severity diagnostic stating the annex content was
       not processed. The AnnexLibrary item reference is still added to the
       item list so downstream code knows the annex exists.
-    rationale: >
-      Current architecture does not integrate annex parsers at the ItemTree
-      level (annex parsing happens later via spar-annex). Warning (not error)
-      because the annex may be processed downstream — the diagnostic alerts
-      that the lowering layer itself did not process it.
-    implements: [STPA-REQ-002]
-    source-files:
-      - crates/spar-hir-def/src/item_tree/lower.rs:147-155  # ANNEX_LIBRARY arm
+    fields:
+      rationale: >
+        Current architecture does not integrate annex parsers at the ItemTree
+        level (annex parsing happens later via spar-annex). Warning (not error)
+        because the annex may be processed downstream — the diagnostic alerts
+        that the lowering layer itself did not process it.
+      source-files:
+        - crates/spar-hir-def/src/item_tree/lower.rs:147-155  # ANNEX_LIBRARY arm
+    links:
+      - type: satisfies
+        target: STPA-REQ-002
 
   - id: ARCH-003
     type: design-decision
@@ -54,22 +62,25 @@ artifacts:
       non-semantic SyntaxKind variants (ERROR, WHITESPACE, COMMENT, NAME,
       END_KW, SEMICOLON, PACKAGE_PROPERTIES, ANNEX_SUBCLAUSE) as no-ops.
       The catch-all arm emits a warning with the unhandled kind name.
-    rationale: >
-      The wildcard _ => {} silently swallowed any SyntaxKind not explicitly
-      handled. If a new semantic construct is added to the parser, it would
-      be silently dropped by the lowering. Explicit arms ensure that only
-      known non-semantic kinds are ignored; any genuinely new semantic kind
-      triggers a diagnostic that can be caught in testing.
-    implements: [STPA-REQ-004]
-    source-files:
-      - crates/spar-hir-def/src/item_tree/lower.rs:161-179  # Explicit arms + catch-all
+    fields:
+      rationale: >
+        The wildcard _ => {} silently swallowed any SyntaxKind not explicitly
+        handled. If a new semantic construct is added to the parser, it would
+        be silently dropped by the lowering. Explicit arms ensure that only
+        known non-semantic kinds are ignored; any genuinely new semantic kind
+        triggers a diagnostic that can be caught in testing.
+      source-files:
+        - crates/spar-hir-def/src/item_tree/lower.rs:161-179  # Explicit arms + catch-all
+    links:
+      - type: satisfies
+        target: STPA-REQ-004
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream B: Property & Resolution (STPA-REQ-006, STPA-REQ-007)
   # ══════════════════════════════════════════════════════════════════════
 
   - id: ARCH-004
-    type: architecture-decision
+    type: design-decision
     title: Standalone property_check module for type validation
     description: >
       Created crates/spar-hir-def/src/property_check.rs as a new module
@@ -77,15 +88,18 @@ artifacts:
       validates PropertyExpr against PropertyTypeDef using recursive match.
       It handles all expression/type combinations including nested structures
       (List, Range, Record, UnitValue).
-    rationale: >
-      Separated from lower.rs and properties.rs because property type
-      validation is a cross-cutting concern. The property_check module
-      takes already-lowered types as input and produces PropertyTypeDiagnostic
-      values, keeping it independent of the lowering pipeline.
-    implements: [STPA-REQ-006]
-    source-files:
-      - crates/spar-hir-def/src/property_check.rs  # Module with validate_property_type
-      - crates/spar-hir-def/src/lib.rs              # pub mod property_check
+    fields:
+      rationale: >
+        Separated from lower.rs and properties.rs because property type
+        validation is a cross-cutting concern. The property_check module
+        takes already-lowered types as input and produces PropertyTypeDiagnostic
+        values, keeping it independent of the lowering pipeline.
+      source-files:
+        - crates/spar-hir-def/src/property_check.rs  # Module with validate_property_type
+        - crates/spar-hir-def/src/lib.rs              # pub mod property_check
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
 
   - id: ARCH-005
     type: design-decision
@@ -96,39 +110,45 @@ artifacts:
       Opaque and ComputedValue expressions skip validation (cannot be
       type-checked statically). UnitValue delegates to inner expression.
       TypeRef skips validation (type not resolved at this level).
-    rationale: >
-      Opaque values contain unparsed text (e.g., from annex expressions).
-      ComputedValue references runtime computation. Neither can be validated
-      against a declared type at lowering time. Flagging them would produce
-      false positives.
-    implements: [STPA-REQ-006]
-    source-files:
-      - crates/spar-hir-def/src/property_check.rs:31-136  # check_expr function
+    fields:
+      rationale: >
+        Opaque values contain unparsed text (e.g., from annex expressions).
+        ComputedValue references runtime computation. Neither can be validated
+        against a declared type at lowering time. Flagging them would produce
+        false positives.
+      source-files:
+        - crates/spar-hir-def/src/property_check.rs:31-136  # check_expr function
+    links:
+      - type: satisfies
+        target: STPA-REQ-006
 
   - id: ARCH-006
-    type: architecture-decision
+    type: design-decision
     title: resolve_classifier_with_diagnostics for ambiguity detection
     description: >
       Added resolve_classifier_with_diagnostics() to GlobalScope. It wraps
       the existing resolve_classifier() and additionally checks for ambiguity
       when an unqualified reference resolves via imports. It iterates all
       imported packages to count candidates.
-    rationale: >
-      The existing resolver is deterministic (first import wins) but does
-      not warn when the result depends on import order. This method preserves
-      the deterministic resolution but adds a diagnostic return channel for
-      ambiguous cases. Kept as a separate method to avoid changing the
-      existing resolve_classifier contract.
-    implements: [STPA-REQ-007]
-    source-files:
-      - crates/spar-hir-def/src/resolver.rs  # resolve_classifier_with_diagnostics method
+    fields:
+      rationale: >
+        The existing resolver is deterministic (first import wins) but does
+        not warn when the result depends on import order. This method preserves
+        the deterministic resolution but adds a diagnostic return channel for
+        ambiguous cases. Kept as a separate method to avoid changing the
+        existing resolve_classifier contract.
+      source-files:
+        - crates/spar-hir-def/src/resolver.rs  # resolve_classifier_with_diagnostics method
+    links:
+      - type: satisfies
+        target: STPA-REQ-007
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream C: Instance Builder Safety (STPA-REQ-009-012)
   # ══════════════════════════════════════════════════════════════════════
 
   - id: ARCH-007
-    type: architecture-decision
+    type: design-decision
     title: Pre-instantiation cycle detection via DFS
     description: >
       Added detect_circular_containment() function that performs DFS on
@@ -136,14 +156,17 @@ artifacts:
       FxHashSet for visiting/visited sets with (package, type, impl)
       tuple keys. If a cycle is found, returns a diagnostic message
       with the cycle path.
-    rationale: >
-      Cycle detection must happen BEFORE recursive expansion to prevent
-      stack overflow. The max_depth limit (now 100) serves as a backup
-      but produces a less informative error. Pre-checking enables a
-      clear "circular containment: A → B → A" diagnostic.
-    implements: [STPA-REQ-012]
-    source-files:
-      - crates/spar-hir-def/src/instance.rs  # detect_circular_containment function
+    fields:
+      rationale: >
+        Cycle detection must happen BEFORE recursive expansion to prevent
+        stack overflow. The max_depth limit (now 100) serves as a backup
+        but produces a less informative error. Pre-checking enables a
+        clear "circular containment: A → B → A" diagnostic.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # detect_circular_containment function
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
 
   - id: ARCH-008
     type: design-decision
@@ -153,14 +176,17 @@ artifacts:
       deep hierarchies (e.g., partitioned avionics systems with 4+ levels
       of containment). The value 100 is well within stack limits while
       being large enough for realistic AADL models.
-    rationale: >
-      32 was too conservative for real-world AADL models. ARINC 653
-      systems with partitions, processes, thread groups, and threads
-      can easily reach 5-6 levels. 100 provides ample headroom while
-      the cycle detection prevents infinite recursion.
-    implements: [STPA-REQ-012]
-    source-files:
-      - crates/spar-hir-def/src/instance.rs  # Builder max_depth field
+    fields:
+      rationale: >
+        32 was too conservative for real-world AADL models. ARINC 653
+        systems with partitions, processes, thread groups, and threads
+        can easily reach 5-6 levels. 100 provides ample headroom while
+        the cycle detection prevents infinite recursion.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # Builder max_depth field
+    links:
+      - type: satisfies
+        target: STPA-REQ-012
 
   - id: ARCH-009
     type: design-decision
@@ -170,14 +196,17 @@ artifacts:
       dimension evaluates to 0, a diagnostic is pushed and the function
       returns 1 as a safe fallback. This prevents infinite loops (0-element
       expansion) or empty subcomponent arrays.
-    rationale: >
-      Returning 1 instead of aborting allows the rest of the model to be
-      instantiated and analyzed. The diagnostic clearly identifies the
-      problem. Aborting would lose all other analysis results for a
-      localized issue.
-    implements: [STPA-REQ-009]
-    source-files:
-      - crates/spar-hir-def/src/instance.rs  # array_element_count function
+    fields:
+      rationale: >
+        Returning 1 instead of aborting allows the rest of the model to be
+        instantiated and analyzed. The diagnostic clearly identifies the
+        problem. Aborting would lose all other analysis results for a
+        localized issue.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # array_element_count function
+    links:
+      - type: satisfies
+        target: STPA-REQ-009
 
   - id: ARCH-010
     type: design-decision
@@ -187,14 +216,17 @@ artifacts:
       connections are instantiated, it builds a map of child name to
       max array dimension, then checks each connection endpoint for
       out-of-bounds array index references.
-    rationale: >
-      Bounds checking is done post-expansion (not during connection
-      instantiation) because the array dimensions are needed from the
-      subcomponent declarations. This approach avoids threading dimension
-      info through the connection tracing logic.
-    implements: [STPA-REQ-010]
-    source-files:
-      - crates/spar-hir-def/src/instance.rs  # validate_connection_array_indices method
+    fields:
+      rationale: >
+        Bounds checking is done post-expansion (not during connection
+        instantiation) because the array dimensions are needed from the
+        subcomponent declarations. This approach avoids threading dimension
+        info through the connection tracing logic.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # validate_connection_array_indices method
+    links:
+      - type: satisfies
+        target: STPA-REQ-010
 
   - id: ARCH-011
     type: design-decision
@@ -204,35 +236,41 @@ artifacts:
       features were matched to destination features. After the matching
       loop, unmatched source features produce diagnostics identifying
       the connection name and unmatched member name.
-    rationale: >
-      Feature group connections should match by name per AS5506.
-      Unmatched members indicate either a modeling error or an
-      incompatible feature group pair. Warning (not error) because
-      partial connections may be intentional in some designs.
-    implements: [STPA-REQ-011]
-    source-files:
-      - crates/spar-hir-def/src/instance.rs  # expand_feature_group_connections
+    fields:
+      rationale: >
+        Feature group connections should match by name per AS5506.
+        Unmatched members indicate either a modeling error or an
+        incompatible feature group pair. Warning (not error) because
+        partial connections may be intentional in some designs.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # expand_feature_group_connections
+    links:
+      - type: satisfies
+        target: STPA-REQ-011
 
   # ══════════════════════════════════════════════════════════════════════
   # Workstream D: Modal-Aware Analysis (STPA-REQ-017)
   # ══════════════════════════════════════════════════════════════════════
 
   - id: ARCH-012
-    type: architecture-decision
+    type: design-decision
     title: Modal analysis helper module
     description: >
       Created crates/spar-analysis/src/modal.rs with has_modes() and
       mode_names() helper functions. These provide a clean API for
       analyses to query SOM status without directly accessing
       SystemInstance internals.
-    rationale: >
-      Centralizes modal awareness logic so all analyses use the same
-      checks. When full per-mode property evaluation is implemented
-      later, only this module needs updating — analysis code stays stable.
-    implements: [STPA-REQ-017]
-    source-files:
-      - crates/spar-analysis/src/modal.rs  # has_modes, mode_names
-      - crates/spar-analysis/src/lib.rs    # pub mod modal
+    fields:
+      rationale: >
+        Centralizes modal awareness logic so all analyses use the same
+        checks. When full per-mode property evaluation is implemented
+        later, only this module needs updating — analysis code stays stable.
+      source-files:
+        - crates/spar-analysis/src/modal.rs  # has_modes, mode_names
+        - crates/spar-analysis/src/lib.rs    # pub mod modal
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
 
   - id: ARCH-013
     type: design-decision
@@ -242,24 +280,27 @@ artifacts:
       instance.system_operation_modes at the end of analyze(). If SOMs
       exist, an Info-severity diagnostic is emitted stating that default
       (non-modal) property values were used and how many SOMs exist.
-    rationale: >
-      Info severity (not Warning) because the analysis results are still
-      valid for the default mode — they're just not mode-specific. The
-      diagnostic alerts the engineer that per-mode analysis would provide
-      more precise results. This is infrastructure for future per-mode
-      property evaluation.
-    implements: [STPA-REQ-017]
-    source-files:
-      - crates/spar-analysis/src/scheduling.rs       # SOM check in analyze()
-      - crates/spar-analysis/src/latency.rs           # SOM check in analyze()
-      - crates/spar-analysis/src/resource_budget.rs   # SOM check in analyze()
+    fields:
+      rationale: >
+        Info severity (not Warning) because the analysis results are still
+        valid for the default mode — they're just not mode-specific. The
+        diagnostic alerts the engineer that per-mode analysis would provide
+        more precise results. This is infrastructure for future per-mode
+        property evaluation.
+      source-files:
+        - crates/spar-analysis/src/scheduling.rs       # SOM check in analyze()
+        - crates/spar-analysis/src/latency.rs           # SOM check in analyze()
+        - crates/spar-analysis/src/resource_budget.rs   # SOM check in analyze()
+    links:
+      - type: satisfies
+        target: STPA-REQ-017
 
   # ══════════════════════════════════════════════════════════════════════
   # Batch 2: STPA-REQ-005, 014, 015, 018, 019
   # ══════════════════════════════════════════════════════════════════════
 
   - id: ARCH-014
-    type: architecture-decision
+    type: design-decision
     title: Intentionally_Unconnected property suppresses connectivity warnings
     description: >
       ConnectivityAnalysis checks SPAR_Properties::Intentionally_Unconnected
@@ -267,36 +308,42 @@ artifacts:
       property value supports three formats: "true"/"all" (suppress all),
       a single feature name, or a comma-separated list (with optional
       parentheses). Matching is case-insensitive.
-    rationale: >
-      False positive connectivity warnings for debug/monitoring ports cause
-      alert fatigue (Loss Scenario LS-8). This annotation lets engineers
-      explicitly mark ports as intentionally unconnected, reducing noise
-      while preserving warnings for genuinely forgotten connections.
-    implements: [STPA-REQ-018]
-    source-files:
-      - crates/spar-analysis/src/connectivity.rs  # is_intentionally_unconnected helper + integration
+    fields:
+      rationale: >
+        False positive connectivity warnings for debug/monitoring ports cause
+        alert fatigue (Loss Scenario LS-8). This annotation lets engineers
+        explicitly mark ports as intentionally unconnected, reducing noise
+        while preserving warnings for genuinely forgotten connections.
+      source-files:
+        - crates/spar-analysis/src/connectivity.rs  # is_intentionally_unconnected helper + integration
+    links:
+      - type: satisfies
+        target: STPA-REQ-018
 
   - id: ARCH-015
-    type: architecture-decision
+    type: design-decision
     title: AnalysisRunner::register_all() for automatic analysis registration
     description: >
       Added register_all() method to AnalysisRunner that registers all 21
       Analysis trait implementations. The CLI now calls register_all()
       instead of individual register() calls. Added count() method for
       test verification.
-    rationale: >
-      Manual registration (Loss Scenario LS-5) risks omitting new analyses.
-      register_all() is the single point of registration. An integration
-      test verifies the count matches expectations. When a new analysis is
-      added, the developer must add it to register_all() and update the
-      count assertion.
-    implements: [STPA-REQ-014]
-    source-files:
-      - crates/spar-analysis/src/lib.rs    # register_all() and count()
-      - crates/spar-cli/src/main.rs        # Updated to use register_all()
+    fields:
+      rationale: >
+        Manual registration (Loss Scenario LS-5) risks omitting new analyses.
+        register_all() is the single point of registration. An integration
+        test verifies the count matches expectations. When a new analysis is
+        added, the developer must add it to register_all() and update the
+        count assertion.
+      source-files:
+        - crates/spar-analysis/src/lib.rs    # register_all() and count()
+        - crates/spar-cli/src/main.rs        # Updated to use register_all()
+    links:
+      - type: satisfies
+        target: STPA-REQ-014
 
   - id: ARCH-016
-    type: architecture-decision
+    type: design-decision
     title: Comprehensive unit conversion validation tests
     description: >
       Added 80+ tests to property_value.rs validating every unit conversion
@@ -304,19 +351,22 @@ artifacts:
       AS5506 Appendix A values. Tests include forward/reverse conversions,
       adjacent ratio verification, case insensitivity, cross-family failure,
       and edge cases.
-    rationale: >
-      Unit conversion errors (Loss Scenario LS-2) can cause analyses to
-      compute with values off by orders of magnitude. Exhaustive pair-wise
-      testing ensures every factor matches the standard. Adjacent ratio
-      tests (1000x for time sub-second, 60x for min, 3600x for hr, 8x
-      for bits/Bytes, 1024x for size powers) provide a second validation
-      dimension.
-    implements: [STPA-REQ-005]
-    source-files:
-      - crates/spar-hir-def/src/property_value.rs  # TIME_UNITS, SIZE_UNITS, conversion tests
+    fields:
+      rationale: >
+        Unit conversion errors (Loss Scenario LS-2) can cause analyses to
+        compute with values off by orders of magnitude. Exhaustive pair-wise
+        testing ensures every factor matches the standard. Adjacent ratio
+        tests (1000x for time sub-second, 60x for min, 3600x for hr, 8x
+        for bits/Bytes, 1024x for size powers) provide a second validation
+        dimension.
+      source-files:
+        - crates/spar-hir-def/src/property_value.rs  # TIME_UNITS, SIZE_UNITS, conversion tests
+    links:
+      - type: satisfies
+        target: STPA-REQ-005
 
   - id: ARCH-017
-    type: architecture-decision
+    type: design-decision
     title: Shared typed property accessors module
     description: >
       Created property_accessors.rs consolidating duplicate property
@@ -325,20 +375,23 @@ artifacts:
       get_processor_binding, get_size_property, get_memory_binding,
       extract_reference_target. Each returns typed values (u64 picoseconds,
       u64 bits, String reference name).
-    rationale: >
-      Duplicate parsing logic across analysis modules (scheduling, latency,
-      resource_budget, arinc653, binding_check, binding_rules) risks
-      inconsistent behavior if one copy is fixed but others aren't. A
-      single module ensures all analyses parse properties identically.
-      Typed return values (u64 instead of &str) prevent downstream
-      parsing errors.
-    implements: [STPA-REQ-015]
-    source-files:
-      - crates/spar-analysis/src/property_accessors.rs  # Shared accessors
-      - crates/spar-analysis/src/lib.rs                  # pub mod property_accessors
+    fields:
+      rationale: >
+        Duplicate parsing logic across analysis modules (scheduling, latency,
+        resource_budget, arinc653, binding_check, binding_rules) risks
+        inconsistent behavior if one copy is fixed but others aren't. A
+        single module ensures all analyses parse properties identically.
+        Typed return values (u64 instead of &str) prevent downstream
+        parsing errors.
+      source-files:
+        - crates/spar-analysis/src/property_accessors.rs  # Shared accessors
+        - crates/spar-analysis/src/lib.rs                  # pub mod property_accessors
+    links:
+      - type: satisfies
+        target: STPA-REQ-015
 
   - id: ARCH-018
-    type: architecture-decision
+    type: design-decision
     title: Serde round-trip tests for all public types
     description: >
       Added 24 round-trip tests to spar-hir covering every Serialize+
@@ -348,12 +401,152 @@ artifacts:
       InstanceNode (with nested tree), InstanceFeature, InstanceConnection,
       plus all enum types (ComponentCategory, Direction, FeatureKind,
       ConnectionKind, FlowKind, AccessKind).
-    rationale: >
-      Serialization bugs (Loss Scenario LS-6) cause downstream consumers
-      to see incomplete data. Round-trip tests verify that every field
-      survives serialize→deserialize. Testing includes nested structures
-      (InstanceNode with children, features, connections) and optional
-      fields (array_index, applies_to, in_modes).
-    implements: [STPA-REQ-019]
-    source-files:
-      - crates/spar-hir/src/lib.rs  # serde_round_trip_tests module
+    fields:
+      rationale: >
+        Serialization bugs (Loss Scenario LS-6) cause downstream consumers
+        to see incomplete data. Round-trip tests verify that every field
+        survives serialize→deserialize. Testing includes nested structures
+        (InstanceNode with children, features, connections) and optional
+        fields (array_index, applies_to, in_modes).
+      source-files:
+        - crates/spar-hir/src/lib.rs  # serde_round_trip_tests module
+    links:
+      - type: satisfies
+        target: STPA-REQ-019
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Batch 3: STPA-REQ-001, 003, 008, 013, 016, 021, 022, 023
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-019
+    type: design-decision
+    title: Parser error handling and production coverage tests
+    description: >
+      Added 48 parser tests: 7 error-handling tests (STPA-REQ-001) verifying
+      ERROR nodes are produced for invalid syntax while CST remains lossless,
+      and 41 production coverage tests (STPA-REQ-003) covering previously
+      untested grammar productions (extends, prototypes, call sequences,
+      access connections, property expressions, annexes, renames, etc.).
+    fields:
+      rationale: >
+        Parser correctness is the foundation of all downstream analysis.
+        Error tests ensure the parser never silently drops tokens. Production
+        coverage tests ensure every AADL construct is parsed correctly.
+      source-files:
+        - crates/spar-syntax/tests/parser_tests.rs
+    links:
+      - type: satisfies
+        target: STPA-REQ-001
+      - type: satisfies
+        target: STPA-REQ-003
+
+  - id: ARCH-020
+    type: design-decision
+    title: Modal membership metadata on instance model
+    description: >
+      Added in_modes: Vec<Name> to ComponentInstance and ConnectionInstance.
+      The field is populated during instantiation from SubcomponentItem and
+      ConnectionItem in_modes. All subcomponents are instantiated regardless
+      of mode; modal membership is tracked as metadata for analyses to filter.
+    fields:
+      rationale: >
+        Filtering subcomponents during instantiation would lose components
+        that are active in non-default modes. Tracking as metadata lets each
+        analysis decide how to handle modal components.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # in_modes field on ComponentInstance, ConnectionInstance
+    links:
+      - type: satisfies
+        target: STPA-REQ-008
+
+  - id: ARCH-021
+    type: design-decision
+    title: Unresolved connection endpoint diagnostics
+    description: >
+      compute_semantic_connections() now emits diagnostics for connections
+      with missing endpoints (src/dst None) and unresolved subcomponent
+      references in connection endpoints.
+    fields:
+      rationale: >
+        Silent failure to resolve connection endpoints masks modeling errors.
+        Diagnostics identify exactly which connection and which subcomponent
+        reference failed to resolve.
+      source-files:
+        - crates/spar-hir-def/src/instance.rs  # endpoint_diagnostics in compute_semantic_connections
+    links:
+      - type: satisfies
+        target: STPA-REQ-013
+
+  - id: ARCH-022
+    type: design-decision
+    title: Severity rationale comments in all analysis modules
+    description: >
+      All 22 analysis modules have a severity rationale comment block at the
+      top of their analyze() function documenting Error/Warning/Info criteria.
+    fields:
+      rationale: >
+        Consistent severity assignment prevents over/under-reporting. The
+        comment block ensures new diagnostic additions follow the established
+        criteria for each analysis.
+      source-files:
+        - crates/spar-analysis/src/  # All 22 analysis modules
+    links:
+      - type: satisfies
+        target: STPA-REQ-016
+
+  - id: ARCH-023
+    type: design-decision
+    title: SVG topology verification tests
+    description: >
+      Added 8 tests verifying SVG output contains correct node count,
+      edge count, node labels matching instance names, edge source/target
+      attributes, hierarchy preservation, and parametric size checks.
+    fields:
+      rationale: >
+        SVG rendering must faithfully represent the instance model topology.
+        These tests prevent regressions where nodes or edges are silently
+        dropped or mislabeled.
+      source-files:
+        - crates/spar-wasm/src/render.rs  # SVG topology tests
+    links:
+      - type: satisfies
+        target: STPA-REQ-021
+
+  - id: ARCH-024
+    type: design-decision
+    title: Coverage tracking via rivet artifacts
+    description: >
+      Analysis coverage of AS5506 sections is tracked as rivet artifacts
+      with traces-to links in artifacts/requirements.yaml, not as a
+      standalone COMPLIANCE.md document. rivet validate and rivet coverage
+      commands verify completeness.
+    fields:
+      rationale: >
+        Rivet's traceability system is purpose-built for coverage tracking.
+        Standalone documents duplicate what rivet already does and go stale.
+      source-files:
+        - artifacts/requirements.yaml   # COVERAGE-* artifacts
+        - artifacts/verification.yaml   # VERIFY-STPA-COVERAGE
+    links:
+      - type: satisfies
+        target: STPA-REQ-022
+
+  - id: ARCH-025
+    type: design-decision
+    title: Regression test module for closed issues
+    description: >
+      Created regression_tests.rs in spar-analysis with 6 seed tests
+      covering past bugs (intentionally_unconnected suppression, invalid
+      containment detection, in_modes preservation, duplicate initial modes,
+      register_all completeness). Each test documents the original bug.
+    fields:
+      rationale: >
+        Regression tests prevent re-introduction of known-bad behavior. The
+        module convention (regression_ prefix, doc comments describing the
+        original bug) makes it easy to add new regressions as bugs are found.
+      source-files:
+        - crates/spar-analysis/src/regression_tests.rs
+        - crates/spar-analysis/src/lib.rs  # mod regression_tests
+    links:
+      - type: satisfies
+        target: STPA-REQ-023

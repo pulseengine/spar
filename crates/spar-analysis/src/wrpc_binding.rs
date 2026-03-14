@@ -29,6 +29,8 @@ impl Analysis for WrpcBindingAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Warning — cross-processor connection missing Actual_Connection_Binding to a bus
         let mut diagnostics = Vec::new();
 
         // Only run if the model has multiple processors — otherwise cross-processor
@@ -200,6 +202,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
@@ -233,6 +236,7 @@ mod tests {
                     subcomponent: Some(Name::new(dst_sub)),
                     feature: Name::new(dst_feat),
                 }),
+                in_modes: Vec::new(),
             });
             self.components[owner].connections.push(conn_idx);
             conn_idx

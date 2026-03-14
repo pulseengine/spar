@@ -210,6 +210,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // Child process
@@ -227,6 +228,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // Link child to root
@@ -290,6 +292,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // Two child components
@@ -307,6 +310,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let controller_idx = components.alloc(ComponentInstance {
@@ -323,6 +327,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         components[root_idx].children.push(sensor_idx);
@@ -342,6 +347,7 @@ mod tests {
                 subcomponent: Some(Name::new("ctrl")),
                 feature: Name::new("in_port"),
             }),
+            in_modes: Vec::new(),
         });
         components[root_idx].connections.push(conn_idx);
 
@@ -408,6 +414,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let child_idx = components.alloc(ComponentInstance {
@@ -424,6 +431,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         components[root_idx].children.push(child_idx);
@@ -442,6 +450,7 @@ mod tests {
                 subcomponent: Some(Name::new("proc")),
                 feature: Name::new("in_port"),
             }),
+            in_modes: Vec::new(),
         });
         components[root_idx].connections.push(conn_idx);
 
@@ -498,6 +507,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let mut child_indices = Vec::new();
@@ -516,6 +526,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: Some(i),
+                in_modes: Vec::new(),
             });
             child_indices.push(child);
         }

@@ -24,6 +24,9 @@ impl Analysis for ConnectivityAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Warning — unconnected required/provided port, or featureless component with connections
+        //   Info    — feature with no direction and no connections
         let mut diags = Vec::new();
 
         // Collect all feature indices that participate in connections.

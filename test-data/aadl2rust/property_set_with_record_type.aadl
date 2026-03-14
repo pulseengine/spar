@@ -1,0 +1,8 @@
+property set CustomRecords is
+  Position : type record (
+    x : aadlreal;
+    y : aadlreal;
+    z : aadlreal;
+  );
+  Location : CustomRecords::Position applies to (system);
+end CustomRecords;

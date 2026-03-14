@@ -23,6 +23,9 @@ impl Analysis for LatencyAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Warning — component without timing properties, worst-case latency exceeds bound
+        //   Info    — end-to-end flow latency range, modal awareness note
         let mut diags = Vec::new();
 
         for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
@@ -203,6 +206,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
@@ -222,6 +226,7 @@ mod tests {
                 owner,
                 src: None,
                 dst: None,
+                in_modes: Vec::new(),
             });
             self.components[owner].connections.push(idx);
         }

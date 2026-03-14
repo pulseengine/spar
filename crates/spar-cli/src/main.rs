@@ -26,6 +26,7 @@ fn main() {
         "items" => cmd_items(&args[2..]),
         "instance" => cmd_instance(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
+        "modes" => cmd_modes(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -42,6 +43,7 @@ fn print_usage() {
     eprintln!("  items      Show item tree (declarations) for file(s)");
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
+    eprintln!("  modes      Mode reachability analysis and SMV export");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -49,6 +51,7 @@ fn print_usage() {
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
+    eprintln!("  modes    --root Package::Type.Impl [--format text|smv] <file...>");
 }
 
 fn cmd_lsp() {
@@ -443,6 +446,139 @@ fn cmd_analyze(args: &[String]) {
         let has_errors = print_diagnostics(&diagnostics);
         if has_errors {
             process::exit(1);
+        }
+    }
+}
+
+fn cmd_modes(args: &[String]) {
+    let mut root = None;
+    let mut files = Vec::new();
+    let mut format = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|smv)");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    match format.as_deref() {
+        Some("smv") => {
+            print!("{}", spar_analysis::mode_reachability::export_smv(&inst));
+        }
+        _ => {
+            // Text output: show reachability matrices
+            let matrices = spar_analysis::mode_reachability::compute_reachability_matrices(&inst);
+
+            if matrices.is_empty() {
+                eprintln!("No modal components found.");
+                return;
+            }
+
+            for matrix in &matrices {
+                println!(
+                    "Component: {} (initial: {})",
+                    matrix.component_path.join("/"),
+                    matrix.initial_mode
+                );
+                println!("Modes: {}", matrix.modes.join(", "));
+                println!();
+
+                // Print matrix header
+                let max_len = matrix.modes.iter().map(|m| m.len()).max().unwrap_or(4);
+                print!("{:width$} |", "", width = max_len);
+                for m in &matrix.modes {
+                    print!(" {:^width$} |", m, width = max_len);
+                }
+                println!();
+                println!(
+                    "{}+{}",
+                    "-".repeat(max_len + 1),
+                    ("-".repeat(max_len + 3) + "+").repeat(matrix.modes.len())
+                );
+
+                for (i, src) in matrix.modes.iter().enumerate() {
+                    print!("{:width$} |", src, width = max_len);
+                    for j in 0..matrix.modes.len() {
+                        let mark = if i == j {
+                            "."
+                        } else if matrix.matrix[i][j] {
+                            "Y"
+                        } else {
+                            "-"
+                        };
+                        print!(" {:^width$} |", mark, width = max_len);
+                    }
+                    println!();
+                }
+                println!();
+
+                if !matrix.unreachable.is_empty() {
+                    println!("Unreachable modes: {}", matrix.unreachable.join(", "));
+                }
+                if !matrix.dead_transitions.is_empty() {
+                    println!("Dead transitions:");
+                    for dt in &matrix.dead_transitions {
+                        println!(
+                            "  {} ({} -> {}): trigger '{}' not connected",
+                            dt.name, dt.source, dt.destination, dt.trigger
+                        );
+                    }
+                }
+                println!();
+            }
         }
     }
 }

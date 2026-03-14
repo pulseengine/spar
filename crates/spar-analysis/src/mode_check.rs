@@ -25,6 +25,9 @@ impl Analysis for ModeCheckAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — no initial mode, multiple initial modes, undeclared source/destination mode
+        //   Warning — transitions declared without mode declarations, trigger not matching any feature
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {
@@ -213,6 +216,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 

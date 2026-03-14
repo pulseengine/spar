@@ -1,0 +1,16 @@
+package FlowSpecInModes
+public
+  system S
+    features
+      trigger : in event port;
+      inp : in data port;
+      outp : out data port;
+    modes
+      fast : initial mode;
+      slow : mode;
+      t1 : fast -[trigger]-> slow;
+    flows
+      f_fast : flow path inp -> outp in modes (fast);
+      f_slow : flow path inp -> outp in modes (slow);
+  end S;
+end FlowSpecInModes;

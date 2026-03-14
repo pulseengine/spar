@@ -25,6 +25,10 @@ impl Analysis for HierarchyAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — invalid containment per AS5506 section 4.5
+        //   Warning — nesting depth exceeds 8 levels
+        //   Info    — empty implementation with no subcomponents
         let mut diags = Vec::new();
 
         for (comp_idx, comp) in instance.all_components() {

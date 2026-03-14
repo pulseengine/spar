@@ -1,0 +1,12 @@
+package RefinedFeature
+public
+  system Base
+    features
+      p : feature;
+  end Base;
+
+  system Ext extends Base
+    features
+      p : refined to in data port;
+  end Ext;
+end RefinedFeature;

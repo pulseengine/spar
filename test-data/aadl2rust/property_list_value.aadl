@@ -1,0 +1,13 @@
+package PropertyListValue
+public
+  thread Worker
+    properties
+      Source_Text => ("file1.c", "file2.c", "file3.c");
+      Source_Language => (C);
+  end Worker;
+
+  system S
+    properties
+      Allowed_Connection_Binding_Class => (classifier (bus));
+  end S;
+end PropertyListValue;

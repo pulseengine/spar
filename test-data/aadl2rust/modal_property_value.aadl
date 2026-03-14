@@ -1,0 +1,13 @@
+package ModalPropertyValue
+public
+  system S
+    features
+      trigger : in event port;
+    modes
+      nominal : initial mode;
+      degraded : mode;
+      t1 : nominal -[trigger]-> degraded;
+    properties
+      Period => 10 ms in modes (nominal), 50 ms in modes (degraded);
+  end S;
+end ModalPropertyValue;

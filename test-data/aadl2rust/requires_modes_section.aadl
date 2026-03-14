@@ -1,0 +1,21 @@
+package RequiresModesSection
+public
+  system S
+    modes
+      nominal : initial mode;
+      degraded : mode;
+  end S;
+
+  system implementation S.i
+    subcomponents
+      sub1 : process P;
+    properties
+      Period => 10 ms applies to sub1;
+  end S.i;
+
+  process P
+    requires modes
+      nominal : initial mode;
+      degraded : mode;
+  end P;
+end RequiresModesSection;

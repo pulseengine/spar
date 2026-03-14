@@ -1,0 +1,23 @@
+package PropertyRecordValue
+public
+  with Data_Model;
+
+  data Packet
+    properties
+      Data_Model::Data_Representation => Struct;
+  end Packet;
+
+  data implementation Packet.i
+    subcomponents
+      hdr : data;
+      pld : data;
+    properties
+      Data_Model::Element_Names => ("hdr", "pld");
+  end Packet.i;
+
+  thread DataHandler
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 10 ms;
+  end DataHandler;
+end PropertyRecordValue;

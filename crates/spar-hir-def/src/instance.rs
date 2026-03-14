@@ -79,6 +79,9 @@ pub struct ComponentInstance {
     pub mode_transitions: Vec<ModeTransitionInstanceIdx>,
     /// Array index for array subcomponents: None for non-array, Some(1..N) for array elements.
     pub array_index: Option<u64>,
+    /// Modal membership: list of mode names this component is active in.
+    /// Empty means active in all modes (non-modal).
+    pub in_modes: Vec<Name>,
 }
 
 /// A feature instance.
@@ -108,6 +111,9 @@ pub struct ConnectionInstance {
     pub src: Option<ConnectionEnd>,
     /// Destination endpoint.
     pub dst: Option<ConnectionEnd>,
+    /// Modal membership: list of mode names this connection is active in.
+    /// Empty means active in all modes (non-modal).
+    pub in_modes: Vec<Name>,
 }
 
 /// An endpoint of a connection instance.
@@ -415,6 +421,7 @@ impl SystemInstance {
         const MAX_TRACE_DEPTH: usize = 20;
 
         let mut semantic = Vec::new();
+        let mut endpoint_diagnostics = Vec::new();
 
         // Collect all connection indices so we can iterate without borrowing self.
         let all_conn_indices: Vec<ConnectionInstanceIdx> =
@@ -424,8 +431,16 @@ impl SystemInstance {
             let conn = &self.connections[*conn_idx];
             let (src, dst) = match (&conn.src, &conn.dst) {
                 (Some(s), Some(d)) => (s.clone(), d.clone()),
-                // Skip connections with missing endpoints.
-                _ => continue,
+                // STPA-REQ-013: Emit diagnostic for connections with missing endpoints.
+                _ => {
+                    let conn_name = conn.name.clone();
+                    let owner_name = self.components[conn.owner].name.clone();
+                    endpoint_diagnostics.push(InstanceDiagnostic {
+                        message: format!("connection '{}': missing endpoint", conn_name,),
+                        path: vec![owner_name, conn_name],
+                    });
+                    continue;
+                }
             };
             let conn_owner = conn.owner;
             let conn_name = conn.name.clone();
@@ -436,6 +451,28 @@ impl SystemInstance {
                 (Some(src_sub_name), Some(dst_sub_name)) => {
                     let src_matches = self.find_children_by_name(conn_owner, src_sub_name);
                     let dst_matches = self.find_children_by_name(conn_owner, dst_sub_name);
+
+                    // STPA-REQ-013: Diagnose unresolved subcomponent references.
+                    if src_matches.is_empty() {
+                        let owner_name = self.components[conn_owner].name.clone();
+                        endpoint_diagnostics.push(InstanceDiagnostic {
+                            message: format!(
+                                "connection '{}': unresolved source subcomponent '{}'",
+                                conn_name, src_sub_name,
+                            ),
+                            path: vec![owner_name, conn_name.clone()],
+                        });
+                    }
+                    if dst_matches.is_empty() {
+                        let owner_name = self.components[conn_owner].name.clone();
+                        endpoint_diagnostics.push(InstanceDiagnostic {
+                            message: format!(
+                                "connection '{}': unresolved destination subcomponent '{}'",
+                                conn_name, dst_sub_name,
+                            ),
+                            path: vec![owner_name, conn_name.clone()],
+                        });
+                    }
 
                     for &src_component in &src_matches {
                         for &dst_component in &dst_matches {
@@ -481,6 +518,16 @@ impl SystemInstance {
                     if owner.parent.is_none() {
                         let src_matches = self.find_children_by_name(conn_owner, src_sub_name);
 
+                        if src_matches.is_empty() {
+                            endpoint_diagnostics.push(InstanceDiagnostic {
+                                message: format!(
+                                    "connection '{}': unresolved source subcomponent '{}'",
+                                    conn_name, src_sub_name,
+                                ),
+                                path: vec![owner.name.clone(), conn_name.clone()],
+                            });
+                        }
+
                         for &src_component in &src_matches {
                             let mut path = vec![*conn_idx];
                             let ultimate_src = self.trace_source(
@@ -510,6 +557,16 @@ impl SystemInstance {
                     if owner.parent.is_none() {
                         let dst_matches = self.find_children_by_name(conn_owner, dst_sub_name);
 
+                        if dst_matches.is_empty() {
+                            endpoint_diagnostics.push(InstanceDiagnostic {
+                                message: format!(
+                                    "connection '{}': unresolved destination subcomponent '{}'",
+                                    conn_name, dst_sub_name,
+                                ),
+                                path: vec![owner.name.clone(), conn_name.clone()],
+                            });
+                        }
+
                         for &dst_component in &dst_matches {
                             let mut path = vec![*conn_idx];
                             let ultimate_dst = self.trace_destination(
@@ -536,6 +593,7 @@ impl SystemInstance {
         }
 
         self.semantic_connections = semantic;
+        self.diagnostics.extend(endpoint_diagnostics);
     }
 
     /// Expand feature group connections into individual port-level semantic connections.
@@ -1147,6 +1205,7 @@ impl<'a> Builder<'a> {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // Build property map: type → impl → subcomponent layering
@@ -1257,6 +1316,7 @@ impl<'a> Builder<'a> {
                                 sub.classifier.clone(),
                                 sub_idx,
                                 sub.array_dimensions.clone(),
+                                sub.in_modes.clone(),
                             ))
                         })
                         .collect();
@@ -1281,6 +1341,7 @@ impl<'a> Builder<'a> {
                                 conn.is_bidirectional,
                                 src,
                                 dst,
+                                conn.in_modes.clone(),
                             ))
                         })
                         .collect();
@@ -1323,7 +1384,9 @@ impl<'a> Builder<'a> {
                         .collect();
 
                     let mut child_indices = Vec::new();
-                    for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims) in sub_data {
+                    for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims, sub_in_modes) in
+                        sub_data
+                    {
                         // Determine how many instances to create for this subcomponent.
                         let count =
                             array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
@@ -1350,6 +1413,7 @@ impl<'a> Builder<'a> {
                                         Some((loc.tree, sub_idx)),
                                     );
                                     self.components[child_idx].array_index = array_index;
+                                    self.components[child_idx].in_modes = sub_in_modes.clone();
                                     child_indices.push(child_idx);
                                 } else {
                                     // Type-only reference — leaf subcomponent
@@ -1367,6 +1431,7 @@ impl<'a> Builder<'a> {
                                         modes: Vec::new(),
                                         mode_transitions: Vec::new(),
                                         array_index,
+                                        in_modes: sub_in_modes.clone(),
                                     });
                                     // Build property map for leaf subcomponent (type only)
                                     self.build_leaf_property_map(
@@ -1394,6 +1459,7 @@ impl<'a> Builder<'a> {
                                     modes: Vec::new(),
                                     mode_transitions: Vec::new(),
                                     array_index,
+                                    in_modes: sub_in_modes.clone(),
                                 });
                                 // Build property map for anonymous subcomponent
                                 self.build_anon_property_map(child_idx, loc.tree, sub_idx);
@@ -1405,7 +1471,7 @@ impl<'a> Builder<'a> {
 
                     // Instantiate connections
                     let mut conn_indices = Vec::new();
-                    for (conn_name, conn_kind, bidi, src, dst) in conn_data {
+                    for (conn_name, conn_kind, bidi, src, dst, conn_in_modes) in conn_data {
                         let ci = self.connections.alloc(ConnectionInstance {
                             name: conn_name,
                             kind: conn_kind,
@@ -1413,6 +1479,7 @@ impl<'a> Builder<'a> {
                             owner: idx,
                             src,
                             dst,
+                            in_modes: conn_in_modes,
                         });
                         conn_indices.push(ci);
                     }
@@ -1775,6 +1842,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let mut child_indices = Vec::new();
@@ -1793,6 +1861,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: Some(i),
+                in_modes: Vec::new(),
             });
             child_indices.push(idx);
         }
@@ -1828,6 +1897,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let child = components.alloc(ComponentInstance {
@@ -1844,6 +1914,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
         components[root].children.push(child);
 
@@ -1875,6 +1946,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let mut feat_indices = Vec::new();
@@ -1924,6 +1996,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // Two array elements of `sub`
@@ -1941,6 +2014,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: Some(1),
+            in_modes: Vec::new(),
         });
 
         let sub2 = components.alloc(ComponentInstance {
@@ -1957,6 +2031,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: Some(2),
+            in_modes: Vec::new(),
         });
 
         // Non-array subcomponent `other`
@@ -1974,6 +2049,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         components[root].children = vec![sub1, sub2, other];
@@ -1992,6 +2068,7 @@ mod tests {
                 subcomponent: Some(Name::new("other")),
                 feature: Name::new("q"),
             }),
+            in_modes: Vec::new(),
         });
         components[root].connections.push(conn_idx);
 
@@ -2043,6 +2120,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         // 2 array elements of `sub`, each with 2 array features
@@ -2062,6 +2140,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: Some(sub_i),
+                in_modes: Vec::new(),
             });
 
             let mut feat_indices = Vec::new();
@@ -2116,6 +2195,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let child = components.alloc(ComponentInstance {
@@ -2132,6 +2212,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
         components[root].children.push(child);
 
@@ -2159,6 +2240,7 @@ mod tests {
             modes: Vec::new(),
             mode_transitions: Vec::new(),
             array_index: None,
+            in_modes: Vec::new(),
         });
 
         let mut children = Vec::new();
@@ -2177,6 +2259,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: Some(i),
+                in_modes: Vec::new(),
             });
             children.push(child);
         }
@@ -2812,5 +2895,214 @@ mod tests {
             .filter(|d| d.message.contains("maximum instantiation depth"))
             .collect();
         assert!(depth_diags.is_empty());
+    }
+
+    // ── STPA-REQ-008: Modal subcomponent instantiation completeness ───
+
+    #[test]
+    fn test_in_modes_preserved_on_component_instance() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // Child active only in modes "active" and "standby"
+        let child = components.alloc(ComponentInstance {
+            name: Name::new("sensor"),
+            category: ComponentCategory::Device,
+            type_name: Name::new("Sensor"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: vec![Name::new("active"), Name::new("standby")],
+        });
+        components[root].children.push(child);
+
+        let instance = make_instance(components, Arena::default(), Arena::default(), root);
+
+        // Root should have no modal restriction.
+        assert!(instance.components[root].in_modes.is_empty());
+        // Child should preserve its in_modes metadata.
+        assert_eq!(instance.components[child].in_modes.len(), 2);
+        assert_eq!(instance.components[child].in_modes[0].as_str(), "active");
+        assert_eq!(instance.components[child].in_modes[1].as_str(), "standby");
+        // Child is still instantiated (not filtered out).
+        assert_eq!(instance.components[root].children.len(), 1);
+    }
+
+    #[test]
+    fn test_in_modes_preserved_on_connection_instance() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // Connection active only in mode "fast"
+        let conn = connections.alloc(ConnectionInstance {
+            name: Name::new("c1"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: None,
+            dst: None,
+            in_modes: vec![Name::new("fast")],
+        });
+        components[root].connections.push(conn);
+
+        let instance = make_instance(components, Arena::default(), connections, root);
+
+        assert_eq!(instance.connections[conn].in_modes.len(), 1);
+        assert_eq!(instance.connections[conn].in_modes[0].as_str(), "fast");
+    }
+
+    // ── STPA-REQ-013: Unresolved connection endpoint diagnostic ───────
+
+    #[test]
+    fn test_unresolved_subcomponent_produces_diagnostic() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // Connection referencing a subcomponent that doesn't exist
+        let conn = connections.alloc(ConnectionInstance {
+            name: Name::new("c1"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("nonexistent_src")),
+                feature: Name::new("p"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("nonexistent_dst")),
+                feature: Name::new("q"),
+            }),
+            in_modes: Vec::new(),
+        });
+        components[root].connections.push(conn);
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.compute_semantic_connections();
+
+        // Should produce diagnostics for both unresolved subcomponents.
+        let unresolved: Vec<_> = instance
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unresolved"))
+            .collect();
+        assert_eq!(
+            unresolved.len(),
+            2,
+            "expected 2 unresolved diagnostics, got: {:?}",
+            unresolved
+        );
+        assert!(unresolved[0].message.contains("nonexistent_src"));
+        assert!(unresolved[1].message.contains("nonexistent_dst"));
+    }
+
+    #[test]
+    fn test_missing_endpoint_produces_diagnostic() {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // Connection with missing src endpoint
+        let conn = connections.alloc(ConnectionInstance {
+            name: Name::new("c_broken"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: None,
+            dst: Some(ConnectionEnd {
+                subcomponent: None,
+                feature: Name::new("q"),
+            }),
+            in_modes: Vec::new(),
+        });
+        components[root].connections.push(conn);
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.compute_semantic_connections();
+
+        let missing: Vec<_> = instance
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("missing endpoint"))
+            .collect();
+        assert_eq!(
+            missing.len(),
+            1,
+            "expected 1 missing endpoint diagnostic, got: {:?}",
+            missing
+        );
+        assert!(missing[0].message.contains("c_broken"));
     }
 }

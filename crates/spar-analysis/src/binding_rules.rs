@@ -27,6 +27,10 @@ impl Analysis for BindingRuleAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — thread missing required processor binding, binding target not found,
+        //             binding target wrong category
+        //   Warning — process missing memory binding
         let mut diags = Vec::new();
 
         // Check if the model has any processors and memory
@@ -230,6 +234,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 

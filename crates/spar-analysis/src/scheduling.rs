@@ -29,6 +29,10 @@ impl Analysis for SchedulingAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error   — processor utilization exceeds 100%
+        //   Warning — missing Period/Execution_Time/binding, utilization exceeds RMA bound
+        //   Info    — processor utilization summary, modal awareness note
         let mut diags = Vec::new();
 
         // Collect thread timing info and group by processor binding.
@@ -261,6 +265,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 

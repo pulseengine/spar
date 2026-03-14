@@ -1,0 +1,16 @@
+package SubcomponentArray
+public
+  thread Worker
+    features
+      inp : in data port;
+      outp : out data port;
+  end Worker;
+
+  process Pool
+  end Pool;
+
+  process implementation Pool.i
+    subcomponents
+      workers : thread Worker [4];
+  end Pool.i;
+end SubcomponentArray;

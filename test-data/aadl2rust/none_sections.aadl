@@ -1,0 +1,24 @@
+package NoneSections
+public
+  system S
+    features
+      none;
+    flows
+      none;
+    properties
+      none;
+  end S;
+
+  system implementation S.i
+    subcomponents
+      none;
+    connections
+      none;
+    flows
+      none;
+    modes
+      none;
+    properties
+      none;
+  end S.i;
+end NoneSections;

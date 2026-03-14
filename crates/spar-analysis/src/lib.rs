@@ -33,6 +33,7 @@ pub mod legality;
 pub mod modal;
 pub mod modal_rules;
 pub mod mode_check;
+pub mod mode_reachability;
 pub mod mode_rules;
 pub mod naming_rules;
 pub mod property_accessors;
@@ -116,6 +117,7 @@ impl AnalysisRunner {
         use latency::LatencyAnalysis;
         use modal_rules::ModalRuleAnalysis;
         use mode_check::ModeCheckAnalysis;
+        use mode_reachability::ModeReachabilityAnalysis;
         use mode_rules::ModeRuleAnalysis;
         use property_rules::PropertyRuleAnalysis;
         use resource_budget::ResourceBudgetAnalysis;
@@ -144,6 +146,7 @@ impl AnalysisRunner {
         self.register(Box::new(Emv2Analysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
+        self.register(Box::new(ModeReachabilityAnalysis));
     }
 
     /// Return the number of registered analyses.
@@ -196,5 +199,7 @@ pub(crate) fn component_depth(instance: &SystemInstance, idx: ComponentInstanceI
     depth
 }
 
+#[cfg(test)]
+mod regression_tests;
 #[cfg(test)]
 mod tests;

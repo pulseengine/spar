@@ -1,0 +1,17 @@
+package ComponentTypeExtends
+public
+  system Base
+    features
+      p1 : in data port;
+  end Base;
+
+  system Extended extends Base
+    features
+      p2 : out data port;
+  end Extended;
+
+  system DoubleExtended extends Extended
+    features
+      p3 : in event port;
+  end DoubleExtended;
+end ComponentTypeExtends;

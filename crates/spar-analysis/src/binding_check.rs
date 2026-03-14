@@ -26,6 +26,9 @@ impl Analysis for BindingCheckAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        // Severity rationale (STPA-REQ-016):
+        //   Error — binding target is wrong component category
+        //   Info  — thread missing processor binding, process missing memory binding
         let mut diags = Vec::new();
 
         // Track whether the model has any processors and memory components
@@ -225,6 +228,7 @@ mod tests {
                 modes: Vec::new(),
                 mode_transitions: Vec::new(),
                 array_index: None,
+                in_modes: Vec::new(),
             })
         }
 
