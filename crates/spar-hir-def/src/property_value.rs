@@ -173,6 +173,8 @@ fn expr_kind_name(expr: &PropertyExpr) -> &'static str {
         PropertyExpr::ReferenceValue(_) => "reference",
         PropertyExpr::ComputedValue(_) => "compute",
         PropertyExpr::UnitValue(_, _) => "unit value",
+        PropertyExpr::BinaryOp { .. } => "binary operation",
+        PropertyExpr::ValueRef(_) => "value reference",
         PropertyExpr::Opaque(_) => "opaque",
     }
 }
