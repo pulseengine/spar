@@ -717,15 +717,15 @@ fn lower_property_type_def(node: &SyntaxNode) -> Option<PropertyTypeDef> {
                                     && (tokens[idx].0 == SyntaxKind::INTEGER_LIT
                                         || tokens[idx].0 == SyntaxKind::REAL_LIT)
                                 {
-                                    let f = tokens[idx].1.clone();
+                                    let f = parse_aadl_integer_or_real(&tokens[idx].1);
                                     idx += 1;
                                     f
                                 } else {
-                                    "1".to_string()
+                                    1
                                 };
                                 units.push((unit_name, Some((base_name, factor))));
                             } else {
-                                units.push((unit_name, Some((base_name, "1".to_string()))));
+                                units.push((unit_name, Some((base_name, 1))));
                             }
                             continue; // skip normal idx increment
                         } else {
@@ -1680,6 +1680,40 @@ fn parse_aadl_integer(s: &str) -> Option<i64> {
         }
     }
     s.parse::<i64>().ok()
+}
+
+/// Parse an AADL numeric literal (integer or real) into an `i64`.
+///
+/// Handles all AADL literal forms:
+/// - Plain decimal: `1000`
+/// - With underscores: `1_000`
+/// - Based integer: `16#FF#`
+/// - Decimal real: `3.14` (truncated to integer)
+///
+/// Returns `1` if the string cannot be parsed.
+fn parse_aadl_integer_or_real(s: &str) -> i64 {
+    let s = s.replace('_', "");
+    // Try based integer: base#digits#
+    if let Some(hash_pos) = s.find('#') {
+        let base_str = &s[..hash_pos];
+        let rest = &s[hash_pos + 1..];
+        if let Some(end_hash) = rest.find('#') {
+            let digits = &rest[..end_hash];
+            if let Ok(base) = base_str.parse::<u32>() {
+                if let Ok(val) = i64::from_str_radix(digits, base) {
+                    return val;
+                }
+            }
+        }
+    }
+    // Try integer first, then float (truncated)
+    if let Ok(v) = s.parse::<i64>() {
+        return v;
+    }
+    if let Ok(v) = s.parse::<f64>() {
+        return v as i64;
+    }
+    1
 }
 
 /// Lower a REAL_VALUE node.

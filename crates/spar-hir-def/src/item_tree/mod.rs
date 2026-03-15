@@ -583,7 +583,13 @@ pub enum PropertyTypeDef {
     /// `list of ElementType`
     ListOf(Box<PropertyTypeDef>),
     /// Units type: `units (base_unit, derived_unit => base * factor, ...)`
-    UnitsType(Vec<(Name, Option<(Name, String)>)>),
+    ///
+    /// Each entry is `(unit_name, Some((base_unit, factor)))` for derived
+    /// units, or `(unit_name, None)` for the base unit.  The factor is a
+    /// parsed `i64` so downstream code can compute absolute conversion
+    /// factors without re-parsing AADL numeric literals (handles underscores,
+    /// based notation like `16#FF#`, etc.).
+    UnitsType(Vec<(Name, Option<(Name, i64)>)>),
 }
 
 /// A property definition within a property set (enriched with type info).

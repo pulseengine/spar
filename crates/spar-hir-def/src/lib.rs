@@ -2739,12 +2739,12 @@ end MyProps;
                 assert_eq!(units[1].0.as_str(), "Bytes");
                 let (base, factor) = units[1].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "bits");
-                assert_eq!(factor, "8");
+                assert_eq!(*factor, 8);
                 // KByte => Bytes * 1024
                 assert_eq!(units[2].0.as_str(), "KByte");
                 let (base2, factor2) = units[2].1.as_ref().unwrap();
                 assert_eq!(base2.as_str(), "Bytes");
-                assert_eq!(factor2, "1024");
+                assert_eq!(*factor2, 1024);
             }
             other => panic!("expected UnitsType, got {:?}", other),
         }
@@ -2773,32 +2773,32 @@ end TimeProps;
                 assert_eq!(units[1].0.as_str(), "ns");
                 let (base, factor) = units[1].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "ps");
-                assert_eq!(factor, "1000");
+                assert_eq!(*factor, 1000);
                 // us => ns * 1000
                 assert_eq!(units[2].0.as_str(), "us");
                 let (base, factor) = units[2].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "ns");
-                assert_eq!(factor, "1000");
+                assert_eq!(*factor, 1000);
                 // ms => us * 1000
                 assert_eq!(units[3].0.as_str(), "ms");
                 let (base, factor) = units[3].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "us");
-                assert_eq!(factor, "1000");
+                assert_eq!(*factor, 1000);
                 // sec => ms * 1000
                 assert_eq!(units[4].0.as_str(), "sec");
                 let (base, factor) = units[4].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "ms");
-                assert_eq!(factor, "1000");
+                assert_eq!(*factor, 1000);
                 // min => sec * 60
                 assert_eq!(units[5].0.as_str(), "min");
                 let (base, factor) = units[5].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "sec");
-                assert_eq!(factor, "60");
+                assert_eq!(*factor, 60);
                 // hr => min * 60
                 assert_eq!(units[6].0.as_str(), "hr");
                 let (base, factor) = units[6].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "min");
-                assert_eq!(factor, "60");
+                assert_eq!(*factor, 60);
             }
             other => panic!("expected UnitsType, got {:?}", other),
         }
@@ -2822,7 +2822,57 @@ end P;
                 assert_eq!(units[1].0.as_str(), "derived");
                 let (base, factor) = units[1].1.as_ref().unwrap();
                 assert_eq!(base.as_str(), "base");
-                assert_eq!(factor, "10");
+                assert_eq!(*factor, 10);
+            }
+            other => panic!("expected UnitsType, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn property_type_decl_units_underscore_factor() {
+        // AADL allows underscores in numeric literals (e.g., 1_000).
+        let src = r#"property set P is
+  MyUnits : type units (base, kilo => base * 1_000, mega => kilo * 1_000);
+end P;
+"#;
+        let tree = lower_first_property_set(src);
+        let ps = &tree.property_sets[tree.property_sets.iter().next().unwrap().0];
+        let td = &ps.property_type_defs[0];
+        match &td.type_def {
+            Some(item_tree::PropertyTypeDef::UnitsType(units)) => {
+                assert_eq!(units.len(), 3);
+                assert_eq!(units[0].0.as_str(), "base");
+                assert!(units[0].1.is_none());
+                // kilo => base * 1_000 — factor must be parsed as 1000
+                let (base, factor) = units[1].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "base");
+                assert_eq!(*factor, 1000);
+                // mega => kilo * 1_000
+                let (base2, factor2) = units[2].1.as_ref().unwrap();
+                assert_eq!(base2.as_str(), "kilo");
+                assert_eq!(*factor2, 1000);
+            }
+            other => panic!("expected UnitsType, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn property_type_decl_units_based_literal_factor() {
+        // Based literals like 16#FF# are valid AADL integer literals.
+        let src = r#"property set P is
+  MyUnits : type units (base, hex => base * 16#100#);
+end P;
+"#;
+        let tree = lower_first_property_set(src);
+        let ps = &tree.property_sets[tree.property_sets.iter().next().unwrap().0];
+        let td = &ps.property_type_defs[0];
+        match &td.type_def {
+            Some(item_tree::PropertyTypeDef::UnitsType(units)) => {
+                assert_eq!(units.len(), 2);
+                // hex => base * 16#100# — 16#100# is 256 in decimal
+                let (base, factor) = units[1].1.as_ref().unwrap();
+                assert_eq!(base.as_str(), "base");
+                assert_eq!(*factor, 256);
             }
             other => panic!("expected UnitsType, got {:?}", other),
         }

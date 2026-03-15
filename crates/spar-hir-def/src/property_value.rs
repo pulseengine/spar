@@ -241,6 +241,52 @@ pub fn convert_units(value: f64, from_unit: &str, to_unit: &str) -> Option<f64> 
     None
 }
 
+/// Compute the absolute conversion factor for a named unit within a
+/// [`PropertyTypeDef::UnitsType`] chain.
+///
+/// The chain defines each derived unit relative to another:
+/// `ns => ps * 1000, us => ns * 1000, ...`
+///
+/// This function resolves the full multiplicative chain from the named
+/// unit back to the base unit, returning the absolute factor (i.e., the
+/// number of base units equal to one of the named unit).
+///
+/// Returns `None` if the unit name is not found in the chain.
+///
+/// # Examples
+///
+/// ```
+/// use spar_hir_def::name::Name;
+/// use spar_hir_def::property_value::compute_absolute_factor;
+///
+/// let chain = vec![
+///     (Name::new("ps"), None),
+///     (Name::new("ns"), Some((Name::new("ps"), 1000_i64))),
+///     (Name::new("us"), Some((Name::new("ns"), 1000_i64))),
+///     (Name::new("ms"), Some((Name::new("us"), 1000_i64))),
+/// ];
+/// assert_eq!(compute_absolute_factor(&chain, "ms"), Some(1_000_000_000));
+/// assert_eq!(compute_absolute_factor(&chain, "ps"), Some(1));
+/// ```
+pub fn compute_absolute_factor(
+    units: &[(crate::name::Name, Option<(crate::name::Name, i64)>)],
+    unit_name: &str,
+) -> Option<i64> {
+    // Find the named unit in the chain
+    let entry = units.iter().find(|(n, _)| n.as_str().eq_ignore_ascii_case(unit_name))?;
+    match &entry.1 {
+        None => {
+            // Base unit — factor is 1
+            Some(1)
+        }
+        Some((base_name, factor)) => {
+            // Recursively resolve the base unit's absolute factor
+            let base_absolute = compute_absolute_factor(units, base_name.as_str())?;
+            Some(base_absolute * factor)
+        }
+    }
+}
+
 fn find_unit_factor(table: &[(&str, u64)], unit: &str) -> Option<u64> {
     table
         .iter()
@@ -1071,5 +1117,75 @@ mod tests {
         assert_eq!(SIZE_UNITS[4].1 / SIZE_UNITS[3].1, 1024);
         // TByte/GByte = 1024
         assert_eq!(SIZE_UNITS[5].1 / SIZE_UNITS[4].1, 1024);
+    }
+
+    // ── compute_absolute_factor ─────────────────────────────────
+
+    #[test]
+    fn absolute_factor_base_unit() {
+        let chain = vec![
+            (Name::new("ps"), None),
+            (Name::new("ns"), Some((Name::new("ps"), 1000_i64))),
+        ];
+        assert_eq!(compute_absolute_factor(&chain, "ps"), Some(1));
+    }
+
+    #[test]
+    fn absolute_factor_one_hop() {
+        let chain = vec![
+            (Name::new("ps"), None),
+            (Name::new("ns"), Some((Name::new("ps"), 1000_i64))),
+        ];
+        assert_eq!(compute_absolute_factor(&chain, "ns"), Some(1000));
+    }
+
+    #[test]
+    fn absolute_factor_full_time_chain() {
+        let chain = vec![
+            (Name::new("ps"), None),
+            (Name::new("ns"), Some((Name::new("ps"), 1000_i64))),
+            (Name::new("us"), Some((Name::new("ns"), 1000_i64))),
+            (Name::new("ms"), Some((Name::new("us"), 1000_i64))),
+            (Name::new("sec"), Some((Name::new("ms"), 1000_i64))),
+            (Name::new("min"), Some((Name::new("sec"), 60_i64))),
+            (Name::new("hr"), Some((Name::new("min"), 60_i64))),
+        ];
+        assert_eq!(compute_absolute_factor(&chain, "ps"), Some(1));
+        assert_eq!(compute_absolute_factor(&chain, "ns"), Some(1_000));
+        assert_eq!(compute_absolute_factor(&chain, "us"), Some(1_000_000));
+        assert_eq!(compute_absolute_factor(&chain, "ms"), Some(1_000_000_000));
+        assert_eq!(compute_absolute_factor(&chain, "sec"), Some(1_000_000_000_000));
+        assert_eq!(compute_absolute_factor(&chain, "min"), Some(60_000_000_000_000));
+        assert_eq!(compute_absolute_factor(&chain, "hr"), Some(3_600_000_000_000_000));
+    }
+
+    #[test]
+    fn absolute_factor_size_chain() {
+        let chain = vec![
+            (Name::new("bits"), None),
+            (Name::new("Bytes"), Some((Name::new("bits"), 8_i64))),
+            (Name::new("KByte"), Some((Name::new("Bytes"), 1024_i64))),
+            (Name::new("MByte"), Some((Name::new("KByte"), 1024_i64))),
+        ];
+        assert_eq!(compute_absolute_factor(&chain, "bits"), Some(1));
+        assert_eq!(compute_absolute_factor(&chain, "Bytes"), Some(8));
+        assert_eq!(compute_absolute_factor(&chain, "KByte"), Some(8 * 1024));
+        assert_eq!(compute_absolute_factor(&chain, "MByte"), Some(8 * 1024 * 1024));
+    }
+
+    #[test]
+    fn absolute_factor_unknown_unit() {
+        let chain = vec![(Name::new("ps"), None)];
+        assert_eq!(compute_absolute_factor(&chain, "nonexistent"), None);
+    }
+
+    #[test]
+    fn absolute_factor_case_insensitive() {
+        let chain = vec![
+            (Name::new("ps"), None),
+            (Name::new("ns"), Some((Name::new("ps"), 1000_i64))),
+        ];
+        assert_eq!(compute_absolute_factor(&chain, "NS"), Some(1000));
+        assert_eq!(compute_absolute_factor(&chain, "PS"), Some(1));
     }
 }
