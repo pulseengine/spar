@@ -122,7 +122,7 @@ jobs:
         run: |
           mkdir -p test-evidence/coverage
           cargo llvm-cov --workspace --lcov --output-path test-evidence/coverage/lcov.info
-          cargo llvm-cov report --workspace > test-evidence/coverage/summary.txt
+          cargo llvm-cov report > test-evidence/coverage/summary.txt
 
       - name: Run spar analyze on test models
         run: |
