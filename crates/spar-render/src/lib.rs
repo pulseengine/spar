@@ -34,10 +34,9 @@ pub fn render_instance(instance: &SystemInstance, options: &RenderOptions) -> St
         &graph,
         &|idx, _: &ComponentInstanceIdx| node_infos[&idx].clone(),
         &|idx, _: &()| {
-            edge_infos
-                .get(&idx)
-                .cloned()
-                .unwrap_or(EdgeInfo { label: String::new() })
+            edge_infos.get(&idx).cloned().unwrap_or(EdgeInfo {
+                label: String::new(),
+            })
         },
         &layout_opts,
     );
@@ -148,18 +147,20 @@ fn build_graph(
         let src_ci = resolve_connection_end(instance, conn.owner, &conn.src);
         let dst_ci = resolve_connection_end(instance, conn.owner, &conn.dst);
 
-        if let (Some(src), Some(dst)) = (src_ci, dst_ci) {
-            if let (Some(&src_node), Some(&dst_node)) = (idx_map.get(&src), idx_map.get(&dst)) {
-                if src_node != dst_node {
-                    let edge_idx = graph.add_edge(src_node, dst_node, ());
-                    edge_infos.insert(
-                        edge_idx,
-                        EdgeInfo {
-                            label: conn.name.to_string(),
-                        },
-                    );
-                }
-            }
+        let (Some(src), Some(dst)) = (src_ci, dst_ci) else {
+            continue;
+        };
+        let (Some(&src_node), Some(&dst_node)) = (idx_map.get(&src), idx_map.get(&dst)) else {
+            continue;
+        };
+        if src_node != dst_node {
+            let edge_idx = graph.add_edge(src_node, dst_node, ());
+            edge_infos.insert(
+                edge_idx,
+                EdgeInfo {
+                    label: conn.name.to_string(),
+                },
+            );
         }
     }
 
@@ -193,10 +194,7 @@ fn resolve_connection_end(
 }
 
 /// Generate a stable node ID for a component instance.
-fn node_id(
-    comp: &spar_hir_def::instance::ComponentInstance,
-    _idx: ComponentInstanceIdx,
-) -> String {
+fn node_id(comp: &spar_hir_def::instance::ComponentInstance, _idx: ComponentInstanceIdx) -> String {
     if let Some(arr_idx) = comp.array_index {
         format!("AADL-{}-{}_{}", comp.package, comp.name, arr_idx)
     } else {
