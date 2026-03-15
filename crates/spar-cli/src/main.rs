@@ -51,7 +51,7 @@ fn print_usage() {
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
-    eprintln!("  instance --root Package::Type.Impl [--analyze] <file...>");
+    eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv] <file...>");
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
@@ -254,6 +254,7 @@ fn cmd_instance(args: &[String]) {
     let mut root = None;
     let mut files = Vec::new();
     let mut run_analysis = false;
+    let mut format = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -264,6 +265,15 @@ fn cmd_instance(args: &[String]) {
                     root = Some(args[i].clone());
                 } else {
                     eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json)");
                     process::exit(1);
                 }
             }
@@ -283,6 +293,15 @@ fn cmd_instance(args: &[String]) {
         eprintln!("--root Package::Type.Impl is required");
         process::exit(1);
     });
+
+    // JSON output path: use spar-hir facade for clean serialization
+    if format.as_deref() == Some("json") {
+        let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+        let hir_db = spar_hir::Database::from_aadl(&sources);
+        let instance_tree = hir_db.instantiate(&root).map(|i| i.to_serializable());
+        println!("{}", serde_json::to_string_pretty(&instance_tree).unwrap());
+        return;
+    }
 
     // Parse root reference: Package::Type.Impl
     let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
