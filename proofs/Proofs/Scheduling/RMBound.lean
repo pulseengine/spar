@@ -42,9 +42,35 @@ theorem rmBound_one : rmBound 1 (by omega) = 1 := by
 
 -- The key fact: rmBound is decreasing and converges to ln(2).
 -- rmBound(n) ≥ ln(2) for all n ≥ 1.
+--
+-- Proof: By the convexity inequality exp(x) ≥ 1 + x (Mathlib: add_one_le_exp),
+-- we have 2^(1/n) = exp(ln2/n) ≥ 1 + ln2/n, so
+-- n*(2^(1/n) - 1) ≥ n*(ln2/n) = ln2.
 theorem rmBound_ge_ln2 (n : ℕ) (hn : n ≥ 1) :
     rmBound n hn ≥ Real.log 2 := by
-  sorry -- requires calculus: concavity of 2^(1/n)
+  unfold rmBound
+  have hn_pos : (0 : ℝ) < (n : ℝ) := Nat.cast_pos.mpr (by omega)
+  have hn_ne : (n : ℝ) ≠ 0 := ne_of_gt hn_pos
+  -- Step 1: Rewrite 2^(1/n) = exp(log 2 · (1/n))
+  have h2pos : (0 : ℝ) < 2 := by norm_num
+  rw [show (2 : ℝ) ^ ((1 : ℝ) / (n : ℝ)) = Real.exp (Real.log 2 * ((1 : ℝ) / (n : ℝ)))
+    from Real.rpow_def_of_pos h2pos _]
+  -- Step 2: exp(x) ≥ 1 + x gives exp(log 2 / n) - 1 ≥ log 2 / n
+  set x := Real.log 2 * (1 / (n : ℝ))
+  have h_exp_bound := Real.add_one_le_exp x
+  -- h_exp_bound : x + 1 ≤ Real.exp x
+  -- so exp(x) - 1 ≥ x
+  -- Step 3: n * (exp(x) - 1) ≥ n * x = log 2
+  have h_nx : (n : ℝ) * x = Real.log 2 := by
+    simp only [x]; field_simp
+  -- Goal: ↑n * (exp x - 1) ≥ Real.log 2
+  -- = ↑n * (exp x - 1) ≥ ↑n * x   [since n*x = log 2]
+  rw [← h_nx]
+  -- Goal: ↑n * (exp x - 1) ≥ ↑n * x
+  -- Since ≥ is ≤ reversed, this is: ↑n * x ≤ ↑n * (exp x - 1)
+  -- From h_exp_bound: x + 1 ≤ exp x, so x ≤ exp x - 1.
+  -- Multiply both sides by ↑n ≥ 0.
+  exact mul_le_mul_of_nonneg_left (by linarith) (le_of_lt hn_pos)
 
 -- Single-task RM: if C ≤ T (utilization ≤ 1), trivially schedulable.
 theorem rm_single_task (t : TaskUtil) (h : t.exec ≤ t.period) :
