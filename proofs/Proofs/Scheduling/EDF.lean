@@ -74,16 +74,45 @@ theorem demandBound_at_period (t : Task) (k : Nat) :
 
 -- For two tasks with U₁ + U₂ ≤ 1 (cross-multiplied):
 -- C₁×T₂ + C₂×T₁ ≤ T₁×T₂ → total demand ≤ L for all L.
+--
+-- Proof strategy (integer arithmetic):
+--   Let q₁ = l / T₁, q₂ = l / T₂ (Nat division).
+--   We know q₁ * T₁ ≤ l and q₂ * T₂ ≤ l (Nat.div_mul_le_self).
+--   Multiply desired inequality by T₁ * T₂ (> 0):
+--     (q₁*C₁ + q₂*C₂) * (T₁*T₂)
+--     = (q₁*T₁)*(C₁*T₂) + (q₂*T₂)*(C₂*T₁)
+--     ≤ l*(C₁*T₂) + l*(C₂*T₁)           [using q_i*T_i ≤ l]
+--     = l*(C₁*T₂ + C₂*T₁)
+--     ≤ l*(T₁*T₂)                         [hypothesis]
+--   Cancel T₁*T₂ to get q₁*C₁ + q₂*C₂ ≤ l.
 theorem edf_two_tasks_demand (t1 t2 : Task) (l : Nat)
     (h : t1.exec * t2.period + t2.exec * t1.period ≤ t1.period * t2.period) :
     demandBound t1 l + demandBound t2 l ≤ l := by
   unfold demandBound
-  -- ⌊L/T₁⌋×C₁ + ⌊L/T₂⌋×C₂
-  -- ≤ (L/T₁)×C₁ + (L/T₂)×C₂  (floor ≤ real value)
-  -- ≤ L × (C₁/T₁ + C₂/T₂)
-  -- ≤ L × 1 = L
-  -- In integer arithmetic, use: ⌊L/T⌋ × C ≤ L × C / T
-  -- and then L × C₁ / T₁ + L × C₂ / T₂ ≤ L
-  sorry -- needs rational/real arithmetic or careful integer bounding
+  set q₁ := l / t1.period
+  set q₂ := l / t2.period
+  set C₁ := t1.exec
+  set C₂ := t2.exec
+  set T₁ := t1.period
+  set T₂ := t2.period
+  -- Cancel the positive factor T₁ * T₂
+  have hT₁ : 0 < T₁ := t1.period_pos
+  have hT₂ : 0 < T₂ := t2.period_pos
+  have hT : 0 < T₁ * T₂ := Nat.mul_pos hT₁ hT₂
+  -- Suffices to show (q₁*C₁ + q₂*C₂) * (T₁*T₂) ≤ l * (T₁*T₂)
+  suffices hsuff : (q₁ * C₁ + q₂ * C₂) * (T₁ * T₂) ≤ l * (T₁ * T₂) by
+    exact Nat.le_of_mul_le_mul_right hsuff hT
+  -- Use: q₁ * T₁ ≤ l and q₂ * T₂ ≤ l
+  have hq₁ : q₁ * T₁ ≤ l := Nat.div_mul_le_self l T₁
+  have hq₂ : q₂ * T₂ ≤ l := Nat.div_mul_le_self l T₂
+  calc (q₁ * C₁ + q₂ * C₂) * (T₁ * T₂)
+      = q₁ * C₁ * (T₁ * T₂) + q₂ * C₂ * (T₁ * T₂) := by ring
+    _ = (q₁ * T₁) * (C₁ * T₂) + (q₂ * T₂) * (C₂ * T₁) := by ring
+    _ ≤ l * (C₁ * T₂) + l * (C₂ * T₁) := by
+        apply Nat.add_le_add
+        · exact Nat.mul_le_mul_right _ hq₁
+        · exact Nat.mul_le_mul_right _ hq₂
+    _ = l * (C₁ * T₂ + C₂ * T₁) := by ring
+    _ ≤ l * (T₁ * T₂) := by exact Nat.mul_le_mul_left l h
 
 end Spar.Scheduling.EDF
