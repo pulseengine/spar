@@ -9,6 +9,10 @@ name = "Proofs"
 name = "proofs"
 root = "Main"
 
+[[lean_exe]]
+name = "codegen"
+root = "Codegen"
+
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
