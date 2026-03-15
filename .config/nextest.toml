@@ -1,0 +1,10 @@
+# Nextest configuration
+# See https://nexte.st/docs/configuration/
+
+[profile.ci]
+# Fail-fast disabled so all tests run even if some fail
+fail-fast = false
+
+[profile.ci.junit]
+# Output JUnit XML for CI consumption
+path = "junit.xml"

@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Cross-platform binary builds ──────────────────────────────────────
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} -p spar
+
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} -p spar
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: strip "target/${TARGET}/release/spar" 2>/dev/null || true
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ARCHIVE="spar-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging
+          cp "target/${TARGET}/release/spar" staging/
+          tar -czf "$ARCHIVE" -C staging .
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          ARCHIVE="spar-${VERSION}-${TARGET}.zip"
+          mkdir -p staging
+          cp "target/${TARGET}/release/spar.exe" staging/
+          cd staging && 7z a "../$ARCHIVE" . && cd ..
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+
+  # ── Test evidence bundle ──────────────────────────────────────────────
+  build-test-evidence:
+    name: Build test evidence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov
+
+      - name: Run tests with JUnit XML
+        run: |
+          mkdir -p test-evidence/test-results
+          cargo nextest run --workspace --profile ci
+          cp target/nextest/ci/junit.xml test-evidence/test-results/junit.xml
+
+      - name: Generate coverage
+        run: |
+          mkdir -p test-evidence/coverage
+          cargo llvm-cov --workspace --lcov --output-path test-evidence/coverage/lcov.info
+          cargo llvm-cov report --workspace > test-evidence/coverage/summary.txt
+
+      - name: Run spar analyze on test models
+        run: |
+          mkdir -p test-evidence/validation
+          set +e
+          cargo run --release -- analyze --root Analysis_Pkg::Full_System.Impl \
+            test-data/analysis_test.aadl > test-evidence/validation/analyze-output.txt 2>&1
+          rc=$?
+          set -e
+          echo "exit_code=${rc}" >> test-evidence/validation/analyze-output.txt
+
+      - name: Generate metadata
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          jq -n \
+            --arg tag "${TAG}" \
+            --arg commit "${GITHUB_SHA}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg rust_version "$(rustc --version)" \
+            --arg os "$(uname -srm)" \
+            '{tag: $tag, commit: $commit, timestamp: $timestamp, rust_version: $rust_version, os: $os}' \
+            > test-evidence/metadata.json
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          tar czf "spar-${VERSION}-test-evidence.tar.gz" test-evidence/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence
+          path: spar-*-test-evidence.tar.gz
+
+  # ── Create GitHub Release ─────────────────────────────────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries, build-test-evidence]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect assets
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          gh release create "$VERSION" \
+            --title "spar $VERSION" \
+            --generate-notes \
+            release/*
