@@ -27,6 +27,7 @@ fn main() {
         "instance" => cmd_instance(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
+        "render" => cmd_render(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -44,6 +45,7 @@ fn print_usage() {
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
     eprintln!("  modes      Mode reachability analysis and SMV export");
+    eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -52,6 +54,7 @@ fn print_usage() {
     eprintln!("  instance --root Package::Type.Impl [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv] <file...>");
+    eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
 }
 
 fn cmd_lsp() {
@@ -580,6 +583,91 @@ fn cmd_modes(args: &[String]) {
                 println!();
             }
         }
+    }
+}
+
+fn cmd_render(args: &[String]) {
+    let mut root = None;
+    let mut output = None;
+    let mut files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires an output file path");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    eprintln!(
+        "Rendering {}::{}. ({} components)",
+        pkg_name,
+        type_name,
+        inst.component_count()
+    );
+
+    let svg = spar_render::render_instance(&inst, &spar_render::RenderOptions::default());
+
+    match output {
+        Some(path) => {
+            fs::write(&path, &svg).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote {}", path);
+        }
+        None => print!("{svg}"),
     }
 }
 
