@@ -327,3 +327,120 @@ artifacts:
     tags: [safety, testing, stpa]
     traces-to: [SC-1]
     mitigates: [H-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Timing and Scheduling Safety Requirements (from UCA-11, CC-10)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-024
+    type: requirement
+    title: Independent verification — RMA/EDF cross-check
+    description: >
+      The scheduling analysis must cross-check results between Rate
+      Monotonic Analysis (RMA) and Earliest Deadline First (EDF)
+      schedulability tests. When a task set is not guaranteed schedulable
+      under RMA but would be schedulable under EDF (utilization <= 100%),
+      the analysis must report this discrepancy so engineers can consider
+      alternative scheduling policies or perform response-time analysis.
+    status: implemented
+    tags: [safety, scheduling, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-025
+    type: requirement
+    title: Sensitivity analysis — timing margin perturbation
+    description: >
+      The scheduling analysis must perform a sensitivity check by
+      perturbing execution times by +10% and checking if the
+      schedulability conclusion changes. If nominal utilization passes
+      the schedulability bound but perturbed utilization exceeds it,
+      the analysis must emit a warning indicating thin timing margins.
+    status: implemented
+    tags: [safety, scheduling, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-026
+    type: requirement
+    title: Explicit Deadline property validation
+    description: >
+      When a thread has a Period property but no explicit Deadline
+      property, the scheduling analysis must emit an info diagnostic
+      noting that the implicit deadline equals the period. This
+      encourages engineers to explicitly set Deadline for
+      constrained-deadline task sets where deadline < period.
+    status: implemented
+    tags: [safety, scheduling, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-027
+    type: requirement
+    title: Execution time range validation
+    description: >
+      The scheduling analysis must validate Compute_Execution_Time
+      ranges: (1) min must not exceed max in a range expression,
+      (2) worst-case execution time must not exceed the period.
+      Violations produce error diagnostics since they indicate
+      specification errors or guaranteed deadline misses.
+    status: implemented
+    tags: [safety, scheduling, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1, H-6]
+
+  - id: STPA-REQ-028
+    type: requirement
+    title: Multi-processor communication overhead awareness
+    description: >
+      The latency analysis must detect when an end-to-end flow crosses
+      processor boundaries and no inter-processor communication overhead
+      property (Transmission_Time or SPAR_Properties::Inter_Processor_Overhead)
+      is specified. In such cases, the analysis must emit an info diagnostic
+      warning that the latency estimate may understate actual delay.
+    status: implemented
+    tags: [safety, latency, multi-processor, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-029
+    type: requirement
+    title: Clock drift margin advisory
+    description: >
+      When processor utilization exceeds 80%, the scheduling analysis
+      must emit an advisory noting that clock drift between processors
+      may cause period jitter that increases effective utilization.
+      Engineers should consider adding a timing margin via
+      SPAR_Properties::Clock_Drift_Margin.
+    status: implemented
+    tags: [safety, scheduling, timing, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-030
+    type: requirement
+    title: Interrupt and context-switch overhead advisory
+    description: >
+      When threads are bound to a processor but no Context_Switch_Time
+      or Interrupt_Overhead property is set on any thread, the scheduling
+      analysis must emit an info diagnostic advising that WCET values
+      may underestimate actual execution time if overhead is not already
+      included in Compute_Execution_Time.
+    status: implemented
+    tags: [safety, scheduling, overhead, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]
+
+  - id: STPA-REQ-031
+    type: requirement
+    title: Shared resource blocking time advisory
+    description: >
+      When two or more threads share a processor but no Priority or
+      Concurrency_Control_Protocol property is set, the scheduling
+      analysis must emit an info diagnostic advising that priority
+      inversion blocking time should be accounted for in
+      Compute_Execution_Time if threads share resources.
+    status: implemented
+    tags: [safety, scheduling, contention, stpa]
+    traces-to: [CC-10]
+    mitigates: [H-1]

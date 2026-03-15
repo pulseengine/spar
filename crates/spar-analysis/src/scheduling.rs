@@ -17,7 +17,9 @@ use rustc_hash::FxHashMap;
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
+use crate::property_accessors::{
+    get_execution_time, get_execution_time_range, get_processor_binding, get_timing_property,
+};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Rate Monotonic scheduling analysis.
@@ -69,6 +71,53 @@ impl Analysis for SchedulingAnalysis {
                     severity: Severity::Warning,
                     message: format!(
                         "thread '{}' has no Compute_Execution_Time property (required for scheduling analysis)",
+                        comp.name
+                    ),
+                    path: path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // STPA-REQ-013: Execution time range validation (min <= max, max <= period)
+            if let Some((min_ps, max_ps)) = get_execution_time_range(props) {
+                if min_ps > max_ps {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "thread '{}' Compute_Execution_Time range has min ({:.3} ms) > max ({:.3} ms)",
+                            comp.name,
+                            min_ps as f64 / 1_000_000_000.0,
+                            max_ps as f64 / 1_000_000_000.0,
+                        ),
+                        path: path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+                if let Some(period) = period_ps {
+                    if max_ps > period {
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Error,
+                            message: format!(
+                                "thread '{}' worst-case execution time ({:.3} ms) exceeds period ({:.3} ms)",
+                                comp.name,
+                                max_ps as f64 / 1_000_000_000.0,
+                                period as f64 / 1_000_000_000.0,
+                            ),
+                            path: path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                    }
+                }
+            }
+
+            // STPA-REQ-008: Validate that explicit Deadline property is set
+            let deadline_ps = get_timing_property(props, "Deadline");
+            if period_ps.is_some() && deadline_ps.is_none() {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "thread '{}' has Period but no explicit Deadline property \
+                         (implicit deadline equals period; set Deadline for constrained-deadline tasks)",
                         comp.name
                     ),
                     path: path.clone(),
@@ -155,6 +204,30 @@ impl Analysis for SchedulingAnalysis {
                 });
             }
 
+            // STPA-REQ-001: Cross-check between RMA and EDF schedulability.
+            // EDF can schedule any task set with U <= 1.0 (necessary and sufficient
+            // for independent, preemptive tasks on a uniprocessor). If RMA says
+            // "not schedulable" but EDF says "schedulable", report the discrepancy
+            // so the engineer knows switching to EDF would help.
+            let edf_schedulable = utilization <= 1.0;
+            let rma_schedulable = utilization <= rma_bound;
+
+            if edf_schedulable && !rma_schedulable {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "processor '{}' cross-check: not guaranteed schedulable under RMA \
+                         (U={:.1}% > RMA bound {:.1}%) but schedulable under EDF (U <= 100%); \
+                         consider EDF scheduling or response-time analysis",
+                        proc_name,
+                        utilization * 100.0,
+                        rma_bound * 100.0,
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
             // Always emit info with utilization
             diags.push(AnalysisDiagnostic {
                 severity: Severity::Info,
@@ -168,6 +241,138 @@ impl Analysis for SchedulingAnalysis {
                 path: proc_path,
                 analysis: self.name().to_string(),
             });
+        }
+
+        // STPA-REQ-003: Sensitivity analysis — perturb execution times by +10% and
+        // check if schedulability conclusion changes. This reveals fragile task sets
+        // with thin margins.
+        for (proc_name, threads) in &processor_threads {
+            if proc_name == "__unbound__" || threads.is_empty() {
+                continue;
+            }
+
+            let n = threads.len();
+            let rma_bound = rma_utilization_bound(n);
+            let nominal_util: f64 = threads
+                .iter()
+                .map(|t| t.exec_ps as f64 / t.period_ps as f64)
+                .sum();
+            let perturbed_util = nominal_util * 1.1; // +10% perturbation
+
+            let proc_path = find_processor_path(instance, proc_name);
+
+            // If nominal passes RMA but +10% fails, the margin is thin
+            if nominal_util <= rma_bound && perturbed_util > rma_bound {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "processor '{}' sensitivity: a 10% increase in execution times \
+                         would exceed the RMA bound ({:.1}% -> {:.1}%, bound {:.1}%); \
+                         consider increasing timing margins",
+                        proc_name,
+                        nominal_util * 100.0,
+                        perturbed_util * 100.0,
+                        rma_bound * 100.0,
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // If nominal passes EDF (U<=1.0) but +10% fails, the margin is very thin
+            if nominal_util <= 1.0 && perturbed_util > 1.0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "processor '{}' sensitivity: a 10% increase in execution times \
+                         would exceed 100% utilization ({:.1}% -> {:.1}%); \
+                         the system has critically thin timing margins",
+                        proc_name,
+                        nominal_util * 100.0,
+                        perturbed_util * 100.0,
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // STPA-REQ-021: Clock drift margin advisory.
+            // In multi-rate systems, clock drift can cause period jitter. Warn
+            // if utilization is above 80% since drift makes tight systems fragile.
+            if nominal_util > 0.8 && nominal_util <= 1.0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "processor '{}' clock drift advisory: utilization {:.1}% is above 80%; \
+                         clock drift between processors may cause period jitter that \
+                         increases effective utilization — consider a timing margin \
+                         (SPAR_Properties::Clock_Drift_Margin)",
+                        proc_name,
+                        nominal_util * 100.0,
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // STPA-REQ-022: Interrupt and context-switch overhead advisory.
+            // Warn when overhead is not accounted for in WCET.
+            let has_any_overhead_prop = threads.iter().any(|t| {
+                let props = instance.properties_for(t.comp_idx);
+                // Check for standard or custom overhead properties
+                props.get("Timing_Properties", "Context_Switch_Time").is_some()
+                    || props.get("", "Context_Switch_Time").is_some()
+                    || props.get("SPAR_Properties", "Interrupt_Overhead").is_some()
+                    || props.get("", "Interrupt_Overhead").is_some()
+            });
+
+            if !has_any_overhead_prop {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "processor '{}' has {} threads but no Context_Switch_Time or \
+                         Interrupt_Overhead properties set; WCET values may underestimate \
+                         actual execution time if overhead is not included in \
+                         Compute_Execution_Time",
+                        proc_name, n,
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            // STPA-REQ-023: Shared resource blocking time (priority inversion).
+            // Check if any threads have priority inversion protocol properties.
+            // If threads share a processor but no concurrency protocol is specified,
+            // warn about potential priority inversion.
+            if n >= 2 {
+                let has_any_protocol = threads.iter().any(|t| {
+                    let props = instance.properties_for(t.comp_idx);
+                    props
+                        .get("Deployment_Properties", "Priority")
+                        .is_some()
+                        || props.get("", "Priority").is_some()
+                        || props
+                            .get("Deployment_Properties", "Concurrency_Control_Protocol")
+                            .is_some()
+                        || props.get("", "Concurrency_Control_Protocol").is_some()
+                });
+
+                if !has_any_protocol {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "processor '{}' has {} threads but no Priority or \
+                             Concurrency_Control_Protocol properties set; if threads \
+                             share resources, priority inversion blocking time should \
+                             be accounted for in Compute_Execution_Time",
+                            proc_name, n,
+                        ),
+                        path: proc_path,
+                        analysis: self.name().to_string(),
+                    });
+                }
+            }
         }
 
         // STPA-REQ-017: Note modal awareness
@@ -620,6 +825,580 @@ mod tests {
             modal_diags.is_empty(),
             "should not emit modal diagnostic without SOMs: {:?}",
             modal_diags
+        );
+    }
+
+    // ── STPA-REQ-013: Execution time range validation ─────────────
+
+    #[test]
+    fn exec_time_min_greater_than_max_errors() {
+        // STPA-REQ-013: min > max in Compute_Execution_Time range
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        // min (5ms) > max (1ms) — inverted range
+        b.set_property(
+            t1,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "5 ms .. 1 ms",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let range_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("min"))
+            .collect();
+        assert_eq!(
+            range_errors.len(),
+            1,
+            "should error on inverted range: {:?}",
+            diags
+        );
+        assert!(
+            range_errors[0].message.contains("5.000 ms"),
+            "should show min value: {}",
+            range_errors[0].message
+        );
+        assert!(
+            range_errors[0].message.contains("1.000 ms"),
+            "should show max value: {}",
+            range_errors[0].message
+        );
+    }
+
+    #[test]
+    fn exec_time_max_exceeds_period_errors() {
+        // STPA-REQ-013: max execution time > period
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        // exec max = 15ms > period = 10ms
+        b.set_property(
+            t1,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms .. 15 ms",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let period_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("exceeds period"))
+            .collect();
+        assert_eq!(
+            period_errors.len(),
+            1,
+            "should error on exec > period: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn exec_time_valid_range_no_error() {
+        // STPA-REQ-013: valid range (1ms..5ms with period 10ms) should not produce range errors
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t1,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms .. 5 ms",
+        );
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let range_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error
+                    && (d.message.contains("min") || d.message.contains("exceeds period"))
+            })
+            .collect();
+        assert!(
+            range_errors.is_empty(),
+            "valid range should not produce errors: {:?}",
+            range_errors
+        );
+    }
+
+    // ── STPA-REQ-008: Deadline property validation ─────────────────
+
+    #[test]
+    fn missing_deadline_property_info() {
+        // STPA-REQ-008: Thread with Period but no Deadline should emit Info
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let deadline_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("Deadline"))
+            .collect();
+        assert_eq!(
+            deadline_diags.len(),
+            1,
+            "should info about missing Deadline: {:?}",
+            diags
+        );
+        assert!(
+            deadline_diags[0].message.contains("implicit deadline"),
+            "should mention implicit deadline: {}",
+            deadline_diags[0].message
+        );
+    }
+
+    #[test]
+    fn explicit_deadline_no_info() {
+        // STPA-REQ-008: Thread with both Period and Deadline should not emit Deadline info
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Deadline", "8 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let deadline_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Deadline") && d.message.contains("implicit"))
+            .collect();
+        assert!(
+            deadline_diags.is_empty(),
+            "explicit Deadline should suppress info: {:?}",
+            deadline_diags
+        );
+    }
+
+    // ── STPA-REQ-001: RMA vs EDF cross-check ──────────────────────
+
+    #[test]
+    fn rma_edf_cross_check_diagnostic() {
+        // STPA-REQ-001: When utilization exceeds RMA bound but is under 100%,
+        // the cross-check should suggest EDF
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        let t3 = b.add_component("t3", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2, t3]);
+
+        // 3 threads each at U=0.30 -> total 0.90 > RMA bound 0.780 but < 1.0
+        for t in [t1, t2, t3] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let cross_check: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("cross-check") && d.message.contains("EDF"))
+            .collect();
+        assert_eq!(
+            cross_check.len(),
+            1,
+            "should emit RMA/EDF cross-check: {:?}",
+            diags
+        );
+        assert_eq!(cross_check[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn rma_edf_no_cross_check_when_schedulable() {
+        // When U is within RMA bound, no cross-check needed
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let cross_check: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("cross-check"))
+            .collect();
+        assert!(
+            cross_check.is_empty(),
+            "schedulable system needs no cross-check: {:?}",
+            cross_check
+        );
+    }
+
+    // ── STPA-REQ-003: Sensitivity analysis ─────────────────────────
+
+    #[test]
+    fn sensitivity_warning_thin_rma_margin() {
+        // STPA-REQ-003: System with U near RMA bound should warn about sensitivity
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // Single task: RMA bound = 1.0 (100%), U = 0.95 (95%)
+        // After +10%: U = 1.045 > 1.0 -> sensitivity warning for EDF
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "95 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("sensitivity"))
+            .collect();
+        assert!(
+            !sensitivity.is_empty(),
+            "should warn about thin margin: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn no_sensitivity_warning_for_ample_margin() {
+        // STPA-REQ-003: System with ample margin should not trigger sensitivity warning
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // Single task: U = 10%, +10% = 11% — still well within bounds
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "10 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("sensitivity"))
+            .collect();
+        assert!(
+            sensitivity.is_empty(),
+            "ample margin should not trigger sensitivity: {:?}",
+            sensitivity
+        );
+    }
+
+    // ── STPA-REQ-021: Clock drift advisory ─────────────────────────
+
+    #[test]
+    fn clock_drift_advisory_high_utilization() {
+        // STPA-REQ-021: Advisory when utilization > 80%
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 85%
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "85 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let drift: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("clock drift"))
+            .collect();
+        assert_eq!(
+            drift.len(),
+            1,
+            "should emit clock drift advisory at 85%: {:?}",
+            diags
+        );
+        assert_eq!(drift[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn no_clock_drift_advisory_low_utilization() {
+        // No clock drift advisory at low utilization
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 20%
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "20 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let drift: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("clock drift"))
+            .collect();
+        assert!(
+            drift.is_empty(),
+            "low utilization should not trigger drift advisory: {:?}",
+            drift
+        );
+    }
+
+    // ── STPA-REQ-022: Interrupt overhead advisory ──────────────────
+
+    #[test]
+    fn interrupt_overhead_advisory_no_properties() {
+        // STPA-REQ-022: Warn when no Context_Switch_Time/Interrupt_Overhead set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let overhead: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Context_Switch_Time"))
+            .collect();
+        assert_eq!(
+            overhead.len(),
+            1,
+            "should advisory about missing overhead: {:?}",
+            diags
+        );
+        assert_eq!(overhead[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn no_interrupt_overhead_advisory_with_property() {
+        // STPA-REQ-022: No advisory when Context_Switch_Time is set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(t1, "Timing_Properties", "Context_Switch_Time", "50 us");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let overhead: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Context_Switch_Time") && d.message.contains("overhead"))
+            .collect();
+        assert!(
+            overhead.is_empty(),
+            "Context_Switch_Time set — no advisory: {:?}",
+            overhead
+        );
+    }
+
+    // ── STPA-REQ-023: Resource contention / priority inversion ─────
+
+    #[test]
+    fn priority_inversion_advisory_no_protocol() {
+        // STPA-REQ-023: Warn when multiple threads on same processor without Priority
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for t in [t1, t2] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert_eq!(
+            pi_diags.len(),
+            1,
+            "should advisory about priority inversion: {:?}",
+            diags
+        );
+        assert_eq!(pi_diags[0].severity, Severity::Info);
+    }
+
+    #[test]
+    fn no_priority_inversion_advisory_with_priority() {
+        // STPA-REQ-023: No advisory when Priority property is set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for (i, t) in [t1, t2].iter().enumerate() {
+            b.set_property(*t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(*t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                *t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+            b.set_property(
+                *t,
+                "Deployment_Properties",
+                "Priority",
+                &format!("{}", i + 1),
+            );
+        }
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert!(
+            pi_diags.is_empty(),
+            "Priority set — no advisory: {:?}",
+            pi_diags
         );
     }
 

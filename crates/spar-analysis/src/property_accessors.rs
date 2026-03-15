@@ -37,6 +37,25 @@ pub fn get_execution_time(props: &PropertyMap) -> Option<u64> {
     parse_time_value(raw)
 }
 
+/// Get `Compute_Execution_Time` as a (min, max) pair in picoseconds.
+///
+/// For a range "1 ms .. 5 ms", returns (1_000_000_000, 5_000_000_000).
+/// For a single value "3 ms", returns (3_000_000_000, 3_000_000_000).
+pub fn get_execution_time_range(props: &PropertyMap) -> Option<(u64, u64)> {
+    let raw = props
+        .get("Timing_Properties", "Compute_Execution_Time")
+        .or_else(|| props.get("", "Compute_Execution_Time"))?;
+
+    if let Some((min_str, max_str)) = raw.split_once("..") {
+        let min_ps = parse_time_value(min_str.trim())?;
+        let max_ps = parse_time_value(max_str.trim())?;
+        Some((min_ps, max_ps))
+    } else {
+        let val = parse_time_value(raw)?;
+        Some((val, val))
+    }
+}
+
 /// Get execution time in picoseconds, also checking the `Execution_Time`
 /// property name (used by ARINC 653 virtual processors).
 ///
@@ -189,6 +208,36 @@ mod tests {
     fn execution_time_missing_returns_none() {
         let props = PropertyMap::new();
         assert_eq!(get_execution_time(&props), None);
+    }
+
+    // ── get_execution_time_range ────────────────────────────────
+
+    #[test]
+    fn execution_time_range_parses_range() {
+        let props = make_props(&[(
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms .. 5 ms",
+        )]);
+        assert_eq!(
+            get_execution_time_range(&props),
+            Some((1_000_000_000, 5_000_000_000))
+        );
+    }
+
+    #[test]
+    fn execution_time_range_single_value() {
+        let props = make_props(&[("Timing_Properties", "Compute_Execution_Time", "3 ms")]);
+        assert_eq!(
+            get_execution_time_range(&props),
+            Some((3_000_000_000, 3_000_000_000))
+        );
+    }
+
+    #[test]
+    fn execution_time_range_missing() {
+        let props = PropertyMap::new();
+        assert_eq!(get_execution_time_range(&props), None);
     }
 
     // ── get_execution_time_or_exec ──────────────────────────────

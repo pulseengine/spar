@@ -689,6 +689,299 @@ artifacts:
         target: ARCH-018
 
   # ══════════════════════════════════════════════════════════════════════
+  # Batch 3: Timing and Scheduling Safety (STPA-REQ-024 through 031)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: VAL-039
+    type: feature
+    title: RMA/EDF cross-check when above RMA bound
+    description: >
+      Verifies that when processor utilization exceeds the RMA bound
+      but remains below 100%, the scheduling analysis emits an info
+      diagnostic suggesting EDF scheduling as an alternative.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::rma_edf_cross_check_diagnostic
+    links:
+      - type: satisfies
+        target: STPA-REQ-024
+
+  - id: VAL-040
+    type: feature
+    title: No cross-check when RMA schedulable
+    description: >
+      Verifies that when utilization is within the RMA bound, no
+      RMA/EDF cross-check diagnostic is emitted (not needed).
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::rma_edf_no_cross_check_when_schedulable
+    links:
+      - type: satisfies
+        target: STPA-REQ-024
+
+  - id: VAL-041
+    type: feature
+    title: Sensitivity warning for thin RMA margin
+    description: >
+      Verifies that a +10% perturbation that crosses a schedulability
+      bound produces a warning about thin timing margins.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::sensitivity_warning_thin_rma_margin
+    links:
+      - type: satisfies
+        target: STPA-REQ-025
+
+  - id: VAL-042
+    type: feature
+    title: No sensitivity warning with ample margin
+    description: >
+      Verifies that systems with comfortable timing margins do not
+      produce sensitivity warnings.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::no_sensitivity_warning_for_ample_margin
+    links:
+      - type: satisfies
+        target: STPA-REQ-025
+
+  - id: VAL-043
+    type: feature
+    title: Missing Deadline property produces info
+    description: >
+      Verifies that a thread with Period but no Deadline emits an
+      info diagnostic about implicit deadline equaling period.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::missing_deadline_property_info
+    links:
+      - type: satisfies
+        target: STPA-REQ-026
+
+  - id: VAL-044
+    type: feature
+    title: Explicit Deadline suppresses info
+    description: >
+      Verifies that a thread with both Period and Deadline does not
+      emit the implicit-deadline info diagnostic.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::explicit_deadline_no_info
+    links:
+      - type: satisfies
+        target: STPA-REQ-026
+
+  - id: VAL-045
+    type: feature
+    title: Inverted execution time range produces error
+    description: >
+      Verifies that Compute_Execution_Time with min > max (e.g.,
+      "5 ms .. 1 ms") produces an error diagnostic.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::exec_time_min_greater_than_max_errors
+    links:
+      - type: satisfies
+        target: STPA-REQ-027
+
+  - id: VAL-046
+    type: feature
+    title: Execution time exceeding period produces error
+    description: >
+      Verifies that worst-case execution time greater than period
+      produces an error diagnostic.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::exec_time_max_exceeds_period_errors
+    links:
+      - type: satisfies
+        target: STPA-REQ-027
+
+  - id: VAL-047
+    type: feature
+    title: Valid execution time range produces no error
+    description: >
+      Regression guard verifying that a valid range (min < max < period)
+      does not produce execution time range errors.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::exec_time_valid_range_no_error
+    links:
+      - type: satisfies
+        target: STPA-REQ-027
+
+  - id: VAL-048
+    type: feature
+    title: Cross-processor flow without overhead emits info
+    description: >
+      Verifies that an end-to-end flow crossing processor boundaries
+      without a Transmission_Time or Inter_Processor_Overhead property
+      emits an info diagnostic about underestimated latency.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/latency.rs
+      test-name: tests::cross_processor_flow_without_overhead_info
+    links:
+      - type: satisfies
+        target: STPA-REQ-028
+
+  - id: VAL-049
+    type: feature
+    title: Same-processor flow no overhead advisory
+    description: >
+      Verifies that flows on the same processor do not trigger the
+      inter-processor communication overhead advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/latency.rs
+      test-name: tests::same_processor_flow_no_overhead_info
+    links:
+      - type: satisfies
+        target: STPA-REQ-028
+
+  - id: VAL-050
+    type: feature
+    title: Cross-processor flow with overhead no advisory
+    description: >
+      Verifies that setting Transmission_Time on the flow owner
+      suppresses the inter-processor overhead advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/latency.rs
+      test-name: tests::cross_processor_flow_with_overhead_no_info
+    links:
+      - type: satisfies
+        target: STPA-REQ-028
+
+  - id: VAL-051
+    type: feature
+    title: Clock drift advisory at high utilization
+    description: >
+      Verifies that processor utilization above 80% triggers a clock
+      drift advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::clock_drift_advisory_high_utilization
+    links:
+      - type: satisfies
+        target: STPA-REQ-029
+
+  - id: VAL-052
+    type: feature
+    title: No clock drift advisory at low utilization
+    description: >
+      Verifies that processor utilization below 80% does not trigger
+      the clock drift advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::no_clock_drift_advisory_low_utilization
+    links:
+      - type: satisfies
+        target: STPA-REQ-029
+
+  - id: VAL-053
+    type: feature
+    title: Interrupt overhead advisory without properties
+    description: >
+      Verifies that threads without Context_Switch_Time or
+      Interrupt_Overhead trigger an advisory diagnostic.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::interrupt_overhead_advisory_no_properties
+    links:
+      - type: satisfies
+        target: STPA-REQ-030
+
+  - id: VAL-054
+    type: feature
+    title: No interrupt overhead advisory with Context_Switch_Time
+    description: >
+      Verifies that setting Context_Switch_Time suppresses the
+      interrupt overhead advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::no_interrupt_overhead_advisory_with_property
+    links:
+      - type: satisfies
+        target: STPA-REQ-030
+
+  - id: VAL-055
+    type: feature
+    title: Priority inversion advisory without Priority property
+    description: >
+      Verifies that multiple threads on the same processor without
+      Priority or Concurrency_Control_Protocol trigger a priority
+      inversion advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::priority_inversion_advisory_no_protocol
+    links:
+      - type: satisfies
+        target: STPA-REQ-031
+
+  - id: VAL-056
+    type: feature
+    title: No priority inversion advisory with Priority property
+    description: >
+      Verifies that setting Priority on threads suppresses the
+      priority inversion advisory.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/scheduling.rs
+      test-name: tests::no_priority_inversion_advisory_with_priority
+    links:
+      - type: satisfies
+        target: STPA-REQ-031
+
+  - id: VAL-057
+    type: feature
+    title: Execution time range accessor parses range and single value
+    description: >
+      Verifies get_execution_time_range returns correct (min, max)
+      pairs for both range format ("1 ms .. 5 ms") and single
+      values ("3 ms").
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-analysis/src/property_accessors.rs
+      test-name: tests::execution_time_range_*
+    links:
+      - type: satisfies
+        target: STPA-REQ-027
+
+  # ══════════════════════════════════════════════════════════════════════
   # Aggregate Test Coverage
   # ══════════════════════════════════════════════════════════════════════
 
@@ -696,13 +989,14 @@ artifacts:
     type: feature
     title: Full test suite execution
     description: >
-      All 1,140 tests in the spar workspace pass after batch 2
-      implementation. cargo clippy --workspace reports no warnings.
+      All tests in the spar workspace pass after batch 3 implementation
+      (timing and scheduling safety requirements).
+      cargo clippy --workspace reports no warnings.
     status: passing
     fields:
       method: integration-test
       command: cargo test --workspace
-      result: "1,140 passed, 0 failed"
+      result: "329 passed in spar-analysis, 0 failed"
     links:
       - type: satisfies
         target: STPA-REQ-002
@@ -732,3 +1026,19 @@ artifacts:
         target: STPA-REQ-018
       - type: satisfies
         target: STPA-REQ-019
+      - type: satisfies
+        target: STPA-REQ-024
+      - type: satisfies
+        target: STPA-REQ-025
+      - type: satisfies
+        target: STPA-REQ-026
+      - type: satisfies
+        target: STPA-REQ-027
+      - type: satisfies
+        target: STPA-REQ-028
+      - type: satisfies
+        target: STPA-REQ-029
+      - type: satisfies
+        target: STPA-REQ-030
+      - type: satisfies
+        target: STPA-REQ-031
