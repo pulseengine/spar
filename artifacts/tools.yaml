@@ -1,0 +1,761 @@
+# AADL ecosystem tools — landscape survey and adoption analysis
+#
+# Each entry captures what the tool does, what's unique about it,
+# and what spar could adopt. This is the single source of truth for
+# tool comparison — no duplicate documents.
+
+artifacts:
+
+  # ── IDEs & Core Tooling ──────────────────────────────────────────────
+
+  - id: TOOL-OSATE2
+    type: aadl-tool
+    title: OSATE2 — Open Source AADL Tool Environment
+    description: >
+      Reference AADL v2.2 toolset built on Eclipse. Provides graphical
+      and textual editors, instantiation, flow latency analysis, resource
+      budget analysis, and a plugin architecture hosting AGREE, ALISA,
+      Resolute, and others. Maintained by SEI/CMU.
+    fields:
+      tool-url: https://osate.org
+      origin: academic
+      maintainer: SEI/CMU
+      tool-status: active
+      category: ide
+      capabilities:
+        - AADL v2.2 textual and graphical editors
+        - Instantiation engine (declarative → instance model)
+        - Flow latency analysis (per SAE AS5506/2 Annex A)
+        - Resource budget analysis (weight, power, RAM, ROM, bandwidth)
+        - EMV2 error model editing and validation
+        - Connection binding consistency checks
+        - Plugin architecture (Eclipse extension points)
+        - ALISA requirements management integration
+        - Xtext-based parser with incremental validation
+      differentiator: >
+        Reference implementation — defines the de-facto standard for AADL
+        tooling. Eclipse plugin ecosystem (AGREE, Resolute, ALISA) gives
+        it the broadest capability set of any AADL environment. Graphical
+        editor with AADL diagrams is unique.
+      adoption-potential: >
+        Priority HIGH: Resource budget analysis (weight, power, bandwidth)
+        goes beyond our MIPS/RAM/ROM budgets. Priority MEDIUM: Graphical
+        editor concepts could inform a future spar-render interactive mode.
+        Priority LOW: Plugin architecture — spar's Analysis trait already
+        provides this.
+      spar-status: equivalent
+    links:
+      - type: traces-to
+        target: TOOL-AGREE
+      - type: traces-to
+        target: TOOL-ALISA
+      - type: traces-to
+        target: TOOL-RESOLUTE
+
+  - id: TOOL-STOOD
+    type: aadl-tool
+    title: STOOD — Ellidiss AADL Editor
+    description: >
+      Commercial AADL modeling environment from Ellidiss Technologies.
+      Graphical component diagram editor with AADL code generation.
+      Targets aerospace and defense embedded systems.
+    fields:
+      tool-url: https://www.ellidiss.com/products/stood/
+      origin: industry
+      maintainer: Ellidiss Technologies (France)
+      tool-status: commercial
+      category: modeling
+      capabilities:
+        - Graphical AADL component modeling
+        - AADL code generation from diagrams
+        - Requirements tracing via ReqIF import/export
+        - SysML/AADL model bridge
+        - Document generation (PDF/HTML from models)
+      differentiator: >
+        Only commercial AADL graphical modeler with SysML bridge.
+        ReqIF import/export enables integration with DOORS and other
+        requirements tools common in aerospace.
+      adoption-potential: >
+        Priority LOW: SysML bridge is niche. Priority MEDIUM: ReqIF
+        import/export would enable DOORS integration for rivet, but
+        this belongs in rivet not spar.
+      spar-status: not-applicable
+
+  - id: TOOL-AADL-INSPECTOR
+    type: aadl-tool
+    title: AADL Inspector — Ellidiss Analysis Tool
+    description: >
+      Commercial analysis and simulation tool from Ellidiss. Performs
+      scheduling analysis (Cheddar integration), model simulation,
+      and fault injection. Companion to STOOD.
+    fields:
+      tool-url: https://www.ellidiss.com/products/aadl-inspector/
+      origin: industry
+      maintainer: Ellidiss Technologies (France)
+      tool-status: commercial
+      category: analysis
+      capabilities:
+        - Scheduling simulation (Cheddar integration)
+        - Model simulation and animation
+        - Fault injection and error propagation simulation
+        - Gantt chart visualization for scheduling
+        - Worst-case response time analysis
+      differentiator: >
+        Only tool combining scheduling simulation with fault injection
+        in a single environment. Gantt chart visualization of scheduling
+        decisions is excellent for debugging timing issues.
+      adoption-potential: >
+        Priority HIGH: Scheduling simulation with Gantt visualization.
+        Our scheduling analysis is static — adding simulation would
+        catch timing issues that static analysis misses. Priority HIGH:
+        Fault injection on the instance model.
+      spar-status: partial
+
+  # ── Verification & Assurance ──────────────────────────────────────────
+
+  - id: TOOL-AGREE
+    type: aadl-tool
+    title: AGREE — Assume-Guarantee Reasoning Environment
+    description: >
+      Compositional verification framework for AADL. Annotates components
+      with assume/guarantee contracts in a Lustre-like language, then
+      uses JKind (k-induction model checker) to verify that component
+      implementations satisfy their contracts given subcomponent contracts.
+    fields:
+      tool-url: https://loonwerks.com/tools/agree.html
+      origin: industry
+      maintainer: Collins Aerospace / Loonwerks
+      tool-status: active
+      category: verification
+      capabilities:
+        - Assume/guarantee contract annotation on AADL components
+        - Compositional verification via k-induction (JKind)
+        - Realizability checking (can a component be implemented?)
+        - Counterexample generation for contract violations
+        - Lustre-like specification language for temporal properties
+      differentiator: >
+        Only compositional verification tool for AADL. Contracts enable
+        modular reasoning — verify system properties from component
+        contracts without examining internals. JKind backend provides
+        decidable model checking for linear arithmetic.
+      adoption-potential: >
+        Priority HIGH but LARGE effort: Compositional verification is
+        the gold standard for safety-critical systems. Spar could start
+        with parsing AGREE annex contracts (currently opaque) and
+        exporting to an external model checker. Full JKind integration
+        would require a Lustre backend.
+      spar-status: not-started
+
+  - id: TOOL-RESOLUTE
+    type: aadl-tool
+    title: Resolute — Assurance Case Automation
+    description: >
+      Rule-based assurance case framework for AADL. Defines claim
+      functions over the AADL model that produce structured assurance
+      arguments. Claims compose hierarchically to build GSN-style
+      assurance cases automatically from the architecture.
+    fields:
+      tool-url: https://loonwerks.com/tools/resolute.html
+      origin: industry
+      maintainer: Collins Aerospace / Loonwerks
+      tool-status: active
+      category: verification
+      capabilities:
+        - Claim functions over AADL instance models
+        - Hierarchical assurance case construction
+        - GSN (Goal Structuring Notation) export
+        - Quantitative evidence aggregation
+        - Custom verification rules as Resolute functions
+      differentiator: >
+        Unique approach to assurance — derives structured safety arguments
+        directly from the architecture model. Claims are functions that
+        query the instance model, so the assurance case stays in sync
+        with the architecture automatically.
+      adoption-potential: >
+        Priority MEDIUM: The concept of claim functions over the instance
+        model maps naturally to spar's Analysis trait. Could add a
+        "resolute-like" analysis that evaluates user-defined claims.
+        Rivet's STPA integration already covers part of this space.
+      spar-status: not-started
+
+  - id: TOOL-ALISA
+    type: aadl-tool
+    title: ALISA — Architecture-Led Incremental System Assurance
+    description: >
+      Requirements management and verification tracking integrated with
+      OSATE2. Defines verification plans that bind requirements to
+      analysis results and test evidence. Tracks verification status
+      across the lifecycle.
+    fields:
+      tool-url: https://osate.org
+      origin: academic
+      maintainer: SEI/CMU
+      tool-status: active
+      category: requirements
+      capabilities:
+        - Verification plan definition (requirements → evidence)
+        - Analysis result binding to requirements
+        - Verification status tracking and coverage metrics
+        - Integration with OSATE2 analyses as evidence sources
+        - ReqSpec language for requirement specification
+      differentiator: >
+        Architecture-LED requirements — requirements are bound to
+        architecture elements, not standalone. Verification plans
+        automatically invoke OSATE2 analyses to produce evidence.
+      adoption-potential: >
+        Priority LOW: Rivet already handles requirements traceability
+        better than ALISA. The "architecture-led" binding concept is
+        already captured by rivet's allocated-from/modeled-by links
+        between requirements and aadl-component artifacts.
+      spar-status: not-applicable
+
+  - id: TOOL-VERDICT
+    type: aadl-tool
+    title: VERDICT — Verification Evidence and Resilience Driven
+    description: >
+      Cyber-resiliency analysis tool from DARPA CASE program. Performs
+      threat modeling on AADL architectures, identifies attack surfaces,
+      and synthesizes defense mechanisms. Uses STEM (Systems Theoretic
+      Evidence Mapper) for cyber-physical risk assessment.
+    fields:
+      tool-url: https://github.com/ge-high-assurance/VERDICT
+      origin: government
+      maintainer: GE Research / DARPA
+      tool-status: active
+      category: safety
+      capabilities:
+        - Cyber threat modeling on AADL architectures
+        - Attack surface identification
+        - Defense mechanism synthesis
+        - CAPEC/CWE threat library integration
+        - STEM risk assessment (likelihood × impact)
+        - Cyber-physical security analysis
+      differentiator: >
+        Only AADL tool focused on cybersecurity. Bridges safety (STPA)
+        and security analysis on the same architecture model. DARPA CASE
+        program funding ensures cutting-edge research integration.
+      adoption-potential: >
+        Priority MEDIUM: Cyber-physical security analysis on AADL models
+        is increasingly important. Spar could parse the security annex
+        (currently opaque) and produce threat surface diagnostics.
+        Rivet's STPA analysis already captures loss scenarios that
+        overlap with security threats.
+      spar-status: not-started
+
+  - id: TOOL-BLESS
+    type: aadl-tool
+    title: BLESS — Behavioral Language for Embedded Systems with Software
+    description: >
+      Formal behavioral specification and verification for AADL thread
+      components. Annotates threads with preconditions, postconditions,
+      and invariants in a Hoare-logic style. Generates proof obligations
+      checked by theorem provers.
+    fields:
+      tool-url: https://bless.cs.ksu.edu
+      origin: academic
+      maintainer: Kansas State University
+      tool-status: research-only
+      category: verification
+      capabilities:
+        - Hoare-logic behavioral specifications on AADL threads
+        - Precondition/postcondition/invariant annotation
+        - Proof obligation generation
+        - Theorem prover integration (HOL, Coq)
+        - Runtime assertion checking code generation
+      differentiator: >
+        Only formal methods tool for AADL thread behavior. Enables
+        mathematically proving that thread implementations satisfy
+        behavioral contracts — strongest guarantee available.
+      adoption-potential: >
+        Priority LOW: Research-only tool with limited adoption. The
+        formal methods approach is sound but the effort/benefit ratio
+        is poor for most projects. Parsing the BLESS annex would be
+        low-value.
+      spar-status: not-applicable
+
+  # ── Scheduling & Timing ──────────────────────────────────────────────
+
+  - id: TOOL-CHEDDAR
+    type: aadl-tool
+    title: Cheddar — Real-Time Scheduling Analyzer
+    description: >
+      Scheduling analysis tool from University of Brest. Supports
+      Rate Monotonic, Earliest Deadline First, and custom scheduling
+      policies. Integrates with AADL via OSATE2 plugin and AADL Inspector.
+      Includes simulation and feasibility testing.
+    fields:
+      tool-url: http://beru.univ-brest.fr/cheddar/
+      origin: academic
+      maintainer: University of Brest (France)
+      tool-status: active
+      category: scheduling
+      capabilities:
+        - Rate Monotonic Analysis (RMA) with exact utilization bounds
+        - Earliest Deadline First (EDF) analysis
+        - Response Time Analysis (RTA) with blocking and preemption
+        - Custom scheduling policy definition
+        - Scheduling simulation with Gantt chart output
+        - Feasibility testing (sufficient and necessary conditions)
+        - Multi-processor partitioned scheduling
+        - Audsley's Optimal Priority Assignment (OPA)
+        - Processor utilization and slack computation
+      differentiator: >
+        Most comprehensive open-source scheduling analyzer. Supports
+        policies beyond RM/EDF including custom user-defined schedulers.
+        Simulation mode catches timing anomalies that static analysis
+        misses. Audsley's OPA finds optimal priority assignments.
+      adoption-potential: >
+        Priority CRITICAL: Spar's scheduling analysis is RM-only with
+        basic utilization bound checks. Adopting EDF analysis, Response
+        Time Analysis (RTA), and Audsley's OPA would be the single
+        highest-impact improvement. Implementation: ~500 LOC for RTA,
+        ~200 LOC for EDF, ~150 LOC for OPA. Rust crates: none needed,
+        algorithms are well-documented.
+      spar-status: partial
+    links:
+      - type: traces-to
+        target: TOOL-AADL-INSPECTOR
+
+  - id: TOOL-MAST
+    type: aadl-tool
+    title: MAST — Modeling and Analysis Suite for Real-Time Applications
+    description: >
+      Timing analysis toolkit from University of Cantabria. Performs
+      worst-case response time analysis, offset-based analysis, and
+      end-to-end latency computation for distributed real-time systems.
+    fields:
+      tool-url: https://mast.unican.es
+      origin: academic
+      maintainer: University of Cantabria (Spain)
+      tool-status: active
+      category: scheduling
+      capabilities:
+        - Worst-case response time analysis (holistic)
+        - Offset-based timing analysis
+        - End-to-end latency computation for distributed systems
+        - Sensitivity analysis (how much slack before deadline miss?)
+        - Priority assignment optimization
+        - Multiprocessor and distributed scheduling analysis
+      differentiator: >
+        Holistic analysis for distributed real-time systems — considers
+        end-to-end timing across multiple processors and networks, not
+        just single-processor scheduling. Sensitivity analysis shows
+        how close the system is to failing timing constraints.
+      adoption-potential: >
+        Priority HIGH: Sensitivity analysis and distributed timing are
+        exactly what spar lacks. Our latency analysis computes bounds
+        but doesn't do sensitivity (how much margin?). Distributed
+        analysis across bus-connected processors would pair well with
+        our connection/binding analyses.
+      spar-status: partial
+
+  # ── Code Generation ──────────────────────────────────────────────────
+
+  - id: TOOL-OCARINA
+    type: aadl-tool
+    title: Ocarina — AADL Code Generator
+    description: >
+      Code generator producing Ada and C code from AADL models.
+      Generates task skeletons, communication middleware, and deployment
+      configurations. Part of the TASTE toolchain. Targets PolyORB-HI
+      middleware for distributed systems.
+    fields:
+      tool-url: https://music.gitlab.io/ocarina/
+      origin: academic
+      maintainer: MUSIC project / ISAE-SUPAERO (France)
+      tool-status: maintained
+      category: code-generation
+      capabilities:
+        - Ada code skeleton generation from AADL thread/process models
+        - C code skeleton generation
+        - PolyORB-HI middleware binding generation
+        - Deployment configuration generation
+        - Makefile/build system generation
+        - Petri net model extraction
+      differentiator: >
+        Most mature AADL code generator. PolyORB-HI middleware enables
+        generated code to run on real-time operating systems (RTEMS,
+        VxWorks, PikeOS). Petri net extraction enables formal analysis
+        of concurrency.
+      adoption-potential: >
+        Priority MEDIUM: Code skeleton generation (Rust, not Ada/C)
+        would be valuable — generate thread task functions, port read/
+        write stubs, and Cargo.toml from AADL models. We already have
+        the WIT transform; a Rust skeleton generator would complement
+        it. Priority LOW: Petri net extraction for concurrency analysis.
+      spar-status: not-started
+
+  - id: TOOL-RAMSES
+    type: aadl-tool
+    title: RAMSES — Refinement of AADL Models for Synthesis
+    description: >
+      Model refinement and transformation tool. Refines high-level
+      AADL models into implementation-level models by applying
+      platform-specific transformations (e.g., adding OS scheduling,
+      memory mapping, communication protocols).
+    fields:
+      tool-url: https://music.gitlab.io/ramses/
+      origin: academic
+      maintainer: MUSIC project / ISAE-SUPAERO (France)
+      tool-status: maintained
+      category: code-generation
+      capabilities:
+        - AADL model refinement (abstract → concrete)
+        - Platform-specific transformations
+        - OS scheduling model injection
+        - Memory mapping refinement
+        - Communication protocol selection
+        - ATL (Atlas Transformation Language) based
+      differentiator: >
+        Model refinement as a first-class concept — transforms abstract
+        architecture models into platform-specific implementations
+        through a chain of well-defined refinement steps. Each step
+        is traceable.
+      adoption-potential: >
+        Priority LOW: Model refinement is useful for code generation
+        pipelines but spar's focus is analysis not synthesis. The
+        refinement concept could inform future spar-transform work
+        if we add AADL-to-AADL transforms.
+      spar-status: not-applicable
+
+  # ── System Integration ──────────────────────────────────────────────
+
+  - id: TOOL-TASTE
+    type: aadl-tool
+    title: TASTE — The ASSERT Set of Tools for Engineering
+    description: >
+      ESA-sponsored integrated system engineering environment. Combines
+      AADL modeling with ASN.1 data modeling, SDL behavior modeling,
+      and code generation. Targets space systems. Includes Ocarina,
+      Cheddar, and MAST as components.
+    fields:
+      tool-url: https://taste.tools
+      origin: government
+      maintainer: European Space Agency (ESA) / N7 Space
+      tool-status: active
+      category: modeling
+      capabilities:
+        - Integrated system modeling (AADL + ASN.1 + SDL)
+        - End-to-end code generation (models → deployable binaries)
+        - Hardware/software co-design
+        - Multi-platform deployment (RTEMS, Linux, bare-metal)
+        - Integrated scheduling analysis (via Cheddar/MAST)
+        - Data type modeling with ASN.1
+        - Behavioral modeling with SDL
+      differentiator: >
+        Most complete model-driven engineering environment for space
+        systems. Integrates data modeling (ASN.1), behavior (SDL), and
+        architecture (AADL) in a single workflow. ESA-qualified for
+        space missions.
+      adoption-potential: >
+        Priority MEDIUM: ASN.1 data type integration is interesting —
+        AADL data components mapped to ASN.1 enables formal data type
+        checking across system boundaries. Priority LOW: SDL behavioral
+        modeling overlaps with BLESS/AGREE territory.
+      spar-status: not-started
+
+  # ── Safety Analysis ──────────────────────────────────────────────────
+
+  - id: TOOL-FASTAR
+    type: aadl-tool
+    title: FASTAR — Fault Tree Analysis for AADL
+    description: >
+      Fault tree generation from EMV2 error models. Constructs minimal
+      cut sets from error propagation paths. Part of OSATE2 plugin
+      ecosystem. Supports FTA, FMEA, and FHA generation.
+    fields:
+      origin: academic
+      maintainer: SEI/CMU
+      tool-status: active
+      category: safety
+      capabilities:
+        - Fault tree construction from EMV2 error flows
+        - Minimal cut set computation
+        - FMEA table generation from error model
+        - Functional Hazard Assessment (FHA) generation
+        - Quantitative probability computation (if failure rates given)
+        - Common cause failure analysis
+      differentiator: >
+        Tightest integration between AADL error models (EMV2) and
+        classical safety analysis artifacts (FTA, FMEA, FHA). Automated
+        minimal cut set computation from architecture enables rapid
+        safety assessment.
+      adoption-potential: >
+        Priority HIGH: Spar has EMV2 parsing and basic emv2_analysis
+        but lacks FTA/FMEA/FHA generation. Implementing fault tree
+        construction from error propagation paths is ~800 LOC.
+        Minimal cut set computation adds ~300 LOC. Would complete
+        our EMV2 story and link to rivet's STPA analysis.
+      spar-status: partial
+
+  # ── Optimization & Design Space Exploration ──────────────────────────
+
+  - id: TOOL-ARCHEOPTERIX
+    type: aadl-tool
+    title: ArcheOpterix — Architecture Optimization
+    description: >
+      Multi-objective design space exploration for embedded systems.
+      Optimizes task-to-processor allocation, bus binding, and
+      redundancy placement using evolutionary algorithms (NSGA-II).
+      Takes AADL models as input, produces Pareto-optimal configurations.
+    fields:
+      origin: academic
+      maintainer: TU Munich (Germany)
+      tool-status: research-only
+      category: optimization
+      capabilities:
+        - Multi-objective deployment optimization (NSGA-II)
+        - Task-to-processor allocation (bin packing)
+        - Communication bus binding optimization
+        - Redundancy placement for reliability
+        - Pareto front visualization
+        - Constraint handling (memory, CPU, timing)
+        - Design space exploration with trade-off analysis
+      differentiator: >
+        Only AADL tool performing multi-objective optimization.
+        Produces Pareto-optimal deployment configurations trading off
+        cost, reliability, latency, and resource utilization. Shows
+        architects the design space rather than a single solution.
+      adoption-potential: >
+        Priority HIGH: Deployment optimization is the most impactful
+        optimization capability. Implementation approach: (1) formulate
+        as bin packing with side constraints, (2) use NSGA-II from
+        moors crate or cp_sat for CP solver, (3) generate modified
+        AADL binding properties. Auto-routing (bus binding inference)
+        falls out naturally as a sub-problem. ~1500 LOC total.
+      spar-status: not-started
+
+  # ── Formal Methods ──────────────────────────────────────────────────
+
+  - id: TOOL-UPPAAL
+    type: aadl-tool
+    title: UPPAAL — Timed Automata Model Checker
+    description: >
+      Timed automata model checker used with AADL for verifying timing
+      properties. AADL models are translated to UPPAAL timed automata
+      for exhaustive state-space exploration. Proves timing properties
+      or generates counterexamples.
+    fields:
+      tool-url: https://uppaal.org
+      origin: academic
+      maintainer: Uppsala University / Aalborg University
+      tool-status: active
+      category: verification
+      capabilities:
+        - Timed automata modeling
+        - Exhaustive state-space exploration
+        - TCTL property verification
+        - Counterexample trace generation
+        - Statistical model checking (SMC)
+        - AADL-to-UPPAAL translation
+      differentiator: >
+        Exhaustive verification of timing properties — if UPPAAL says
+        no deadline miss can occur, it's mathematically proven. Statistical
+        model checking mode scales to larger models with probabilistic
+        guarantees.
+      adoption-potential: >
+        Priority MEDIUM: UPPAAL export (similar to our NuSMV export)
+        would enable timing property verification. Spar already exports
+        NuSMV for mode reachability — adding UPPAAL timed automata
+        export for timing verification is a natural extension. ~400 LOC.
+      spar-status: partial
+
+  # ── Code Generation & Model Processing ────────────────────────────
+
+  - id: TOOL-HAMR
+    type: aadl-tool
+    title: Sireum HAMR — High Assurance Modeling and Rapid-engineering
+    description: >
+      Multi-platform code generation framework from Kansas State University.
+      Generates Rust, C, and Slang (safety-critical Scala) from AADL models.
+      JVM-based simulation for rapid prototyping. Code-level verification
+      via Verus (Rust) and Logika (Slang). Now supports SysML v2.
+    fields:
+      tool-url: https://hamr.sireum.org
+      origin: academic
+      maintainer: Kansas State University
+      tool-status: active
+      category: code-generation
+      capabilities:
+        - Rust code generation from AADL thread/process models
+        - C code generation
+        - Slang (safety-critical Scala) code generation
+        - JVM-based simulation framework for rapid prototyping
+        - Code-level formal verification via Verus (Rust)
+        - SysML v2 support
+        - ARINC 653 and seL4 runtime targets
+      differentiator: >
+        Only tool generating Rust from AADL. Verus integration enables
+        formally verified Rust code from architecture models. JVM simulation
+        allows testing before deploying to embedded targets.
+      adoption-potential: >
+        Priority HIGH: Rust skeleton generation is directly aligned with
+        spar's ecosystem. Could study HAMR's AADL-to-Rust mapping for
+        thread dispatch, port read/write, and scheduling. Verus integration
+        for formal verification of generated code is unique. ~800 LOC
+        for basic Rust skeleton generation.
+      spar-status: not-started
+
+  - id: TOOL-AWAS
+    type: aadl-tool
+    title: Sireum Awas — Architecture-Wide Analysis Suite
+    description: >
+      Information flow and error propagation analysis from Kansas State
+      University. Unified analysis of data/control flows, security
+      information flows, and EMV2 error propagation paths with
+      interactive visualization.
+    fields:
+      tool-url: https://awas.sireum.org
+      origin: academic
+      maintainer: Kansas State University
+      tool-status: active
+      category: safety
+      capabilities:
+        - Security-oriented information flow analysis
+        - Interactive flow visualization with querying
+        - Unified functional and error flow analysis
+        - DSL for safety and security property checking
+        - Applied to medical devices and avionics
+      differentiator: >
+        Only tool unifying security information flow analysis with EMV2
+        error propagation in a single framework. Interactive visualization
+        with dynamic querying is unique. Increasingly important for
+        DO-326A airborne security compliance.
+      adoption-potential: >
+        Priority MEDIUM: Security information flow analysis is a gap in
+        spar. Could extend our existing flow_check and emv2_analysis to
+        include security flow tracking. Interactive visualization could
+        enhance spar-render.
+      spar-status: not-started
+
+  - id: TOOL-EMFTA
+    type: aadl-tool
+    title: EMFTA — EMV2-based Fault Tree Analysis
+    description: >
+      Open-source fault tree analysis tool from SEI/CMU. Generates fault
+      trees from AADL EMV2 annotations with automatic optimization,
+      probability propagation, and minimal cut set computation.
+    fields:
+      tool-url: https://github.com/cmu-sei/emfta
+      origin: academic
+      maintainer: SEI/CMU
+      tool-status: active
+      category: safety
+      capabilities:
+        - Automatic FTA generation from EMV2 error models
+        - Fault tree optimization (removing useless events)
+        - Probability propagation to root node
+        - Minimal cut set computation
+        - Synchronized tree diagram and table views
+      differentiator: >
+        Open-source BSD-licensed FTA tool with automatic tree
+        optimization. Probability consistency checking ensures
+        quantitative fault tree results are valid.
+      adoption-potential: >
+        Priority HIGH: Better reference than FASTAR for implementing
+        FTA in spar. BSD license allows studying the algorithms.
+        Tree optimization and probability propagation are ~300 LOC
+        on top of basic fault tree construction.
+      spar-status: partial
+    links:
+      - type: traces-to
+        target: TOOL-FASTAR
+
+  - id: TOOL-COMPASS
+    type: aadl-tool
+    title: COMPASS — Correctness, Modeling, Performance of Aerospace Systems
+    description: >
+      ESA-sponsored formal verification and safety analysis suite.
+      Uses SLIM (AADL dialect) as input. Backends include nuXmv (model
+      checking), OCRA (contract-based verification), MRMC (probabilistic
+      model checking), and xSAP (safety analysis).
+    fields:
+      origin: government
+      maintainer: ESA / Fondazione Bruno Kessler (FBK)
+      tool-status: maintained
+      category: verification
+      capabilities:
+        - LTL/CTL model checking via nuXmv
+        - Contract-based compositional verification (OCRA)
+        - Automatic fault injection from error models
+        - Probabilistic model checking (Markov chains)
+        - FTA, FMEA, and diagnosability analysis
+        - Statistical model checking
+        - FDIR (Fault Detection Isolation Recovery) analysis
+      differentiator: >
+        Most comprehensive formal verification suite for AADL-like models.
+        Combines functional verification, safety analysis, and
+        probabilistic reliability in one framework. Automatic fault
+        injection produces faulty model variants from nominal + error specs.
+      adoption-potential: >
+        Priority LOW for direct integration (ESA restricted access), but
+        concepts are valuable. Automatic fault injection from EMV2 error
+        models could enhance spar's emv2_analysis. Probabilistic
+        reliability computation is a gap. FDIR analysis is unique.
+      spar-status: not-started
+
+  - id: TOOL-MASIW
+    type: aadl-tool
+    title: MASIW — Modular Avionics Software Integration Workbench
+    description: >
+      Eclipse-based IDE from ISP RAS targeting Integrated Modular Avionics.
+      AFDX network analysis, QEMU co-simulation, automatic distribution
+      optimization, and fault tree analysis.
+    fields:
+      tool-url: https://forge.ispras.ru/projects/masiw-oss
+      origin: academic
+      maintainer: ISP RAS (Russia)
+      tool-status: active
+      category: analysis
+      capabilities:
+        - AFDX network latency and port queue analysis
+        - QEMU-based software-in-the-loop co-simulation
+        - Automatic software distribution across modules
+        - Resource-constrained bin packing optimization
+        - Fault tree analysis with probability computation
+      differentiator: >
+        Only AADL tool with AFDX network-level timing simulation
+        and QEMU hardware co-simulation. Distribution optimization
+        solves the deployment problem with real resource constraints.
+      adoption-potential: >
+        Priority MEDIUM: AFDX/bus-level timing analysis is a gap.
+        Spar validates bus bindings but doesn't simulate network
+        latency. Distribution optimization aligns with our deployment
+        optimization plans.
+      spar-status: not-started
+
+  # ── Summary: Spar Competitive Position ──────────────────────────────
+
+  - id: TOOL-SPAR
+    type: aadl-tool
+    title: Spar — Modern AADL Toolchain
+    description: >
+      10-crate Rust toolchain for AADL v2.2. Incremental computation
+      (salsa), lossless syntax (rowan), 22 analysis passes, LSP server,
+      WASM compilation target, WIT/WAC/wRPC transforms. Single binary,
+      sub-second incremental analysis, 1.3MB WASM component.
+    fields:
+      origin: open-source
+      maintainer: Pulse Engine
+      tool-status: active
+      category: analysis
+      capabilities:
+        - AADL v2.2 parsing with error recovery (lossless CST)
+        - Incremental computation via salsa (sub-second re-analysis)
+        - 22 pluggable analysis passes (Analysis trait + AnalysisRunner)
+        - LSP server (completions, diagnostics, go-to-definition)
+        - WASM compilation target (1.3MB, wasm32-wasip2)
+        - WIT/WAC/wRPC bidirectional transforms
+        - Mode reachability analysis with NuSMV export
+        - ARINC 653 partition scheduling validation
+        - EMV2 error model analysis
+        - JSON serialization of all model artifacts
+        - SVG architecture visualization
+        - STPA safety analysis integration (via rivet)
+      differentiator: >
+        Only AADL toolchain that compiles to WASM. Incremental computation
+        enables IDE-speed analysis. Rust implementation gives memory
+        safety without GC pauses. Single 4MB binary vs OSATE2's 500MB+
+        Eclipse installation. WIT/WAC transforms bridge AADL to the
+        WebAssembly component ecosystem — no other tool does this.
+      spar-status: not-applicable
