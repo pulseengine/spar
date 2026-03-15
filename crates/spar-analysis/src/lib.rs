@@ -40,6 +40,7 @@ pub mod property_accessors;
 pub mod property_rules;
 pub mod resource_budget;
 pub mod scheduling;
+pub mod scheduling_verified;
 pub mod subcomponent_rules;
 pub mod wrpc_binding;
 
