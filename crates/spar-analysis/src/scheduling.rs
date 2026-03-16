@@ -93,20 +93,20 @@ impl Analysis for SchedulingAnalysis {
                         analysis: self.name().to_string(),
                     });
                 }
-                if let Some(period) = period_ps {
-                    if max_ps > period {
-                        diags.push(AnalysisDiagnostic {
-                            severity: Severity::Error,
-                            message: format!(
-                                "thread '{}' worst-case execution time ({:.3} ms) exceeds period ({:.3} ms)",
-                                comp.name,
-                                max_ps as f64 / 1_000_000_000.0,
-                                period as f64 / 1_000_000_000.0,
-                            ),
-                            path: path.clone(),
-                            analysis: self.name().to_string(),
-                        });
-                    }
+                if let Some(period) = period_ps
+                    && max_ps > period
+                {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "thread '{}' worst-case execution time ({:.3} ms) exceeds period ({:.3} ms)",
+                            comp.name,
+                            max_ps as f64 / 1_000_000_000.0,
+                            period as f64 / 1_000_000_000.0,
+                        ),
+                        path: path.clone(),
+                        analysis: self.name().to_string(),
+                    });
                 }
             }
 
@@ -320,7 +320,9 @@ impl Analysis for SchedulingAnalysis {
             let has_any_overhead_prop = threads.iter().any(|t| {
                 let props = instance.properties_for(t.comp_idx);
                 // Check for standard or custom overhead properties
-                props.get("Timing_Properties", "Context_Switch_Time").is_some()
+                props
+                    .get("Timing_Properties", "Context_Switch_Time")
+                    .is_some()
                     || props.get("", "Context_Switch_Time").is_some()
                     || props.get("SPAR_Properties", "Interrupt_Overhead").is_some()
                     || props.get("", "Interrupt_Overhead").is_some()
@@ -348,9 +350,7 @@ impl Analysis for SchedulingAnalysis {
             if n >= 2 {
                 let has_any_protocol = threads.iter().any(|t| {
                     let props = instance.properties_for(t.comp_idx);
-                    props
-                        .get("Deployment_Properties", "Priority")
-                        .is_some()
+                    props.get("Deployment_Properties", "Priority").is_some()
                         || props.get("", "Priority").is_some()
                         || props
                             .get("Deployment_Properties", "Concurrency_Control_Protocol")

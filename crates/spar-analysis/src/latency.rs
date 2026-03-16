@@ -182,12 +182,11 @@ impl Analysis for LatencyAnalysis {
                         let child_props = instance.properties_for(child_idx);
                         let binding = get_processor_binding(child_props);
 
-                        if let Some(ref cur) = binding {
-                            if let Some(ref prev) = prev_binding {
-                                if !cur.eq_ignore_ascii_case(prev) {
-                                    crosses_boundary = true;
-                                }
-                            }
+                        if let Some(ref cur) = binding
+                            && let Some(ref prev) = prev_binding
+                            && !cur.eq_ignore_ascii_case(prev)
+                        {
+                            crosses_boundary = true;
                         }
                         if binding.is_some() {
                             prev_binding = binding;
@@ -565,12 +564,7 @@ mod tests {
             "reference (cpu1)",
         );
 
-        b.set_property(
-            ctrl,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
         b.set_property(
             ctrl,
@@ -594,9 +588,7 @@ mod tests {
         );
         assert_eq!(cross_proc[0].severity, Severity::Info);
         assert!(
-            cross_proc[0]
-                .message
-                .contains("Inter_Processor_Overhead"),
+            cross_proc[0].message.contains("Inter_Processor_Overhead"),
             "should mention overhead property: {}",
             cross_proc[0].message
         );
@@ -634,12 +626,7 @@ mod tests {
             "reference (cpu1)",
         );
 
-        b.set_property(
-            ctrl,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
         b.set_property(
             ctrl,
@@ -694,12 +681,7 @@ mod tests {
             "reference (cpu1)",
         );
 
-        b.set_property(
-            ctrl,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
         b.set_property(
             ctrl,
