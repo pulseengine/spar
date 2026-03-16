@@ -1699,10 +1699,10 @@ fn parse_aadl_integer_or_real(s: &str) -> i64 {
         let rest = &s[hash_pos + 1..];
         if let Some(end_hash) = rest.find('#') {
             let digits = &rest[..end_hash];
-            if let Ok(base) = base_str.parse::<u32>() {
-                if let Ok(val) = i64::from_str_radix(digits, base) {
-                    return val;
-                }
+            if let Ok(base) = base_str.parse::<u32>()
+                && let Ok(val) = i64::from_str_radix(digits, base)
+            {
+                return val;
             }
         }
     }

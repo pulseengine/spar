@@ -534,27 +534,38 @@ mod tests {
     #[test]
     fn record_field_found() {
         let record = PropertyExpr::Record(vec![
-            (Name::new("NetWeight"), PropertyExpr::Integer(5, Some(Name::new("kg")))),
-            (Name::new("GrossWeight"), PropertyExpr::Integer(10, Some(Name::new("kg")))),
+            (
+                Name::new("NetWeight"),
+                PropertyExpr::Integer(5, Some(Name::new("kg"))),
+            ),
+            (
+                Name::new("GrossWeight"),
+                PropertyExpr::Integer(10, Some(Name::new("kg"))),
+            ),
         ]);
         let field = get_record_field(&record, "NetWeight");
-        assert_eq!(field, Some(&PropertyExpr::Integer(5, Some(Name::new("kg")))));
+        assert_eq!(
+            field,
+            Some(&PropertyExpr::Integer(5, Some(Name::new("kg"))))
+        );
     }
 
     #[test]
     fn record_field_case_insensitive() {
-        let record = PropertyExpr::Record(vec![
-            (Name::new("NetWeight"), PropertyExpr::Integer(5, None)),
-        ]);
+        let record = PropertyExpr::Record(vec![(
+            Name::new("NetWeight"),
+            PropertyExpr::Integer(5, None),
+        )]);
         let field = get_record_field(&record, "netweight");
         assert_eq!(field, Some(&PropertyExpr::Integer(5, None)));
     }
 
     #[test]
     fn record_field_not_found() {
-        let record = PropertyExpr::Record(vec![
-            (Name::new("NetWeight"), PropertyExpr::Integer(5, None)),
-        ]);
+        let record = PropertyExpr::Record(vec![(
+            Name::new("NetWeight"),
+            PropertyExpr::Integer(5, None),
+        )]);
         assert_eq!(get_record_field(&record, "Missing"), None);
     }
 
@@ -567,8 +578,14 @@ mod tests {
     #[test]
     fn record_field_numeric_extraction() {
         let record = PropertyExpr::Record(vec![
-            (Name::new("weight"), PropertyExpr::Integer(5, Some(Name::new("kg")))),
-            (Name::new("label"), PropertyExpr::StringLit("test".to_string())),
+            (
+                Name::new("weight"),
+                PropertyExpr::Integer(5, Some(Name::new("kg"))),
+            ),
+            (
+                Name::new("label"),
+                PropertyExpr::StringLit("test".to_string()),
+            ),
         ]);
         assert_eq!(get_record_field_numeric(&record, "weight"), Some(5.0));
         assert_eq!(get_record_field_numeric(&record, "label"), None);
@@ -595,10 +612,8 @@ mod tests {
 
     #[test]
     fn numeric_with_unit_unit_value() {
-        let expr = PropertyExpr::UnitValue(
-            Box::new(PropertyExpr::Integer(500, None)),
-            Name::new("us"),
-        );
+        let expr =
+            PropertyExpr::UnitValue(Box::new(PropertyExpr::Integer(500, None)), Name::new("us"));
         let (val, unit) = numeric_with_unit(&expr).unwrap();
         assert_eq!(val, 500.0);
         assert_eq!(unit.unwrap().as_str(), "us");
