@@ -94,6 +94,26 @@ jobs:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
 
+  # ── Compliance report (HTML export via rivet) ─────────────────────────
+  build-compliance:
+    name: Build compliance report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate compliance report
+        id: report
+        uses: pulseengine/rivet/.github/actions/compliance@main
+        with:
+          theme: dark
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report
+          path: ${{ steps.report.outputs.archive-path }}
+
   # ── Test evidence bundle ──────────────────────────────────────────────
   build-test-evidence:
     name: Build test evidence
@@ -159,7 +179,7 @@ jobs:
   # ── Create GitHub Release ─────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
-    needs: [build-binaries, build-test-evidence]
+    needs: [build-binaries, build-compliance, build-test-evidence]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
