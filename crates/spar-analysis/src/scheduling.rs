@@ -1465,7 +1465,7 @@ mod conformance_tests {
 
     #[test]
     fn ceil_div_matches_inline() {
-        // The actual code computes (r + period - 1) / period inline.
+        // The actual code computes r.div_ceil(period) inline.
         // Verify the Lean-proven ceil_div produces the same result.
         let cases: &[(u64, u64)] = &[
             (0, 1),
@@ -1484,7 +1484,7 @@ mod conformance_tests {
             (u64::MAX / 2, 1000),
         ];
         for &(a, b) in cases {
-            let inline = (a + b - 1) / b;
+            let inline = a.div_ceil(b);
             let proven = verified::ceil_div(a, b);
             assert_eq!(inline, proven, "ceil_div mismatch for ({a}, {b})");
         }
@@ -1492,7 +1492,7 @@ mod conformance_tests {
 
     #[test]
     fn interference_matches_inline() {
-        // Actual: activations = (r + period - 1) / period; interference = activations * exec
+        // Actual: activations = r.div_ceil(period); interference = activations * exec
         let cases: &[(u64, u64, u64)] = &[
             // (period, exec, r)
             (10, 2, 3),   // ceil(3/10)*2 = 2
@@ -1503,7 +1503,7 @@ mod conformance_tests {
             (1, 1, 100),  // ceil(100/1)*1 = 100
         ];
         for &(period, hp_exec, r) in cases {
-            let inline = ((r + period - 1) / period).saturating_mul(hp_exec);
+            let inline = r.div_ceil(period).saturating_mul(hp_exec);
             let proven = verified::interference(period, hp_exec, r);
             assert_eq!(
                 inline, proven,
@@ -1523,7 +1523,7 @@ mod conformance_tests {
             // Compute inline (same as scheduling.rs loop body)
             let mut inline_total: u64 = 0;
             for &(period, hp_exec) in hp_tasks {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 inline_total = inline_total.saturating_add(activations.saturating_mul(hp_exec));
             }
 
@@ -1542,7 +1542,7 @@ mod conformance_tests {
             // Inline: new_r = exec + sum of ceil(r/Tj)*Cj
             let mut interference: u64 = 0;
             for &(period, hp_exec) in hp_tasks {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 interference = interference.saturating_add(activations.saturating_mul(hp_exec));
             }
             let inline_new_r = task_exec.saturating_add(interference);
@@ -1568,7 +1568,7 @@ mod conformance_tests {
         for _ in 0..=max_iterations {
             let mut interference: u64 = 0;
             for &(period, hp_exec) in higher_priority {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 interference = interference.saturating_add(activations.saturating_mul(hp_exec));
             }
             let new_r = task_exec.saturating_add(interference);
