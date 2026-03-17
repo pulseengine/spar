@@ -617,6 +617,7 @@ fn cmd_modes(args: &[String]) {
 fn cmd_render(args: &[String]) {
     let mut root = None;
     let mut output = None;
+    let mut format = None;
     let mut files = Vec::new();
 
     let mut i = 0;
@@ -628,6 +629,15 @@ fn cmd_render(args: &[String]) {
                     root = Some(args[i].clone());
                 } else {
                     eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (svg|html)");
                     process::exit(1);
                 }
             }
@@ -685,17 +695,31 @@ fn cmd_render(args: &[String]) {
         inst.component_count()
     );
 
-    let svg = spar_render::render_instance(&inst, &spar_render::RenderOptions::default());
+    let render_opts = spar_render::RenderOptions {
+        interactive: true,
+        ..Default::default()
+    };
+
+    let content = match format.as_deref() {
+        Some("html") => {
+            let html_opts = etch::html::HtmlOptions {
+                title: format!("{pkg_name}::{type_name}"),
+                ..Default::default()
+            };
+            spar_render::render_instance_html(&inst, &render_opts, &html_opts)
+        }
+        _ => spar_render::render_instance(&inst, &render_opts),
+    };
 
     match output {
         Some(path) => {
-            fs::write(&path, &svg).unwrap_or_else(|e| {
+            fs::write(&path, &content).unwrap_or_else(|e| {
                 eprintln!("Cannot write {path}: {e}");
                 process::exit(1);
             });
             eprintln!("Wrote {}", path);
         }
-        None => print!("{svg}"),
+        None => print!("{content}"),
     }
 }
 
