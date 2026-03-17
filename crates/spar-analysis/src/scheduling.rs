@@ -1468,9 +1468,20 @@ mod conformance_tests {
         // The actual code computes (r + period - 1) / period inline.
         // Verify the Lean-proven ceil_div produces the same result.
         let cases: &[(u64, u64)] = &[
-            (0, 1), (1, 1), (1, 2), (7, 3), (6, 3), (9, 3),
-            (10, 10), (11, 10), (100, 7), (1, 1000), (999, 1000),
-            (1000, 1000), (1001, 1000), (u64::MAX / 2, 1000),
+            (0, 1),
+            (1, 1),
+            (1, 2),
+            (7, 3),
+            (6, 3),
+            (9, 3),
+            (10, 10),
+            (11, 10),
+            (100, 7),
+            (1, 1000),
+            (999, 1000),
+            (1000, 1000),
+            (1001, 1000),
+            (u64::MAX / 2, 1000),
         ];
         for &(a, b) in cases {
             let inline = (a + b - 1) / b;
@@ -1494,7 +1505,10 @@ mod conformance_tests {
         for &(period, hp_exec, r) in cases {
             let inline = ((r + period - 1) / period).saturating_mul(hp_exec);
             let proven = verified::interference(period, hp_exec, r);
-            assert_eq!(inline, proven, "interference mismatch for period={period}, exec={hp_exec}, r={r}");
+            assert_eq!(
+                inline, proven,
+                "interference mismatch for period={period}, exec={hp_exec}, r={r}"
+            );
         }
     }
 
@@ -1514,10 +1528,7 @@ mod conformance_tests {
             }
 
             let proven = verified::total_interference(hp_tasks, r);
-            assert_eq!(
-                inline_total, proven,
-                "total_interference mismatch at r={r}"
-            );
+            assert_eq!(inline_total, proven, "total_interference mismatch at r={r}");
         }
     }
 
@@ -1537,10 +1548,7 @@ mod conformance_tests {
             let inline_new_r = task_exec.saturating_add(interference);
 
             let proven = verified::rta_step(task_exec, hp_tasks, r);
-            assert_eq!(
-                inline_new_r, proven,
-                "rta_step mismatch at r={r}"
-            );
+            assert_eq!(inline_new_r, proven, "rta_step mismatch at r={r}");
         }
     }
 
