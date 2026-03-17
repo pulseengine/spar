@@ -10,8 +10,9 @@
 //! - Worst case: sum of execution times + sum of periods (sampling delays)
 
 use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::property_accessors::{get_execution_time, get_timing_property};
+use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// End-to-end flow latency analysis.
@@ -134,6 +135,92 @@ impl Analysis for LatencyAnalysis {
                     path: owner_path,
                     analysis: self.name().to_string(),
                 });
+            }
+        }
+
+        // STPA-REQ-016: Multi-processor awareness — check if E2E flows cross
+        // processor boundaries without communication overhead properties.
+        // When a flow path crosses a processor boundary, inter-processor
+        // communication adds latency that may not be captured by the basic
+        // execution_time + sampling_delay model.
+        let has_multi_processors = {
+            let proc_count = instance
+                .all_components()
+                .filter(|(_, c)| {
+                    matches!(
+                        c.category,
+                        ComponentCategory::Processor | ComponentCategory::VirtualProcessor
+                    )
+                })
+                .count();
+            proc_count >= 2
+        };
+
+        if has_multi_processors {
+            for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
+                let owner = instance.component(e2e.owner);
+                let owner_path = component_path(instance, e2e.owner);
+
+                // Collect processor bindings for each flow segment component
+                let mut prev_binding: Option<String> = None;
+                let mut crosses_boundary = false;
+
+                for (i, seg) in e2e.segments.iter().enumerate() {
+                    if i % 2 == 1 {
+                        continue; // skip connection segments
+                    }
+                    let subcomp_name = seg.as_str().split('.').next().unwrap_or(seg.as_str());
+                    let child = owner.children.iter().find(|&&child_idx| {
+                        instance
+                            .component(child_idx)
+                            .name
+                            .as_str()
+                            .eq_ignore_ascii_case(subcomp_name)
+                    });
+
+                    if let Some(&child_idx) = child {
+                        let child_props = instance.properties_for(child_idx);
+                        let binding = get_processor_binding(child_props);
+
+                        if let Some(ref cur) = binding
+                            && let Some(ref prev) = prev_binding
+                            && !cur.eq_ignore_ascii_case(prev)
+                        {
+                            crosses_boundary = true;
+                        }
+                        if binding.is_some() {
+                            prev_binding = binding;
+                        }
+                    }
+                }
+
+                if crosses_boundary {
+                    // Check if the owner has a communication overhead property
+                    let owner_props = instance.properties_for(e2e.owner);
+                    let has_comm_overhead = owner_props
+                        .get("Timing_Properties", "Transmission_Time")
+                        .is_some()
+                        || owner_props.get("", "Transmission_Time").is_some()
+                        || owner_props
+                            .get("SPAR_Properties", "Inter_Processor_Overhead")
+                            .is_some()
+                        || owner_props.get("", "Inter_Processor_Overhead").is_some();
+
+                    if !has_comm_overhead {
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Info,
+                            message: format!(
+                                "end-to-end flow '{}' crosses processor boundaries but no \
+                                 Transmission_Time or Inter_Processor_Overhead property is set; \
+                                 latency estimate may understate actual inter-processor \
+                                 communication delay",
+                                e2e.name,
+                            ),
+                            path: owner_path,
+                            analysis: self.name().to_string(),
+                        });
+                    }
+                }
             }
         }
 
@@ -440,6 +527,183 @@ mod tests {
             diags.is_empty(),
             "no E2E flows should produce no diagnostics: {:?}",
             diags
+        );
+    }
+
+    // ── STPA-REQ-016: Inter-processor communication overhead ─────
+
+    #[test]
+    fn cross_processor_flow_without_overhead_info() {
+        // STPA-REQ-016: E2E flow crossing processor boundary without overhead prop
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let cross_proc: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("processor boundaries"))
+            .collect();
+        assert_eq!(
+            cross_proc.len(),
+            1,
+            "should info about cross-processor flow: {:?}",
+            diags
+        );
+        assert_eq!(cross_proc[0].severity, Severity::Info);
+        assert!(
+            cross_proc[0].message.contains("Inter_Processor_Overhead"),
+            "should mention overhead property: {}",
+            cross_proc[0].message
+        );
+    }
+
+    #[test]
+    fn same_processor_flow_no_overhead_info() {
+        // No inter-processor advisory when all on same processor
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_same",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)", // Same processor
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let cross_proc: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("processor boundaries"))
+            .collect();
+        assert!(
+            cross_proc.is_empty(),
+            "same-processor flow should not trigger: {:?}",
+            cross_proc
+        );
+    }
+
+    #[test]
+    fn cross_processor_flow_with_overhead_no_info() {
+        // STPA-REQ-016: No info when overhead property is set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        // Set transmission time on owner to indicate overhead is accounted for
+        b.set_property(root, "Timing_Properties", "Transmission_Time", "1 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let cross_proc: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("processor boundaries"))
+            .collect();
+        assert!(
+            cross_proc.is_empty(),
+            "overhead property set — no advisory: {:?}",
+            cross_proc
         );
     }
 
