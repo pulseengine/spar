@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use etch::layout::{EdgeInfo, LayoutOptions, NodeInfo, PortDirection, PortInfo, PortSide, PortType};
+use etch::layout::{
+    EdgeInfo, LayoutOptions, NodeInfo, PortDirection, PortInfo, PortSide, PortType,
+};
 use etch::svg::{SvgOptions, render_svg};
 use petgraph::Graph;
 use petgraph::graph::{EdgeIndex, NodeIndex};
@@ -184,14 +186,8 @@ fn build_graph(
         };
         if src_node != dst_node {
             // Resolve port IDs from connection ends
-            let source_port = conn
-                .src
-                .as_ref()
-                .map(|e| e.feature.to_string());
-            let target_port = conn
-                .dst
-                .as_ref()
-                .map(|e| e.feature.to_string());
+            let source_port = conn.src.as_ref().map(|e| e.feature.to_string());
+            let target_port = conn.dst.as_ref().map(|e| e.feature.to_string());
 
             let edge_idx = graph.add_edge(src_node, dst_node, ());
             edge_infos.insert(
@@ -354,8 +350,8 @@ mod tests {
 
     #[test]
     fn feature_kind_to_port_type_mapping() {
-        use spar_hir_def::instance::FeatureInstance;
         use spar_hir_def::Name;
+        use spar_hir_def::instance::FeatureInstance;
 
         let f = FeatureInstance {
             name: Name::new("data_in"),
