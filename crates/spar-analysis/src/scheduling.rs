@@ -187,7 +187,10 @@ impl Analysis for SchedulingAnalysis {
                         message: format!(
                             "processor '{}' near scheduling limit: margin {:.1} percentage points \
                              (utilization {:.1}% vs limit {:.1}%)",
-                            proc_name, margin_pct, utilization * 100.0, limit * 100.0
+                            proc_name,
+                            margin_pct,
+                            utilization * 100.0,
+                            limit * 100.0
                         ),
                         path: proc_path.clone(),
                         analysis: self.name().to_string(),
@@ -302,7 +305,8 @@ impl Analysis for SchedulingAnalysis {
             message: "scheduling: checks RMA utilization bound, EDF feasibility, and RTA response \
                       times. Does not account for: blocking time, priority inversion, \
                       non-preemptive sections, or inter-processor interference. For systems with \
-                      shared resources, consider external tools (Cheddar, MAST).".to_string(),
+                      shared resources, consider external tools (Cheddar, MAST)."
+                .to_string(),
             path: vec!["root".to_string()],
             analysis: self.name().to_string(),
         });
@@ -358,7 +362,7 @@ fn compute_response_time(task: &ThreadInfo, higher_priority: &[&ThreadInfo]) -> 
         let mut interference: u64 = 0;
         for hp in higher_priority {
             // ⌈R / Tj⌉ × Cj
-            let activations = (r + hp.period_ps - 1) / hp.period_ps;
+            let activations = r.div_ceil(hp.period_ps);
             interference = interference.saturating_add(activations.saturating_mul(hp.exec_ps));
         }
 
@@ -609,7 +613,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
             .collect();
-        assert_eq!(overload_errors.len(), 1, "should have 1 overload error: {:?}", diags);
+        assert_eq!(
+            overload_errors.len(),
+            1,
+            "should have 1 overload error: {:?}",
+            diags
+        );
 
         // Also expect EDF infeasible and RTA divergence errors
         let all_errors: Vec<_> = diags
@@ -897,12 +906,22 @@ mod tests {
 
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "9 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         b.set_property(t2, "Timing_Properties", "Period", "100 ms");
         b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3 ms");
         b.set_property(t2, "Timing_Properties", "Deadline", "31 ms");
-        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
@@ -911,13 +930,21 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
             .collect();
-        assert!(rta_errors.is_empty(), "T2 should not miss deadline: {:?}", rta_errors);
+        assert!(
+            rta_errors.is_empty(),
+            "T2 should not miss deadline: {:?}",
+            rta_errors
+        );
 
         let tight: Vec<_> = diags
             .iter()
             .filter(|d| d.message.contains("tight margin") && d.message.contains("t2"))
             .collect();
-        assert!(!tight.is_empty(), "T2 should have tight margin warning: {:?}", diags);
+        assert!(
+            !tight.is_empty(),
+            "T2 should have tight margin warning: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -940,12 +967,22 @@ mod tests {
 
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         b.set_property(t2, "Timing_Properties", "Period", "20 ms");
         b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "5 ms");
         b.set_property(t2, "Timing_Properties", "Deadline", "8 ms");
-        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
@@ -955,7 +992,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
             .collect();
-        assert!(rta_errors.is_empty(), "R=D should not be error: {:?}", rta_errors);
+        assert!(
+            rta_errors.is_empty(),
+            "R=D should not be error: {:?}",
+            rta_errors
+        );
     }
 
     #[test]
@@ -972,11 +1013,21 @@ mod tests {
 
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "8 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         b.set_property(t2, "Timing_Properties", "Period", "10 ms");
         b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "5 ms");
-        b.set_property(t2, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
@@ -985,7 +1036,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("RTA"))
             .collect();
-        assert!(!rta_errors.is_empty(), "overloaded system should have RTA errors: {:?}", diags);
+        assert!(
+            !rta_errors.is_empty(),
+            "overloaded system should have RTA errors: {:?}",
+            diags
+        );
     }
 
     // ── EDF tests ─────────────────────────────────────────────────
@@ -1002,7 +1057,12 @@ mod tests {
 
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
@@ -1011,7 +1071,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("EDF feasible"))
             .collect();
-        assert!(!edf_info.is_empty(), "should report EDF feasibility: {:?}", diags);
+        assert!(
+            !edf_info.is_empty(),
+            "should report EDF feasibility: {:?}",
+            diags
+        );
     }
 
     // ── Margin tests ──────────────────────────────────────────────
@@ -1031,7 +1095,12 @@ mod tests {
         // U = 96/100 = 0.96 → margin 4% (< 5% threshold)
         b.set_property(t1, "Timing_Properties", "Period", "100 ms");
         b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "96 ms");
-        b.set_property(t1, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = SchedulingAnalysis.analyze(&inst);
@@ -1040,7 +1109,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("margin"))
             .collect();
-        assert!(!margin_warns.is_empty(), "should warn about narrow margin: {:?}", diags);
+        assert!(
+            !margin_warns.is_empty(),
+            "should warn about narrow margin: {:?}",
+            diags
+        );
     }
 
     // ── Limitation documentation test ─────────────────────────────
@@ -1059,7 +1132,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("Does not account for"))
             .collect();
-        assert!(!limitation.is_empty(), "should document limitations: {:?}", diags);
+        assert!(
+            !limitation.is_empty(),
+            "should document limitations: {:?}",
+            diags
+        );
     }
 }
 
@@ -1075,15 +1152,26 @@ mod conformance_tests {
 
     #[test]
     fn ceil_div_matches_inline() {
-        // The actual code computes (r + period - 1) / period inline.
+        // The actual code computes r.div_ceil(period) inline.
         // Verify the Lean-proven ceil_div produces the same result.
         let cases: &[(u64, u64)] = &[
-            (0, 1), (1, 1), (1, 2), (7, 3), (6, 3), (9, 3),
-            (10, 10), (11, 10), (100, 7), (1, 1000), (999, 1000),
-            (1000, 1000), (1001, 1000), (u64::MAX / 2, 1000),
+            (0, 1),
+            (1, 1),
+            (1, 2),
+            (7, 3),
+            (6, 3),
+            (9, 3),
+            (10, 10),
+            (11, 10),
+            (100, 7),
+            (1, 1000),
+            (999, 1000),
+            (1000, 1000),
+            (1001, 1000),
+            (u64::MAX / 2, 1000),
         ];
         for &(a, b) in cases {
-            let inline = (a + b - 1) / b;
+            let inline = a.div_ceil(b);
             let proven = verified::ceil_div(a, b);
             assert_eq!(inline, proven, "ceil_div mismatch for ({a}, {b})");
         }
@@ -1091,7 +1179,7 @@ mod conformance_tests {
 
     #[test]
     fn interference_matches_inline() {
-        // Actual: activations = (r + period - 1) / period; interference = activations * exec
+        // Actual: activations = r.div_ceil(period); interference = activations * exec
         let cases: &[(u64, u64, u64)] = &[
             // (period, exec, r)
             (10, 2, 3),   // ceil(3/10)*2 = 2
@@ -1102,9 +1190,12 @@ mod conformance_tests {
             (1, 1, 100),  // ceil(100/1)*1 = 100
         ];
         for &(period, hp_exec, r) in cases {
-            let inline = ((r + period - 1) / period).saturating_mul(hp_exec);
+            let inline = (r.div_ceil(period)).saturating_mul(hp_exec);
             let proven = verified::interference(period, hp_exec, r);
-            assert_eq!(inline, proven, "interference mismatch for period={period}, exec={hp_exec}, r={r}");
+            assert_eq!(
+                inline, proven,
+                "interference mismatch for period={period}, exec={hp_exec}, r={r}"
+            );
         }
     }
 
@@ -1119,15 +1210,12 @@ mod conformance_tests {
             // Compute inline (same as scheduling.rs loop body)
             let mut inline_total: u64 = 0;
             for &(period, hp_exec) in hp_tasks {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 inline_total = inline_total.saturating_add(activations.saturating_mul(hp_exec));
             }
 
             let proven = verified::total_interference(hp_tasks, r);
-            assert_eq!(
-                inline_total, proven,
-                "total_interference mismatch at r={r}"
-            );
+            assert_eq!(inline_total, proven, "total_interference mismatch at r={r}");
         }
     }
 
@@ -1141,16 +1229,13 @@ mod conformance_tests {
             // Inline: new_r = exec + sum of ceil(r/Tj)*Cj
             let mut interference: u64 = 0;
             for &(period, hp_exec) in hp_tasks {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 interference = interference.saturating_add(activations.saturating_mul(hp_exec));
             }
             let inline_new_r = task_exec.saturating_add(interference);
 
             let proven = verified::rta_step(task_exec, hp_tasks, r);
-            assert_eq!(
-                inline_new_r, proven,
-                "rta_step mismatch at r={r}"
-            );
+            assert_eq!(inline_new_r, proven, "rta_step mismatch at r={r}");
         }
     }
 
@@ -1170,7 +1255,7 @@ mod conformance_tests {
         for _ in 0..=max_iterations {
             let mut interference: u64 = 0;
             for &(period, hp_exec) in higher_priority {
-                let activations = (r + period - 1) / period;
+                let activations = r.div_ceil(period);
                 interference = interference.saturating_add(activations.saturating_mul(hp_exec));
             }
             let new_r = task_exec.saturating_add(interference);

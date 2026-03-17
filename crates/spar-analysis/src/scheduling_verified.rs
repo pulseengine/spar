@@ -19,7 +19,7 @@
 #[inline]
 pub fn ceil_div(a: u64, b: u64) -> u64 {
     debug_assert!(b > 0);
-    (a + b - 1) / b
+    a.div_ceil(b)
 }
 
 /// Interference from one higher-priority task over interval r.
