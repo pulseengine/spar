@@ -104,3 +104,74 @@ jobs:
         with:
           name: coverage-html
           path: coverage-html/
+
+  # ── Miri (undefined behavior, pointer provenance) ───────────────────
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Miri
+        run: cargo miri test -p spar-hir-def --lib
+        env:
+          MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
+
+  # ── Property-based testing (extended) ───────────────────────────────
+  proptest:
+    name: Proptest (extended)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run proptest with 10x cases
+        run: cargo test --workspace
+        env:
+          PROPTEST_CASES: "1000"
+
+  # ── Mutation testing ────────────────────────────────────────────────
+  mutants:
+    name: Mutation Testing
+    needs: [test]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - name: Run cargo-mutants on spar-analysis
+        run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-report
+          path: mutants-out/
+
+  # ── Supply chain verification ───────────────────────────────────────
+  supply-chain:
+    name: Supply Chain (cargo-vet)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-vet
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-vet
+      - name: Initialize cargo-vet if needed
+        run: |
+          if [ ! -d supply-chain ]; then
+            cargo vet init
+            echo "::notice::cargo-vet initialized"
+          fi
+      - name: Check supply chain
+        run: cargo vet --locked || echo "::warning::cargo-vet found unaudited crates"
