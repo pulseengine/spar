@@ -44,7 +44,7 @@ fn print_usage() {
     eprintln!("  items      Show item tree (declarations) for file(s)");
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
-    eprintln!("  modes      Mode reachability analysis and SMV export");
+    eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
@@ -53,7 +53,7 @@ fn print_usage() {
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
-    eprintln!("  modes    --root Package::Type.Impl [--format text|smv] <file...>");
+    eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
 }
 
@@ -494,7 +494,7 @@ fn cmd_modes(args: &[String]) {
                 if i < args.len() {
                     format = Some(args[i].clone());
                 } else {
-                    eprintln!("--format requires a value (text|smv)");
+                    eprintln!("--format requires a value (text|smv|dot)");
                     process::exit(1);
                 }
             }
@@ -539,6 +539,9 @@ fn cmd_modes(args: &[String]) {
     match format.as_deref() {
         Some("smv") => {
             print!("{}", spar_analysis::mode_reachability::export_smv(&inst));
+        }
+        Some("dot") => {
+            print!("{}", spar_analysis::mode_reachability::export_dot(&inst));
         }
         _ => {
             // Text output: show reachability matrices
