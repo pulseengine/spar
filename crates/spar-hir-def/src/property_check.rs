@@ -35,9 +35,12 @@ fn check_expr(
     diags: &mut Vec<PropertyTypeDiagnostic>,
 ) {
     match (expr, type_def) {
-        // Skip validation for opaque and computed values — we cannot
-        // type-check them statically.
-        (PropertyExpr::Opaque(_), _) | (PropertyExpr::ComputedValue(_), _) => {}
+        // Skip validation for opaque, computed, value-ref, and binary-op
+        // expressions — we cannot type-check them statically.
+        (PropertyExpr::Opaque(_), _)
+        | (PropertyExpr::ComputedValue(_), _)
+        | (PropertyExpr::ValueRef(_), _)
+        | (PropertyExpr::BinaryOp { .. }, _) => {}
 
         // UnitValue: check inner expression against the type.
         (PropertyExpr::UnitValue(inner, _unit), _) => {
@@ -150,6 +153,8 @@ fn expr_kind_name(expr: &PropertyExpr) -> &'static str {
         PropertyExpr::ReferenceValue(_) => "reference value",
         PropertyExpr::ComputedValue(_) => "computed value",
         PropertyExpr::UnitValue(..) => "unit value",
+        PropertyExpr::BinaryOp { .. } => "binary operation",
+        PropertyExpr::ValueRef(_) => "value reference",
         PropertyExpr::Opaque(_) => "opaque",
     }
 }

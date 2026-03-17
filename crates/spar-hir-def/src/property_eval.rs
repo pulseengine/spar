@@ -14,7 +14,7 @@
 //! default value. Resolution is recursive: a `value()` reference may
 //! itself reference another `value()`.
 
-use crate::item_tree::{PropertyAssociationItem, PropertyDefItem, PropertyExpr};
+use crate::item_tree::{BinaryOpKind, PropertyAssociationItem, PropertyDefItem, PropertyExpr};
 use crate::name::Name;
 
 /// Resolve a [`PropertyExpr`], substituting `ComputedValue` references
@@ -30,7 +30,7 @@ pub fn resolve_property_expr(
     definitions: &[PropertyDefItem],
 ) -> PropertyExpr {
     match expr {
-        PropertyExpr::ComputedValue(ref_name) => {
+        PropertyExpr::ComputedValue(ref_name) | PropertyExpr::ValueRef(ref_name) => {
             // Look up the referenced property in associations
             if let Some(assoc) = associations
                 .iter()
@@ -75,6 +75,11 @@ pub fn resolve_property_expr(
             Box::new(resolve_property_expr(inner, associations, definitions)),
             unit.clone(),
         ),
+        PropertyExpr::BinaryOp { op, lhs, rhs } => PropertyExpr::BinaryOp {
+            op: *op,
+            lhs: Box::new(resolve_property_expr(lhs, associations, definitions)),
+            rhs: Box::new(resolve_property_expr(rhs, associations, definitions)),
+        },
         _ => expr.clone(),
     }
 }
@@ -109,21 +114,63 @@ pub fn lookup_property(
 
 /// Evaluate a numeric property expression to an `f64` value.
 ///
-/// Handles `Integer`, `Real`, and `UnitValue` (which wraps a numeric
-/// inner expression). Returns `None` for non-numeric expressions.
+/// Handles `Integer`, `Real`, `UnitValue` (which wraps a numeric inner
+/// expression), and `BinaryOp` (arithmetic on sub-expressions).
+/// Returns `None` for non-numeric expressions.
 pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
     match expr {
         PropertyExpr::Integer(v, _unit) => Some(*v as f64),
         PropertyExpr::Real(v, _unit) => v.parse::<f64>().ok(),
         PropertyExpr::UnitValue(inner, _unit) => eval_numeric(inner),
+        PropertyExpr::BinaryOp { op, lhs, rhs } => {
+            let l = eval_numeric(lhs)?;
+            let r = eval_numeric(rhs)?;
+            match op {
+                BinaryOpKind::Add => Some(l + r),
+                BinaryOpKind::Sub => Some(l - r),
+                BinaryOpKind::Mul => Some(l * r),
+                BinaryOpKind::Div => {
+                    if r == 0.0 {
+                        None
+                    } else {
+                        Some(l / r)
+                    }
+                }
+            }
+        }
         _ => None,
     }
 }
 
-/// Evaluate a range property expression to `(min, max)` as `f64` values.
+/// Compute a numeric property expression, returning both the value
+/// and its unit (if any).
+///
+/// For `Integer(v, Some(u))` returns `Some((v, Some(u)))`.
+/// For `UnitValue(inner, u)` returns `Some((numeric(inner), Some(u)))`.
+/// For bare `Integer(v, None)` returns `Some((v, None))`.
+pub fn numeric_with_unit(expr: &PropertyExpr) -> Option<(f64, Option<&Name>)> {
+    match expr {
+        PropertyExpr::Integer(v, unit) => Some((*v as f64, unit.as_ref())),
+        PropertyExpr::Real(v, unit) => {
+            let val = v.parse::<f64>().ok()?;
+            Some((val, unit.as_ref()))
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let val = eval_numeric(inner)?;
+            Some((val, Some(unit)))
+        }
+        PropertyExpr::BinaryOp { .. } => {
+            let val = eval_numeric(expr)?;
+            Some((val, None))
+        }
+        _ => None,
+    }
+}
+
+/// Compute a range property expression to `(min, max)` as `f64` values.
 ///
 /// Returns `None` if the expression is not a `Range` or if either
-/// bound cannot be evaluated to a number.
+/// bound cannot be computed to a number.
 pub fn eval_range(expr: &PropertyExpr) -> Option<(f64, f64)> {
     match expr {
         PropertyExpr::Range { min, max, .. } => {
@@ -133,6 +180,27 @@ pub fn eval_range(expr: &PropertyExpr) -> Option<(f64, f64)> {
         }
         _ => None,
     }
+}
+
+/// Extract a field value from a record property expression.
+///
+/// Performs case-insensitive lookup of the field name.
+/// Returns `None` if `expr` is not a record or the field is not found.
+pub fn get_record_field<'a>(expr: &'a PropertyExpr, field_name: &str) -> Option<&'a PropertyExpr> {
+    match expr {
+        PropertyExpr::Record(fields) => fields
+            .iter()
+            .find(|(name, _)| name.as_str().eq_ignore_ascii_case(field_name))
+            .map(|(_, val)| val),
+        _ => None,
+    }
+}
+
+/// Extract a numeric field value from a record, returning `None` if the
+/// record doesn't have the field or the field is not numeric.
+pub fn get_record_field_numeric(expr: &PropertyExpr, field_name: &str) -> Option<f64> {
+    let field = get_record_field(expr, field_name)?;
+    eval_numeric(field)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -371,5 +439,232 @@ mod tests {
             delta: None,
         };
         assert_eq!(eval_range(&expr), None);
+    }
+
+    // ── BinaryOp evaluation ─────────────────────────────────────
+
+    #[test]
+    fn eval_binary_add() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Add,
+            lhs: Box::new(PropertyExpr::Integer(10, None)),
+            rhs: Box::new(PropertyExpr::Integer(20, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(30.0));
+    }
+
+    #[test]
+    fn eval_binary_sub() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Sub,
+            lhs: Box::new(PropertyExpr::Integer(50, None)),
+            rhs: Box::new(PropertyExpr::Integer(20, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(30.0));
+    }
+
+    #[test]
+    fn eval_binary_mul() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(PropertyExpr::Integer(6, None)),
+            rhs: Box::new(PropertyExpr::Integer(7, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(42.0));
+    }
+
+    #[test]
+    fn eval_binary_div() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Div,
+            lhs: Box::new(PropertyExpr::Integer(100, None)),
+            rhs: Box::new(PropertyExpr::Integer(4, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(25.0));
+    }
+
+    #[test]
+    fn eval_binary_div_by_zero_returns_none() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Div,
+            lhs: Box::new(PropertyExpr::Integer(100, None)),
+            rhs: Box::new(PropertyExpr::Integer(0, None)),
+        };
+        assert_eq!(eval_numeric(&expr), None);
+    }
+
+    #[test]
+    fn eval_binary_nested() {
+        // (10 + 20) * 3 = 90
+        let add = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Add,
+            lhs: Box::new(PropertyExpr::Integer(10, None)),
+            rhs: Box::new(PropertyExpr::Integer(20, None)),
+        };
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(add),
+            rhs: Box::new(PropertyExpr::Integer(3, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(90.0));
+    }
+
+    #[test]
+    fn eval_binary_with_real() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(PropertyExpr::Real("2.5".to_string(), None)),
+            rhs: Box::new(PropertyExpr::Integer(4, None)),
+        };
+        assert_eq!(eval_numeric(&expr), Some(10.0));
+    }
+
+    #[test]
+    fn eval_binary_non_numeric_operand_returns_none() {
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Add,
+            lhs: Box::new(PropertyExpr::StringLit("hello".to_string())),
+            rhs: Box::new(PropertyExpr::Integer(1, None)),
+        };
+        assert_eq!(eval_numeric(&expr), None);
+    }
+
+    // ── Record field access ─────────────────────────────────────
+
+    #[test]
+    fn record_field_found() {
+        let record = PropertyExpr::Record(vec![
+            (
+                Name::new("NetWeight"),
+                PropertyExpr::Integer(5, Some(Name::new("kg"))),
+            ),
+            (
+                Name::new("GrossWeight"),
+                PropertyExpr::Integer(10, Some(Name::new("kg"))),
+            ),
+        ]);
+        let field = get_record_field(&record, "NetWeight");
+        assert_eq!(
+            field,
+            Some(&PropertyExpr::Integer(5, Some(Name::new("kg"))))
+        );
+    }
+
+    #[test]
+    fn record_field_case_insensitive() {
+        let record = PropertyExpr::Record(vec![(
+            Name::new("NetWeight"),
+            PropertyExpr::Integer(5, None),
+        )]);
+        let field = get_record_field(&record, "netweight");
+        assert_eq!(field, Some(&PropertyExpr::Integer(5, None)));
+    }
+
+    #[test]
+    fn record_field_not_found() {
+        let record = PropertyExpr::Record(vec![(
+            Name::new("NetWeight"),
+            PropertyExpr::Integer(5, None),
+        )]);
+        assert_eq!(get_record_field(&record, "Missing"), None);
+    }
+
+    #[test]
+    fn record_field_on_non_record_returns_none() {
+        let expr = PropertyExpr::Integer(42, None);
+        assert_eq!(get_record_field(&expr, "anything"), None);
+    }
+
+    #[test]
+    fn record_field_numeric_extraction() {
+        let record = PropertyExpr::Record(vec![
+            (
+                Name::new("weight"),
+                PropertyExpr::Integer(5, Some(Name::new("kg"))),
+            ),
+            (
+                Name::new("label"),
+                PropertyExpr::StringLit("test".to_string()),
+            ),
+        ]);
+        assert_eq!(get_record_field_numeric(&record, "weight"), Some(5.0));
+        assert_eq!(get_record_field_numeric(&record, "label"), None);
+        assert_eq!(get_record_field_numeric(&record, "missing"), None);
+    }
+
+    // ── numeric_with_unit ───────────────────────────────────────
+
+    #[test]
+    fn numeric_with_unit_integer_with_unit() {
+        let expr = PropertyExpr::Integer(10, Some(Name::new("ms")));
+        let (val, unit) = numeric_with_unit(&expr).unwrap();
+        assert_eq!(val, 10.0);
+        assert_eq!(unit.unwrap().as_str(), "ms");
+    }
+
+    #[test]
+    fn numeric_with_unit_integer_without_unit() {
+        let expr = PropertyExpr::Integer(42, None);
+        let (val, unit) = numeric_with_unit(&expr).unwrap();
+        assert_eq!(val, 42.0);
+        assert!(unit.is_none());
+    }
+
+    #[test]
+    fn numeric_with_unit_unit_value() {
+        let expr =
+            PropertyExpr::UnitValue(Box::new(PropertyExpr::Integer(500, None)), Name::new("us"));
+        let (val, unit) = numeric_with_unit(&expr).unwrap();
+        assert_eq!(val, 500.0);
+        assert_eq!(unit.unwrap().as_str(), "us");
+    }
+
+    #[test]
+    fn numeric_with_unit_non_numeric_returns_none() {
+        let expr = PropertyExpr::StringLit("hello".to_string());
+        assert!(numeric_with_unit(&expr).is_none());
+    }
+
+    // ── ValueRef resolution ─────────────────────────────────────
+
+    #[test]
+    fn resolve_value_ref_from_association() {
+        let associations = vec![make_assoc("Period", PropertyExpr::Integer(100, None))];
+        let definitions = vec![];
+
+        let expr = PropertyExpr::ValueRef(Name::new("Period"));
+        let result = resolve_property_expr(&expr, &associations, &definitions);
+
+        assert_eq!(result, PropertyExpr::Integer(100, None));
+    }
+
+    #[test]
+    fn resolve_value_ref_falls_back_to_default() {
+        let associations = vec![];
+        let definitions = vec![make_def("Period", Some(PropertyExpr::Integer(50, None)))];
+
+        let expr = PropertyExpr::ValueRef(Name::new("Period"));
+        let result = resolve_property_expr(&expr, &associations, &definitions);
+
+        assert_eq!(result, PropertyExpr::Integer(50, None));
+    }
+
+    // ── BinaryOp resolution ─────────────────────────────────────
+
+    #[test]
+    fn resolve_binary_op_with_value_refs() {
+        let associations = vec![
+            make_assoc("X", PropertyExpr::Integer(10, None)),
+            make_assoc("Y", PropertyExpr::Integer(20, None)),
+        ];
+        let definitions = vec![];
+
+        let expr = PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Add,
+            lhs: Box::new(PropertyExpr::ComputedValue(Name::new("X"))),
+            rhs: Box::new(PropertyExpr::ComputedValue(Name::new("Y"))),
+        };
+        let resolved = resolve_property_expr(&expr, &associations, &definitions);
+        assert_eq!(eval_numeric(&resolved), Some(30.0));
     }
 }
