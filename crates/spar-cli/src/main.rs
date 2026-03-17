@@ -1,4 +1,5 @@
 mod lsp;
+mod verify;
 
 use std::{env, fs, process};
 
@@ -28,6 +29,7 @@ fn main() {
         "analyze" => cmd_analyze(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
         "render" => cmd_render(&args[2..]),
+        "verify" => cmd_verify(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -46,6 +48,7 @@ fn print_usage() {
     eprintln!("  analyze    Run analyses on an instantiated system model");
     eprintln!("  modes      Mode reachability analysis and SMV export");
     eprintln!("  render     Render architecture SVG from an instantiated system");
+    eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -55,6 +58,9 @@ fn print_usage() {
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv] <file...>");
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
+    eprintln!(
+        "  verify   --root Package::Type.Impl [--format text|json] requirements.toml <file...>"
+    );
 }
 
 fn cmd_lsp() {
@@ -687,6 +693,132 @@ fn cmd_render(args: &[String]) {
             eprintln!("Wrote {}", path);
         }
         None => print!("{svg}"),
+    }
+}
+
+fn cmd_verify(args: &[String]) {
+    let mut root = None;
+    let mut format = None;
+    let mut positional = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json)");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => positional.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if positional.is_empty() {
+        eprintln!("Missing requirements.toml argument");
+        process::exit(1);
+    }
+
+    let req_path = &positional[0];
+    let files = &positional[1..];
+
+    if files.is_empty() {
+        eprintln!("Missing AADL file argument(s)");
+        process::exit(1);
+    }
+
+    // Parse requirements
+    let req_file = verify::parse_requirements(req_path);
+
+    if req_file.requirement.is_empty() {
+        eprintln!("No requirements found in {req_path}");
+        process::exit(0);
+    }
+
+    // Parse root reference
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    // Parse all AADL files and build item trees
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in files {
+        let source = read_file(file_path);
+        let parsed = spar_syntax::parse(&source);
+        if !parsed.ok() {
+            for err in parsed.errors() {
+                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+            }
+            eprintln!("Cannot verify: parse errors in {}", file_path);
+            process::exit(1);
+        }
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    // Build global scope and run ItemTree-level checks
+    let scope = spar_hir_def::GlobalScope::from_trees(trees.clone());
+    let mut diagnostics = Vec::new();
+
+    for tree in &trees {
+        diagnostics.extend(spar_analysis::naming_rules::check_naming_rules(tree));
+        diagnostics.extend(spar_analysis::category_check::check_category_rules(tree));
+        diagnostics.extend(spar_analysis::extends_rules::check_extends_rules(tree));
+    }
+
+    // Instantiate root system
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    eprintln!(
+        "Instantiated {}::{}. ({} components)",
+        pkg_name,
+        type_name,
+        inst.component_count()
+    );
+    eprintln!();
+
+    // Run all analyses
+    diagnostics.extend(run_all_analyses(&inst));
+
+    // Evaluate requirements against diagnostics
+    let report = verify::evaluate(&req_file.requirement, &diagnostics, &root);
+
+    // Output
+    if format.as_deref() == Some("json") {
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        verify::print_text_report(&report);
+    }
+
+    if report.failed > 0 {
+        process::exit(1);
     }
 }
 
