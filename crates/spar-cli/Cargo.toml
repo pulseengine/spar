@@ -19,6 +19,7 @@ spar-hir.workspace = true
 spar-annex.workspace = true
 spar-analysis.workspace = true
 spar-render.workspace = true
+etch.workspace = true
 rowan.workspace = true
 serde.workspace = true
 lsp-server = "0.7"

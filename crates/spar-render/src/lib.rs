@@ -1,34 +1,22 @@
-//! SVG architecture visualization for AADL models.
+//! SVG and interactive HTML architecture visualization for AADL models.
 //!
 //! Converts an AADL `SystemInstance` into a compound hierarchical graph using
-//! the `etch` crate's Sugiyama-based layout, then renders to SVG with
-//! AADL-standard category colors and nested container boxes.
+//! the `etch` crate's Sugiyama-based layout, then renders to SVG or
+//! interactive HTML with AADL-standard category colors and port visualization.
 
 use std::collections::HashMap;
 
-use etch::layout::{EdgeInfo, LayoutOptions, NodeInfo};
+use etch::layout::{EdgeInfo, LayoutOptions, NodeInfo, PortDirection, PortInfo, PortSide, PortType};
 use etch::svg::{SvgOptions, render_svg};
 use petgraph::Graph;
 use petgraph::graph::{EdgeIndex, NodeIndex};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
-use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::item_tree::{ComponentCategory, Direction, FeatureKind};
 
 /// Render an AADL system instance to SVG.
-///
-/// The resulting SVG uses compound layout — containers (systems, processes)
-/// visually enclose their children, with connections drawn as edges.
 pub fn render_instance(instance: &SystemInstance, options: &RenderOptions) -> String {
     let (graph, node_infos, edge_infos) = build_graph(instance, options);
-
-    let layout_opts = LayoutOptions {
-        node_width: options.node_width,
-        node_height: options.node_height,
-        rank_separation: options.rank_separation,
-        node_separation: options.node_separation,
-        container_padding: options.container_padding,
-        container_header: options.container_header,
-        ..Default::default()
-    };
+    let layout_opts = make_layout_opts(options);
 
     let gl = etch::layout::layout(
         &graph,
@@ -36,42 +24,74 @@ pub fn render_instance(instance: &SystemInstance, options: &RenderOptions) -> St
         &|idx, _: &()| {
             edge_infos.get(&idx).cloned().unwrap_or(EdgeInfo {
                 label: String::new(),
+                source_port: None,
+                target_port: None,
             })
         },
         &layout_opts,
     );
 
-    let svg_opts = SvgOptions {
+    render_svg(&gl, &make_svg_opts(options))
+}
+
+/// Render an AADL system instance to interactive HTML.
+pub fn render_instance_html(
+    instance: &SystemInstance,
+    options: &RenderOptions,
+    html_options: &etch::html::HtmlOptions,
+) -> String {
+    let (graph, node_infos, edge_infos) = build_graph(instance, options);
+    let layout_opts = make_layout_opts(options);
+
+    let gl = etch::layout::layout(
+        &graph,
+        &|idx, _: &ComponentInstanceIdx| node_infos[&idx].clone(),
+        &|idx, _: &()| {
+            edge_infos.get(&idx).cloned().unwrap_or(EdgeInfo {
+                label: String::new(),
+                source_port: None,
+                target_port: None,
+            })
+        },
+        &layout_opts,
+    );
+
+    etch::html::render_html(&gl, &make_svg_opts(options), html_options)
+}
+
+fn make_layout_opts(options: &RenderOptions) -> LayoutOptions {
+    LayoutOptions {
+        node_width: options.node_width,
+        node_height: options.node_height,
+        rank_separation: options.rank_separation,
+        node_separation: options.node_separation,
+        container_padding: options.container_padding,
+        container_header: options.container_header,
+        ..Default::default()
+    }
+}
+
+fn make_svg_opts(options: &RenderOptions) -> SvgOptions {
+    SvgOptions {
         type_colors: category_colors(),
         interactive: options.interactive,
         base_url: options.base_url.clone(),
         highlight: options.highlight.clone(),
         ..Default::default()
-    };
-
-    render_svg(&gl, &svg_opts)
+    }
 }
 
 /// Options for AADL architecture rendering.
 #[derive(Debug, Clone)]
 pub struct RenderOptions {
-    /// Width of leaf node boxes (px).
     pub node_width: f64,
-    /// Height of leaf node boxes (px).
     pub node_height: f64,
-    /// Vertical spacing between ranks.
     pub rank_separation: f64,
-    /// Horizontal spacing between sibling nodes.
     pub node_separation: f64,
-    /// Padding inside container nodes.
     pub container_padding: f64,
-    /// Height of container header labels.
     pub container_header: f64,
-    /// Emit interactive data-* attributes.
     pub interactive: bool,
-    /// Base URL for data-href attributes.
     pub base_url: Option<String>,
-    /// Node ID to highlight.
     pub highlight: Option<String>,
 }
 
@@ -91,7 +111,7 @@ impl Default for RenderOptions {
     }
 }
 
-/// Build a petgraph from the AADL instance model.
+/// Build a petgraph from the AADL instance model with ports.
 fn build_graph(
     instance: &SystemInstance,
     _options: &RenderOptions,
@@ -105,7 +125,6 @@ fn build_graph(
     let mut node_infos: HashMap<NodeIndex, NodeInfo> = HashMap::new();
     let mut edge_infos: HashMap<EdgeIndex, EdgeInfo> = HashMap::new();
 
-    // Add all component instances as nodes.
     for (ci_idx, comp) in instance.all_components() {
         let node_idx = graph.add_node(ci_idx);
         idx_map.insert(ci_idx, node_idx);
@@ -121,7 +140,6 @@ fn build_graph(
             .as_ref()
             .map(|impl_name| format!("{}::{}.{}", comp.package, comp.type_name, impl_name));
 
-        // Parent in the containment hierarchy — enables compound layout.
         let parent = if ci_idx == instance.root {
             None
         } else {
@@ -131,18 +149,29 @@ fn build_graph(
             })
         };
 
+        // Build ports from AADL features
+        let ports: Vec<PortInfo> = comp
+            .features
+            .iter()
+            .map(|&fi| {
+                let f = &instance.features[fi];
+                feature_to_port(f)
+            })
+            .collect();
+
         let info = NodeInfo {
             id: node_id(comp, ci_idx),
             label,
             node_type: category_type_name(comp.category).to_string(),
             sublabel,
             parent,
+            ports,
         };
 
         node_infos.insert(node_idx, info);
     }
 
-    // Add connection edges.
+    // Add connection edges with port references.
     for (_conn_idx, conn) in instance.connections.iter() {
         let src_ci = resolve_connection_end(instance, conn.owner, &conn.src);
         let dst_ci = resolve_connection_end(instance, conn.owner, &conn.dst);
@@ -154,11 +183,23 @@ fn build_graph(
             continue;
         };
         if src_node != dst_node {
+            // Resolve port IDs from connection ends
+            let source_port = conn
+                .src
+                .as_ref()
+                .map(|e| e.feature.to_string());
+            let target_port = conn
+                .dst
+                .as_ref()
+                .map(|e| e.feature.to_string());
+
             let edge_idx = graph.add_edge(src_node, dst_node, ());
             edge_infos.insert(
                 edge_idx,
                 EdgeInfo {
                     label: conn.name.to_string(),
+                    source_port,
+                    target_port,
                 },
             );
         }
@@ -167,7 +208,36 @@ fn build_graph(
     (graph, node_infos, edge_infos)
 }
 
-/// Resolve a connection end to a component instance index.
+/// Convert an AADL FeatureInstance to an etch PortInfo.
+fn feature_to_port(feature: &spar_hir_def::instance::FeatureInstance) -> PortInfo {
+    let port_type = match feature.kind {
+        FeatureKind::DataPort | FeatureKind::Parameter => PortType::Data,
+        FeatureKind::EventPort => PortType::Event,
+        FeatureKind::EventDataPort => PortType::EventData,
+        FeatureKind::DataAccess
+        | FeatureKind::BusAccess
+        | FeatureKind::SubprogramAccess
+        | FeatureKind::SubprogramGroupAccess => PortType::Access,
+        FeatureKind::FeatureGroup => PortType::Group,
+        FeatureKind::AbstractFeature => PortType::Abstract,
+    };
+
+    let (direction, side) = match feature.direction {
+        Some(Direction::In) => (PortDirection::In, PortSide::Left),
+        Some(Direction::Out) => (PortDirection::Out, PortSide::Right),
+        Some(Direction::InOut) => (PortDirection::InOut, PortSide::Left),
+        None => (PortDirection::In, PortSide::Auto),
+    };
+
+    PortInfo {
+        id: feature.name.to_string(),
+        label: feature.name.to_string(),
+        side,
+        direction,
+        port_type,
+    }
+}
+
 fn resolve_connection_end(
     instance: &SystemInstance,
     owner: ComponentInstanceIdx,
@@ -193,7 +263,6 @@ fn resolve_connection_end(
     }
 }
 
-/// Generate a stable node ID for a component instance.
 fn node_id(comp: &spar_hir_def::instance::ComponentInstance, _idx: ComponentInstanceIdx) -> String {
     if let Some(arr_idx) = comp.array_index {
         format!("AADL-{}-{}_{}", comp.package, comp.name, arr_idx)
@@ -202,7 +271,6 @@ fn node_id(comp: &spar_hir_def::instance::ComponentInstance, _idx: ComponentInst
     }
 }
 
-/// Map ComponentCategory to a node type string for etch theming.
 fn category_type_name(cat: ComponentCategory) -> &'static str {
     match cat {
         ComponentCategory::System => "system",
@@ -222,7 +290,6 @@ fn category_type_name(cat: ComponentCategory) -> &'static str {
     }
 }
 
-/// Standard AADL category colors.
 fn category_colors() -> HashMap<String, String> {
     [
         ("system", "#b3d9ff"),
@@ -283,5 +350,39 @@ mod tests {
         let opts = RenderOptions::default();
         assert_eq!(opts.node_width, 180.0);
         assert!(!opts.interactive);
+    }
+
+    #[test]
+    fn feature_kind_to_port_type_mapping() {
+        use spar_hir_def::instance::FeatureInstance;
+        use spar_hir_def::Name;
+
+        let f = FeatureInstance {
+            name: Name::new("data_in"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::In),
+            owner: ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(0)),
+            classifier: None,
+            access_kind: None,
+            array_index: None,
+        };
+        let p = feature_to_port(&f);
+        assert_eq!(p.port_type, PortType::Data);
+        assert_eq!(p.direction, PortDirection::In);
+        assert_eq!(p.side, PortSide::Left);
+
+        let f2 = FeatureInstance {
+            name: Name::new("event_out"),
+            kind: FeatureKind::EventPort,
+            direction: Some(Direction::Out),
+            owner: ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(0)),
+            classifier: None,
+            access_kind: None,
+            array_index: None,
+        };
+        let p2 = feature_to_port(&f2);
+        assert_eq!(p2.port_type, PortType::Event);
+        assert_eq!(p2.direction, PortDirection::Out);
+        assert_eq!(p2.side, PortSide::Right);
     }
 }
