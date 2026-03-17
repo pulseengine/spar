@@ -275,7 +275,9 @@ pub fn compute_absolute_factor(
     unit_name: &str,
 ) -> Option<i64> {
     // Find the named unit in the chain
-    let entry = units.iter().find(|(n, _)| n.as_str().eq_ignore_ascii_case(unit_name))?;
+    let entry = units
+        .iter()
+        .find(|(n, _)| n.as_str().eq_ignore_ascii_case(unit_name))?;
     match &entry.1 {
         None => {
             // Base unit — factor is 1
@@ -1156,9 +1158,18 @@ mod tests {
         assert_eq!(compute_absolute_factor(&chain, "ns"), Some(1_000));
         assert_eq!(compute_absolute_factor(&chain, "us"), Some(1_000_000));
         assert_eq!(compute_absolute_factor(&chain, "ms"), Some(1_000_000_000));
-        assert_eq!(compute_absolute_factor(&chain, "sec"), Some(1_000_000_000_000));
-        assert_eq!(compute_absolute_factor(&chain, "min"), Some(60_000_000_000_000));
-        assert_eq!(compute_absolute_factor(&chain, "hr"), Some(3_600_000_000_000_000));
+        assert_eq!(
+            compute_absolute_factor(&chain, "sec"),
+            Some(1_000_000_000_000)
+        );
+        assert_eq!(
+            compute_absolute_factor(&chain, "min"),
+            Some(60_000_000_000_000)
+        );
+        assert_eq!(
+            compute_absolute_factor(&chain, "hr"),
+            Some(3_600_000_000_000_000)
+        );
     }
 
     #[test]
@@ -1172,7 +1183,10 @@ mod tests {
         assert_eq!(compute_absolute_factor(&chain, "bits"), Some(1));
         assert_eq!(compute_absolute_factor(&chain, "Bytes"), Some(8));
         assert_eq!(compute_absolute_factor(&chain, "KByte"), Some(8 * 1024));
-        assert_eq!(compute_absolute_factor(&chain, "MByte"), Some(8 * 1024 * 1024));
+        assert_eq!(
+            compute_absolute_factor(&chain, "MByte"),
+            Some(8 * 1024 * 1024)
+        );
     }
 
     #[test]
