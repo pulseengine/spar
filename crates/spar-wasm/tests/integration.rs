@@ -47,7 +47,10 @@ fn e2e_renders_valid_html() {
     assert!(html.contains("<!DOCTYPE html>"), "should be HTML document");
     assert!(html.contains("<svg"), "should contain SVG");
     assert!(html.contains("</svg>"), "should close SVG");
-    assert!(html.contains("<script>"), "should have interactivity script");
+    assert!(
+        html.contains("<script>"),
+        "should have interactivity script"
+    );
 
     // Contains expected components
     assert!(

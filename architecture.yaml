@@ -1,0 +1,134 @@
+# Spar toolchain architecture — 10-crate Rust workspace
+
+artifacts:
+
+  # ── System Level ───────────────────────────────────────────────────────
+
+  - id: ARCH-SYS
+    type: system-arch-component
+    title: Spar AADL Toolchain
+    description: >
+      10-crate Rust workspace implementing an AADL v2.2 toolchain
+      with incremental computation (salsa), lossless syntax (rowan),
+      and arena allocation (la-arena).
+    component-type: software
+    allocated-from: [REQ-PARSE-001, REQ-MODEL-001, REQ-INST-001]
+
+  # ── Crate Components ──────────────────────────────────────────────────
+
+  - id: ARCH-PARSER
+    type: sw-arch-component
+    title: spar-parser
+    description: >
+      AADL v2.2 parser producing a lossless concrete syntax tree (CST)
+      using rowan. Hand-written recursive descent with error recovery.
+    interfaces:
+      provides: [parse(source) -> GreenNode]
+    allocated-from: [REQ-PARSE-001, REQ-PARSE-002]
+
+  - id: ARCH-SYNTAX
+    type: sw-arch-component
+    title: spar-syntax
+    description: >
+      Typed syntax tree wrapper over rowan GreenNode. Defines SyntaxKind
+      enum and typed AST node accessors.
+    interfaces:
+      provides: [SourceFile, AstNode trait]
+      requires: [spar-parser]
+    allocated-from: [REQ-PARSE-001]
+
+  - id: ARCH-ANNEX
+    type: sw-arch-component
+    title: spar-annex
+    description: >
+      Annex sublanguage parsing for EMV2 and Behavior Annex.
+    interfaces:
+      provides: [parse_annex_library, parse_emv2]
+      requires: [spar-parser]
+    allocated-from: [REQ-ANALYSIS-005]
+
+  - id: ARCH-BASE-DB
+    type: sw-arch-component
+    title: spar-base-db
+    description: >
+      Salsa database foundation. Defines SourceFile input and
+      parse query. All other crates build on this.
+    interfaces:
+      provides: [BaseDatabase trait, SourceFile input]
+      requires: [spar-parser, spar-syntax]
+    allocated-from: [REQ-PARSE-001]
+
+  - id: ARCH-HIR-DEF
+    type: sw-arch-component
+    title: spar-hir-def
+    description: >
+      Internal HIR definitions: ItemTree (declarative model),
+      instance model, resolver, standard properties. Not public API.
+    interfaces:
+      provides: [ItemTree, SystemInstance, GlobalScope, StandardProperties]
+      requires: [spar-base-db, spar-annex]
+    allocated-from: [REQ-MODEL-001, REQ-MODEL-002, REQ-INST-001, REQ-PROP-001]
+
+  - id: ARCH-HIR
+    type: sw-arch-component
+    title: spar-hir
+    description: >
+      Public facade over spar-hir-def. Value-oriented API with serde
+      support. All downstream consumers use this crate.
+    interfaces:
+      provides: [Database, Package, ComponentType, ComponentImpl, InstanceNode]
+      requires: [spar-hir-def]
+    allocated-from: [REQ-SERDE-001, REQ-MODEL-001]
+
+  - id: ARCH-ANALYSIS
+    type: sw-arch-component
+    title: spar-analysis
+    description: >
+      19+ analysis passes implementing connectivity, scheduling, latency,
+      resource budget, EMV2, ARINC 653, legality rules, and more.
+      Trait-based Analysis framework with AnalysisRunner.
+    interfaces:
+      provides: [Analysis trait, AnalysisRunner, AnalysisDiagnostic]
+      requires: [spar-hir-def]
+    allocated-from:
+      - REQ-ANALYSIS-001
+      - REQ-ANALYSIS-002
+      - REQ-ANALYSIS-003
+      - REQ-ANALYSIS-004
+      - REQ-ANALYSIS-005
+      - REQ-ANALYSIS-006
+      - REQ-ANALYSIS-007
+      - REQ-ANALYSIS-008
+
+  - id: ARCH-TRANSFORM
+    type: sw-arch-component
+    title: spar-transform
+    description: >
+      Bidirectional transforms between AADL and external formats.
+      Currently implements WIT transform. Planned: WAC, wRPC, Rust crate.
+    interfaces:
+      provides: [Transform trait, WitTransform]
+      requires: [spar-hir-def]
+    allocated-from: [REQ-TRANSFORM-001]
+
+  - id: ARCH-CLI
+    type: sw-arch-component
+    title: spar-cli
+    description: >
+      CLI binary with subcommands: parse, items, instance, analyze,
+      transform, lsp, render. Manual arg parsing.
+    interfaces:
+      provides: [spar binary]
+      requires: [spar-hir, spar-analysis, spar-transform]
+    allocated-from: [REQ-LSP-001, REQ-SERDE-001]
+
+  - id: ARCH-WASM
+    type: sw-arch-component
+    title: spar-wasm
+    description: >
+      WASM component exporting adapter and renderer interfaces via WIT.
+      Compiles to wasm32-wasip2. 1.3MB release binary.
+    interfaces:
+      provides: [adapter.import, adapter.analyze, renderer.render, renderer.analyze]
+      requires: [spar-hir, spar-analysis]
+    allocated-from: [REQ-WASM-001]

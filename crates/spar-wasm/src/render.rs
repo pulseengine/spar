@@ -241,5 +241,4 @@ mod tests {
         let result = render_aadl(source, "Pkg::Nonexistent.Impl", &[]);
         assert!(result.is_err());
     }
-
 }
