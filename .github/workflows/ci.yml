@@ -109,15 +109,18 @@ jobs:
   miri:
     name: Miri
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
       - uses: Swatinem/rust-cache@v2
-      - name: Run Miri
-        run: cargo miri test -p spar-hir-def --lib
+      - name: Run Miri (instance model tests)
+        # Filter to instance:: tests to avoid known rowan UB (rust-analyzer/rowan issue 192).
+        # rowan's custom Arc implementation has a retag issue in HeaderSlice that
+        # triggers Miri's borrow stack check. This is upstream, not our code.
+        # Once rowan ships a fix, expand to full --lib.
+        run: "cargo miri test -p spar-hir-def --lib -- instance::"
         env:
           MIRIFLAGS: "-Zmiri-strict-provenance -Zmiri-disable-isolation"
 
