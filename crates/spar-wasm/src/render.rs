@@ -88,8 +88,20 @@ pub fn render_aadl_from_fs(root: &str, highlight: &[String]) -> Result<String, R
         )));
     }
 
-    let (graph, _) = build_graph(instance.inner());
-    render_graph_to_svg(&graph, highlight)
+    let render_opts = spar_render::RenderOptions {
+        interactive: true,
+        highlight: highlight.first().cloned(),
+        ..Default::default()
+    };
+    let html_opts = etch::html::HtmlOptions {
+        title: root.to_string(),
+        ..Default::default()
+    };
+    Ok(spar_render::render_instance_html(
+        instance.inner(),
+        &render_opts,
+        &html_opts,
+    ))
 }
 
 /// Run all analyses on the AADL model from filesystem.
@@ -194,9 +206,20 @@ pub fn render_aadl(source: &str, root: &str, highlight: &[String]) -> Result<Str
         )));
     }
 
-    let (graph, _index_map) = build_graph(instance.inner());
-
-    render_graph_to_svg(&graph, highlight)
+    let render_opts = spar_render::RenderOptions {
+        interactive: true,
+        highlight: highlight.first().cloned(),
+        ..Default::default()
+    };
+    let html_opts = etch::html::HtmlOptions {
+        title: root.to_string(),
+        ..Default::default()
+    };
+    Ok(spar_render::render_instance_html(
+        instance.inner(),
+        &render_opts,
+        &html_opts,
+    ))
 }
 
 /// Render a petgraph of [`ArchNode`]/[`ArchEdge`] to an SVG string.
