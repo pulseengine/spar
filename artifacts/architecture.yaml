@@ -214,3 +214,91 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-WASM-001
+
+  # ── Rendering Quality Decisions ──────────────────────────────────────
+
+  - id: ARCH-R1
+    type: design-decision
+    title: Port-aware layout
+    description: >
+      Graph nodes gain explicit ports with side placement, direction
+      indicators, and type metadata. Edges connect to specific ports
+      rather than node centers, ensuring visual fidelity to the AADL
+      connection topology.
+    fields:
+      rationale: >
+        Port-aware layout eliminates ambiguity about which features are
+        connected. Side placement (inputs left, outputs right) matches
+        data-flow reading direction and AADL port semantics.
+      interfaces:
+        provides: [EtchNode with ports, port side/direction/type metadata]
+        requires: [spar-hir instance model]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-002
+
+  - id: ARCH-R2
+    type: design-decision
+    title: Orthogonal edge routing
+    description: >
+      A visibility-graph router with obstacle avoidance replaces bezier
+      curves. Edges follow rectilinear (horizontal/vertical) paths,
+      routing around component boxes to minimize crossings.
+    fields:
+      rationale: >
+        Orthogonal routing is standard in EDA and architecture tools
+        because it produces clean, traceable connection paths. The
+        visibility-graph approach guarantees obstacle avoidance without
+        requiring manual layout adjustment.
+      interfaces:
+        provides: [orthogonal edge paths, crossing minimization]
+        requires: [EtchNode positions, port positions]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-001
+
+  - id: ARCH-R3
+    type: design-decision
+    title: Interactive HTML wrapper
+    description: >
+      A self-contained HTML file with embedded JavaScript provides
+      pan, zoom, minimap, search, and selection/highlighting. No
+      external dependencies — the entire interactive viewer is a
+      single file.
+    fields:
+      rationale: >
+        Single-file HTML eliminates deployment complexity and works
+        in any browser. No external dependencies means the artifact
+        is reproducible and archivable for certification evidence.
+      interfaces:
+        provides: [pan, zoom, minimap, search, selection highlighting]
+        requires: [SVG rendering output]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-003
+      - type: satisfies
+        target: RENDER-REQ-005
+
+  - id: ARCH-R4
+    type: design-decision
+    title: GLSP-inspired separation
+    description: >
+      Layout computation (GraphLayout) is separated from rendering
+      (SVG/HTML output). The layout phase produces abstract positions
+      and routed edges; the render phase converts to visual output.
+      This separation enables deterministic layout independent of
+      rendering format.
+    fields:
+      rationale: >
+        Separating layout from rendering enables testing layout
+        determinism without rendering, supports multiple output formats
+        (SVG, HTML, PDF) from the same layout, and allows layout
+        algorithm evolution without breaking rendering.
+      interfaces:
+        provides: [GraphLayout with node/edge positions]
+        requires: [spar-hir instance model]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-004
+      - type: satisfies
+        target: RENDER-REQ-006

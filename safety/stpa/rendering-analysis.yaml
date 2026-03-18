@@ -1,0 +1,164 @@
+# STPA Analysis — Spar Rendering Quality
+#
+# Analyzes the rendering subsystem (spar-wasm graph/SVG/HTML output) as a
+# safety-relevant component. Engineers and reviewers rely on rendered diagrams
+# to understand and approve architectures. Incorrect, unreadable, or misleading
+# diagrams can lead to wrong design decisions or failed certification reviews.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1a: Losses
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: L-R1
+    type: loss
+    title: Engineer misreads architecture
+    description: >
+      An engineer misinterprets the rendered diagram — reading a wrong
+      connection, missing a component, or confusing port directions —
+      leading to a design error in the implemented system.
+    stakeholders: [system-integrator, safety-reviewer]
+
+  - id: L-R2
+    type: loss
+    title: Engineer cannot find relevant component
+    description: >
+      In a large model the engineer cannot locate the component or
+      subsystem they need, wasting significant time or missing a
+      review deadline.
+    stakeholders: [system-integrator, project-manager]
+
+  - id: L-R3
+    type: loss
+    title: Engineer cannot distinguish port connections
+    description: >
+      Port connections appear identical regardless of direction, type,
+      or feature, causing incorrect integration decisions or runtime
+      failures in the deployed system.
+    stakeholders: [system-integrator, safety-reviewer]
+
+  - id: L-R4
+    type: loss
+    title: Stakeholder review fails
+    description: >
+      A stakeholder review (design review, certification audit) fails
+      because the rendered diagram is unreadable or incomprehensible,
+      delaying certification milestones.
+    stakeholders: [certification-authority, safety-reviewer, project-manager]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1b: Hazards
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: H-R1
+    type: hazard
+    title: Edge spaghetti obscures connection topology
+    description: >
+      Connections between components are rendered as overlapping,
+      crossing, or tangled lines that make it impossible to trace
+      which ports are connected. The visual topology does not match
+      the logical topology.
+    severity: critical
+    losses: [L-R1, L-R3]
+
+  - id: H-R2
+    type: hazard
+    title: No port visibility
+    description: >
+      Ports are not rendered or are rendered without directional
+      indicators and type coloring, so connections appear identical
+      regardless of direction (in/out) or data type (event, data,
+      event data).
+    severity: critical
+    losses: [L-R3, L-R4]
+
+  - id: H-R3
+    type: hazard
+    title: Cannot navigate large models
+    description: >
+      No zoom, pan, search, or filtering capability exists, so
+      engineers viewing models with dozens or hundreds of components
+      cannot find or focus on the subsystem they need.
+    severity: marginal
+    losses: [L-R2]
+
+  - id: H-R4
+    type: hazard
+    title: Layout instability
+    description: >
+      A small change to the AADL model (adding one port, renaming a
+      component) causes a completely different layout, making it
+      impossible to compare before/after diagrams or build spatial
+      memory of the architecture.
+    severity: marginal
+    losses: [L-R1, L-R2]
+
+  - id: H-R5
+    type: hazard
+    title: No selection or highlighting
+    description: >
+      There is no way to select a component or connection and see its
+      relationships highlighted. Engineers cannot isolate a subsystem
+      for focused review.
+    severity: marginal
+    losses: [L-R2, L-R4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Safety Requirements
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: RENDER-REQ-001
+    type: safety-requirement
+    title: Orthogonal edge routing
+    description: >
+      Edges must use orthogonal (rectilinear) routing to minimize
+      visual crossings. The routing algorithm must avoid overlapping
+      edges and route around component obstacles.
+    hazards: [H-R1]
+
+  - id: RENDER-REQ-002
+    type: safety-requirement
+    title: Visible ports with directional indicators
+    description: >
+      Ports must be rendered as visible elements on component
+      boundaries with directional indicators (arrows for in/out/in-out)
+      and type-based coloring (distinct colors for data, event, event
+      data, bus access, etc.).
+    hazards: [H-R2]
+
+  - id: RENDER-REQ-003
+    type: safety-requirement
+    title: Interactive HTML with zoom/pan/minimap/search
+    description: >
+      The interactive HTML output must support zoom, pan, a minimap
+      for orientation in large models, and text search to locate
+      components by name.
+    hazards: [H-R3]
+
+  - id: RENDER-REQ-004
+    type: safety-requirement
+    title: Deterministic layout
+    description: >
+      Layout must be deterministic — the same AADL model must always
+      produce the same rendered layout. No randomized placement or
+      non-deterministic ordering.
+    hazards: [H-R4]
+
+  - id: RENDER-REQ-005
+    type: safety-requirement
+    title: Selection and group highlighting
+    description: >
+      Interactive output must support selecting a component or
+      connection and highlighting its connected neighbors, ports,
+      and edges to isolate subsystems for focused review.
+    hazards: [H-R5]
+
+  - id: RENDER-REQ-006
+    type: safety-requirement
+    title: Semantic zoom
+    description: >
+      At overview zoom levels, rendering must reduce visual clutter
+      by collapsing internal details and showing only component
+      boundaries and inter-component connections.
+    hazards: [H-R3]

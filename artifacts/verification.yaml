@@ -276,3 +276,92 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-ANALYSIS-009
+
+  # ── Rendering Quality Verification ───────────────────────────────────
+
+  - id: VAL-R1
+    type: feature
+    title: Layout determinism tests (RENDER-REQ-004)
+    description: >
+      Tests verifying that the same AADL model always produces the same
+      layout output. Covers node positions, edge routes, and port placement
+      across repeated runs.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- layout_is_deterministic
+    links:
+      - type: satisfies
+        target: RENDER-REQ-004
+      - type: satisfies
+        target: ARCH-R4
+
+  - id: VAL-R2
+    type: feature
+    title: Orthogonal routing tests (RENDER-REQ-001)
+    description: >
+      Tests verifying that edge routing produces orthogonal (rectilinear)
+      paths with minimized crossings and obstacle avoidance around
+      component boxes.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- orthogonal_routing
+    links:
+      - type: satisfies
+        target: RENDER-REQ-001
+      - type: satisfies
+        target: ARCH-R2
+
+  - id: VAL-R3
+    type: feature
+    title: Port positioning tests (RENDER-REQ-002)
+    description: >
+      Tests verifying that ports are rendered with correct side placement,
+      directional indicators, and type-based coloring on component
+      boundaries.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- port_positioning
+    links:
+      - type: satisfies
+        target: RENDER-REQ-002
+      - type: satisfies
+        target: ARCH-R1
+
+  - id: VAL-R4
+    type: feature
+    title: HTML interactive feature tests (RENDER-REQ-003, RENDER-REQ-005)
+    description: >
+      Tests verifying the interactive HTML output supports zoom, pan,
+      minimap, search, and selection/highlighting of components and
+      connections.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- html_interactive
+    links:
+      - type: satisfies
+        target: RENDER-REQ-003
+      - type: satisfies
+        target: RENDER-REQ-005
+      - type: satisfies
+        target: ARCH-R3
+
+  - id: VAL-R5
+    type: feature
+    title: Semantic zoom tests (RENDER-REQ-006)
+    description: >
+      Tests verifying that semantic zoom reduces clutter at overview
+      levels by collapsing internal details and showing only component
+      boundaries and inter-component connections.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-wasm -- semantic_zoom
+    links:
+      - type: satisfies
+        target: RENDER-REQ-006
+      - type: satisfies
+        target: ARCH-R4
