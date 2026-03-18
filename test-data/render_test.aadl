@@ -1,0 +1,70 @@
+-- Minimal AADL model for rendering/Playwright tests
+package RenderTest
+public
+  system Top
+    features
+      ext_in: in data port;
+      ext_out: out data port;
+  end Top;
+
+  system implementation Top.Impl
+    subcomponents
+      sensor: device Sensor.Impl;
+      ctrl: process Controller.Impl;
+      actuator: device Actuator.Impl;
+    connections
+      c1: port sensor.data_out -> ctrl.sensor_in;
+      c2: port ctrl.cmd_out -> actuator.cmd_in;
+  end Top.Impl;
+
+  device Sensor
+    features
+      data_out: out data port;
+  end Sensor;
+
+  device implementation Sensor.Impl
+  end Sensor.Impl;
+
+  process Controller
+    features
+      sensor_in: in data port;
+      cmd_out: out data port;
+  end Controller;
+
+  process implementation Controller.Impl
+    subcomponents
+      filter: thread FilterThread.Impl;
+      compute: thread ComputeThread.Impl;
+    connections
+      c3: port sensor_in -> filter.raw_in;
+      c4: port filter.filtered_out -> compute.data_in;
+      c5: port compute.result_out -> cmd_out;
+  end Controller.Impl;
+
+  thread FilterThread
+    features
+      raw_in: in data port;
+      filtered_out: out data port;
+  end FilterThread;
+
+  thread implementation FilterThread.Impl
+  end FilterThread.Impl;
+
+  thread ComputeThread
+    features
+      data_in: in data port;
+      result_out: out data port;
+  end ComputeThread;
+
+  thread implementation ComputeThread.Impl
+  end ComputeThread.Impl;
+
+  device Actuator
+    features
+      cmd_in: in data port;
+  end Actuator;
+
+  device implementation Actuator.Impl
+  end Actuator.Impl;
+
+end RenderTest;
