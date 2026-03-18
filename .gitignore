@@ -8,3 +8,7 @@
 proofs/.lake/
 tests/playwright/node_modules/
 tests/playwright/test-results/
+dist/
+architecture.yaml
+requirements.yaml
+verification.yaml
