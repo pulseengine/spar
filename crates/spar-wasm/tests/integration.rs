@@ -40,35 +40,38 @@ end FlightControl;
 "#;
 
 #[test]
-fn e2e_renders_valid_svg() {
-    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+fn e2e_renders_valid_html() {
+    let html = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
-    // Valid SVG structure
-    assert!(svg.starts_with("<svg"));
-    assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
-    assert!(svg.contains("</svg>"));
-
-    // Contains expected components as nodes
+    // Valid HTML structure (now interactive HTML, not bare SVG)
+    assert!(html.contains("<!DOCTYPE html>"), "should be HTML document");
+    assert!(html.contains("<svg"), "should contain SVG");
+    assert!(html.contains("</svg>"), "should close SVG");
     assert!(
-        svg.contains("data-id=\"AADL-FlightControl-Controller.Basic\"")
-            || svg.contains("data-id=\"AADL-FlightControl-nav\"")
-            || svg.contains("AADL-FlightControl")
+        html.contains("<script>"),
+        "should have interactivity script"
+    );
+
+    // Contains expected components
+    assert!(
+        html.contains("AADL-FlightControl"),
+        "should contain AADL component IDs"
     );
 
     // Has style and defs
-    assert!(svg.contains("<defs>"));
-    assert!(svg.contains("<style>"));
-    assert!(svg.contains("arrowhead"));
+    assert!(html.contains("<defs>"));
+    assert!(html.contains("<style>"));
+    assert!(html.contains("arrowhead"));
 }
 
 #[test]
 fn e2e_nodes_have_category_classes() {
-    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+    let html = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
     // Root is a system
-    assert!(svg.contains("type-system"));
+    assert!(html.contains("type-system"));
     // Subcomponents are processes
-    assert!(svg.contains("type-process"));
+    assert!(html.contains("type-process"));
 }
 
 #[test]
@@ -89,12 +92,15 @@ fn e2e_highlight_changes_stroke() {
 }
 
 #[test]
-fn e2e_svg_has_edges() {
-    let svg = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
+fn e2e_has_edges() {
+    let html = render_aadl(FLIGHT_CONTROL, "FlightControl::Controller.Basic", &[]).unwrap();
 
-    // Should have edge elements (connections + hierarchy)
-    assert!(svg.contains("class=\"edge\"") || svg.contains("class=\"edges\""));
-    assert!(svg.contains("<path"));
+    // Should have edge elements
+    assert!(
+        html.contains("class=\"edge\"") || html.contains("class=\"edges\""),
+        "should have edge elements"
+    );
+    assert!(html.contains("<path"), "should have edge paths");
 }
 
 #[test]

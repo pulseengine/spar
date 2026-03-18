@@ -1,0 +1,5 @@
+out/
+node_modules/
+*.vsix
+assets/js/
+assets/spar_wasm.wasm
