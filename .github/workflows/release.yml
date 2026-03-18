@@ -175,10 +175,51 @@ jobs:
           name: test-evidence
           path: spar-*-test-evidence.tar.gz
 
+  # ── VS Code Extension ────────────────────────────────────────────────
+  build-vsix:
+    name: Build VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install and compile extension
+        working-directory: vscode-spar
+        run: npm install && npm run compile
+      - name: Package VSIX
+        working-directory: vscode-spar
+        run: npx @vscode/vsce package --no-dependencies
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: vscode-spar/*.vsix
+
+  # ── Publish to VS Code Marketplace ──────────────────────────────────
+  publish-vsix:
+    name: Publish to Marketplace
+    needs: [build-vsix, create-release]
+    runs-on: ubuntu-latest
+    if: env.VSCE_PAT != ''
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: vsix
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --packagePath vsix/*.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
   # ── Create GitHub Release ─────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
-    needs: [build-binaries, build-compliance, build-test-evidence]
+    needs: [build-binaries, build-compliance, build-test-evidence, build-vsix]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
