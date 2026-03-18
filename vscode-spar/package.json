@@ -1,0 +1,82 @@
+{
+  "name": "spar-aadl",
+  "displayName": "AADL (spar)",
+  "description": "AADL v2.2 language support with live architecture visualization",
+  "publisher": "pulseengine",
+  "version": "0.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pulseengine/spar"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onLanguage:aadl"
+  ],
+  "main": "./out/extension",
+  "contributes": {
+    "languages": [
+      {
+        "id": "aadl",
+        "extensions": [
+          ".aadl"
+        ],
+        "aliases": [
+          "AADL",
+          "aadl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aadl",
+        "scopeName": "source.aadl",
+        "path": "./syntaxes/aadl.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "spar.showDiagram",
+        "title": "Show Architecture Diagram",
+        "category": "AADL"
+      },
+      {
+        "command": "spar.selectRoot",
+        "title": "Select Root System",
+        "category": "AADL"
+      }
+    ],
+    "configuration": {
+      "title": "AADL (spar)",
+      "properties": {
+        "spar.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to spar binary (leave empty to find on PATH)"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.100.0",
+    "@types/node": "^22",
+    "typescript": "^5.9.0",
+    "esbuild": "^0.25.0"
+  },
+  "scripts": {
+    "compile": "tsc -b",
+    "watch": "tsc -b -w",
+    "package": "npx @vscode/vsce package",
+    "esbuild": "node ./bin/esbuild.js"
+  }
+}
