@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RenderTest::Top</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1e1e2e; overflow: hidden; font-family: system-ui, sans-serif; }
+  #container { width: 100vw; height: 100vh; }
+  #container svg { width: 100%; height: 100%; cursor: grab; }
+  #container svg:active { cursor: grabbing; }
+  .node.selected rect { stroke: #ff6600 !important; stroke-width: 3 !important; }
+  .node.selected circle { stroke: #ff6600 !important; }
+  /* Semantic zoom: hide detail at low zoom */
+  svg.zoom-low .sublabel { display: none; }
+  svg.zoom-low .port text { display: none; }
+  svg.zoom-overview .edge text { display: none; }
+  svg.zoom-overview .edge .label-bg { display: none; }
+</style>
+</head>
+<body>
+<div id="container">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 450" width="300" height="450">
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="8" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 8 4 L 0 8" fill="#666" />
+    </marker>
+  </defs>
+  <style>
+    .node rect { stroke: #333; stroke-width: 1.5; }
+    .node text { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; fill: #222; text-anchor: middle; dominant-baseline: central; }
+    .node .sublabel { font-size: 11px; fill: #666; }
+    .edge path { fill: none; stroke: #666; stroke-width: 1.4; marker-end: url(#arrowhead); }
+    .edge .label-bg { fill: #fff; opacity: 0.85; rx: 3; }
+    .edge text { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #555; text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+    .node.container rect { stroke-dasharray: 4 2; }
+    .node:hover rect { filter: brightness(0.92); }
+    .port circle { stroke: #333; stroke-width: 0.8; }
+    .port.data circle { fill: #4a90d9; }
+    .port.event circle { fill: #e67e22; }
+    .port.event-data circle { fill: #27ae60; }
+    .port.access circle { fill: #999; }
+    .port.group circle { fill: #9b59b6; }
+    .port.abstract circle { fill: #666; }
+    .port text { font-size: 9px; fill: #444; dominant-baseline: central; }
+  </style>
+  <g transform="translate(20,20)">
+    <g class="edges">
+      <g class="edge" data-source="AADL-RenderTest-sensor" data-target="AADL-RenderTest-ctrl">
+        <path d="M 200 25 L 0 25 L 0 180" />
+        <rect class="label-bg" x="-10.5" y="14" width="21" height="14" />
+        <text x="0" y="21">c1</text>
+      </g>
+      <g class="edge" data-source="AADL-RenderTest-ctrl" data-target="AADL-RenderTest-actuator">
+        <path d="M 220 180 L 130 180 L 130 340" />
+        <rect class="label-bg" x="119.5" y="169" width="21" height="14" />
+        <text x="130" y="176">c2</text>
+      </g>
+    </g>
+    <g class="nodes">
+      <g class="node type-process container" data-id="AADL-RenderTest-ctrl">
+        <rect x="20" y="160" width="220" height="100" rx="4" ry="4" fill="#f2f9f3" stroke="#333" stroke-width="2.0" />
+        <text x="130" y="177" font-weight="bold">ctrl</text>
+        <text class="sublabel" x="130" y="190">RenderTest::Controller.Impl</text>
+        <g class="port data" data-port-id="sensor_in">
+          <circle cx="0" cy="180" r="3" />
+          <path d="M 4 180 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="180" text-anchor="start">sensor_in</text>
+        </g>
+        <g class="port data" data-port-id="cmd_out">
+          <circle cx="220" cy="180" r="3" />
+          <path d="M 224 180 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="214" y="180" text-anchor="end">cmd_out</text>
+        </g>
+        <title>AADL-RenderTest-ctrl</title>
+      </g>
+      <g class="node type-system container" data-id="AADL-RenderTest-Top.Impl">
+        <rect x="0" y="0" width="260" height="410" rx="4" ry="4" fill="#e8f3ff" stroke="#333" stroke-width="2.0" />
+        <text x="130" y="17" font-weight="bold">Top.Impl</text>
+        <text class="sublabel" x="130" y="30">RenderTest::Top.Impl</text>
+        <g class="port data" data-port-id="ext_in">
+          <circle cx="0" cy="205" r="3" />
+          <path d="M 4 205 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="6" y="205" text-anchor="start">ext_in</text>
+        </g>
+        <g class="port data" data-port-id="ext_out">
+          <circle cx="260" cy="205" r="3" />
+          <path d="M 264 205 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="254" y="205" text-anchor="end">ext_out</text>
+        </g>
+        <title>AADL-RenderTest-Top.Impl</title>
+      </g>
+      <g class="node type-device" data-id="AADL-RenderTest-sensor">
+        <rect x="40" y="30" width="180" height="50" rx="4" ry="4" fill="#e2d5f1" stroke="#333" stroke-width="1.5" />
+        <text x="130" y="49.15">sensor</text>
+        <text class="sublabel" x="130" y="63.45">RenderTest::Sensor.Impl</text>
+        <g class="port data" data-port-id="data_out">
+          <circle cx="200" cy="25" r="3" />
+          <path d="M 204 25 l 4 -2.5 l 0 5 Z" fill="currentColor" />
+          <text x="194" y="25" text-anchor="end">data_out</text>
+        </g>
+        <title>AADL-RenderTest-sensor</title>
+      </g>
+      <g class="node type-system" data-id="AADL-RenderTest-filter">
+        <rect x="40" y="190" width="180" height="50" rx="4" ry="4" fill="#b3d9ff" stroke="#333" stroke-width="1.5" />
+        <text x="130" y="209.15">filter</text>
+        <text class="sublabel" x="130" y="223.45">RenderTest::FilterThread.Impl</text>
+        <title>AADL-RenderTest-filter</title>
+      </g>
+      <g class="node type-system" data-id="AADL-RenderTest-actuator">
+        <rect x="40" y="340" width="180" height="50" rx="4" ry="4" fill="#b3d9ff" stroke="#333" stroke-width="1.5" />
+        <text x="130" y="359.15">actuator</text>
+        <text class="sublabel" x="130" y="373.45">RenderTest::Actuator.Impl</text>
+        <title>AADL-RenderTest-actuator</title>
+      </g>
+    </g>
+  </g>
+</svg>
+
+</div>
+<script>
+// etch interactive SVG viewer — pan, zoom, selection, group highlight
+(function() {
+  const container = document.getElementById('container');
+  const svg = container.querySelector('svg');
+  if (!svg) return;
+
+  // Parse initial viewBox
+  const vb = svg.getAttribute('viewBox').split(' ').map(Number);
+  let [vx, vy, vw, vh] = vb;
+  const origVw = vw, origVh = vh;
+
+  // State
+  let isPanning = false;
+  let panStart = { x: 0, y: 0 };
+  let scale = 1;
+
+  // --- Pan ---
+  svg.addEventListener('mousedown', e => {
+    if (e.target.closest('.node')) return; // don't pan when clicking nodes
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY };
+    svg.style.cursor = 'grabbing';
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    const dx = (e.clientX - panStart.x) * (vw / svg.clientWidth);
+    const dy = (e.clientY - panStart.y) * (vh / svg.clientHeight);
+    vx -= dx;
+    vy -= dy;
+    panStart = { x: e.clientX, y: e.clientY };
+    updateViewBox();
+  });
+
+  window.addEventListener('mouseup', () => {
+    isPanning = false;
+    svg.style.cursor = 'grab';
+  });
+
+  // --- Zoom (wheel) ---
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+
+    // Zoom around cursor position
+    const rect = svg.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) / rect.width;
+    const my = (e.clientY - rect.top) / rect.height;
+
+    const newVw = vw * zoomFactor;
+    const newVh = vh * zoomFactor;
+
+    vx += (vw - newVw) * mx;
+    vy += (vh - newVh) * my;
+    vw = newVw;
+    vh = newVh;
+    scale = origVw / vw;
+
+    updateViewBox();
+    updateSemanticZoom();
+  }, { passive: false });
+
+  // --- Selection ---
+  svg.addEventListener('click', e => {
+    const nodeEl = e.target.closest('.node');
+    if (!nodeEl) {
+      if (!e.ctrlKey && !e.metaKey) {
+        svg.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected'));
+      }
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      nodeEl.classList.toggle('selected');
+    } else {
+      svg.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected'));
+      nodeEl.classList.add('selected');
+    }
+
+    // If it's a container, highlight children
+    if (nodeEl.classList.contains('container')) {
+      const containerId = nodeEl.getAttribute('data-id');
+      if (containerId) {
+        // Emit event for integration
+        svg.dispatchEvent(new CustomEvent('etch-container-select', {
+          detail: { id: containerId }
+        }));
+      }
+    }
+
+    // Emit selection event
+    const selected = Array.from(svg.querySelectorAll('.node.selected'))
+      .map(n => n.getAttribute('data-id'))
+      .filter(Boolean);
+    svg.dispatchEvent(new CustomEvent('etch-select', {
+      detail: { ids: selected }
+    }));
+  });
+
+  // --- URL highlight parameter ---
+  const params = new URLSearchParams(window.location.search);
+  const highlightId = params.get('highlight');
+  if (highlightId) {
+    const node = svg.querySelector(`.node[data-id="${CSS.escape(highlightId)}"]`);
+    if (node) {
+      node.classList.add('selected');
+      // Pan to highlighted node
+      const rect = node.querySelector('rect');
+      if (rect) {
+        const nx = parseFloat(rect.getAttribute('x'));
+        const ny = parseFloat(rect.getAttribute('y'));
+        vx = nx - vw / 4;
+        vy = ny - vh / 4;
+        updateViewBox();
+      }
+    }
+  }
+
+  // --- Semantic zoom ---
+  function updateSemanticZoom() {
+    svg.classList.toggle('zoom-low', scale < 0.5);
+    svg.classList.toggle('zoom-overview', scale < 0.25);
+  }
+
+  function updateViewBox() {
+    svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+  }
+})();
+
+</script>
+</body>
+</html>
