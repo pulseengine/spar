@@ -9,6 +9,11 @@
     "type": "git",
     "url": "https://github.com/pulseengine/spar"
   },
+  "icon": "icon.svg",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.100.0"
   },
