@@ -281,6 +281,8 @@ artifacts:
 
   - id: VAL-R1
     type: feature
+    status: implemented
+    verifies: [RENDER-REQ-004]
     title: Layout determinism tests (RENDER-REQ-004)
     description: >
       Tests verifying that the same AADL model always produces the same
@@ -298,6 +300,8 @@ artifacts:
 
   - id: VAL-R2
     type: feature
+    status: implemented
+    verifies: [RENDER-REQ-001]
     title: Orthogonal routing tests (RENDER-REQ-001)
     description: >
       Tests verifying that edge routing produces orthogonal (rectilinear)
@@ -315,6 +319,8 @@ artifacts:
 
   - id: VAL-R3
     type: feature
+    status: implemented
+    verifies: [RENDER-REQ-002]
     title: Port positioning tests (RENDER-REQ-002)
     description: >
       Tests verifying that ports are rendered with correct side placement,
@@ -332,6 +338,8 @@ artifacts:
 
   - id: VAL-R4
     type: feature
+    status: implemented
+    verifies: [RENDER-REQ-003, RENDER-REQ-005]
     title: HTML interactive feature tests (RENDER-REQ-003, RENDER-REQ-005)
     description: >
       Tests verifying the interactive HTML output supports zoom, pan,
@@ -351,6 +359,8 @@ artifacts:
 
   - id: VAL-R5
     type: feature
+    status: implemented
+    verifies: [RENDER-REQ-006]
     title: Semantic zoom tests (RENDER-REQ-006)
     description: >
       Tests verifying that semantic zoom reduces clutter at overview

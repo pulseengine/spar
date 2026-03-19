@@ -219,6 +219,8 @@ artifacts:
 
   - id: ARCH-R1
     type: design-decision
+    status: implemented
+    satisfies: [RENDER-REQ-002]
     title: Port-aware layout
     description: >
       Graph nodes gain explicit ports with side placement, direction
@@ -239,6 +241,8 @@ artifacts:
 
   - id: ARCH-R2
     type: design-decision
+    status: implemented
+    satisfies: [RENDER-REQ-001]
     title: Orthogonal edge routing
     description: >
       A visibility-graph router with obstacle avoidance replaces bezier
@@ -259,6 +263,8 @@ artifacts:
 
   - id: ARCH-R3
     type: design-decision
+    status: implemented
+    satisfies: [RENDER-REQ-003]
     title: Interactive HTML wrapper
     description: >
       A self-contained HTML file with embedded JavaScript provides
@@ -281,6 +287,8 @@ artifacts:
 
   - id: ARCH-R4
     type: design-decision
+    status: implemented
+    satisfies: [RENDER-REQ-004]
     title: GLSP-inspired separation
     description: >
       Layout computation (GraphLayout) is separated from rendering
@@ -302,3 +310,15 @@ artifacts:
         target: RENDER-REQ-004
       - type: satisfies
         target: RENDER-REQ-006
+
+  - id: ARCH-R5
+    type: design-decision
+    status: implemented
+    title: VS Code extension with native LSP and WASM rendering
+    description: >
+      VS Code extension combines native spar binary for LSP editing
+      intelligence (10 IDE features) with jco-transpiled spar-wasm
+      for in-process diagram rendering. WASI filesystem calls are
+      shimmed to read workspace files. Webview panel shows interactive
+      HTML from etch with ports, orthogonal routing, and pan/zoom.
+    tags: [architecture, tooling, vscode]
