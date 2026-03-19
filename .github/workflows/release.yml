@@ -200,9 +200,6 @@ jobs:
     name: Publish to Marketplace
     needs: [build-vsix, create-release]
     runs-on: ubuntu-latest
-    if: env.VSCE_PAT != ''
-    env:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -212,6 +209,9 @@ jobs:
         with:
           node-version: 20
       - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: env.VSCE_PAT != ''
         run: npx @vscode/vsce publish --packagePath vsix/*.vsix
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

@@ -111,54 +111,73 @@ artifacts:
   - id: RENDER-REQ-001
     type: safety-requirement
     title: Orthogonal edge routing
+    status: implemented
     description: >
       Edges must use orthogonal (rectilinear) routing to minimize
       visual crossings. The routing algorithm must avoid overlapping
       edges and route around component obstacles.
     hazards: [H-R1]
+    satisfies: [ARCH-R2]
+    verified-by: [VAL-R2]
 
   - id: RENDER-REQ-002
     type: safety-requirement
     title: Visible ports with directional indicators
+    status: implemented
     description: >
       Ports must be rendered as visible elements on component
       boundaries with directional indicators (arrows for in/out/in-out)
       and type-based coloring (distinct colors for data, event, event
       data, bus access, etc.).
     hazards: [H-R2]
+    satisfies: [ARCH-R1]
+    verified-by: [VAL-R3]
 
   - id: RENDER-REQ-003
     type: safety-requirement
     title: Interactive HTML with zoom/pan/minimap/search
+    status: partial
     description: >
       The interactive HTML output must support zoom, pan, a minimap
       for orientation in large models, and text search to locate
-      components by name.
+      components by name. Phase 3a (zoom/pan/selection) is implemented;
+      Phase 3b (minimap/search) is deferred.
     hazards: [H-R3]
+    satisfies: [ARCH-R3]
+    verified-by: [VAL-R4]
 
   - id: RENDER-REQ-004
     type: safety-requirement
     title: Deterministic layout
+    status: implemented
     description: >
       Layout must be deterministic — the same AADL model must always
       produce the same rendered layout. No randomized placement or
       non-deterministic ordering.
     hazards: [H-R4]
+    satisfies: [ARCH-R4]
+    verified-by: [VAL-R1]
 
   - id: RENDER-REQ-005
     type: safety-requirement
     title: Selection and group highlighting
+    status: implemented
     description: >
       Interactive output must support selecting a component or
       connection and highlighting its connected neighbors, ports,
       and edges to isolate subsystems for focused review.
     hazards: [H-R5]
+    satisfies: [ARCH-R3]
+    verified-by: [VAL-R4]
 
   - id: RENDER-REQ-006
     type: safety-requirement
     title: Semantic zoom
+    status: implemented
     description: >
       At overview zoom levels, rendering must reduce visual clutter
       by collapsing internal details and showing only component
       boundaries and inter-component connections.
     hazards: [H-R3]
+    satisfies: [ARCH-R4]
+    verified-by: [VAL-R5]
