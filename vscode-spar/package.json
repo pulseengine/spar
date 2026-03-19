@@ -70,12 +70,17 @@
   "devDependencies": {
     "@types/vscode": "^1.100.0",
     "@types/node": "^22",
+    "@types/mocha": "^10",
+    "@vscode/test-electron": "^2.4.0",
+    "mocha": "^10",
+    "glob": "^11",
     "typescript": "^5.9.0",
     "esbuild": "^0.25.0"
   },
   "scripts": {
     "compile": "tsc -b",
     "watch": "tsc -b -w",
+    "test": "node ./out/test/runTest.js",
     "package": "npx @vscode/vsce package",
     "esbuild": "node ./bin/esbuild.js"
   }
