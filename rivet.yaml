@@ -1,6 +1,6 @@
 project:
   name: spar
-  version: "0.2.0"
+  version: "0.2.2"
   description: >
     AADL v2.2 toolchain — parser, HIR, analyses, LSP, WASM.
     Tracks requirements derived from SAE AS5506C, architecture decisions,
