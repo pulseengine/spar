@@ -209,10 +209,12 @@ jobs:
         with:
           node-version: 20
       - name: Publish to VS Code Marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        if: env.VSCE_PAT != ''
-        run: npx @vscode/vsce publish --packagePath vsix/*.vsix
+        run: |
+          if [ -n "$VSCE_PAT" ]; then
+            npx @vscode/vsce publish --packagePath vsix/*.vsix
+          else
+            echo "VSCE_PAT not set, skipping marketplace publish"
+          fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
