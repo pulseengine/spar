@@ -3,13 +3,13 @@
   "displayName": "AADL (spar)",
   "description": "AADL v2.2 language support with live architecture visualization",
   "publisher": "pulseengine",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/pulseengine/spar"
   },
-  "icon": "icon.svg",
+  "icon": "icon.png",
   "galleryBanner": {
     "color": "#1e1e2e",
     "theme": "dark"
@@ -83,6 +83,7 @@
     "esbuild": "^0.25.0"
   },
   "scripts": {
+    "vscode:prepublish": "npm run compile",
     "compile": "tsc -b",
     "watch": "tsc -b -w",
     "test": "node ./out/test/runTest.js",

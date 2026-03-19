@@ -1,7 +1,8 @@
-src/
-node_modules/
-scripts/
+src/**
+node_modules/**
+scripts/**
 .gitignore
-*.ts
-!out/**/*.js
 tsconfig.json
+tsconfig.tsbuildinfo
+**/*.ts
+!out/**
