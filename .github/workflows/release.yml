@@ -12,9 +12,35 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ── Version consistency check ──────────────────────────────────────────
+  check-versions:
+    name: Verify version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check tag matches Cargo.toml and package.json
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          VSIX_VERSION=$(node -p "require('./vscode-spar/package.json').version")
+          echo "tag=$TAG_VERSION cargo=$CARGO_VERSION vsix=$VSIX_VERSION"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) does not match Cargo.toml ($CARGO_VERSION)"
+            exit 1
+          fi
+          if [ "$TAG_VERSION" != "$VSIX_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) does not match package.json ($VSIX_VERSION)"
+            exit 1
+          fi
+          echo "All versions match: $TAG_VERSION"
+
   # ── Cross-platform binary builds ──────────────────────────────────────
   build-binaries:
     name: Build ${{ matrix.target }}
+    needs: [check-versions]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -234,7 +260,7 @@ jobs:
       - name: Collect assets
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) -exec mv {} release/ \;
           ls -la release/
 
       - name: Generate checksums
