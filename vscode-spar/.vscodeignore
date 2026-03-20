@@ -2,7 +2,7 @@ src/**
 node_modules/**
 scripts/**
 .gitignore
+*.ts
+!out/**
 tsconfig.json
 tsconfig.tsbuildinfo
-**/*.ts
-!out/**

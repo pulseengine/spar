@@ -3,7 +3,7 @@
   "displayName": "AADL (spar)",
   "description": "AADL v2.2 language support with live architecture visualization",
   "publisher": "pulseengine",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,14 +15,17 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "Programming Languages",
     "Visualization"
   ],
   "activationEvents": [
-    "onLanguage:aadl"
+    "onLanguage:aadl",
+    "onCommand:spar.showDiagram",
+    "onCommand:spar.selectRoot",
+    "workspaceContains:**/*.aadl"
   ],
   "main": "./out/extension",
   "contributes": {
@@ -73,7 +76,7 @@
     "vscode-languageclient": "^9.0.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.100.0",
+    "@types/vscode": "^1.85.0",
     "@types/node": "^22",
     "@types/mocha": "^10",
     "@vscode/test-electron": "^2.4.0",
@@ -83,11 +86,11 @@
     "esbuild": "^0.25.0"
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run esbuild -- --production",
     "compile": "tsc -b",
+    "esbuild": "node ./bin/esbuild.js",
     "watch": "tsc -b -w",
     "test": "node ./out/test/runTest.js",
-    "package": "npx @vscode/vsce package",
-    "esbuild": "node ./bin/esbuild.js"
+    "package": "npx @vscode/vsce package"
   }
 }

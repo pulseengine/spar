@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { execFileSync } from 'child_process';
 import {
   LanguageClient,
@@ -6,12 +8,15 @@ import {
   ServerOptions,
   TransportKind,
 } from 'vscode-languageclient/node';
+import { VirtualFs, buildWasiImports } from './wasi-shim';
 
 let client: LanguageClient | undefined;
 let diagramPanel: vscode.WebviewPanel | undefined;
 let rootClassifier: string | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
+let wasmRenderer: any = undefined;
+let virtualFs: VirtualFs | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   // --- Commands (register FIRST, before anything that can fail) ---
@@ -28,8 +33,12 @@ export async function activate(context: vscode.ExtensionContext) {
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
-  // --- LSP Client (may fail if binary not found — must not break commands) ---
-  const sparPath = findSparBinary();
+  // --- WASM renderer disabled for now (WASI shim needs more work) ---
+  // TODO: Enable once WASI filesystem shim is complete
+  // try { await initWasmRenderer(context); } catch {}
+
+  // --- LSP Client ---
+  const sparPath = findSparBinary(context);
   if (sparPath) {
     try {
       const serverOptions: ServerOptions = {
@@ -52,17 +61,6 @@ export async function activate(context: vscode.ExtensionContext) {
       const msg = err instanceof Error ? err.message : String(err);
       vscode.window.showWarningMessage(`spar LSP failed to start: ${msg}`);
     }
-  } else {
-    const action = await vscode.window.showWarningMessage(
-      'spar binary not found. LSP features require the spar CLI.',
-      'Download spar',
-      'Set Path',
-    );
-    if (action === 'Download spar') {
-      vscode.env.openExternal(vscode.Uri.parse('https://github.com/pulseengine/spar/releases/latest'));
-    } else if (action === 'Set Path') {
-      vscode.commands.executeCommand('workbench.action.openSettings', 'spar.binaryPath');
-    }
   }
 
   // --- Re-render on save ---
@@ -84,14 +82,59 @@ export function deactivate() {
   return client?.stop();
 }
 
-// --- Binary discovery (execFileSync — safe, no shell injection) ---
+// --- WASM Renderer ---
 
-function findSparBinary(): string | undefined {
+async function initWasmRenderer(context: vscode.ExtensionContext) {
+  const wasmDir = path.join(context.extensionPath, 'assets', 'wasm');
+  const jsPath = path.join(wasmDir, 'spar_wasm.js');
+
+  if (!fs.existsSync(jsPath)) {
+    console.log('spar WASM: no assets at', wasmDir);
+    return;
+  }
+
+  virtualFs = new VirtualFs();
+  const imports = buildWasiImports(virtualFs);
+
+  // Load the CJS-converted jco module (converted by scripts/convert-esm-to-cjs.js)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const wasmModule = require(jsPath);
+  console.log('spar WASM: module loaded, instantiate type:', typeof wasmModule.instantiate);
+
+  // getCoreModule callback: loads .core.wasm files by name
+  const getCoreModule = async (name: string) => {
+    const wasmPath = path.join(wasmDir, name);
+    console.log('spar WASM: loading core module:', name);
+    const bytes = fs.readFileSync(wasmPath);
+    return WebAssembly.compile(bytes);
+  };
+
+  console.log('spar WASM: calling instantiate...');
+  const instance = await wasmModule.instantiate(getCoreModule, imports);
+  console.log('spar WASM: instantiate returned, keys:', instance ? Object.keys(instance) : 'null');
+  wasmRenderer = instance?.renderer ?? instance?.['pulseengine:rivet/renderer@0.1.0'];
+  console.log('spar WASM renderer:', wasmRenderer ? 'initialized' : 'FAILED');
+}
+
+// --- Binary discovery ---
+
+function findSparBinary(context: vscode.ExtensionContext): string | undefined {
   const configured = vscode.workspace.getConfiguration('spar').get<string>('binaryPath');
   if (configured && configured.length > 0) return configured;
 
+  // Prefer bundled binary (guaranteed correct version)
+  const binaryName = process.platform === 'win32' ? 'spar.exe' : 'spar';
+  const bundled = path.join(context.extensionPath, 'bin', binaryName);
+  if (fs.existsSync(bundled)) {
+    console.log('spar: using bundled binary at', bundled);
+    return bundled;
+  }
+
+  // Fall back to PATH
   try {
-    return execFileSync('which', ['spar'], { encoding: 'utf8' }).trim();
+    const found = execFileSync('which', ['spar'], { encoding: 'utf8' }).trim();
+    console.log('spar: using PATH binary at', found);
+    return found;
   } catch {
     return undefined;
   }
@@ -107,9 +150,7 @@ function showDiagram(context: vscode.ExtensionContext) {
 
   if (!rootClassifier) {
     selectRoot(context).then(() => {
-      if (rootClassifier) {
-        showDiagram(context);
-      }
+      if (rootClassifier) showDiagram(context);
     });
     return;
   }
@@ -128,37 +169,51 @@ function showDiagram(context: vscode.ExtensionContext) {
 async function renderDiagram(_context: vscode.ExtensionContext) {
   if (!diagramPanel || !rootClassifier) return;
 
-  const sparPath = findSparBinary();
-  if (!sparPath) {
-    diagramPanel.webview.html = errorHtml(
-      'spar binary not found',
-      'Install spar from <a href="https://github.com/pulseengine/spar/releases/latest">GitHub Releases</a> or set <code>spar.binaryPath</code> in settings.'
-    );
-    return;
-  }
+  diagramPanel.webview.html = loadingHtml(rootClassifier);
 
   try {
+    // Collect all .aadl files
     const files = await vscode.workspace.findFiles('**/*.aadl');
     if (files.length === 0) {
       diagramPanel.webview.html = errorHtml('No .aadl files found', 'Open a workspace containing AADL files.');
       return;
     }
 
-    diagramPanel.webview.html = loadingHtml(rootClassifier);
+    console.log('renderDiagram: wasmRenderer=', !!wasmRenderer, 'virtualFs=', !!virtualFs);
+    if (wasmRenderer && virtualFs) {
+      // --- WASM path (preferred) ---
+      virtualFs.clear();
+      for (const file of files) {
+        const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === file.toString());
+        const content = doc
+          ? doc.getText()
+          : Buffer.from(await vscode.workspace.fs.readFile(file)).toString('utf8');
+        const name = path.basename(file.fsPath);
+        virtualFs.setFile(name, content);
+      }
 
-    const filePaths = files.map((f) => f.fsPath);
+      const html = wasmRenderer.render(rootClassifier, []);
+      diagramPanel.webview.html = html;
+      diagramPanel.title = `AADL: ${rootClassifier}`;
+    } else {
+      // --- Fallback: spar binary ---
+      const sparPath = findSparBinary(_context);
+      if (!sparPath) {
+        diagramPanel.webview.html = errorHtml(
+          'No renderer available',
+          'WASM assets not found and spar binary not on PATH.\n\nDownload spar from GitHub Releases.'
+        );
+        return;
+      }
 
-    // execFileSync is safe — no shell injection, arguments are array elements
-    const html = execFileSync(sparPath, [
-      'render', '--root', rootClassifier, '--format', 'html', ...filePaths,
-    ], {
-      encoding: 'utf8',
-      timeout: 30000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+      const filePaths = files.map(f => f.fsPath);
+      const html = execFileSync(sparPath, [
+        'render', '--root', rootClassifier, '--format', 'html', ...filePaths,
+      ], { encoding: 'utf8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
 
-    diagramPanel.webview.html = html;
-    diagramPanel.title = `AADL: ${rootClassifier}`;
+      diagramPanel.webview.html = html;
+      diagramPanel.title = `AADL: ${rootClassifier}`;
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     diagramPanel.webview.html = errorHtml('Render failed', message);
@@ -198,9 +253,7 @@ async function selectRoot(context: vscode.ExtensionContext) {
     rootClassifier = picked;
     await context.workspaceState.update('spar.lastRoot', rootClassifier);
     updateStatusBar();
-    if (diagramPanel) {
-      renderDiagram(context);
-    }
+    if (diagramPanel) renderDiagram(context);
   }
 }
 
@@ -234,28 +287,22 @@ function updateStatusBar() {
 // --- HTML templates ---
 
 function loadingHtml(root: string): string {
-  return `<!DOCTYPE html>
-<html><head><style>
+  const e = root.replace(/</g, '&lt;');
+  return `<!DOCTYPE html><html><head><style>
 body{background:#1e1e2e;color:#cdd6f4;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh}
-.loader{text-align:center}
 .spinner{width:40px;height:40px;border:3px solid #313244;border-top:3px solid #89b4fa;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 1em}
 @keyframes spin{to{transform:rotate(360deg)}}
-</style></head><body><div class="loader">
-<div class="spinner"></div>
-<p>Rendering ${root.replace(/</g, '&lt;')}...</p>
-</div></body></html>`;
+</style></head><body><div style="text-align:center"><div class="spinner"></div><p>Rendering ${e}...</p></div></body></html>`;
 }
 
 function errorHtml(title: string, detail: string): string {
-  return `<!DOCTYPE html>
-<html><head><style>
+  const t = title.replace(/</g, '&lt;');
+  const d = detail.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<!DOCTYPE html><html><head><style>
 body{background:#1e1e2e;color:#cdd6f4;font-family:system-ui;padding:2em}
-h2{color:#f38ba8}
-pre{background:#313244;padding:1em;border-radius:8px;white-space:pre-wrap;overflow-x:auto}
-a{color:#89b4fa}code{background:#313244;padding:2px 6px;border-radius:4px}
-</style></head><body>
-<h2>${title.replace(/</g, '&lt;')}</h2>
-<pre>${detail.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+h2{color:#f38ba8}pre{background:#313244;padding:1em;border-radius:8px;white-space:pre-wrap;overflow-x:auto}
+a{color:#89b4fa}
+</style></head><body><h2>${t}</h2><pre>${d}</pre>
 <p><a href="https://github.com/pulseengine/spar/releases/latest">Download latest spar release</a></p>
 </body></html>`;
 }

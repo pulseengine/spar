@@ -136,7 +136,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 [[package]]
 name = "etch"
 version = "0.2.0-dev"
-source = "git+https://github.com/pulseengine/rivet.git?rev=73f4055#73f40553173781112551dee1d4fc38c083943da2"
+source = "git+https://github.com/pulseengine/rivet.git?rev=d80b36b#d80b36b09bf95a79b2a613dbf48cd25dd9328a53"
 dependencies = [
  "petgraph 0.7.1",
 ]
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "spar"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "etch",
  "lsp-server",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.1",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "rowan",
  "salsa",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "salsa",
  "serde",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "la-arena",
  "rowan",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "spar-parser"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "expect-test",
  "rowan",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "spar-render"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "etch",
  "la-arena",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "spar-syntax"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "expect-test",
  "rowan",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "spar-transform"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "la-arena",
  "serde",
@@ -739,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "spar-wasm"
-version = "0.1.0"
+version = "0.2.3"
 dependencies = [
  "etch",
  "la-arena",
