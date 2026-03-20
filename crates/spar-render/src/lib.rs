@@ -100,12 +100,12 @@ pub struct RenderOptions {
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
-            node_width: 180.0,
-            node_height: 50.0,
-            rank_separation: 80.0,
+            node_width: 220.0,
+            node_height: 60.0,
+            rank_separation: 70.0,
             node_separation: 40.0,
-            container_padding: 20.0,
-            container_header: 30.0,
+            container_padding: 30.0,
+            container_header: 40.0,
             interactive: false,
             base_url: None,
             highlight: None,
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn default_render_options() {
         let opts = RenderOptions::default();
-        assert_eq!(opts.node_width, 180.0);
+        assert_eq!(opts.node_width, 220.0);
         assert!(!opts.interactive);
     }
 
