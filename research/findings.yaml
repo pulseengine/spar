@@ -172,6 +172,133 @@ artifacts:
       limitations: closed-source, expensive, heuristic only
       differentiation: spar is open-source, provides exact solutions, WASM-deployable
 
+  - id: COMP-ELLIDISS
+    type: competitive-analysis
+    title: Ellidiss STOOD + AADL Inspector — commercial AADL IDE
+    description: >
+      Commercial AADL development environment with graphical editor, code
+      generation (Ada/C via Ocarina), real-time scheduling simulation
+      (MARZHIN), security rules checker, and AADL v2.3 support. Includes
+      syntax-highlighting VS Code extension.
+    fields:
+      tool-name: STOOD / AADL Inspector
+      tool-url: https://www.ellidiss.fr
+      vendor: Ellidiss Technologies
+      tool-status: commercial
+      approach: IDE with integrated analysis and code generation
+      constraints-handled: [timing, scheduling, security, code-generation]
+      global-optimal: false
+      limitations: >
+        Commercial license, no WASM, no deployment optimization, no
+        incremental computation, VS Code extension is syntax-only
+      differentiation: >
+        spar has incremental computation (salsa), WASM deployment,
+        deployment solver with bin-packing, assertion engine, SARIF CI
+        integration, and rivet lifecycle traceability. Ellidiss has code
+        generation and MARZHIN scheduling simulation that spar lacks.
+
+  - id: COMP-CHEDDAR
+    type: competitive-analysis
+    title: Cheddar — real-time scheduling simulator
+    description: >
+      Open-source real-time scheduling analyzer from Lab-STICC. Supports
+      RM, DM, EDF, LLF, MUF, Round-Robin, ARINC 653, hierarchical, and
+      global multiprocessor scheduling. Generates timeline visualizations.
+      AADL integration via CheddarADL or OSATE plugin.
+    fields:
+      tool-name: Cheddar
+      tool-url: http://beru.univ-brest.fr/cheddar/
+      vendor: Lab-STICC / Univ. Brest
+      tool-status: active
+      approach: scheduling simulation with timeline visualization
+      constraints-handled: [scheduling, timing, arinc653, multiprocessor]
+      global-optimal: false
+      limitations: >
+        Ada/GNAT-based (not Rust), no deployment optimization, no
+        incremental computation, limited to scheduling analysis
+      differentiation: >
+        spar has broader analysis (27 passes beyond scheduling), WASM,
+        deployment solver. Cheddar has richer scheduling simulation with
+        timeline visualization and more scheduling policies. Future:
+        spar could integrate Cheddar-style timeline output.
+
+  - id: COMP-TASTE
+    type: competitive-analysis
+    title: TASTE/Ocarina — ESA AADL toolchain
+    description: >
+      ESA's complete AADL toolchain. Ocarina processes AADL models for
+      code generation (C, Ada), Petri net generation, scheduling analysis
+      (via MAST/Cheddar), WCET analysis, and constraint checking (REAL
+      language). TASTE adds graphical IDE, ASN.1 data modeling, and
+      multi-language behavior (SDL, SCADE, Simulink). Used on real ESA
+      missions (IXV, ERGO).
+    fields:
+      tool-name: TASTE / Ocarina
+      tool-url: https://taste.tuxfamily.org
+      vendor: ESA / Telecom ParisTech
+      tool-status: maintained
+      approach: model-driven code generation + deployment
+      constraints-handled: [timing, scheduling, code-generation, deployment, wcet]
+      global-optimal: false
+      limitations: >
+        Eclipse-based and heavyweight. Ocarina development slowed.
+        No WASM deployment. No incremental computation. Ada codebase.
+        Limited multicore support.
+      differentiation: >
+        spar is modern Rust, WASM-deployable, incrementally computed,
+        lighter weight, easier to qualify under DO-330. TASTE has code
+        generation and mission heritage that spar lacks. SpaceWire
+        protocol in spar's virtual bus library bridges the gap.
+
+  - id: COMP-APP4MC
+    type: competitive-analysis
+    title: Eclipse App4MC — AUTOSAR timing and mapping
+    description: >
+      Eclipse-based tool for AUTOSAR timing analysis and runnable-to-task
+      mapping. Uses AMALTHEA data model. Includes partitioning and mapping
+      algorithms. Used by BMW, Daimler, VW.
+    fields:
+      tool-name: App4MC / Amalthea
+      tool-url: https://eclipse.dev/app4mc/
+      vendor: Eclipse Foundation (Robert Bosch GmbH)
+      tool-status: active
+      approach: heuristic partitioning + timing analysis
+      constraints-handled: [timing, scheduling, autosar-mapping, safety]
+      global-optimal: false
+      limitations: >
+        AUTOSAR-specific (AMALTHEA model, not AADL). Eclipse/Java.
+        Heuristic only — no optimality guarantees.
+      differentiation: >
+        spar uses AADL (cross-domain standard), provides exact solver
+        path, WASM deployment, rivet traceability. App4MC has deeper
+        AUTOSAR integration and industry adoption.
+
+  - id: COMP-AGREE-RESOLUTE
+    type: competitive-analysis
+    title: OSATE AGREE/Resolute — formal property checking
+    description: >
+      OSATE plugins for formal verification. AGREE provides assume-guarantee
+      compositional verification using Lustre/JKind model checker. Resolute
+      provides a claim-based verification language for architecture-level
+      properties. Both operate on AADL instance models.
+    fields:
+      tool-name: AGREE + Resolute
+      tool-url: https://github.com/loonwerks/AGREE
+      vendor: Collins Aerospace / Loonwerks
+      tool-status: maintained
+      approach: model checking (AGREE) + claim language (Resolute)
+      constraints-handled: [formal-verification, safety-properties, architecture-claims]
+      global-optimal: false
+      limitations: >
+        OSATE/Eclipse-only. AGREE requires Lustre specifications.
+        Resolute is AADL-annex-based (not standalone). JKind model
+        checker can be slow on large models.
+      differentiation: >
+        spar's assertion engine provides lightweight Resolute-like
+        checking with rowan CST, usable in CI via spar verify.
+        AGREE's model checking is deeper but heavier. Future: spar
+        could integrate with Lean4 proofs for formal guarantees.
+
   # ── Patent Findings ────────────────────────────────────────────────
 
   - id: PAT-COSYN

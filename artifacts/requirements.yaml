@@ -691,4 +691,68 @@ artifacts:
     status: planned
     tags: [solver, security, v040]
 
+  # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
+
+  - id: REQ-CODEGEN-001
+    type: requirement
+    title: Code skeleton generation (Ada/C/Rust)
+    description: >
+      Generate deployable code skeletons from AADL component implementations.
+      Thread bodies as task entry points with correct scheduling attributes.
+      Port connections as typed communication stubs. Data types as structs.
+      Targets: Ada (aerospace), C (embedded), Rust (modern). Ellidiss and
+      TASTE both offer this — it's the #1 competitive gap.
+    status: planned
+    tags: [codegen, competitive-gap, v040]
+
+  - id: REQ-TIMELINE-001
+    type: requirement
+    title: Scheduling timeline visualization
+    description: >
+      Generate timeline diagrams showing thread execution over time on each
+      processor. Visualize preemption, blocking, response times, deadline
+      margins. Cheddar and Ellidiss MARZHIN offer this — spar has static
+      RMA/RTA but no temporal visualization. Output as SVG/HTML with
+      interactive zoom.
+    status: planned
+    tags: [visualization, scheduling, competitive-gap, v040]
+
+  - id: REQ-SECURITY-001
+    type: requirement
+    title: Security rules analysis
+    description: >
+      Check security properties on connections and components: encryption
+      requirements on cross-zone connections, authentication on control
+      interfaces, secure boot chain verification, trust boundary validation.
+      Ellidiss has a security rules checker; OSATE has none. Maps to
+      IEC 62443 zones/conduits and ISO 21434 threat analysis.
+    status: planned
+    tags: [security, competitive-gap, v040]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-009
+
+  - id: REQ-RESOLUTE-001
+    type: requirement
+    title: Architecture claim language (Resolute-lite)
+    description: >
+      Extend the assertion engine to support Resolute-style architecture
+      claims: hierarchical claim decomposition, evidence linking, and
+      reusable claim libraries. Currently spar verify has flat assertions;
+      Resolute supports claim trees with sub-claims and computed evidence.
+    status: planned
+    tags: [verification, competitive-gap, v040]
+
+  - id: REQ-BIDIRECTIONAL-001
+    type: requirement
+    title: Bidirectional diagram editing
+    description: >
+      Allow editing the architecture via the diagram (add components,
+      draw connections, change properties) with changes propagated back
+      to AADL source via rowan CST. Currently spar renders read-only
+      diagrams. OSATE graphical editor and Ellidiss STOOD both support
+      bidirectional editing.
+    status: planned
+    tags: [rendering, editing, competitive-gap, v050]
+
   # Research findings tracked separately in research/findings.yaml
