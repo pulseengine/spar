@@ -755,4 +755,49 @@ artifacts:
     status: planned
     tags: [rendering, editing, competitive-gap, v050]
 
+  # ── Interoperability Requirements (v0.5.0+) ────────────────────────
+
+  - id: REQ-INTEROP-001
+    type: requirement
+    title: SysML v2 textual notation import/export
+    description: >
+      Parse SysML v2 textual grammar and transform to/from AADL via
+      spar-transform. Blocks → components, constraint definitions →
+      assertions, interfaces → feature groups. Makes spar the deployment
+      verification backend for SysML v2-based system design.
+    status: planned
+    tags: [transform, sysml, interop, v050]
+
+  - id: REQ-INTEROP-002
+    type: requirement
+    title: ReqIF import for requirements interchange
+    description: >
+      Import OMG ReqIF XML into rivet artifacts. Bridges enterprise ALM
+      tools (DOORS, Jama, Polarion) with spar's architecture verification.
+      Requirements flow into rivet, trace to AADL components via spar verify.
+    status: planned
+    tags: [interop, requirements, v040]
+
+  - id: REQ-INTEROP-003
+    type: requirement
+    title: Capella/ARCADIA to AADL bridge
+    description: >
+      Import Capella XMI models into AADL. Physical Architecture → system
+      implementations, Functional Chains → end-to-end flows, Components →
+      AADL components. Lighter than the N7 Space Capella-to-TASTE bridge
+      (no Eclipse dependency).
+    status: planned
+    tags: [interop, capella, bridge, v050]
+
+  - id: REQ-INTEROP-004
+    type: requirement
+    title: AUTOSAR ARXML import
+    description: >
+      Import AUTOSAR Adaptive/Classic ARXML into AADL. Execution Manifests
+      → process/thread bindings, Service Instance Manifests → connections,
+      Machine Manifests → processor configurations. Enables spar analysis
+      on existing AUTOSAR models without manual AADL modeling.
+    status: planned
+    tags: [interop, autosar, bridge, v050]
+
   # Research findings tracked separately in research/findings.yaml
