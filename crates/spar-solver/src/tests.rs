@@ -576,12 +576,7 @@ fn constraints_extract_thread_timing() {
     b.set_children(proc, vec![thr]);
 
     b.set_property(thr, "Timing_Properties", "Period", "10 ms");
-    b.set_property(
-        thr,
-        "Timing_Properties",
-        "Compute_Execution_Time",
-        "2 ms",
-    );
+    b.set_property(thr, "Timing_Properties", "Compute_Execution_Time", "2 ms");
     b.set_property(thr, "Timing_Properties", "Deadline", "5 ms");
 
     let instance = b.build(root);
@@ -636,12 +631,7 @@ fn constraints_missing_period_warns() {
     b.set_children(root, vec![proc]);
     b.set_children(proc, vec![thr]);
 
-    b.set_property(
-        thr,
-        "Timing_Properties",
-        "Compute_Execution_Time",
-        "2 ms",
-    );
+    b.set_property(thr, "Timing_Properties", "Compute_Execution_Time", "2 ms");
     // No Period set.
 
     let instance = b.build(root);
@@ -671,12 +661,7 @@ fn constraints_deadline_defaults_to_period() {
     b.set_children(proc, vec![thr]);
 
     b.set_property(thr, "Timing_Properties", "Period", "10 ms");
-    b.set_property(
-        thr,
-        "Timing_Properties",
-        "Compute_Execution_Time",
-        "2 ms",
-    );
+    b.set_property(thr, "Timing_Properties", "Compute_Execution_Time", "2 ms");
     // No Deadline set — should default to Period.
 
     let instance = b.build(root);
@@ -722,12 +707,7 @@ fn constraints_extract_binding() {
     b.set_children(proc, vec![thr]);
 
     b.set_property(thr, "Timing_Properties", "Period", "10 ms");
-    b.set_property(
-        thr,
-        "Timing_Properties",
-        "Compute_Execution_Time",
-        "2 ms",
-    );
+    b.set_property(thr, "Timing_Properties", "Compute_Execution_Time", "2 ms");
     b.set_property(
         thr,
         "Deployment_Properties",
@@ -764,22 +744,33 @@ fn constraints_sorted_deterministically() {
     // that would clutter the assertion.
     for &thr in &[z, a, m] {
         b.set_property(thr, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            thr,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "1 ms",
-        );
+        b.set_property(thr, "Timing_Properties", "Compute_Execution_Time", "1 ms");
     }
 
     let instance = b.build(root);
     let constraints = ModelConstraints::from_instance(&instance);
 
-    let names: Vec<&str> = constraints.threads.iter().map(|t| t.name.as_str()).collect();
+    let names: Vec<&str> = constraints
+        .threads
+        .iter()
+        .map(|t| t.name.as_str())
+        .collect();
     // Names must contain the thread name as the last segment.
-    assert!(names[0].ends_with("a_thread"), "first should be a_thread, got {}", names[0]);
-    assert!(names[1].ends_with("m_thread"), "second should be m_thread, got {}", names[1]);
-    assert!(names[2].ends_with("z_thread"), "third should be z_thread, got {}", names[2]);
+    assert!(
+        names[0].ends_with("a_thread"),
+        "first should be a_thread, got {}",
+        names[0]
+    );
+    assert!(
+        names[1].ends_with("m_thread"),
+        "second should be m_thread, got {}",
+        names[1]
+    );
+    assert!(
+        names[2].ends_with("z_thread"),
+        "third should be z_thread, got {}",
+        names[2]
+    );
 }
 
 // ── Impact analysis: deadline violation ─────────────────────────────

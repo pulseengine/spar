@@ -879,8 +879,7 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
             b.set_children(root, vec![sensor, controller, actuator]);
             b.build(root)
@@ -907,8 +906,7 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
             let monitor = b.add_component("monitor", ComponentCategory::Process, Some(root));
             b.set_children(root, vec![sensor, controller, actuator, monitor]);
@@ -920,7 +918,12 @@ mod tests {
                 .iter()
                 .filter(|c| matches!(c, StructuralChange::ComponentAdded { .. }))
                 .collect();
-            assert_eq!(added.len(), 1, "should detect exactly one addition: {:?}", changes);
+            assert_eq!(
+                added.len(),
+                1,
+                "should detect exactly one addition: {:?}",
+                changes
+            );
             match &added[0] {
                 StructuralChange::ComponentAdded { path, category } => {
                     assert_eq!(path, &vec!["root".to_string(), "monitor".to_string()]);
@@ -948,8 +951,7 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             b.set_children(root, vec![sensor, controller]);
             let head = b.build(root);
 
@@ -959,7 +961,12 @@ mod tests {
                 .iter()
                 .filter(|c| matches!(c, StructuralChange::ComponentRemoved { .. }))
                 .collect();
-            assert_eq!(removed.len(), 1, "should detect exactly one removal: {:?}", changes);
+            assert_eq!(
+                removed.len(),
+                1,
+                "should detect exactly one removal: {:?}",
+                changes
+            );
             match &removed[0] {
                 StructuralChange::ComponentRemoved { path, category } => {
                     assert_eq!(path, &vec!["root".to_string(), "actuator".to_string()]);
@@ -975,8 +982,7 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             b.add_feature("data_out", sensor);
             b.add_feature("data_in", controller);
             b.set_children(root, vec![sensor, controller]);
@@ -986,12 +992,16 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             b.add_feature("data_out", sensor);
             b.add_feature("data_in", controller);
             b.add_connection(
-                "c1", root, Some("sensor"), "data_out", Some("controller"), "data_in",
+                "c1",
+                root,
+                Some("sensor"),
+                "data_out",
+                Some("controller"),
+                "data_in",
             );
             b.set_children(root, vec![sensor, controller]);
             let head = b.build(root);
@@ -1031,12 +1041,16 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             b.add_feature("data_out", sensor);
             b.add_feature("data_in", controller);
             b.add_connection(
-                "c1", root, Some("sensor"), "data_out", Some("controller"), "data_in",
+                "c1",
+                root,
+                Some("sensor"),
+                "data_out",
+                Some("controller"),
+                "data_in",
             );
             b.set_children(root, vec![sensor, controller]);
             let base = b.build(root);
@@ -1045,8 +1059,7 @@ mod tests {
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
             let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
-            let controller =
-                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let controller = b.add_component("controller", ComponentCategory::Process, Some(root));
             b.add_feature("data_out", sensor);
             b.add_feature("data_in", controller);
             b.set_children(root, vec![sensor, controller]);
@@ -1148,8 +1161,7 @@ mod tests {
             // Head: cpu is now a VirtualProcessor (category changed)
             let mut b = TestBuilder::new();
             let root = b.add_component("root", ComponentCategory::System, None);
-            let cpu =
-                b.add_component("cpu", ComponentCategory::VirtualProcessor, Some(root));
+            let cpu = b.add_component("cpu", ComponentCategory::VirtualProcessor, Some(root));
             let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
             b.set_children(root, vec![cpu, proc]);
             let head = b.build(root);

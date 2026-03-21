@@ -3292,8 +3292,7 @@ mod tests {
 
         // Add two files: one declares a system type, the other uses it.
         let uri_a = "file:///a.aadl";
-        let content_a =
-            "package PkgA\npublic\n  system SysType\n  end SysType;\nend PkgA;\n";
+        let content_a = "package PkgA\npublic\n  system SysType\n  end SysType;\nend PkgA;\n";
         state.update_file(uri_a, content_a);
 
         let uri_b = "file:///b.aadl";

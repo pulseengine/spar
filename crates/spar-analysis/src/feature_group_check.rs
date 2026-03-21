@@ -10,7 +10,7 @@
 //! - **Feature group connection expansion tracking**: Reports diagnostics for
 //!   feature group connections that could not be expanded.
 
-use spar_hir_def::feature_group::{expand_feature_group, flip_direction, ExpandedFeature};
+use spar_hir_def::feature_group::{ExpandedFeature, expand_feature_group, flip_direction};
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::{ConnectionKind, Direction, FeatureKind, ItemTree};
 use spar_hir_def::name::Name;
@@ -233,12 +233,10 @@ pub fn check_feature_group_complements(
         };
 
         // Expand the feature groups.
-        let src_expanded = expand_component_feature_group(
-            instance, scope, src_comp_idx, &src_end.feature,
-        );
-        let dst_expanded = expand_component_feature_group(
-            instance, scope, dst_comp_idx, &dst_end.feature,
-        );
+        let src_expanded =
+            expand_component_feature_group(instance, scope, src_comp_idx, &src_end.feature);
+        let dst_expanded =
+            expand_component_feature_group(instance, scope, dst_comp_idx, &dst_end.feature);
 
         let (src_features, dst_features) = match (src_expanded, dst_expanded) {
             (Some(s), Some(d)) => (s, d),
@@ -271,9 +269,15 @@ pub fn check_feature_group_complements(
                      (source: {}, destination: {}, expected destination: {})",
                     conn.name,
                     mismatch.feature_name,
-                    mismatch.source_direction.map_or("none".to_string(), |d| d.to_string()),
-                    mismatch.destination_direction.map_or("none".to_string(), |d| d.to_string()),
-                    mismatch.source_direction.map_or("none".to_string(), |d| flip_direction(d).to_string()),
+                    mismatch
+                        .source_direction
+                        .map_or("none".to_string(), |d| d.to_string()),
+                    mismatch
+                        .destination_direction
+                        .map_or("none".to_string(), |d| d.to_string()),
+                    mismatch
+                        .source_direction
+                        .map_or("none".to_string(), |d| flip_direction(d).to_string()),
                 ),
                 path: conn_path.clone(),
                 analysis: "feature_group_check".to_string(),
@@ -295,9 +299,11 @@ fn resolve_endpoint_component(
     match subcomponent {
         Some(sub_name) => {
             let owner_comp = instance.component(owner);
-            owner_comp.children.iter().find(|&&child_idx| {
-                instance.component(child_idx).name.eq_ci(sub_name)
-            }).copied()
+            owner_comp
+                .children
+                .iter()
+                .find(|&&child_idx| instance.component(child_idx).name.eq_ci(sub_name))
+                .copied()
         }
         None => Some(owner),
     }
@@ -457,8 +463,14 @@ mod tests {
         ];
 
         let result = validate_complement(&source, &destination);
-        assert!(result.unmatched_source.is_empty(), "all features should match");
-        assert!(result.direction_mismatches.is_empty(), "directions should be complementary");
+        assert!(
+            result.unmatched_source.is_empty(),
+            "all features should match"
+        );
+        assert!(
+            result.direction_mismatches.is_empty(),
+            "directions should be complementary"
+        );
     }
 
     #[test]
@@ -477,14 +489,12 @@ mod tests {
                 group_prefix: None,
             },
         ];
-        let destination = vec![
-            ExpandedFeature {
-                name: Name::new("temp"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::In),
-                group_prefix: None,
-            },
-        ];
+        let destination = vec![ExpandedFeature {
+            name: Name::new("temp"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::In),
+            group_prefix: None,
+        }];
 
         let result = validate_complement(&source, &destination);
         assert_eq!(result.unmatched_source.len(), 1);
@@ -493,22 +503,18 @@ mod tests {
 
     #[test]
     fn complement_direction_mismatch() {
-        let source = vec![
-            ExpandedFeature {
-                name: Name::new("data"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::Out),
-                group_prefix: None,
-            },
-        ];
-        let destination = vec![
-            ExpandedFeature {
-                name: Name::new("data"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::Out), // Should be In!
-                group_prefix: None,
-            },
-        ];
+        let source = vec![ExpandedFeature {
+            name: Name::new("data"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            group_prefix: None,
+        }];
+        let destination = vec![ExpandedFeature {
+            name: Name::new("data"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out), // Should be In!
+            group_prefix: None,
+        }];
 
         let result = validate_complement(&source, &destination);
         assert!(result.unmatched_source.is_empty());
@@ -518,48 +524,46 @@ mod tests {
 
     #[test]
     fn complement_inout_matches_inout() {
-        let source = vec![
-            ExpandedFeature {
-                name: Name::new("bus"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::InOut),
-                group_prefix: None,
-            },
-        ];
-        let destination = vec![
-            ExpandedFeature {
-                name: Name::new("bus"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::InOut),
-                group_prefix: None,
-            },
-        ];
+        let source = vec![ExpandedFeature {
+            name: Name::new("bus"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::InOut),
+            group_prefix: None,
+        }];
+        let destination = vec![ExpandedFeature {
+            name: Name::new("bus"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::InOut),
+            group_prefix: None,
+        }];
 
         let result = validate_complement(&source, &destination);
-        assert!(result.direction_mismatches.is_empty(), "InOut matches InOut");
+        assert!(
+            result.direction_mismatches.is_empty(),
+            "InOut matches InOut"
+        );
     }
 
     #[test]
     fn complement_case_insensitive_matching() {
-        let source = vec![
-            ExpandedFeature {
-                name: Name::new("Temperature"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::Out),
-                group_prefix: None,
-            },
-        ];
-        let destination = vec![
-            ExpandedFeature {
-                name: Name::new("temperature"),
-                kind: FeatureKind::DataPort,
-                direction: Some(Direction::In),
-                group_prefix: None,
-            },
-        ];
+        let source = vec![ExpandedFeature {
+            name: Name::new("Temperature"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            group_prefix: None,
+        }];
+        let destination = vec![ExpandedFeature {
+            name: Name::new("temperature"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::In),
+            group_prefix: None,
+        }];
 
         let result = validate_complement(&source, &destination);
-        assert!(result.unmatched_source.is_empty(), "matching should be case-insensitive");
+        assert!(
+            result.unmatched_source.is_empty(),
+            "matching should be case-insensitive"
+        );
         assert!(result.direction_mismatches.is_empty());
     }
 
@@ -601,7 +605,11 @@ mod tests {
         });
 
         let diags = check_inverse_of_rules(&tree);
-        assert!(diags.is_empty(), "inverse_of with no features should be valid: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "inverse_of with no features should be valid: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -828,26 +836,45 @@ mod tests {
 
         // The instance should have semantic connections from FG expansion.
         // We should find individual semantic connections for "temp" and "pressure".
-        let fg_semantic: Vec<_> = instance.semantic_connections.iter()
+        let fg_semantic: Vec<_> = instance
+            .semantic_connections
+            .iter()
             .filter(|sc| sc.name.as_str().starts_with("c1."))
             .collect();
 
         assert_eq!(
-            fg_semantic.len(), 2,
+            fg_semantic.len(),
+            2,
             "feature group connection should expand into 2 individual connections, \
              got {} semantic connections: {:?}",
             fg_semantic.len(),
-            instance.semantic_connections.iter().map(|sc| sc.name.as_str()).collect::<Vec<_>>()
+            instance
+                .semantic_connections
+                .iter()
+                .map(|sc| sc.name.as_str())
+                .collect::<Vec<_>>()
         );
 
         // Check that we have connections for both temp and pressure
         let names: Vec<_> = fg_semantic.iter().map(|sc| sc.name.as_str()).collect();
-        assert!(names.contains(&"c1.temp"), "should have c1.temp: {:?}", names);
-        assert!(names.contains(&"c1.pressure"), "should have c1.pressure: {:?}", names);
+        assert!(
+            names.contains(&"c1.temp"),
+            "should have c1.temp: {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"c1.pressure"),
+            "should have c1.pressure: {:?}",
+            names
+        );
 
         // Each expanded connection should be of kind Port (since the features are DataPort)
         for sc in &fg_semantic {
-            assert_eq!(sc.kind, ConnectionKind::Port, "expanded FG connection should be Port kind");
+            assert_eq!(
+                sc.kind,
+                ConnectionKind::Port,
+                "expanded FG connection should be Port kind"
+            );
         }
     }
 
@@ -1057,13 +1084,15 @@ mod tests {
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
 
-        let unmatched: Vec<_> = diags.iter()
+        let unmatched: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("no matching"))
             .collect();
         assert_eq!(unmatched.len(), 1, "pressure should be unmatched");
         assert!(unmatched[0].message.contains("pressure"));
 
-        let mismatches: Vec<_> = diags.iter()
+        let mismatches: Vec<_> = diags
+            .iter()
             .filter(|d| d.message.contains("incompatible directions"))
             .collect();
         assert_eq!(mismatches.len(), 1, "temp should have direction mismatch");
@@ -1121,12 +1150,10 @@ mod tests {
         // Expand both and verify they are complements
         let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
 
-        let src_expanded = expand_feature_group(
-            &scope, &Name::new("P"), &Name::new("SensorOutput"), false,
-        );
-        let dst_expanded = expand_feature_group(
-            &scope, &Name::new("P"), &Name::new("SensorInput"), false,
-        );
+        let src_expanded =
+            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorOutput"), false);
+        let dst_expanded =
+            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorInput"), false);
 
         assert_eq!(src_expanded.len(), 2);
         assert_eq!(dst_expanded.len(), 2);
@@ -1134,7 +1161,10 @@ mod tests {
         // SensorOutput: temp=Out, pressure=Out
         // SensorInput (inverse): temp=In, pressure=In
         let result = validate_complement(&src_expanded, &dst_expanded);
-        assert!(result.unmatched_source.is_empty(), "inverse should match all features");
+        assert!(
+            result.unmatched_source.is_empty(),
+            "inverse should match all features"
+        );
         assert!(
             result.direction_mismatches.is_empty(),
             "inverse should have complementary directions: {:?}",
