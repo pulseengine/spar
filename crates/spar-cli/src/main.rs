@@ -706,6 +706,25 @@ fn cmd_allocate(args: &[String]) {
         // each file for each binding edit.
         let mut edits_applied = 0;
 
+        // Detect hierarchical models: if any thread is nested more than one
+        // level below the root (i.e., its parent's parent exists), bindings
+        // placed on the root implementation may be incorrect.
+        let is_hierarchical = constraints.threads.iter().any(|t| {
+            let comp = inst.component(t.idx);
+            if let Some(parent_idx) = comp.parent {
+                inst.component(parent_idx).parent.is_some()
+            } else {
+                false
+            }
+        });
+        if is_hierarchical {
+            eprintln!(
+                "warning: --apply places all bindings on the root implementation \
+                 ({}.{}). For hierarchical models, manual placement may be needed.",
+                type_name, impl_name,
+            );
+        }
+
         // Build edits from bindings (only new ones, not pre-existing)
         let binding_edits: Vec<refactor::BindingEdit> = result
             .bindings
