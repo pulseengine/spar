@@ -375,3 +375,137 @@ artifacts:
         target: RENDER-REQ-006
       - type: satisfies
         target: ARCH-R4
+
+  # ── v0.3.0 Verification Records ─────────────────────────────────────
+
+  - id: VAL-RTA-001
+    type: feature
+    status: planned
+    title: RTA response time analysis tests
+    description: >
+      Tests for Response Time Analysis covering deadline miss detection,
+      convergence of iterative WCRT computation, multi-processor thread
+      grouping, and correct handling of missing Deadline/Period properties.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- rta
+    links:
+      - type: verifies
+        target: REQ-RTA-001
+      - type: satisfies
+        target: ARCH-ANALYSIS-001
+
+  - id: VAL-BUS-001
+    type: feature
+    status: planned
+    title: Bus bandwidth utilization tests
+    description: >
+      Tests for bus bandwidth analysis covering overload detection when
+      aggregate demand exceeds capacity, normal utilization reporting,
+      and graceful handling of missing Bandwidth_Capacity properties.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- bus_bandwidth
+    links:
+      - type: verifies
+        target: REQ-BUS-001
+      - type: satisfies
+        target: ARCH-ANALYSIS-001
+
+  - id: VAL-MEMBUD-001
+    type: feature
+    status: planned
+    title: Memory budget analysis tests
+    description: >
+      Tests for memory budget analysis covering budget violations when
+      Code_Size + Data_Size exceeds Memory_Size, normal budget reporting,
+      and handling of components with partial or missing size properties.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- memory_budget
+    links:
+      - type: verifies
+        target: REQ-MEMBUD-001
+      - type: satisfies
+        target: ARCH-ANALYSIS-001
+
+  - id: VAL-WEIGHTPOWER-001
+    type: feature
+    status: planned
+    title: Weight/power aggregation tests
+    description: >
+      Tests for weight and power property aggregation up the component
+      hierarchy, verifying correct summation and capacity violation
+      detection at each level.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis -- weight_power
+    links:
+      - type: verifies
+        target: REQ-WEIGHTPOWER-001
+      - type: satisfies
+        target: ARCH-ANALYSIS-001
+
+  - id: VAL-VERIFY-001
+    type: feature
+    status: planned
+    title: Property assertion rule tests
+    description: >
+      Tests for the property assertion DSL covering passing assertions,
+      failing assertions with evidence, assertions referencing analysis
+      results, and malformed assertion syntax errors.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-cli -- verify
+    links:
+      - type: verifies
+        target: REQ-VERIFY-001
+      - type: satisfies
+        target: ARCH-VERIFY-001
+
+  - id: VAL-DIFF-001
+    type: feature
+    status: planned
+    title: Structural diff and analysis impact tests
+    description: >
+      Tests for git-aware structural diff covering component addition/
+      removal detection, property change detection, analysis impact
+      comparison between revisions, SARIF output format validation,
+      and three-way merge conflict detection.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-cli -- diff
+    links:
+      - type: verifies
+        target: REQ-DIFF-001
+      - type: verifies
+        target: REQ-DIFF-002
+      - type: verifies
+        target: REQ-DIFF-003
+      - type: satisfies
+        target: ARCH-DIFF-001
+
+  - id: VAL-MCP-001
+    type: feature
+    status: planned
+    title: MCP server JSON-RPC request/response tests
+    description: >
+      Tests for the MCP server covering JSON-RPC initialize handshake,
+      tool listing and invocation for analysis passes, resource listing
+      and reading for instance model elements, and error handling for
+      invalid requests.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-cli -- mcp
+    links:
+      - type: verifies
+        target: REQ-MCP-001
+      - type: satisfies
+        target: ARCH-MCP-001
