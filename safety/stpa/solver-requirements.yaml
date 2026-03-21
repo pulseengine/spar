@@ -1,0 +1,608 @@
+# STPA-Derived Safety Requirements for the Deployment Solver
+#
+# These requirements are derived from the STPA analysis (solver-analysis.yaml).
+# Each addresses one or more Unsafe Control Actions (UCAs) by specifying
+# concrete implementation requirements for the deployment solver.
+#
+# Traceability:
+#   solver-analysis.yaml → solver-requirements.yaml
+#   (hazards/UCAs)          (what to implement)
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Layer 0: Scheduling Safety Requirements (UCA-S1 through UCA-S3)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-001
+    type: requirement
+    title: Integer arithmetic for schedulability computations
+    description: >
+      All schedulability computations (utilization, response time,
+      deadline comparison) must use integer arithmetic with picosecond
+      precision. Floating-point arithmetic is prohibited for feasibility
+      boundary comparisons. If floating-point is used internally (e.g.,
+      for LP relaxations), the final feasibility check must use
+      conservative integer rounding (ceiling for utilization, floor
+      for available time).
+    status: not-implemented
+    tags: [safety, solver, scheduling, numeric, stpa]
+    traces-to: [CC-S1, CC-S20]
+    mitigates: [H-S2, H-S12]
+
+  - id: SOLVER-REQ-002
+    type: requirement
+    title: RTA must use worst-case execution time
+    description: >
+      The response-time analysis must extract the maximum (worst-case)
+      value from Compute_Execution_Time range properties. When a range
+      is specified (e.g., "1 ms .. 5 ms"), the RTA must use 5 ms.
+      When a single value is specified, it is treated as both best-case
+      and worst-case. The RTA must emit a diagnostic if only a single
+      value is provided, advising the engineer to specify a range.
+    status: not-implemented
+    tags: [safety, solver, scheduling, stpa]
+    traces-to: [CC-S1]
+    mitigates: [H-S2]
+
+  - id: SOLVER-REQ-003
+    type: requirement
+    title: RTA must include blocking and overhead terms
+    description: >
+      The response-time analysis must include blocking time from shared
+      resources (Priority_Ceiling_Protocol or highest-locker analysis),
+      interrupt overhead, and context-switch time. When these properties
+      are not specified in the model, the RTA must emit a warning that
+      overhead is not accounted for and that the schedulability result
+      is optimistic.
+    status: not-implemented
+    tags: [safety, solver, scheduling, overhead, stpa]
+    traces-to: [CC-S1]
+    mitigates: [H-S2]
+
+  - id: SOLVER-REQ-004
+    type: requirement
+    title: Schedulability check for every populated processor
+    description: >
+      After the solver's allocation phase completes, RTA must be
+      performed for every processor that has at least one thread
+      bound to it. The solver must maintain a set of "dirty" processors
+      (whose thread sets have changed) and re-run RTA for each dirty
+      processor before reporting feasibility. An integration test must
+      verify that no populated processor is skipped.
+    status: not-implemented
+    tags: [safety, solver, scheduling, completeness, stpa]
+    traces-to: [CC-S2]
+    mitigates: [H-S2]
+
+  - id: SOLVER-REQ-005
+    type: requirement
+    title: Schedulability re-check after every incremental allocation
+    description: >
+      When Layer 1 incrementally adds a process to a processor, it must
+      re-run full RTA (not a quick utilization estimate) for the updated
+      thread set on that processor before proceeding to the next allocation.
+      The quick utilization test may be used as a pre-filter to reject
+      obviously infeasible allocations, but the full RTA must confirm
+      feasibility before the allocation is committed.
+    status: not-implemented
+    tags: [safety, solver, scheduling, incremental, stpa]
+    traces-to: [CC-S2]
+    mitigates: [H-S2, H-S9]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Layer 1: Allocation Safety Requirements (UCA-S4 through UCA-S6)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-006
+    type: requirement
+    title: Complete resource accounting for allocations
+    description: >
+      The solver's resource accounting must include memory (Code_Size +
+      Data_Size + Stack_Size for all threads and processes), CPU
+      utilization (sum of WCET/Period for all threads), weight, and
+      power consumption. Shared memory regions must be counted once per
+      processor they reside on, not once per process that accesses them.
+      An integration test must verify resource sums against hand-calculated
+      values for a reference model.
+    status: not-implemented
+    tags: [safety, solver, allocation, resources, stpa]
+    traces-to: [CC-S3]
+    mitigates: [H-S10]
+
+  - id: SOLVER-REQ-007
+    type: requirement
+    title: Affinity and anti-affinity constraint enforcement
+    description: >
+      The solver must read and enforce Allowed_Processor_Binding (affinity)
+      and Not_Collocated (anti-affinity) properties as hard constraints.
+      Violations must cause the allocation to be rejected, not penalized
+      as soft constraints. When an allocation violates an affinity
+      constraint, the diagnostic must name the constraint, the component,
+      and the conflicting binding.
+    status: not-implemented
+    tags: [safety, solver, allocation, constraints, stpa]
+    traces-to: [CC-S4]
+    mitigates: [H-S3]
+
+  - id: SOLVER-REQ-008
+    type: requirement
+    title: Redundancy-aware allocation
+    description: >
+      When components are annotated with redundancy properties (e.g.,
+      replicated channels, hot standby pairs), the solver must enforce
+      physical separation — redundant components must be allocated to
+      different processors, different buses, and (when specified)
+      different cabinets. The solver must detect redundancy annotations
+      and apply anti-affinity automatically.
+    status: not-implemented
+    tags: [safety, solver, allocation, redundancy, stpa]
+    traces-to: [CC-S4]
+    mitigates: [H-S3]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Layer 2: Bus Binding Safety Requirements (UCA-S7 through UCA-S9)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-009
+    type: requirement
+    title: Aggregate bus bandwidth validation
+    description: >
+      When assigning connections to buses, the solver must track aggregate
+      bandwidth utilization for each bus. After each connection assignment,
+      the total data rate of all connections on the bus must be compared
+      against the bus's Bandwidth_Capacity property. If aggregate
+      utilization exceeds capacity, the assignment must be rejected.
+      The bandwidth check must account for protocol overhead (framing,
+      headers, retransmission).
+    status: not-implemented
+    tags: [safety, solver, bus-binding, bandwidth, stpa]
+    traces-to: [CC-S5]
+    mitigates: [H-S4]
+
+  - id: SOLVER-REQ-010
+    type: requirement
+    title: Security zone enforcement for protocol selection
+    description: >
+      When a connection crosses a security zone boundary, the solver
+      must select only protocols that provide the required security
+      properties (encryption level, authentication mechanism, integrity
+      check). The virtual bus library must declare security properties.
+      Connections without a matching secure protocol must produce an
+      error diagnostic, not be silently assigned to an insecure protocol.
+    status: not-implemented
+    tags: [safety, solver, bus-binding, security, stpa]
+    traces-to: [CC-S6]
+    mitigates: [H-S4]
+
+  - id: SOLVER-REQ-011
+    type: requirement
+    title: Complete cross-processor connection enumeration
+    description: >
+      The solver must enumerate all connections whose source and
+      destination components are transitively bound to different
+      processors. The enumeration must trace through process containment
+      hierarchy (not just check direct parent binding). Every
+      cross-processor connection must receive a bus binding. A
+      completeness check must verify that no cross-processor connection
+      is unbound after Layer 2 completes.
+    status: not-implemented
+    tags: [safety, solver, bus-binding, completeness, stpa]
+    traces-to: [CC-S7]
+    mitigates: [H-S4]
+
+  - id: SOLVER-REQ-012
+    type: requirement
+    title: Worst-case protocol property usage
+    description: >
+      The virtual bus library must provide separate worst-case and
+      nominal values for latency, bandwidth, and jitter. The solver
+      must use worst-case values for all constraint feasibility checks.
+      Nominal values may be used only for optimization objective
+      evaluation (not for constraint satisfaction). Library entries
+      without worst-case values must produce a warning diagnostic.
+    status: not-implemented
+    tags: [safety, solver, bus-binding, protocol-library, stpa]
+    traces-to: [CC-S19]
+    mitigates: [H-S4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Layer 3: Global Optimization Safety Requirements (UCA-S10 through S12)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-013
+    type: requirement
+    title: Complete E2E latency path computation
+    description: >
+      End-to-end latency computation must include all path segments:
+      thread worst-case execution time, scheduling delay (response time
+      minus execution time), bus transmission delay (from protocol
+      worst-case latency), protocol overhead (framing, encryption),
+      context-switch time, and queuing delay. Each segment must be
+      individually reported in the latency breakdown. Missing segments
+      must produce a diagnostic.
+    status: not-implemented
+    tags: [safety, solver, e2e-latency, stpa]
+    traces-to: [CC-S8]
+    mitigates: [H-S1, H-S9]
+
+  - id: SOLVER-REQ-014
+    type: requirement
+    title: Safety level co-location requires verified containment
+    description: >
+      When the solver co-locates components of different safety levels
+      (ASIL/DAL/SIL) on the same processor, it must verify that: (a) an
+      ARINC 653 partition schedule exists, (b) health monitoring is
+      configured with appropriate actions (partition restart, process
+      stop), (c) time and space partitioning is specified. If any
+      containment mechanism is missing, the co-location must be rejected
+      with an error diagnostic identifying the missing mechanism.
+    status: not-implemented
+    tags: [safety, solver, mixed-criticality, containment, stpa]
+    traces-to: [CC-S9]
+    mitigates: [H-S3]
+
+  - id: SOLVER-REQ-015
+    type: requirement
+    title: Global validation after hierarchical composition
+    description: >
+      After all solver layers (0-3) produce their results, a mandatory
+      global validation pass must verify: (a) all E2E flow latency
+      budgets are satisfied, (b) total resource budgets (memory, weight,
+      power) across all zones are within limits, (c) safety level
+      decomposition is complete and correct, (d) all cross-processor
+      connections have bus bindings, (e) all processors pass
+      schedulability. The global validation must use the composed
+      solution (not individual layer results) and must report all
+      violations, not just the first one found.
+    status: not-implemented
+    tags: [safety, solver, global-validation, composition, stpa]
+    traces-to: [CC-S10]
+    mitigates: [H-S9]
+
+  - id: SOLVER-REQ-016
+    type: requirement
+    title: Layer backtracking on global constraint violation
+    description: >
+      When global validation (SOLVER-REQ-015) detects a constraint
+      violation, the solver must support backtracking to revise earlier
+      layer decisions. At minimum, the solver must report which layer's
+      decision caused the violation and suggest a relaxation (e.g.,
+      "E2E latency violated: consider fewer bus hops by co-locating
+      processes X and Y"). Full automated backtracking is desirable
+      but manual-with-guidance is acceptable for the initial
+      implementation.
+    status: not-implemented
+    tags: [safety, solver, backtracking, global-validation, stpa]
+    traces-to: [CC-S10]
+    mitigates: [H-S9]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Source Rewriter Safety Requirements (UCA-S13 through UCA-S16)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-017
+    type: requirement
+    title: Fully-qualified CST node targeting for rewrites
+    description: >
+      The source rewriter must identify target CST nodes using fully-
+      qualified component paths (package::type.impl → subcomponent
+      chain). Substring or partial name matching is prohibited. The
+      rewriter must resolve the path through the salsa database (not
+      by text search on the CST). When the path does not resolve to
+      exactly one CST node, the rewriter must emit an error and skip
+      the rewrite for that component.
+    status: not-implemented
+    tags: [safety, solver, rewriter, targeting, stpa]
+    traces-to: [CC-S11]
+    mitigates: [H-S5]
+
+  - id: SOLVER-REQ-018
+    type: requirement
+    title: Existing property preservation during rewrite
+    description: >
+      The source rewriter must not delete, modify, or reorder existing
+      property associations. New binding properties must be inserted at
+      a deterministic position: after the last existing property in the
+      component's properties block, or in a new properties block if
+      none exists. Before insertion, the rewriter must check whether the
+      property already exists; if so, it must update the value in place
+      rather than inserting a duplicate.
+    status: not-implemented
+    tags: [safety, solver, rewriter, preservation, stpa]
+    traces-to: [CC-S12]
+    mitigates: [H-S5]
+
+  - id: SOLVER-REQ-019
+    type: requirement
+    title: Mandatory parse-after-rewrite validation
+    description: >
+      After all source rewrites are applied, the solver must re-parse
+      every modified AADL file and verify zero new syntax errors. If
+      any modified file has parse errors, all rewrites must be rolled
+      back (original files restored) and an error diagnostic must
+      identify which file has the syntax error and the approximate
+      insertion location.
+    status: not-implemented
+    tags: [safety, solver, rewriter, validation, stpa]
+    traces-to: [CC-S13]
+    mitigates: [H-S5]
+
+  - id: SOLVER-REQ-020
+    type: requirement
+    title: Atomic multi-file rewrite
+    description: >
+      When the binding configuration requires changes to multiple AADL
+      files, all changes must be applied atomically. The rewriter must
+      identify all files needing modification before writing any file.
+      If any file cannot be written (permissions, disk error), no files
+      must be modified. The rewriter should write to temporary files
+      first, then rename all atomically.
+    status: not-implemented
+    tags: [safety, solver, rewriter, atomicity, stpa]
+    traces-to: [CC-S14]
+    mitigates: [H-S5]
+
+  - id: SOLVER-REQ-021
+    type: requirement
+    title: Diff-reviewable rewrite output
+    description: >
+      The solver must produce a human-readable diff of all source changes
+      before applying them. The diff must be presented to the engineer
+      for review (in CLI mode, printed to stdout; in LSP mode, shown
+      as a workspace edit). The engineer must have the option to accept
+      or reject the changes. No source modification without explicit
+      engineer approval.
+    status: not-implemented
+    tags: [safety, solver, rewriter, review, stpa]
+    traces-to: [CC-S14]
+    mitigates: [H-S5, H-S4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Certificate Safety Requirements (UCA-S17 through UCA-S19)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-022
+    type: requirement
+    title: Optimality certificate with independent verification data
+    description: >
+      Every solver run must produce a certificate containing: (a) the
+      objective function definition (what was optimized), (b) the primal
+      objective value (the solution's cost), (c) the dual bound (lower
+      bound from relaxation), (d) the optimality gap as a percentage,
+      (e) solver parameters (time limit, tolerance, algorithm). The
+      certificate must contain sufficient data for an independent
+      verifier to reproduce the gap calculation without running the
+      solver.
+    status: not-implemented
+    tags: [safety, solver, certificate, verification, stpa]
+    traces-to: [CC-S15]
+    mitigates: [H-S6]
+
+  - id: SOLVER-REQ-023
+    type: requirement
+    title: Independent certificate verifier
+    description: >
+      An independent verifier (separate code path from the solver) must
+      check optimality certificates. The verifier must: (a) recompute
+      the gap from primal and dual values, (b) verify that the primal
+      solution satisfies all constraints by re-evaluating constraints
+      against the reported binding, (c) flag any inconsistency. The
+      verifier must be included in the CI test suite.
+    status: not-implemented
+    tags: [safety, solver, certificate, independent-check, stpa]
+    traces-to: [CC-S15]
+    mitigates: [H-S6]
+
+  - id: SOLVER-REQ-024
+    type: requirement
+    title: Certificate required for all solution types
+    description: >
+      Certificates must be generated for all solver outcomes: optimal
+      solutions (gap = 0), bounded-gap solutions (gap > 0 with dual
+      bound), heuristic solutions (gap = unknown, certificate must
+      state "no optimality proof — heuristic solution"), and infeasible
+      results (certificate must include the infeasibility proof or
+      state which constraint set is unsatisfiable). Solutions without
+      certificates must not be reported to the user.
+    status: not-implemented
+    tags: [safety, solver, certificate, completeness, stpa]
+    traces-to: [CC-S16]
+    mitigates: [H-S6]
+
+  - id: SOLVER-REQ-025
+    type: requirement
+    title: Certificate objective must match solver objective
+    description: >
+      The certificate generator must receive the objective function
+      definition from the solver (not maintain its own copy). An
+      assertion must verify that the certificate's objective function
+      hash matches the solver's objective function hash. Mismatched
+      objectives must produce an internal error, not a misleading
+      certificate.
+    status: not-implemented
+    tags: [safety, solver, certificate, consistency, stpa]
+    traces-to: [CC-S15]
+    mitigates: [H-S6]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Post-Solve Validation Requirements (UCA-S20, UCA-S21)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-026
+    type: requirement
+    title: Mandatory post-solve re-analysis
+    description: >
+      After the solver produces a binding and (optionally) rewrites
+      AADL source files, the solver must re-run the full analysis suite
+      (all 21+ analysis passes) on the resulting model. The post-solve
+      analysis must use the rewritten model (not the pre-solve model).
+      Any analysis diagnostic at error severity must cause the solver to
+      report failure, even if the solver's internal validation passed.
+    status: not-implemented
+    tags: [safety, solver, validation, post-solve, stpa]
+    traces-to: [CC-S17]
+    mitigates: [H-S1, H-S8]
+
+  - id: SOLVER-REQ-027
+    type: requirement
+    title: Fresh salsa computation for post-solve validation
+    description: >
+      Post-solve validation must ensure salsa cache coherence by either:
+      (a) calling set_file_text for every modified file to invalidate
+      affected queries, or (b) creating a new salsa database for the
+      post-solve analysis. Option (a) is preferred for incremental
+      efficiency. A test must verify that post-solve analysis reads
+      rewritten property values (not stale pre-rewrite values) by
+      checking that a solver-inserted binding property appears in the
+      post-solve analysis output.
+    status: not-implemented
+    tags: [safety, solver, validation, cache-coherence, stpa]
+    traces-to: [CC-S17]
+    mitigates: [H-S8]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Model Completeness Requirements (UCA-S22)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-028
+    type: requirement
+    title: Pre-solve model completeness check
+    description: >
+      Before running the solver, a completeness check must verify that
+      all components have the properties required for deployment
+      optimization: threads must have Period and Compute_Execution_Time,
+      processes must have Memory_Size (or component-level Code_Size +
+      Data_Size + Stack_Size), processors must have resource capacities,
+      buses must have Bandwidth. Missing required properties must
+      produce error diagnostics. The solver must refuse to run until
+      all required properties are present or the engineer explicitly
+      acknowledges the gaps.
+    status: not-implemented
+    tags: [safety, solver, completeness, pre-solve, stpa]
+    traces-to: [CC-S18]
+    mitigates: [H-S11]
+
+  - id: SOLVER-REQ-029
+    type: requirement
+    title: No silent default assumptions
+    description: >
+      The solver must not assume default values for missing properties.
+      Specifically: missing Compute_Execution_Time must not default to
+      zero, missing Memory_Size must not default to zero, missing
+      Bandwidth must not default to infinity, missing safety level
+      must not default to "no safety requirement". Each missing property
+      must produce an explicit diagnostic. If the engineer provides an
+      explicit default via a solver configuration flag, the solver must
+      emit a warning listing all properties using the override default.
+    status: not-implemented
+    tags: [safety, solver, completeness, defaults, stpa]
+    traces-to: [CC-S18]
+    mitigates: [H-S11]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Determinism Requirements (H-S7)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-030
+    type: requirement
+    title: Deterministic solver output
+    description: >
+      The solver must produce identical results given identical inputs.
+      All internal data structures must use deterministic iteration
+      order (BTreeMap, IndexMap, or sorted Vec — not HashMap/HashSet).
+      Tie-breaking for equal-cost solutions must use a deterministic
+      criterion (lexicographic ordering of component names). A CI test
+      must run the solver 10 times on the same input and verify
+      identical output.
+    status: not-implemented
+    tags: [safety, solver, determinism, stpa]
+    traces-to: [CC-S7]
+    mitigates: [H-S7]
+
+  - id: SOLVER-REQ-031
+    type: requirement
+    title: Solution persistence for reproducibility
+    description: >
+      The solver must persist its output binding configuration as a
+      structured artifact (JSON or YAML) alongside the optimality
+      certificate. This artifact must contain: the complete binding
+      map, the protocol selection for each connection, the resource
+      utilization for each processor/bus/memory, and a hash of the
+      input model. Re-running the solver with the same input hash
+      must produce the same binding or report a divergence diagnostic.
+    status: not-implemented
+    tags: [safety, solver, reproducibility, persistence, stpa]
+    traces-to: [CC-S7]
+    mitigates: [H-S7]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Virtual Bus Library Requirements (UCA-S23)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-032
+    type: requirement
+    title: Protocol library validation
+    description: >
+      The virtual bus library must be validated against known protocol
+      specifications before use. Each library entry must include a
+      reference to the protocol standard (e.g., ARINC 664 Part 7 for
+      AFDX, MIL-STD-1553 for 1553). A library validation tool must
+      check that declared properties (bandwidth, latency, frame size)
+      are within the ranges specified by the referenced standard.
+      Library entries without standard references must produce a warning.
+    status: not-implemented
+    tags: [safety, solver, protocol-library, validation, stpa]
+    traces-to: [CC-S19]
+    mitigates: [H-S4]
+
+  - id: SOLVER-REQ-033
+    type: requirement
+    title: Sensitivity analysis for protocol properties
+    description: >
+      The solver must perform sensitivity analysis on protocol property
+      values. After producing a binding, the solver must perturb
+      protocol latencies by +25% and re-check E2E flow deadlines. If
+      any flow deadline is violated under perturbation, the solver must
+      emit a warning identifying the sensitive flows and the margin.
+      This accounts for virtual bus library inaccuracies and real-world
+      protocol variability.
+    status: not-implemented
+    tags: [safety, solver, sensitivity, protocol-library, stpa]
+    traces-to: [CC-S19]
+    mitigates: [H-S4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Cross-Cutting Solver Safety Requirements
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SOLVER-REQ-034
+    type: requirement
+    title: Solver constraint model documentation
+    description: >
+      The solver must maintain documentation of its constraint model:
+      which AADL properties map to which solver variables, which
+      constraints are hard vs soft, which approximations are used at
+      each layer, and what properties the virtual bus library must
+      provide. This documentation must be updated when the constraint
+      model changes and must be reviewable by safety engineers.
+    status: not-implemented
+    tags: [safety, solver, documentation, stpa]
+    traces-to: [SC-S1]
+    mitigates: [H-S1]
+
+  - id: SOLVER-REQ-035
+    type: requirement
+    title: Solver diagnostic summary report
+    description: >
+      The solver must produce a summary report after each run containing:
+      (a) number of components allocated, (b) number of connections
+      bound, (c) resource utilization per processor/bus/memory as
+      percentage of capacity, (d) list of all constraints checked with
+      pass/fail status, (e) the optimality certificate, (f) list of
+      all diagnostics by severity. The report must be both human-readable
+      (text) and machine-parseable (JSON).
+    status: not-implemented
+    tags: [safety, solver, reporting, stpa]
+    traces-to: [SC-S1]
+    mitigates: [H-S1, H-S5, H-S6]

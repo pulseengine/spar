@@ -26,6 +26,8 @@ sources:
     format: generic-yaml
   - path: safety/stpa/validation.yaml
     format: generic-yaml
+  - path: safety/stpa/solver-requirements.yaml
+    format: generic-yaml
 
 docs:
   - docs
