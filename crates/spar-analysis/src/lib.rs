@@ -17,6 +17,7 @@
 pub mod arinc653;
 pub mod binding_check;
 pub mod binding_rules;
+pub mod bus_bandwidth;
 pub mod category_check;
 pub mod classifier_match;
 pub mod completeness;
@@ -30,6 +31,7 @@ pub mod flow_rules;
 pub mod hierarchy;
 pub mod latency;
 pub mod legality;
+pub mod memory_budget;
 pub mod modal;
 pub mod modal_rules;
 pub mod mode_check;
@@ -39,9 +41,11 @@ pub mod naming_rules;
 pub mod property_accessors;
 pub mod property_rules;
 pub mod resource_budget;
+pub mod rta;
 pub mod scheduling;
 pub mod scheduling_verified;
 pub mod subcomponent_rules;
+pub mod weight_power;
 pub mod wrpc_binding;
 
 use serde::Serialize;
@@ -100,12 +104,14 @@ impl AnalysisRunner {
     /// connectivity, hierarchy, completeness, direction rules, classifier
     /// matching, binding checks, binding rules, flow checks, flow rules,
     /// mode checks, mode rules, modal rules, property rules, connection
-    /// rules, subcomponent rules, scheduling, latency, resource budget,
-    /// EMV2 fault-tree, ARINC 653, and wRPC binding.
+    /// rules, subcomponent rules, scheduling, response-time analysis,
+    /// latency, memory budget, resource budget, EMV2 fault-tree,
+    /// ARINC 653, wRPC binding, weight/power aggregation, and bus bandwidth.
     pub fn register_all(&mut self) {
         use arinc653::Arinc653Analysis;
         use binding_check::BindingCheckAnalysis;
         use binding_rules::BindingRuleAnalysis;
+        use bus_bandwidth::BusBandwidthAnalysis;
         use classifier_match::ClassifierMatchAnalysis;
         use completeness::CompletenessAnalysis;
         use connection_rules::ConnectionRuleAnalysis;
@@ -116,14 +122,17 @@ impl AnalysisRunner {
         use flow_rules::FlowRuleAnalysis;
         use hierarchy::HierarchyAnalysis;
         use latency::LatencyAnalysis;
+        use memory_budget::MemoryBudgetAnalysis;
         use modal_rules::ModalRuleAnalysis;
         use mode_check::ModeCheckAnalysis;
         use mode_reachability::ModeReachabilityAnalysis;
         use mode_rules::ModeRuleAnalysis;
         use property_rules::PropertyRuleAnalysis;
         use resource_budget::ResourceBudgetAnalysis;
+        use rta::RtaAnalysis;
         use scheduling::SchedulingAnalysis;
         use subcomponent_rules::SubcomponentRuleAnalysis;
+        use weight_power::WeightPowerAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
 
         self.register(Box::new(ConnectivityAnalysis));
@@ -142,12 +151,16 @@ impl AnalysisRunner {
         self.register(Box::new(ConnectionRuleAnalysis));
         self.register(Box::new(SubcomponentRuleAnalysis));
         self.register(Box::new(SchedulingAnalysis));
+        self.register(Box::new(RtaAnalysis));
         self.register(Box::new(LatencyAnalysis));
+        self.register(Box::new(MemoryBudgetAnalysis));
         self.register(Box::new(ResourceBudgetAnalysis));
         self.register(Box::new(Emv2Analysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
         self.register(Box::new(ModeReachabilityAnalysis));
+        self.register(Box::new(WeightPowerAnalysis));
+        self.register(Box::new(BusBandwidthAnalysis));
     }
 
     /// Return the number of registered analyses.

@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "spar"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "etch",
  "lsp-server",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.1",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "rowan",
  "salsa",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "salsa",
  "serde",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "la-arena",
  "rowan",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "spar-parser"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "expect-test",
  "rowan",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "spar-render"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "etch",
  "la-arena",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "spar-syntax"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "expect-test",
  "rowan",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "spar-transform"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "la-arena",
  "serde",
@@ -739,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "spar-wasm"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "etch",
  "la-arena",
