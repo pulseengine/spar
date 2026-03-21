@@ -477,3 +477,131 @@ artifacts:
         target: REQ-QUERY-001
       - type: traces-to
         target: REQ-MCP-001
+
+  # ── Deployment Solver Architecture ─────────────────────────────────────
+
+  - id: ARCH-SOLVER-001
+    type: design-decision
+    status: planned
+    title: "NDS-layered hierarchical solving"
+    description: >
+      Deployment optimization uses 4 hierarchical layers analogous to NDS
+      navigation. Layer 0 (Component): RTA/scheduling per processor — already
+      implemented. Layer 1 (Cluster): bin-packing with schedulability
+      validation — FFD/BFD heuristics in pure Rust. Layer 2 (System): topology
+      graph extraction + bus binding optimization — petgraph-based. Layer 3
+      (Global): cross-zone E2E + safety decomposition — exact solver
+      (MILP/CP-SAT). Local solutions compose into globally valid configurations.
+    fields:
+      rationale: >
+        Hierarchical decomposition makes NP-hard problem tractable. Each layer
+        is independently testable. Layers 0-2 use pure Rust (WASM-compatible).
+        Layer 3 optionally uses native solver backends.
+    tags: [architecture, solver, v040]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-004
+
+  - id: ARCH-SOLVER-002
+    type: design-decision
+    status: planned
+    title: Topology graph as petgraph
+    description: >
+      Hardware topology extracted from AADL instance model into a petgraph
+      DiGraph. Processor nodes with capacity properties (CPU budget, memory,
+      scheduling policy). Bus edges with bandwidth and protocol properties.
+      Memory nodes with size properties. Used as the target graph for
+      deployment allocation.
+    fields:
+      rationale: >
+        petgraph already used in spar-render for layout. Reusing it for
+        topology avoids new dependencies. Graph operations (shortest path,
+        connectivity, coloring) are well-supported.
+    tags: [architecture, solver, v030]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-001
+
+  - id: ARCH-SOLVER-003
+    type: design-decision
+    status: planned
+    title: Virtual bus library as AADL package
+    description: >
+      Communication protocols modeled as AADL virtual bus types in a standard
+      library package. Each virtual bus type has properties: latency_overhead,
+      bandwidth_capacity, max_payload, security_profile, bus_type_compatibility.
+      Solver selects from compatible virtual buses when binding connections to
+      physical buses.
+    fields:
+      rationale: >
+        Using native AADL virtual bus types means the protocol catalog is part
+        of the model, not external configuration. Engineers can extend the
+        library with custom protocols. spar's existing property system reads
+        the values.
+    tags: [architecture, solver, v030]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-002
+
+  - id: ARCH-SOLVER-004
+    type: design-decision
+    status: planned
+    title: Pure Rust bin-packing for Layer 1
+    description: >
+      Process-to-processor allocation uses First-Fit Decreasing (FFD) and
+      Best-Fit Decreasing (BFD) bin-packing heuristics with schedulability
+      validation. After tentative allocation, RTA is run per processor. If
+      schedulability fails, the process is tried on the next candidate. Pure
+      Rust, no external dependencies, WASM-compatible.
+    fields:
+      rationale: >
+        FFD gives 11/9-approximation to optimal. Combined with RTA validation,
+        this catches infeasible allocations immediately. Pure Rust ensures WASM
+        compatibility. Good enough for 80% of practical use cases; exact solver
+        handles the rest.
+    tags: [architecture, solver, v040]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-004
+
+  - id: ARCH-SOLVER-005
+    type: design-decision
+    status: planned
+    title: Source rewriting via rowan CST
+    description: >
+      Solver output applied by constructing TextEdit operations on the AADL
+      source via rowan CST. Insert/update Actual_Processor_Binding,
+      Actual_Memory_Binding, Actual_Connection_Binding properties. Preserves
+      formatting, comments, and all other source content. Changes validated
+      incrementally via salsa before committing.
+    fields:
+      rationale: >
+        Rowan's lossless CST preserves every byte of source. LSP code actions
+        already use this pattern (4 existing quick-fixes). Salsa ensures only
+        affected analyses re-run after changes.
+    tags: [architecture, solver, v030]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-007
+
+  - id: ARCH-SOLVER-006
+    type: design-decision
+    status: planned
+    title: "Dual solver strategy (WASM heuristic + native exact)"
+    description: >
+      Two solver tiers. Tier 1 (WASM): pure Rust heuristics (FFD/BFD
+      bin-packing, NSGA-II for Pareto). Runs in browser and CLI. Tier 2
+      (native): exact solver via good_lp+HiGHS (MILP) or cp_sat (CP-SAT).
+      Returns optimality certificates. CLI only due to C++ dependencies.
+    fields:
+      rationale: >
+        WASM compatibility for Tier 1 enables browser-based architecture
+        exploration. Tier 2 provides formal guarantees for certification
+        evidence. Engineers start with Tier 1 for interactive exploration,
+        then run Tier 2 for final optimization.
+    tags: [architecture, solver, v040]
+    links:
+      - type: satisfies
+        target: REQ-SOLVER-005
+      - type: satisfies
+        target: REQ-SOLVER-006

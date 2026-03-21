@@ -1,0 +1,1420 @@
+# STPA Analysis — Spar Deployment Solver
+#
+# Analyzes the deployment configuration solver as a safety-relevant subsystem.
+# The solver takes software architecture, hardware topology, communication protocol
+# catalogs, and constraints (timing, safety levels, security zones, resource budgets)
+# and produces:
+#   - Software-to-hardware binding configurations
+#   - Communication protocol selections for cross-processor connections
+#   - Source rewrites (AADL property changes via rowan CST)
+#   - Optimality certificates (proof the solution is optimal or within bounded gap)
+#
+# The solver uses NDS-layered hierarchical decomposition:
+#   Layer 0: Thread scheduling within one processor (RTA)
+#   Layer 1: Process-to-processor allocation (bin packing + schedulability)
+#   Layer 2: Subsystem-to-zone topology optimization (bus binding)
+#   Layer 3: Global cross-zone optimization (E2E latency, safety decomposition)
+#
+# An incorrect solver result could lead to a deployed system that misses deadlines,
+# violates safety isolation, exceeds resource budgets, or suffers communication
+# failures. Unlike analysis passes (which detect defects), the solver actively
+# MODIFIES the architecture — raising the stakes significantly.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1a: Losses
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: L-S1
+    type: loss
+    title: Deployed system misses timing deadlines
+    description: >
+      The solver produces a binding configuration that appears schedulable
+      but causes deadline misses at runtime. Threads bound to overloaded
+      processors miss their periods. End-to-end flows exceed latency
+      budgets. The deployed avionics system fails timing certification or,
+      worse, exhibits timing failures in operation.
+    stakeholders: [system-integrator, certification-authority, end-user]
+
+  - id: L-S2
+    type: loss
+    title: Safety isolation violated in deployment
+    description: >
+      The solver co-locates software of different safety levels (e.g., DAL-A
+      and DAL-D) on the same processor or bus without adequate fault
+      containment. A failure in the lower-criticality component can
+      propagate to the higher-criticality component, defeating the safety
+      architecture's redundancy assumptions.
+    stakeholders: [safety-reviewer, certification-authority, end-user]
+
+  - id: L-S3
+    type: loss
+    title: Communication failure in deployed system
+    description: >
+      The solver selects a communication protocol for cross-processor
+      connections that has insufficient bandwidth, excessive latency,
+      or missing security properties for the data flows it carries.
+      Messages are dropped, delayed, or corrupted at runtime.
+    stakeholders: [system-integrator, end-user]
+
+  - id: L-S4
+    type: loss
+    title: AADL model corrupted by source rewrite
+    description: >
+      The solver's source rewrite (inserting/modifying AADL property
+      associations via rowan CST editing) corrupts the model — breaking
+      syntax, inserting properties on the wrong component, removing existing
+      properties, or producing whitespace/formatting that confuses
+      downstream tools. The engineer's source of truth is damaged.
+    stakeholders: [system-integrator, project-manager]
+
+  - id: L-S5
+    type: loss
+    title: False confidence from invalid optimality certificate
+    description: >
+      The solver claims its solution is optimal (or within a bounded gap)
+      when it is not. Engineers accept a suboptimal deployment without
+      exploring better alternatives. In the worst case, a feasible
+      solution exists but the solver claims infeasibility, blocking
+      the project.
+    stakeholders: [system-integrator, project-manager, certification-authority]
+
+  - id: L-S6
+    type: loss
+    title: Resource exhaustion in deployed system
+    description: >
+      The solver produces a binding that exceeds physical resource limits
+      (memory, weight, power) because the solver's resource accounting
+      was incorrect. The hardware cannot host the assigned software, leading
+      to out-of-memory failures, overweight assemblies, or power budget
+      violations discovered late in integration.
+    stakeholders: [system-integrator, certification-authority]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1b: Hazards
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: H-S1
+    type: hazard
+    title: Solver marks infeasible binding as feasible
+    description: >
+      The solver produces a binding configuration that violates one or
+      more constraints (timing, resource, safety) but reports it as
+      feasible. The constraint violation is not detected by the solver's
+      internal validation.
+    severity: critical
+    losses: [L-S1, L-S2, L-S3, L-S6]
+
+  - id: H-S2
+    type: hazard
+    title: Solver misses timing constraint
+    description: >
+      The solver's schedulability check (RTA at Layer 0) uses incorrect
+      parameters, wrong algorithm assumptions, or insufficient precision,
+      causing it to accept a task set that is actually unschedulable.
+    severity: critical
+    losses: [L-S1]
+
+  - id: H-S3
+    type: hazard
+    title: Solver allows mixed-criticality without fault containment
+    description: >
+      The solver co-locates components of different ASIL/DAL/SIL levels
+      on the same processor or bus without verifying that adequate fault
+      containment mechanisms (partitioning, time/space isolation, health
+      monitoring) are specified in the model.
+    severity: critical
+    losses: [L-S2]
+
+  - id: H-S4
+    type: hazard
+    title: Solver selects protocol with insufficient properties
+    description: >
+      The solver selects a virtual bus (communication protocol) for a
+      cross-processor connection whose actual properties (bandwidth,
+      latency, security, reliability) are worse than what the virtual
+      bus library claims. Or the solver matches a protocol that meets
+      nominal requirements but not worst-case.
+    severity: critical
+    losses: [L-S3]
+
+  - id: H-S5
+    type: hazard
+    title: Source rewrite corrupts AADL model
+    description: >
+      The solver's rowan CST editing inserts a property association in
+      the wrong component scope, deletes an existing property, produces
+      invalid syntax, or corrupts whitespace/comments in the source file.
+    severity: critical
+    losses: [L-S4]
+
+  - id: H-S6
+    type: hazard
+    title: Optimality certificate is invalid
+    description: >
+      The solver's optimality proof (e.g., dual bound from LP relaxation,
+      branch-and-bound gap) contains an error — either in the mathematical
+      formulation, the numerical computation, or the gap calculation. The
+      certificate claims optimal when the solution is suboptimal, or claims
+      infeasible when a feasible solution exists.
+    severity: critical
+    losses: [L-S5]
+
+  - id: H-S7
+    type: hazard
+    title: Solver produces non-deterministic results
+    description: >
+      Given the same input model and constraints, the solver produces
+      different binding configurations on different runs (due to hash
+      map ordering, floating-point non-determinism, or randomized
+      heuristics). Engineers cannot reproduce or review results.
+    severity: marginal
+    losses: [L-S5, L-S1]
+
+  - id: H-S8
+    type: hazard
+    title: Stale analysis after source rewrite
+    description: >
+      The solver rewrites AADL source properties but the salsa
+      incremental cache is not properly invalidated. Subsequent analysis
+      passes read stale pre-rewrite values from the cache, producing
+      results that do not reflect the actual (rewritten) model.
+    severity: critical
+    losses: [L-S1, L-S4]
+
+  - id: H-S9
+    type: hazard
+    title: Hierarchical composition violates global constraint
+    description: >
+      Each solver layer produces a locally optimal solution, but the
+      composition of layers violates a global constraint. For example,
+      Layer 0 and Layer 1 individually satisfy timing, but the combined
+      allocation creates bus contention at Layer 2 that violates the
+      end-to-end latency budget at Layer 3.
+    severity: critical
+    losses: [L-S1, L-S3]
+
+  - id: H-S10
+    type: hazard
+    title: Resource accounting error
+    description: >
+      The solver's resource budget tracking (memory, weight, power)
+      uses incorrect values — missing a component's contribution,
+      double-counting shared resources, or using wrong unit conversions.
+    severity: critical
+    losses: [L-S6]
+
+  - id: H-S11
+    type: hazard
+    title: Incomplete model input causes unsound solution
+    description: >
+      The AADL model is missing properties that the solver needs
+      (e.g., no Compute_Execution_Time on a thread, no Memory_Size
+      on a process, no Bandwidth on a bus) and the solver silently
+      assumes default values or skips the constraint, producing a
+      binding that looks feasible but is incomplete.
+    severity: critical
+    losses: [L-S1, L-S3, L-S6]
+
+  - id: H-S12
+    type: hazard
+    title: Floating-point precision causes incorrect schedulability
+    description: >
+      The solver's RTA computation uses floating-point arithmetic
+      that accumulates rounding errors, causing a utilization of
+      1.0000000000001 to be reported as <= 1.0, or vice versa.
+      Boundary cases are decided by numerical noise rather than
+      actual schedulability.
+    severity: critical
+    losses: [L-S1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1c: System-Level Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SC-S1
+    type: system-constraint
+    title: Solver must not produce infeasible bindings marked feasible
+    description: >
+      Every binding configuration reported as feasible must satisfy all
+      declared constraints. A post-solve validation pass must independently
+      verify the solution against the original constraints.
+    hazards: [H-S1]
+
+  - id: SC-S2
+    type: system-constraint
+    title: Timing analysis must be conservative
+    description: >
+      The solver's schedulability analysis must be pessimistic — it must
+      never accept a task set that could miss deadlines. Approximations
+      must err on the side of rejection, not acceptance.
+    hazards: [H-S2, H-S12]
+
+  - id: SC-S3
+    type: system-constraint
+    title: Safety level separation must be enforced
+    description: >
+      The solver must not co-locate components of different safety levels
+      unless the model explicitly specifies adequate fault containment
+      (ARINC 653 partitioning, health monitoring, etc.).
+    hazards: [H-S3]
+
+  - id: SC-S4
+    type: system-constraint
+    title: Protocol selection must use worst-case properties
+    description: >
+      Protocol matching must use worst-case (not nominal) property values.
+      The virtual bus library must distinguish between nominal and
+      worst-case bounds for latency, bandwidth, and jitter.
+    hazards: [H-S4]
+
+  - id: SC-S5
+    type: system-constraint
+    title: Source rewrites must preserve model validity
+    description: >
+      After source rewriting, the modified AADL files must parse without
+      new syntax errors. All pre-existing properties and constructs must
+      be preserved. The rewrite must be invertible (diff-reviewable).
+    hazards: [H-S5]
+
+  - id: SC-S6
+    type: system-constraint
+    title: Optimality certificates must be independently verifiable
+    description: >
+      Optimality certificates must contain sufficient information for
+      an independent verifier to check the claim. The verifier must
+      be a separate code path from the solver.
+    hazards: [H-S6]
+
+  - id: SC-S7
+    type: system-constraint
+    title: Solver results must be deterministic
+    description: >
+      The solver must produce identical results given identical inputs.
+      All internal orderings must be deterministic (sorted, not hash-order).
+    hazards: [H-S7]
+
+  - id: SC-S8
+    type: system-constraint
+    title: Cache must be invalidated after source rewrite
+    description: >
+      After source rewriting, the solver must either invalidate all
+      affected salsa queries or force a full re-computation before
+      post-rewrite analysis.
+    hazards: [H-S8]
+
+  - id: SC-S9
+    type: system-constraint
+    title: Global constraints must be verified after hierarchical composition
+    description: >
+      After all solver layers complete, a global validation pass must
+      check all cross-layer constraints (E2E latency, total resource
+      budgets, safety decomposition completeness).
+    hazards: [H-S9]
+
+  - id: SC-S10
+    type: system-constraint
+    title: Missing model properties must produce diagnostics
+    description: >
+      When the solver encounters a component without required properties
+      (timing, memory, binding candidates), it must emit an error
+      diagnostic and exclude that component from optimization rather
+      than assuming a default value.
+    hazards: [H-S11]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 2: Control Structure
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CTRL-ENGINEER-S
+    type: controller
+    title: Deployment Engineer
+    controller-type: human
+    process-model:
+      - Believes the AADL model is complete with all timing/resource properties
+      - Believes the solver will find the best feasible deployment
+      - Trusts the optimality certificate as proof of solution quality
+      - Trusts that source rewrites will not break the model
+      - May not understand the solver's internal layer decomposition
+
+  - id: CTRL-SOLVER
+    type: controller
+    title: Deployment Solver (spar-solver)
+    controller-type: automated
+    process-model:
+      - Instance model is complete and all properties are correctly evaluated
+      - Hardware topology accurately represents available resources
+      - Virtual bus library properties match real protocol behavior
+      - Layer decomposition preserves global constraint satisfaction
+      - Numerical precision is sufficient for schedulability decisions
+
+  - id: CTRL-LAYER0
+    type: controller
+    title: Layer 0 — Thread Scheduler (RTA)
+    controller-type: automated
+    process-model:
+      - All threads on a processor have Period and Compute_Execution_Time
+      - Priority assignment is valid (or computed by the solver)
+      - Blocking times from shared resources are accounted for
+      - Interrupt and context-switch overhead is included
+
+  - id: CTRL-LAYER1
+    type: controller
+    title: Layer 1 — Process Allocator (bin packing)
+    controller-type: automated
+    process-model:
+      - Each process has known resource demands (CPU, memory)
+      - Each processor has known resource capacity
+      - Layer 0 schedulability is a feasibility filter for each allocation
+      - Allocation respects affinity and anti-affinity constraints
+
+  - id: CTRL-LAYER2
+    type: controller
+    title: Layer 2 — Bus Binder (topology optimization)
+    controller-type: automated
+    process-model:
+      - Cross-processor connections are identified from the instance model
+      - Virtual bus library contains valid protocol options
+      - Bus bandwidth and latency properties are accurate
+      - Protocol selection satisfies security zone requirements
+
+  - id: CTRL-LAYER3
+    type: controller
+    title: Layer 3 — Global Optimizer (E2E, safety decomposition)
+    controller-type: automated
+    process-model:
+      - Layer 0-2 solutions are locally feasible
+      - End-to-end flow paths are correctly traced through the instance model
+      - Safety level decomposition follows DO-178C/ISO 26262 rules
+      - Total resource consumption across all zones is within budget
+
+  - id: CTRL-REWRITER
+    type: controller
+    title: Source Rewriter (rowan CST editor)
+    controller-type: automated
+    process-model:
+      - CST accurately represents the source file
+      - Property insertion targets the correct component scope
+      - Existing properties are preserved during editing
+      - Whitespace and comments are preserved
+
+  - id: CTRL-CERTIFIER
+    type: controller
+    title: Certificate Generator
+    controller-type: automated
+    process-model:
+      - Mathematical formulation matches the constraint model
+      - Dual bounds are correctly computed
+      - Gap calculation is correct (upper - lower) / upper
+      - Infeasibility proofs are sound
+
+  # ── Controlled Processes ───────────────────────────────────────────────
+
+  - id: CP-BINDING
+    type: controlled-process
+    title: Deployment Binding Configuration
+    description: >
+      The solver's output — a mapping of software components to hardware
+      resources, protocol selections, and property values.
+
+  - id: CP-AADL-SOURCE
+    type: controlled-process
+    title: AADL Source Files (rewritten)
+    description: >
+      The AADL source files after the solver's rewrite pass has applied
+      the computed binding properties.
+
+  - id: CP-CERTIFICATE
+    type: controlled-process
+    title: Optimality Certificate
+    description: >
+      The mathematical proof artifact that the solution is optimal or
+      within a bounded gap of optimality.
+
+  # ── Control Actions ────────────────────────────────────────────────────
+
+  - id: CA-SOLVE
+    type: control-action
+    title: Solve deployment configuration
+    action: >
+      Compute software-to-hardware binding by running Layer 0-3 solvers
+      with constraint satisfaction and optimization.
+    source: CTRL-SOLVER
+    target: CP-BINDING
+
+  - id: CA-SCHEDULE
+    type: control-action
+    title: Check thread schedulability (Layer 0)
+    action: >
+      Perform response-time analysis for threads assigned to a processor.
+      Determines whether the assignment is schedulable under the given
+      scheduling policy.
+    source: CTRL-LAYER0
+    target: CP-BINDING
+
+  - id: CA-ALLOCATE
+    type: control-action
+    title: Allocate processes to processors (Layer 1)
+    action: >
+      Assign processes to processors using bin-packing with schedulability
+      and resource budget feasibility filters.
+    source: CTRL-LAYER1
+    target: CP-BINDING
+
+  - id: CA-BIND-BUS
+    type: control-action
+    title: Bind connections to buses and select protocols (Layer 2)
+    action: >
+      Select communication protocols from the virtual bus library for
+      cross-processor connections and bind them to physical buses.
+    source: CTRL-LAYER2
+    target: CP-BINDING
+
+  - id: CA-OPTIMIZE
+    type: control-action
+    title: Global optimization (Layer 3)
+    action: >
+      Optimize end-to-end latency, verify safety decomposition, and
+      check global resource budgets across all zones.
+    source: CTRL-LAYER3
+    target: CP-BINDING
+
+  - id: CA-REWRITE
+    type: control-action
+    title: Rewrite AADL source with binding properties
+    action: >
+      Apply computed binding configuration as AADL property associations
+      by editing the rowan CST and emitting modified source text.
+    source: CTRL-REWRITER
+    target: CP-AADL-SOURCE
+
+  - id: CA-CERTIFY
+    type: control-action
+    title: Generate optimality certificate
+    action: >
+      Produce a mathematical certificate proving the solution quality
+      (optimal, bounded gap, or infeasible with proof).
+    source: CTRL-CERTIFIER
+    target: CP-CERTIFICATE
+
+  - id: CA-VALIDATE
+    type: control-action
+    title: Post-solve validation
+    action: >
+      Re-run analysis passes on the rewritten model to verify all
+      constraints are satisfied by the solver's output.
+    source: CTRL-SOLVER
+    target: CP-BINDING
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3: Unsafe Control Actions
+  # ══════════════════════════════════════════════════════════════════════
+
+  # ── Layer 0 UCAs (Thread Scheduling) ────────────────────────────────
+
+  - id: UCA-S1
+    type: uca
+    title: RTA accepts unschedulable task set
+    uca-type: providing
+    context: >
+      Layer 0 performs response-time analysis and reports a processor
+      assignment as schedulable when the actual worst-case response time
+      exceeds the deadline for one or more threads.
+    rationale: >
+      Floating-point rounding, missing blocking time, missing interrupt
+      overhead, or wrong priority ordering could cause the RTA to
+      underestimate response times. The resulting binding will cause
+      deadline misses at runtime.
+    controller: CTRL-LAYER0
+    hazards: [H-S2, H-S12]
+
+  - id: UCA-S2
+    type: uca
+    title: RTA not performed for a processor
+    uca-type: not-providing
+    context: >
+      A processor has threads bound to it but Layer 0 does not perform
+      schedulability analysis (e.g., the processor is not recognized,
+      or the thread binding was added by a higher layer after Layer 0
+      completed).
+    rationale: >
+      Threads bound without schedulability verification may overload
+      the processor. No analysis pass will catch this if the solver
+      bypasses its own validation.
+    controller: CTRL-LAYER0
+    hazards: [H-S1, H-S2]
+
+  - id: UCA-S3
+    type: uca
+    title: RTA uses wrong execution time value
+    uca-type: providing
+    context: >
+      The RTA reads Compute_Execution_Time but uses the best-case
+      (minimum) value instead of the worst-case (maximum) value, or
+      applies the wrong unit conversion.
+    rationale: >
+      Using best-case instead of worst-case execution time causes the
+      RTA to be optimistic. Utilization appears lower than actual.
+    controller: CTRL-LAYER0
+    hazards: [H-S2]
+
+  # ── Layer 1 UCAs (Process Allocation) ──────────────────────────────
+
+  - id: UCA-S4
+    type: uca
+    title: Allocator exceeds processor capacity
+    uca-type: providing
+    context: >
+      Layer 1 assigns processes to a processor whose total resource
+      demand (CPU utilization, memory) exceeds the processor's capacity,
+      but the allocator's resource accounting misses a component or
+      uses wrong resource values.
+    rationale: >
+      Over-allocated processors will exhibit memory exhaustion, scheduling
+      failures, or both at runtime.
+    controller: CTRL-LAYER1
+    hazards: [H-S1, H-S10]
+
+  - id: UCA-S5
+    type: uca
+    title: Allocator ignores affinity constraints
+    uca-type: not-providing
+    context: >
+      The model specifies Allowed_Processor_Binding or anti-affinity
+      constraints (e.g., redundant channels must be on separate processors)
+      but the allocator does not check these constraints.
+    rationale: >
+      Violating affinity constraints can place redundant components on
+      the same processor, creating a single point of failure that defeats
+      the safety architecture.
+    controller: CTRL-LAYER1
+    hazards: [H-S1, H-S3]
+
+  - id: UCA-S6
+    type: uca
+    title: Allocator does not invoke Layer 0 for new assignment
+    uca-type: not-providing
+    context: >
+      Layer 1 adds a process to a processor but does not re-invoke
+      Layer 0 schedulability analysis with the updated thread set.
+    rationale: >
+      Each incremental allocation changes the schedulability picture.
+      Skipping re-analysis after allocation means the final binding may
+      be unschedulable even though each individual allocation appeared
+      feasible at the time.
+    controller: CTRL-LAYER1
+    hazards: [H-S2, H-S9]
+
+  # ── Layer 2 UCAs (Bus Binding / Protocol Selection) ────────────────
+
+  - id: UCA-S7
+    type: uca
+    title: Protocol selected with insufficient bandwidth
+    uca-type: providing
+    context: >
+      Layer 2 selects a virtual bus (communication protocol) for a
+      cross-processor connection but the protocol's available bandwidth
+      is less than the aggregate data rate of all connections sharing
+      the bus.
+    rationale: >
+      Message loss, increased latency, or queue overflow at runtime.
+      The solver checked bandwidth for each connection individually but
+      did not account for aggregate bus loading.
+    controller: CTRL-LAYER2
+    hazards: [H-S4]
+
+  - id: UCA-S8
+    type: uca
+    title: Protocol selected without matching security level
+    uca-type: providing
+    context: >
+      A connection carries data between security zones that require
+      encryption or authentication, but the selected protocol does not
+      provide these security properties.
+    rationale: >
+      Data in transit between security zones without adequate protection
+      violates the security architecture. The deployed system may fail
+      security certification.
+    controller: CTRL-LAYER2
+    hazards: [H-S4]
+
+  - id: UCA-S9
+    type: uca
+    title: Bus binding not performed for cross-processor connection
+    uca-type: not-providing
+    context: >
+      A connection crosses processor boundaries but is not identified
+      as needing bus binding (e.g., the connection tracing does not
+      detect the processor boundary crossing).
+    rationale: >
+      The connection has no assigned communication path. At runtime,
+      the data flow will fail silently or be routed over an uncontrolled
+      default path.
+    controller: CTRL-LAYER2
+    hazards: [H-S3, H-S4]
+
+  # ── Layer 3 UCAs (Global Optimization) ──────────────────────────────
+
+  - id: UCA-S10
+    type: uca
+    title: E2E latency check uses incomplete path
+    uca-type: providing
+    context: >
+      Layer 3 computes end-to-end latency for a flow but misses a
+      segment (e.g., a bus traversal, a protocol encapsulation delay,
+      or a thread context switch) in the path.
+    rationale: >
+      Underestimated E2E latency causes the solver to accept a
+      deployment that violates the flow's deadline. The error is
+      hidden because the incomplete path computes a shorter latency.
+    controller: CTRL-LAYER3
+    hazards: [H-S1, H-S9]
+
+  - id: UCA-S11
+    type: uca
+    title: Safety decomposition allows inadequate containment
+    uca-type: providing
+    context: >
+      Layer 3 verifies safety level decomposition but accepts
+      co-location of DAL-A and DAL-D components on a processor without
+      ARINC 653 partitioning or equivalent isolation mechanism.
+    rationale: >
+      DO-178C and ARP4754A require that higher-criticality functions
+      are protected from lower-criticality failures. Without verified
+      fault containment, the safety case is invalid.
+    controller: CTRL-LAYER3
+    hazards: [H-S3]
+
+  - id: UCA-S12
+    type: uca
+    title: Global validation not performed after layer composition
+    uca-type: not-providing
+    context: >
+      The solver composes Layer 0-2 results but does not run a global
+      validation pass to check cross-layer constraints (total resource
+      budget, E2E latency across zones, safety decomposition).
+    rationale: >
+      Individual layers may produce locally feasible solutions that
+      violate global constraints. Without a composition check, the
+      solver delivers a solution that satisfies no one's constraints.
+    controller: CTRL-LAYER3
+    hazards: [H-S9]
+
+  # ── Source Rewriter UCAs ────────────────────────────────────────────
+
+  - id: UCA-S13
+    type: uca
+    title: Property inserted in wrong component scope
+    uca-type: providing
+    context: >
+      The rewriter inserts a property association (e.g.,
+      Actual_Processor_Binding) into the wrong component implementation
+      or subcomponent in the AADL source, because the CST node lookup
+      found the wrong scope.
+    rationale: >
+      The wrong component gets bound to a processor. The binding
+      configuration in the source no longer matches what the solver
+      computed. Post-rewrite analysis may or may not catch this
+      depending on which component was affected.
+    controller: CTRL-REWRITER
+    hazards: [H-S5]
+
+  - id: UCA-S14
+    type: uca
+    title: Rewriter deletes existing property
+    uca-type: providing
+    context: >
+      The rewriter replaces or overwrites an existing property association
+      that should be preserved (e.g., a manually-set Period or a safety
+      level annotation) while inserting the binding property.
+    rationale: >
+      Loss of manually-set properties means the rewritten model no
+      longer reflects the engineer's intent. Timing, safety, or other
+      critical properties may be silently removed.
+    controller: CTRL-REWRITER
+    hazards: [H-S5]
+
+  - id: UCA-S15
+    type: uca
+    title: Rewriter produces invalid AADL syntax
+    uca-type: providing
+    context: >
+      The inserted property association has incorrect syntax (missing
+      semicolon, wrong keyword, malformed applies_to clause) because
+      the rewriter's code generation has a bug.
+    rationale: >
+      The rewritten file cannot be parsed by spar or other AADL tools.
+      The engineer must manually repair the syntax damage.
+    controller: CTRL-REWRITER
+    hazards: [H-S5]
+
+  - id: UCA-S16
+    type: uca
+    title: Rewriter does not update all files
+    uca-type: not-providing
+    context: >
+      The binding configuration requires property changes in multiple
+      AADL files (e.g., bindings in one file, protocol selections in
+      another) but the rewriter only modifies a subset of files.
+    rationale: >
+      Partial rewrite creates an inconsistent model. Some bindings
+      are applied, others are not. Analysis of the partially-rewritten
+      model produces confusing results.
+    controller: CTRL-REWRITER
+    hazards: [H-S5, H-S8]
+
+  # ── Certificate Generator UCAs ──────────────────────────────────────
+
+  - id: UCA-S17
+    type: uca
+    title: Certificate claims optimal when solution is suboptimal
+    uca-type: providing
+    context: >
+      The certificate generator reports a zero optimality gap but the
+      dual bound computation has an error (wrong LP relaxation, missing
+      constraint in the dual, numerical precision issue in the bound).
+    rationale: >
+      Engineers accept the solution believing it cannot be improved.
+      A better deployment (lower latency, better resource utilization,
+      simpler bus topology) may exist but is never explored.
+    controller: CTRL-CERTIFIER
+    hazards: [H-S6]
+
+  - id: UCA-S18
+    type: uca
+    title: Certificate claims infeasible when solution exists
+    uca-type: providing
+    context: >
+      The solver's constraint formulation is overly restrictive (e.g.,
+      it models a hard constraint that should be soft, or it uses a
+      tighter bound than necessary) and reports infeasibility when a
+      feasible binding exists.
+    rationale: >
+      The engineer is told no deployment exists, halting the project.
+      They must manually redesign the architecture or relax constraints
+      when the solver should have found a solution.
+    controller: CTRL-CERTIFIER
+    hazards: [H-S6]
+
+  - id: UCA-S19
+    type: uca
+    title: Certificate not generated
+    uca-type: not-providing
+    context: >
+      The solver produces a binding but does not generate an optimality
+      certificate (e.g., because the certificate generation code path
+      is bypassed for heuristic solutions).
+    rationale: >
+      Without a certificate, there is no evidence of solution quality.
+      The engineer cannot assess whether the deployment is close to
+      optimal or arbitrarily bad.
+    controller: CTRL-CERTIFIER
+    hazards: [H-S6]
+
+  # ── Post-Solve Validation UCAs ──────────────────────────────────────
+
+  - id: UCA-S20
+    type: uca
+    title: Post-solve validation not performed
+    uca-type: not-providing
+    context: >
+      The solver produces a binding and rewrites the source but does
+      not re-run the full analysis suite on the rewritten model to
+      verify that all constraints are satisfied.
+    rationale: >
+      The solver's internal constraint checking may differ from the
+      analysis passes. Only a full re-analysis can confirm that the
+      rewritten model is valid. Skipping this step means solver bugs
+      go undetected.
+    controller: CTRL-SOLVER
+    hazards: [H-S1, H-S8]
+
+  - id: UCA-S21
+    type: uca
+    title: Post-solve validation uses stale cache
+    uca-type: providing
+    context: >
+      Post-solve validation runs analysis passes but the salsa cache
+      still holds pre-rewrite query results. The validation reads stale
+      property values and reports the model as valid based on the
+      old (pre-rewrite) state.
+    rationale: >
+      The validation is meaningless if it reads stale data. Constraint
+      violations introduced by the solver's binding choices are invisible.
+    controller: CTRL-SOLVER
+    hazards: [H-S8]
+
+  # ── Model Input UCAs ────────────────────────────────────────────────
+
+  - id: UCA-S22
+    type: uca
+    title: Solver uses default for missing property
+    uca-type: providing
+    context: >
+      A thread has no Compute_Execution_Time, or a process has no
+      Memory_Size, or a bus has no Bandwidth property. The solver
+      assumes a default value (e.g., zero execution time, infinite
+      bandwidth) instead of reporting the missing property.
+    rationale: >
+      Default assumptions make infeasible problems appear feasible.
+      A thread with zero execution time consumes no CPU. A bus with
+      infinite bandwidth has no contention. The resulting binding
+      will fail at runtime.
+    controller: CTRL-SOLVER
+    hazards: [H-S11]
+
+  - id: UCA-S23
+    type: uca
+    title: Virtual bus library properties do not match reality
+    uca-type: providing
+    context: >
+      The virtual bus library specifies protocol latency as 1ms but
+      the real protocol (e.g., AFDX under load) has 5ms worst-case
+      latency. The solver selects the protocol based on the library's
+      optimistic claim.
+    rationale: >
+      All timing analyses based on the library's property values are
+      incorrect. End-to-end latency budgets are violated at runtime.
+    controller: CTRL-LAYER2
+    hazards: [H-S4]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3b: Controller Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CC-S1
+    type: controller-constraint
+    title: RTA must use worst-case parameters
+    constraint: >
+      Response-time analysis must use worst-case execution time (maximum
+      of Compute_Execution_Time range), include blocking time from
+      shared resources, include interrupt and context-switch overhead,
+      and use pessimistic priority ordering when priorities are not
+      explicitly assigned.
+    controller: CTRL-LAYER0
+    ucas: [UCA-S1, UCA-S3]
+    hazards: [H-S2]
+
+  - id: CC-S2
+    type: controller-constraint
+    title: Schedulability must be checked for every populated processor
+    constraint: >
+      After Layer 1 allocation completes, Layer 0 RTA must be re-run for
+      every processor that has at least one thread bound to it. No
+      processor may be skipped.
+    controller: CTRL-LAYER0
+    ucas: [UCA-S2, UCA-S6]
+    hazards: [H-S2]
+
+  - id: CC-S3
+    type: controller-constraint
+    title: Resource accounting must include all bound components
+    constraint: >
+      Memory, CPU, weight, and power budgets must account for every
+      component bound to a resource. Shared resources must not be
+      double-counted. Resource values must use validated unit conversions.
+    controller: CTRL-LAYER1
+    ucas: [UCA-S4]
+    hazards: [H-S10]
+
+  - id: CC-S4
+    type: controller-constraint
+    title: Affinity and anti-affinity constraints must be enforced
+    constraint: >
+      The allocator must read Allowed_Processor_Binding, Not_Collocated,
+      and Actual_Processor_Binding properties and enforce them as hard
+      constraints. Violations must cause the allocation to be rejected.
+    controller: CTRL-LAYER1
+    ucas: [UCA-S5]
+    hazards: [H-S3]
+
+  - id: CC-S5
+    type: controller-constraint
+    title: Aggregate bus bandwidth must be checked
+    constraint: >
+      Protocol selection must check aggregate bandwidth of all connections
+      sharing a bus, not just individual connection bandwidth. The total
+      data rate must not exceed the bus capacity.
+    controller: CTRL-LAYER2
+    ucas: [UCA-S7]
+    hazards: [H-S4]
+
+  - id: CC-S6
+    type: controller-constraint
+    title: Security zone matching must be enforced
+    constraint: >
+      Connections crossing security zone boundaries must be bound to
+      protocols that provide the required security properties (encryption,
+      authentication, integrity). The virtual bus library must declare
+      security properties explicitly.
+    controller: CTRL-LAYER2
+    ucas: [UCA-S8]
+    hazards: [H-S4]
+
+  - id: CC-S7
+    type: controller-constraint
+    title: All cross-processor connections must be identified
+    constraint: >
+      The solver must enumerate all connections whose source and
+      destination components are bound to different processors.
+      This enumeration must occur after Layer 1 allocation, not before.
+    controller: CTRL-LAYER2
+    ucas: [UCA-S9]
+    hazards: [H-S4]
+
+  - id: CC-S8
+    type: controller-constraint
+    title: E2E latency must include all path segments
+    constraint: >
+      End-to-end latency computation must include: thread execution time,
+      scheduling delay, bus transmission delay, protocol overhead,
+      context-switch time, and queuing delay for each segment of the flow.
+    controller: CTRL-LAYER3
+    ucas: [UCA-S10]
+    hazards: [H-S1, H-S9]
+
+  - id: CC-S9
+    type: controller-constraint
+    title: Safety co-location requires verified containment
+    constraint: >
+      Co-locating components of different safety levels on the same
+      processor is permitted only when the model specifies ARINC 653
+      partitioning (or equivalent isolation) and the partition schedule
+      has been validated.
+    controller: CTRL-LAYER3
+    ucas: [UCA-S11]
+    hazards: [H-S3]
+
+  - id: CC-S10
+    type: controller-constraint
+    title: Global validation must run after all layers complete
+    constraint: >
+      After Layer 0-2 produce their results, Layer 3 must run a
+      comprehensive validation checking all global constraints. Layer
+      composition must be atomic — partial results must not be reported
+      as final.
+    controller: CTRL-LAYER3
+    ucas: [UCA-S12]
+    hazards: [H-S9]
+
+  - id: CC-S11
+    type: controller-constraint
+    title: Source rewrite must target correct CST node
+    constraint: >
+      The rewriter must identify the CST node for the target component
+      by matching the fully-qualified component path (package::type.impl
+      → subcomponent chain). Ambiguous matches must produce an error.
+    controller: CTRL-REWRITER
+    ucas: [UCA-S13]
+    hazards: [H-S5]
+
+  - id: CC-S12
+    type: controller-constraint
+    title: Source rewrite must preserve existing properties
+    constraint: >
+      The rewriter must not delete, modify, or reorder existing property
+      associations when inserting new ones. Insertion must occur at a
+      deterministic position (e.g., after the last existing property in
+      the properties block).
+    controller: CTRL-REWRITER
+    ucas: [UCA-S14]
+    hazards: [H-S5]
+
+  - id: CC-S13
+    type: controller-constraint
+    title: Source rewrite output must parse cleanly
+    constraint: >
+      After rewriting, the modified AADL source must be re-parsed by spar
+      and produce zero new syntax errors. A parse-after-rewrite check
+      must be mandatory.
+    controller: CTRL-REWRITER
+    ucas: [UCA-S15]
+    hazards: [H-S5]
+
+  - id: CC-S14
+    type: controller-constraint
+    title: All affected files must be rewritten
+    constraint: >
+      The rewriter must identify all AADL files that need modification
+      for the binding configuration and apply all changes atomically.
+      If any file cannot be written, no files should be modified.
+    controller: CTRL-REWRITER
+    ucas: [UCA-S16]
+    hazards: [H-S5]
+
+  - id: CC-S15
+    type: controller-constraint
+    title: Optimality certificate must be independently verifiable
+    constraint: >
+      The certificate must contain: (a) the objective function value,
+      (b) the dual bound value, (c) the gap calculation, (d) the solver
+      configuration (tolerances, time limit). An independent verifier
+      must be able to confirm the gap using only the certificate data.
+    controller: CTRL-CERTIFIER
+    ucas: [UCA-S17, UCA-S18]
+    hazards: [H-S6]
+
+  - id: CC-S16
+    type: controller-constraint
+    title: Certificate must be generated for every solver run
+    constraint: >
+      Every solver invocation must produce a certificate, including
+      heuristic-only solutions (which must state "no optimality proof"
+      instead of claiming optimality).
+    controller: CTRL-CERTIFIER
+    ucas: [UCA-S19]
+    hazards: [H-S6]
+
+  - id: CC-S17
+    type: controller-constraint
+    title: Post-solve analysis must use fresh computation
+    constraint: >
+      Post-solve validation must force full re-computation (either by
+      invalidating all salsa caches for modified files or by creating
+      a fresh database). Stale cache reads are prohibited during
+      post-solve validation.
+    controller: CTRL-SOLVER
+    ucas: [UCA-S20, UCA-S21]
+    hazards: [H-S8]
+
+  - id: CC-S18
+    type: controller-constraint
+    title: Missing properties must be errors, not defaults
+    constraint: >
+      When the solver encounters a component without a required property
+      (Compute_Execution_Time, Memory_Size, Bandwidth, etc.), it must
+      emit an error diagnostic and exclude the component from the
+      optimization. Silent default assumptions are prohibited.
+    controller: CTRL-SOLVER
+    ucas: [UCA-S22]
+    hazards: [H-S11]
+
+  - id: CC-S19
+    type: controller-constraint
+    title: Virtual bus library must distinguish nominal vs worst-case
+    constraint: >
+      The virtual bus library must provide separate worst-case and
+      nominal values for latency, bandwidth, and jitter. The solver
+      must use worst-case values for constraint checking and nominal
+      values only for optimization objectives.
+    controller: CTRL-LAYER2
+    ucas: [UCA-S23]
+    hazards: [H-S4]
+
+  - id: CC-S20
+    type: controller-constraint
+    title: Numerical computation must use integer or bounded arithmetic
+    constraint: >
+      Schedulability computations must use integer arithmetic (picosecond
+      precision) or interval arithmetic with explicit rounding direction.
+      Pure floating-point comparison for feasibility boundaries is
+      prohibited.
+    controller: CTRL-LAYER0
+    ucas: [UCA-S1]
+    hazards: [H-S12]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 4: Loss Scenarios
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: LS-S1
+    type: loss-scenario
+    title: Floating-point RTA accepts boundary-case task set
+    scenario-type: inadequate-control-algorithm
+    description: >
+      Layer 0 computes processor utilization as 0.9999999999997 using
+      double-precision floating-point arithmetic. The true utilization
+      is 1.0000000000003 (unschedulable). The comparison U <= 1.0
+      passes due to rounding. The task set is accepted. At runtime,
+      the lowest-priority thread intermittently misses its deadline
+      under worst-case execution conditions. The intermittent failure
+      is difficult to reproduce during testing but occurs under
+      stress in the deployed system.
+    causal-factors:
+      - RTA uses f64 arithmetic instead of integer picosecond arithmetic
+      - Utilization comparison uses exact equality instead of epsilon-safe comparison
+      - Boundary cases are not tested with adversarial inputs
+      - No sensitivity analysis is performed on the RTA result
+    uca: [UCA-S1]
+    hazards: [H-S12, H-S2]
+
+  - id: LS-S2
+    type: loss-scenario
+    title: Allocator double-counts shared memory
+    scenario-type: inadequate-process-model
+    description: >
+      Two processes share a memory region (e.g., a shared data component).
+      Layer 1's resource accounting counts the shared memory size for
+      both processes, consuming 2x the actual memory. The allocator
+      rejects a feasible allocation because the memory budget appears
+      exhausted. Alternatively, if the allocator only counts once but
+      assigns the processes to different processors, the shared memory
+      is allocated on both processors (duplicated), exceeding the real
+      memory budget.
+    causal-factors:
+      - Shared memory ownership semantics are ambiguous in AADL
+      - Resource accounting does not distinguish shared vs private memory
+      - No validation of shared resource assumptions across processors
+    uca: [UCA-S4]
+    hazards: [H-S10]
+
+  - id: LS-S3
+    type: loss-scenario
+    title: Solver ignores Allowed_Processor_Binding constraint
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An avionics system has redundant flight control channels (FCC-A,
+      FCC-B) with anti-affinity constraints requiring them to be on
+      separate processors. The solver's Layer 1 does not read
+      Allowed_Processor_Binding properties and places both channels
+      on the same processor for scheduling efficiency. A single
+      processor failure takes out both flight control channels.
+    causal-factors:
+      - Layer 1 reads only basic resource properties, not constraint properties
+      - Allowed_Processor_Binding is treated as informational, not binding
+      - No test case for anti-affinity constraint enforcement
+    uca: [UCA-S5]
+    hazards: [H-S3]
+
+  - id: LS-S4
+    type: loss-scenario
+    title: Aggregate bus bandwidth exceeded
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An AFDX network has 100 Mbps bandwidth. The solver assigns 60
+      connections to the network, each individually requiring 2 Mbps.
+      Layer 2 checks each connection individually against the bus
+      bandwidth (2 < 100, pass) but does not sum the aggregate load
+      (60 * 2 = 120 > 100, fail). At runtime, the AFDX network is
+      overloaded and starts dropping virtual links.
+    causal-factors:
+      - Per-connection bandwidth check instead of aggregate check
+      - No bus utilization accumulator during connection assignment
+      - Virtual bus library does not model contention effects
+    uca: [UCA-S7]
+    hazards: [H-S4]
+
+  - id: LS-S5
+    type: loss-scenario
+    title: Rewriter inserts binding on wrong subcomponent
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The AADL model has two subcomponents with similar names:
+      "flight_control" and "flight_controller". The rewriter searches
+      the CST for "flight_control" and matches the first occurrence,
+      which happens to be in a comment or in the wrong component
+      implementation. The Actual_Processor_Binding property is inserted
+      into the wrong scope. Post-rewrite analysis may not catch this
+      if both subcomponents have the same type and the binding is valid
+      for both.
+    causal-factors:
+      - CST node lookup uses substring matching instead of exact path matching
+      - No fully-qualified path matching for insertion targets
+      - Comment text is not excluded from matching
+    uca: [UCA-S13]
+    hazards: [H-S5]
+
+  - id: LS-S6
+    type: loss-scenario
+    title: Rewriter corrupts property block formatting
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The rewriter inserts a new property association into a component's
+      properties block. The insertion logic does not account for the
+      existing indentation level. The new property is inserted at column 0
+      with no trailing semicolon. The AADL file now has a syntax error.
+      The engineer runs spar parse and sees an error in a file they
+      did not manually modify, creating confusion. If they don't re-parse
+      before committing, the broken file enters version control.
+    causal-factors:
+      - Rewriter does not preserve surrounding whitespace/indentation
+      - No parse-after-rewrite validation step
+      - No git-diff preview before committing rewrites
+    uca: [UCA-S15]
+    hazards: [H-S5]
+
+  - id: LS-S7
+    type: loss-scenario
+    title: Salsa cache returns pre-rewrite property values
+    scenario-type: inadequate-feedback
+    description: >
+      The solver computes a binding, rewrites the AADL source files,
+      then runs post-solve validation by calling the analysis passes.
+      But the salsa database still has the pre-rewrite file contents
+      cached. The analysis passes read the old property values (no
+      binding) and report missing bindings. The engineer sees validation
+      failures and believes the solver failed, when in fact the analysis
+      is reading stale data. Alternatively, the stale cache makes the
+      validation pass because the pre-rewrite model also happened to
+      satisfy the checked constraints, masking new issues introduced by
+      the rewrite.
+    causal-factors:
+      - Source rewrite modifies files on disk but not the salsa database
+      - Salsa cache invalidation requires explicit set_file_text calls
+      - No test for cache coherence after source rewrite
+    uca: [UCA-S21]
+    hazards: [H-S8]
+
+  - id: LS-S8
+    type: loss-scenario
+    title: Layer 2 misses cross-processor connection
+    scenario-type: inadequate-process-model
+    description: >
+      A connection between two threads is traced through feature groups
+      and intermediate processes. Layer 1 binds the two threads' enclosing
+      processes to different processors. Layer 2 enumerates cross-processor
+      connections by checking direct subcomponent bindings but does not
+      trace through the process hierarchy. The connection is not identified
+      as cross-processor and receives no bus binding. At runtime, the
+      connection has no communication path.
+    causal-factors:
+      - Cross-processor detection checks only direct parent binding
+      - Connection tracing does not propagate through process containment
+      - No completeness check for bus binding coverage
+    uca: [UCA-S9]
+    hazards: [H-S4]
+
+  - id: LS-S9
+    type: loss-scenario
+    title: Local optima violate global E2E latency
+    scenario-type: inadequate-control-algorithm
+    description: >
+      Layer 0 optimizes for minimum CPU utilization on each processor.
+      Layer 1 optimizes for minimum number of processors used. These
+      local optima pack threads tightly onto few processors. Layer 2
+      selects the cheapest (lowest-bandwidth) protocol for each
+      connection. All layers satisfy their local constraints. But at
+      Layer 3, the end-to-end latency of a safety-critical flow exceeds
+      its 50ms deadline because: (a) threads are on heavily-loaded
+      processors with high scheduling delay, (b) the flow crosses 3
+      bus hops each with 10ms protocol overhead, and (c) the total
+      path latency is 65ms. No individual layer saw this violation
+      because none had the global view.
+    causal-factors:
+      - Each layer optimizes independently without global constraint awareness
+      - E2E latency is checked only at Layer 3, after Layers 0-2 have committed
+      - No backtracking mechanism to revise Layer 0-2 decisions
+      - Layer decomposition assumes constraints are separable when they are not
+    uca: [UCA-S10, UCA-S12]
+    hazards: [H-S9]
+
+  - id: LS-S10
+    type: loss-scenario
+    title: Virtual bus library understates AFDX worst-case latency
+    scenario-type: inadequate-process-model
+    description: >
+      The virtual bus library entry for AFDX specifies worst-case latency
+      as 2ms (the switch forwarding delay). But actual AFDX worst-case
+      latency under full network load is 32ms (due to regulatory shaping,
+      priority scheduling across virtual links, and multi-hop switching).
+      The solver uses the library's 2ms value for E2E latency analysis.
+      A flow with a 40ms deadline appears to have 10ms margin. At runtime,
+      under peak network load, the actual AFDX latency reaches 30ms and
+      the flow's actual E2E latency reaches 58ms, violating the deadline.
+    causal-factors:
+      - Virtual bus library maintains a single latency value instead of nominal/worst-case
+      - Library entries are not validated against protocol specifications
+      - No sensitivity analysis for protocol latency uncertainty
+    uca: [UCA-S23]
+    hazards: [H-S4]
+
+  - id: LS-S11
+    type: loss-scenario
+    title: Solver non-determinism from HashMap iteration
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The solver stores candidate allocations in a HashMap<ProcessorId,
+      Vec<ProcessId>>. The iteration order of HashMap is non-deterministic.
+      When two allocations have equal cost, the solver picks the first one
+      found during iteration. Run 1 produces allocation A (processes on
+      CPU1), run 2 produces allocation B (processes on CPU2). Both are
+      feasible. But the engineer reviews allocation A, approves it, then
+      runs the solver again for the final build and gets allocation B.
+      The approved deployment does not match the deployed one.
+    causal-factors:
+      - HashMap iteration order depends on hasher seed
+      - No deterministic tie-breaking for equal-cost solutions
+      - Solver does not persist solution to ensure reproducibility
+    uca: [UCA-S23]
+    hazards: [H-S7]
+
+  - id: LS-S12
+    type: loss-scenario
+    title: DAL-A and DAL-D co-located without partition verification
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The solver's Layer 1 allocates a DAL-A flight control process and
+      a DAL-D cabin lighting process to the same processor to minimize
+      hardware count. Layer 3's safety decomposition check sees that
+      both are on the same processor but only checks whether an ARINC 653
+      partition schedule exists — it does not verify that the partition
+      provides adequate time and space isolation (health monitoring,
+      partition-level restart). The partition schedule exists but has
+      no HM table configured. A runaway in the lighting process corrupts
+      the flight control process's memory because health monitoring
+      was not configured to contain the fault.
+    causal-factors:
+      - Safety check verifies partition presence, not partition adequacy
+      - Health monitoring configuration is not checked as part of containment
+      - ARINC 653 analysis checks partition schedule timing but not fault containment
+    uca: [UCA-S11]
+    hazards: [H-S3]
+
+  - id: LS-S13
+    type: loss-scenario
+    title: Missing Compute_Execution_Time silently assumed zero
+    scenario-type: inadequate-process-model
+    description: >
+      A thread component type has no Compute_Execution_Time property
+      (the engineer forgot to add it). The solver's Layer 0 reads the
+      property, gets None, and defaults to 0 ps. The thread consumes
+      zero CPU in the utilization calculation. Layer 1 packs 20 threads
+      onto a processor that can actually handle 15. At runtime, the
+      actual execution time causes processor overload and deadline
+      misses across all threads.
+    causal-factors:
+      - get_timing_property returns None for missing properties
+      - Solver treats None as zero instead of raising an error
+      - No pre-solve completeness check for required properties
+    uca: [UCA-S22]
+    hazards: [H-S11, H-S2]
+
+  - id: LS-S14
+    type: loss-scenario
+    title: Certificate validates wrong objective function
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The solver optimizes for minimum total bus latency (sum of protocol
+      latencies across all connections). The certificate generator computes
+      the dual bound for a different objective (minimum processor count).
+      The gap calculation compares incompatible primal and dual values.
+      The certificate reports a 0% gap (apparently optimal) because the
+      dual of the wrong problem happens to produce a tight bound. The
+      actual latency solution is 30% suboptimal.
+    causal-factors:
+      - Certificate generator and solver use different objective function formulations
+      - No assertion that certificate objective matches solver objective
+      - Dual bound is not cross-checked against the primal solution structure
+    uca: [UCA-S17]
+    hazards: [H-S6]
+
+  - id: LS-S15
+    type: loss-scenario
+    title: Incremental allocation breaks prior schedulability
+    scenario-type: inadequate-control-algorithm
+    description: >
+      Layer 1 iteratively allocates processes: first assigns P1 to CPU1
+      (schedulable), then P2 to CPU1 (schedulable with P1), then P3 to
+      CPU1. After adding P3, the combined utilization exceeds the RMA
+      bound, but Layer 1 does not re-run RTA after adding P3 because it
+      checked schedulability before the assignment using a quick
+      utilization test that does not account for priority inversion
+      blocking. The full RTA (which would detect the problem) was only
+      run for the initial two assignments.
+    causal-factors:
+      - Quick utilization test used for incremental allocation is not conservative
+      - Full RTA not re-run after every allocation step
+      - Blocking time increases as more threads share a processor
+    uca: [UCA-S6]
+    hazards: [H-S2, H-S9]

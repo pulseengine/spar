@@ -585,3 +585,110 @@ artifacts:
       and aggregation.
     status: planned
     tags: [query, instance, v030]
+
+  # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
+
+  - id: REQ-SOLVER-001
+    type: requirement
+    title: Hardware topology graph extraction
+    description: >
+      Extract a petgraph from the AADL instance model representing the
+      hardware topology: processors as nodes, buses as edges, with capacity
+      properties (CPU budget, memory size, bus bandwidth). Serves as the
+      target graph for deployment optimization.
+    status: planned
+    tags: [solver, topology, v030]
+
+  - id: REQ-SOLVER-002
+    type: requirement
+    title: Virtual bus library (communication protocol catalog)
+    description: >
+      AADL package library defining virtual bus types for common protocols:
+      DDS, SOME/IP, shared memory, CAN, CAN FD, Ethernet, AFDX, SpaceWire,
+      PROFINET, EtherCAT, MAVLink. Each includes latency overhead, bandwidth,
+      max payload, security profile, and bus type compatibility properties.
+    status: planned
+    tags: [solver, protocol, v030]
+
+  - id: REQ-SOLVER-003
+    type: requirement
+    title: Constraint formulation from AADL properties
+    description: >
+      Translate AADL model properties into solver constraints: timing
+      (Period, Deadline, WCET → scheduling feasibility), safety (ASIL/DAL
+      → partition isolation), security (trust zones → encryption overhead),
+      resources (memory/CPU/bandwidth budgets), physical (bus connectivity).
+    status: planned
+    tags: [solver, constraints, v030]
+
+  - id: REQ-SOLVER-004
+    type: requirement
+    title: Hierarchical deployment solving (NDS-layered)
+    description: >
+      Solve deployment in hierarchical layers analogous to NDS navigation:
+      Layer 0 (Component) — schedule threads within one processor (RTA).
+      Layer 1 (Cluster) — allocate processes to processors within a
+      subsystem (bin packing + schedulability). Layer 2 (System) — allocate
+      subsystems to hardware zones (topology + bandwidth + safety). Layer 3
+      (Global) — optimize across all zones (E2E latency, safety decomposition,
+      cost). Local solutions compose into globally valid configurations.
+    status: planned
+    tags: [solver, optimization, v040]
+
+  - id: REQ-SOLVER-005
+    type: requirement
+    title: Optimality certificates for deployment solutions
+    description: >
+      Deployment solver returns not just a valid configuration but a
+      machine-checkable certificate proving it is globally optimal (for
+      exact methods) or within a bounded optimality gap (for heuristics).
+      Uses dual bounds from MILP or exhaustive search proofs from CP-SAT.
+    status: planned
+    tags: [solver, verification, v040]
+
+  - id: REQ-SOLVER-006
+    type: requirement
+    title: Multi-objective Pareto front computation
+    description: >
+      For conflicting objectives (minimize latency vs minimize cost vs
+      maximize safety margins), compute the Pareto front of non-dominated
+      solutions. Present to the engineer for interactive selection. Support
+      both exact Pareto (small problems) and approximate (NSGA-II for large).
+    status: planned
+    tags: [solver, optimization, v040]
+
+  - id: REQ-SOLVER-007
+    type: requirement
+    title: Source rewriting to apply deployment solutions
+    description: >
+      Apply solver output by rewriting AADL source via rowan CST
+      manipulation. Insert/update Actual_Processor_Binding, Actual_Memory_Binding,
+      Actual_Connection_Binding properties. Preserve formatting and comments.
+      Validate incrementally via salsa after each change.
+    status: planned
+    tags: [solver, refactoring, v030]
+
+  - id: REQ-SOLVER-008
+    type: requirement
+    title: Safety decomposition validation (ASIL/DAL/SIL)
+    description: >
+      Validate that ASIL decomposition rules are satisfied in the deployment:
+      decomposed requirements are allocated to sufficiently independent elements,
+      freedom from interference is ensured (spatial via MMU, temporal via
+      scheduling, communication via controlled interfaces). Supports ISO 26262
+      ASIL, DO-178C DAL, and IEC 61508 SIL.
+    status: planned
+    tags: [solver, safety, v040]
+
+  - id: REQ-SOLVER-009
+    type: requirement
+    title: Security zone and conduit validation
+    description: >
+      Model IEC 62443 / ISO 21434 security zones as AADL system components
+      with security-level properties. Validate that cross-zone connections
+      have appropriate protection (encryption, authentication). Account for
+      security overhead (TLS latency, MAC computation) in timing analysis.
+    status: planned
+    tags: [solver, security, v040]
+
+  # Research findings tracked separately in research/findings.yaml

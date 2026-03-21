@@ -1,0 +1,370 @@
+# Research findings from cross-domain deployment solver landscape analysis
+# Date: 2026-03-21
+# Source: docs/plans/2026-03-21-deployment-solver-research.md
+
+artifacts:
+
+  # ── Market Findings ────────────────────────────────────────────────
+
+  - id: MKT-DEPLOY-001
+    type: market-finding
+    title: No tool validates deployment pre-deployment across constraint dimensions
+    description: >
+      Research across automotive (AUTOSAR), aerospace (DO-178C), drones (PX4),
+      medical (IEC 62304), IIoT (IEC 61499), and edge (K8s) confirms no existing
+      tool validates deployment configurations against all constraint dimensions
+      (timing, safety, security, resources, cost) before deployment.
+    fields:
+      domain: cross-domain
+      finding-type: tool-gap
+      confidence: high
+    tags: [deployment, validation, cross-domain]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-003
+
+  - id: MKT-DRONE-001
+    type: market-finding
+    title: Drones have zero formal architecture tools — BVLOS driving demand
+    description: >
+      The drone/UAV market has no formal architecture description tools.
+      BVLOS certification (JARUS SORA) creates demand for demonstrating
+      system architecture safety. Multi-processor architectures (flight
+      controller + companion + payload) lack formal deployment models.
+    fields:
+      domain: drones
+      finding-type: opportunity
+      confidence: high
+    tags: [drones, bvlos, certification]
+
+  - id: MKT-MEDICAL-001
+    type: market-finding
+    title: Medical device architecture documented in Word/PDF — FDA pushing rigor
+    description: >
+      IEC 62304 medical device software architecture is typically documented
+      in Word/PDF with manual diagrams. FDA is pushing for more rigorous
+      architecture documentation. Mixed-criticality analysis (Class A/B/C
+      co-location) requires manual justification.
+    fields:
+      domain: medical
+      finding-type: opportunity
+      confidence: high
+    tags: [medical, fda, iec62304]
+
+  - id: MKT-SDV-001
+    type: market-finding
+    title: AUTOSAR deployment is manual and NP-hard — no integrated optimizer
+    description: >
+      AUTOSAR deployment (runnable-to-task, task-to-core, SWC-to-ECU) is
+      "over-dependent on engineer experience and time-consuming." TU Munich
+      published ILP formulations but no integrated tool exists. Industry
+      moving to zonal architectures adds new optimization dimensions.
+    fields:
+      domain: automotive
+      finding-type: pain-point
+      source: https://mediatum.ub.tum.de/doc/1688003/
+      confidence: high
+    tags: [automotive, autosar, sdv]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-004
+
+  - id: MKT-IIOT-001
+    type: market-finding
+    title: Zephyr community requesting system devicetree — AADL already provides this
+    description: >
+      Zephyr RTOS has open issue #57623 requesting "system devicetree" for
+      multi-board deployment — a concept AADL already provides natively.
+      IEC 61499 mapping to AADL already researched. Industrial fieldbus
+      configuration (PROFINET, EtherCAT) lacks cross-protocol modeling.
+    fields:
+      domain: iiot
+      finding-type: opportunity
+      source: https://github.com/zephyrproject-rtos/zephyr/issues/57623
+      confidence: medium
+    tags: [iiot, zephyr, iec61499]
+
+  - id: MKT-AEROSPACE-001
+    type: market-finding
+    title: TASTE/Ocarina aging — spar is lighter, modern, WASM-deployable
+    description: >
+      ESA TASTE is the most mature AADL tool but Eclipse-based and heavyweight.
+      Ocarina development has slowed. spar's Rust/WASM architecture is far
+      easier to qualify under DO-330 than Eclipse-based tools. AMC 20-193
+      multicore interference analysis is labor-intensive with limited automation.
+    fields:
+      domain: aerospace
+      finding-type: opportunity
+      confidence: high
+    tags: [aerospace, taste, do178c]
+
+  # ── Competitive Analysis ───────────────────────────────────────────
+
+  - id: COMP-ARCHEOPTERIX
+    type: competitive-analysis
+    title: ArcheOpterix — AADL evolutionary optimization (dead)
+    description: >
+      Eclipse/OSATE plugin using GA, ACO, MILP for multi-objective AADL
+      deployment optimization. Handles 7 quality attributes. Near-Pareto
+      solutions. Inactive since ~2016.
+    fields:
+      tool-name: ArcheOpterix
+      tool-url: https://users.monash.edu.au/~aldeidaa/ArcheOpterix.html
+      vendor: Monash University
+      tool-status: dead
+      approach: evolutionary (NSGA-II, ACO, local search, MILP)
+      constraints-handled: [reliability, response-time, communication, cost, data-reliability, energy, scheduling]
+      global-optimal: false
+      limitations: Eclipse/Java, inactive, no optimality certificates
+      differentiation: spar is active, Rust/WASM, can provide exact solutions
+
+  - id: COMP-DESYDE
+    type: competitive-analysis
+    title: DeSyDe/IDeSyDe — CP-based DSE with optimality certificates (ForSyDe only)
+    description: >
+      KTH ForSyDe project. Uses Constraint Programming (Gecode) for provably
+      optimal design space exploration. Provides optimality certificates.
+      Only works with ForSyDe models, not AADL.
+    fields:
+      tool-name: IDeSyDe
+      tool-url: https://github.com/forsyde/IDeSyDe
+      vendor: KTH Royal Institute of Technology
+      tool-status: active
+      approach: Constraint Programming (Gecode, modular CP)
+      constraints-handled: [timing, throughput, area, cost, power]
+      global-optimal: true
+      limitations: ForSyDe input only, no AADL support
+      differentiation: spar takes AADL directly — no model translation needed
+
+  - id: COMP-OSATE
+    type: competitive-analysis
+    title: OSATE — greedy bin-packing only
+    description: >
+      CMU SEI's reference AADL tool. Provides scheduling analysis and
+      bin-packing-based resource allocation. Greedy heuristic — finds a
+      feasible allocation, not the optimal one.
+    fields:
+      tool-name: OSATE
+      tool-url: https://osate.org/
+      vendor: CMU SEI
+      tool-status: active
+      approach: greedy bin-packing heuristic
+      constraints-handled: [timing, scheduling, resources]
+      global-optimal: false
+      limitations: Java/Eclipse, heuristic only, no multi-objective
+      differentiation: spar provides exact optimization, WASM deployment, rivet integration
+
+  - id: COMP-PREEVISION
+    type: competitive-analysis
+    title: PREEvision — commercial E/E architecture tool
+    description: >
+      Vector's integrated MBSE tool covering full E/E architecture from
+      requirements through wiring harness. Optimization engine for cost,
+      weight, bandwidth. Six-figure annual licensing.
+    fields:
+      tool-name: PREEvision
+      tool-url: https://www.vector.com/us/en/products/products-a-z/software/preevision/
+      vendor: Vector Informatik
+      tool-status: commercial
+      approach: heuristic optimization
+      constraints-handled: [cost, weight, bandwidth, timing, security]
+      global-optimal: false
+      limitations: closed-source, expensive, heuristic only
+      differentiation: spar is open-source, provides exact solutions, WASM-deployable
+
+  # ── Patent Findings ────────────────────────────────────────────────
+
+  - id: PAT-COSYN
+    type: patent-finding
+    title: "US6178542B1 — COSYN hardware-software co-synthesis"
+    description: >
+      Foundational co-synthesis patent. COSYN algorithm maps periodic task
+      graphs to heterogeneous distributed architectures. Greedy task
+      clustering heuristic, not globally optimal.
+    fields:
+      patent-number: US6178542B1
+      assignee: Lucent Technologies
+      filed-date: "2001"
+      patent-status: expired
+      claims-summary: >
+        Greedy co-synthesis algorithm for mapping task graphs to heterogeneous
+        multiprocessor architectures with real-time constraints.
+      freedom-to-operate: clear
+      relevance: Foundational prior art. Expired. spar uses different approach (exact methods).
+
+  - id: PAT-COHRA
+    type: patent-finding
+    title: "US6289488B1 — COHRA hierarchical co-synthesis"
+    description: >
+      Hierarchical co-synthesis for heterogeneous distributed systems.
+      Discovers optimal hierarchy automatically from flat task graphs.
+    fields:
+      patent-number: US6289488B1
+      assignee: Lucent Technologies
+      filed-date: "1998"
+      patent-status: expired
+      claims-summary: Hierarchical co-synthesis with automatic hierarchy discovery.
+      freedom-to-operate: clear
+      relevance: Expired. AADL models express hierarchy natively.
+
+  - id: PAT-GAP
+    type: patent-finding
+    title: "Patent gap — no patents on exact multi-objective AADL optimization"
+    description: >
+      Patent landscape dominated by 1990s co-synthesis heuristics and runtime
+      scheduling. No patents cover exact multi-objective deployment optimization
+      with optimality certificates for architecture description languages.
+      This is white space.
+    fields:
+      patent-number: N/A
+      patent-status: active
+      claims-summary: Gap identified — no existing patents in this space.
+      freedom-to-operate: clear
+
+  # ── Technology Evaluations ─────────────────────────────────────────
+
+  - id: TECH-MICROLP
+    type: technology-evaluation
+    title: microlp — pure Rust LP solver (WASM-compatible)
+    fields:
+      technology: microlp
+      category: solver
+      maturity: beta
+      rust-compatible: true
+      wasm-compatible: true
+      license: MIT
+      recommendation: trial
+    tags: [solver, wasm, lp]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-004
+
+  - id: TECH-GOODLP
+    type: technology-evaluation
+    title: good_lp — unified Rust MILP API (HiGHS/CBC/SCIP backends)
+    fields:
+      technology: good_lp
+      category: solver
+      maturity: stable
+      rust-compatible: true
+      wasm-compatible: false
+      license: MIT
+      recommendation: adopt
+    tags: [solver, milp, optimization]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-005
+
+  - id: TECH-OXIZ
+    type: technology-evaluation
+    title: OxiZ — pure Rust SMT solver (Z3-compatible, WASM potential)
+    fields:
+      technology: OxiZ
+      category: solver
+      maturity: alpha
+      rust-compatible: true
+      wasm-compatible: true
+      license: MIT
+      recommendation: assess
+    tags: [solver, smt, wasm]
+
+  - id: TECH-NSGA2
+    type: technology-evaluation
+    title: NSGA-II — multi-objective evolutionary algorithm (pure Rust impl)
+    fields:
+      technology: NSGA-II
+      category: algorithm
+      maturity: production
+      rust-compatible: true
+      wasm-compatible: true
+      license: N/A
+      recommendation: adopt
+    description: >
+      Standard algorithm for multi-objective Pareto front approximation.
+      Implementable in pure Rust with no dependencies. Used by ArcheOpterix
+      for AADL deployment optimization. WASM-compatible.
+    tags: [solver, pareto, multi-objective]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-006
+
+  # ── Academic References ────────────────────────────────────────────
+
+  - id: PAPER-ALETI-2013
+    type: academic-reference
+    title: "Software Architecture Optimization: A Systematic Literature Review"
+    fields:
+      authors: Aleti, Buhnova, Grunske, Koziolek, Meedeniya
+      year: 2013
+      venue: IEEE TSE
+      url: https://ieeexplore.ieee.org/document/6311410/
+      key-finding: >
+        78% of 188 surveyed papers use metaheuristics (primarily evolutionary).
+        Only a small minority use exact methods (ILP, CP, B&B).
+      relevance: Confirms spar's exact-method approach is differentiated.
+
+  - id: PAPER-ISHEBABI-2009
+    type: academic-reference
+    title: "ASP vs ILP for multiprocessor system synthesis"
+    fields:
+      authors: Ishebabi et al.
+      year: 2009
+      venue: Hindawi VLSI Design
+      url: https://onlinelibrary.wiley.com/doi/10.1155/2009/863630
+      key-finding: >
+        Answer Set Programming was three orders of magnitude faster than
+        Integer Linear Programming for multiprocessor synthesis.
+      relevance: ASP should be evaluated as solver backend for large models.
+
+  - id: PAPER-KTH-GAP-2017
+    type: academic-reference
+    title: "Architecture Exploration Gap Analysis — Automotive"
+    fields:
+      authors: KTH / automotive OEM interviews
+      year: 2017
+      venue: IEEE
+      url: https://ieeexplore.ieee.org/document/7993377/
+      key-finding: >
+        Five automotive OEMs confirmed academic DSE tools are not adopted
+        because they don't reflect real constraints or integrate with workflows.
+      relevance: >
+        spar must integrate with real workflows (CLI, LSP, rivet) to avoid
+        this trap. The tool must work where engineers already are.
+
+  - id: PAPER-IDESYDE-2024
+    type: academic-reference
+    title: "IDeSyDe — modular design space identification"
+    fields:
+      authors: KTH ForSyDe group
+      year: 2024
+      venue: ACM TODAES
+      url: https://dl.acm.org/doi/10.1145/3647640
+      key-finding: >
+        Modular, incremental CP-based DSE with optimality certificates.
+        Supports cooperative exploration across multiple solver backends.
+      relevance: Architecture pattern for spar-solver — modular, multi-backend.
+
+  - id: REF-NDS-LAYERS
+    type: academic-reference
+    title: "NDS-inspired hierarchical deployment solving"
+    fields:
+      technology: NDS (Navigation Data Standard)
+      year: 2026
+      key-finding: >
+        Hierarchical decomposition of deployment optimization into four layers
+        analogous to NDS navigation tile levels. Layer 0 (Component): thread
+        scheduling within a single processor via RTA. Layer 1 (Cluster):
+        process-to-processor bin packing with schedulability validation. Layer 2
+        (System): subsystem-to-zone topology extraction and bus binding
+        optimization. Layer 3 (Global): cross-zone end-to-end latency and safety
+        decomposition optimization. Each layer solves a local optimum; composition
+        of layer solutions approaches the global optimum. Computationally tractable
+        because each layer's problem size is bounded by the hierarchy level.
+      relevance: >
+        Directly inspires the spar deployment solver architecture (ARCH-SOLVER-001).
+        Layers 0-2 are pure Rust / WASM-compatible; Layer 3 optionally uses native
+        exact solver backends.
+    tags: [solver, hierarchy, nds]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-004
