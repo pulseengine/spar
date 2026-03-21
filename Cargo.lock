@@ -628,9 +628,11 @@ name = "spar"
 version = "0.2.4"
 dependencies = [
  "etch",
+ "la-arena",
  "lsp-server",
  "lsp-types",
  "rowan",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "spar-analysis",
