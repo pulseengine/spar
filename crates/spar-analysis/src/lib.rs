@@ -39,6 +39,7 @@ pub mod naming_rules;
 pub mod property_accessors;
 pub mod property_rules;
 pub mod resource_budget;
+pub mod rta;
 pub mod scheduling;
 pub mod scheduling_verified;
 pub mod subcomponent_rules;
@@ -100,8 +101,9 @@ impl AnalysisRunner {
     /// connectivity, hierarchy, completeness, direction rules, classifier
     /// matching, binding checks, binding rules, flow checks, flow rules,
     /// mode checks, mode rules, modal rules, property rules, connection
-    /// rules, subcomponent rules, scheduling, latency, resource budget,
-    /// EMV2 fault-tree, ARINC 653, and wRPC binding.
+    /// rules, subcomponent rules, scheduling, response-time analysis,
+    /// latency, resource budget, EMV2 fault-tree, ARINC 653, and
+    /// wRPC binding.
     pub fn register_all(&mut self) {
         use arinc653::Arinc653Analysis;
         use binding_check::BindingCheckAnalysis;
@@ -122,6 +124,7 @@ impl AnalysisRunner {
         use mode_rules::ModeRuleAnalysis;
         use property_rules::PropertyRuleAnalysis;
         use resource_budget::ResourceBudgetAnalysis;
+        use rta::RtaAnalysis;
         use scheduling::SchedulingAnalysis;
         use subcomponent_rules::SubcomponentRuleAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
@@ -142,6 +145,7 @@ impl AnalysisRunner {
         self.register(Box::new(ConnectionRuleAnalysis));
         self.register(Box::new(SubcomponentRuleAnalysis));
         self.register(Box::new(SchedulingAnalysis));
+        self.register(Box::new(RtaAnalysis));
         self.register(Box::new(LatencyAnalysis));
         self.register(Box::new(ResourceBudgetAnalysis));
         self.register(Box::new(Emv2Analysis));
