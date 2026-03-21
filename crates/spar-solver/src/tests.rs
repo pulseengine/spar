@@ -409,6 +409,62 @@ fn connection_binding_creates_edges() {
     assert!(topo.are_connected(cpu_node, bus_node));
 }
 
+// ── Data rate parsing tests (all unit suffixes) ─────────────────────
+
+#[test]
+fn bandwidth_gbitsps() {
+    let bps = crate::topology::parse_data_rate("1 Gbitsps").unwrap();
+    assert!((bps - 1_000_000_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_mbitsps() {
+    let bps = crate::topology::parse_data_rate("100 Mbitsps").unwrap();
+    assert!((bps - 100_000_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_kbitsps() {
+    let bps = crate::topology::parse_data_rate("100 Kbitsps").unwrap();
+    assert!((bps - 100_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_bitsps() {
+    let bps = crate::topology::parse_data_rate("9600 bitsps").unwrap();
+    assert!((bps - 9600.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_gbytesps() {
+    let bps = crate::topology::parse_data_rate("1 GBytesps").unwrap();
+    assert!((bps - 8_000_000_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_mbytesps() {
+    let bps = crate::topology::parse_data_rate("100 MBytesps").unwrap();
+    assert!((bps - 800_000_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_kbytesps() {
+    let bps = crate::topology::parse_data_rate("500 KBytesps").unwrap();
+    assert!((bps - 4_000_000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_bytesps() {
+    let bps = crate::topology::parse_data_rate("1000 Bytesps").unwrap();
+    assert!((bps - 8000.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn bandwidth_plain_number() {
+    let bps = crate::topology::parse_data_rate("1000000").unwrap();
+    assert!((bps - 1_000_000.0).abs() < f64::EPSILON);
+}
+
 // ── Impact analysis tests ───────────────────────────────────────────
 
 #[test]

@@ -351,7 +351,7 @@ fn parse_bandwidth(s: &str) -> Option<f64> {
 }
 
 /// Parse a data rate value string like "100 KBytesps" into bits per second.
-fn parse_data_rate(s: &str) -> Option<f64> {
+pub(crate) fn parse_data_rate(s: &str) -> Option<f64> {
     let s = s.trim();
     for &(suffix, factor) in DATA_RATE_UNITS {
         if let Some(val) = s
