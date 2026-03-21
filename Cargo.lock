@@ -631,6 +631,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "rowan",
+ "salsa",
  "serde",
  "serde_json",
  "spar-analysis",
