@@ -435,3 +435,112 @@ fn connection_binding_creates_edges() {
     let bus_node = topo.idx_map[&bus];
     assert!(topo.are_connected(cpu_node, bus_node));
 }
+
+// ── Impact analysis tests ───────────────────────────────────────────
+
+#[test]
+fn impact_reports_feasible_allocation() {
+    use crate::allocate::Allocator;
+    use crate::constraints::ModelConstraints;
+
+    let instance = build_schedulable_system();
+    let constraints = ModelConstraints::from_instance(&instance);
+    let result = Allocator::ffd(&constraints);
+    let impact = result.impact(&constraints);
+
+    assert!(impact.schedulable);
+    assert!(impact.deadline_violations.is_empty());
+    for pi in &impact.processor_utilization {
+        assert!(pi.feasible);
+        assert!(pi.utilization <= 1.0);
+    }
+}
+
+#[test]
+fn impact_detects_overloaded_processor() {
+    use crate::allocate::{AllocationResult, Binding};
+    use crate::constraints::{ModelConstraints, ProcessorConstraint, ThreadConstraint};
+
+    // Manually create an allocation that overloads a processor
+    let mut components: Arena<ComponentInstance> = Arena::default();
+    let dummy = components.alloc(ComponentInstance {
+        name: Name::new("dummy"),
+        category: ComponentCategory::System,
+        type_name: Name::new("D"),
+        impl_name: None,
+        package: Name::new("Pkg"),
+        parent: None,
+        children: Vec::new(),
+        features: Vec::new(),
+        connections: Vec::new(),
+        flows: Vec::new(),
+        modes: Vec::new(),
+        mode_transitions: Vec::new(),
+        array_index: None,
+        in_modes: Vec::new(),
+    });
+
+    let constraints = ModelConstraints {
+        threads: vec![
+            ThreadConstraint {
+                idx: dummy,
+                name: "t1".to_string(),
+                period_ps: 10_000_000_000,
+                wcet_ps: 6_000_000_000,
+                deadline_ps: 10_000_000_000,
+                current_binding: None,
+                priority: None,
+            },
+            ThreadConstraint {
+                idx: dummy,
+                name: "t2".to_string(),
+                period_ps: 10_000_000_000,
+                wcet_ps: 6_000_000_000,
+                deadline_ps: 10_000_000_000,
+                current_binding: None,
+                priority: None,
+            },
+        ],
+        processors: vec![ProcessorConstraint {
+            idx: dummy,
+            name: "cpu1".to_string(),
+            memory_bytes: None,
+        }],
+        warnings: vec![],
+    };
+
+    // Force both threads onto one processor (120% utilization)
+    let result = AllocationResult {
+        bindings: vec![
+            Binding { thread: "t1".to_string(), processor: "cpu1".to_string(), utilization: 0.6 },
+            Binding { thread: "t2".to_string(), processor: "cpu1".to_string(), utilization: 0.6 },
+        ],
+        unallocated: vec![],
+        per_processor_utilization: vec![("cpu1".to_string(), 1.2)],
+        warnings: vec![],
+    };
+
+    let impact = result.impact(&constraints);
+    assert!(!impact.schedulable);
+    assert!(!impact.processor_utilization[0].feasible);
+}
+
+/// Build a simple schedulable system for impact tests.
+fn build_schedulable_system() -> SystemInstance {
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+    let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+    let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![cpu1, cpu2, proc]);
+    b.set_children(proc, vec![t1, t2]);
+
+    b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+    b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+    b.set_property(t2, "Timing_Properties", "Period", "20 ms");
+    b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+
+    b.build(root)
+}

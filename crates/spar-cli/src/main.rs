@@ -654,6 +654,42 @@ fn cmd_allocate(args: &[String]) {
         }
     }
 
+    // Impact analysis
+    let impact = result.impact(&constraints);
+    match format.as_deref() {
+        Some("json") => {
+            // Impact already included if we serialize the full result
+        }
+        _ => {
+            println!();
+            println!("Impact analysis:");
+            for pi in &impact.processor_utilization {
+                let status = if pi.feasible { "OK" } else { "OVERLOADED" };
+                println!(
+                    "  {:<20} {:>6.1}% util, RMA bound {:>5.1}%, {} threads [{}]",
+                    pi.name,
+                    pi.utilization * 100.0,
+                    pi.rma_bound * 100.0,
+                    pi.thread_count,
+                    status,
+                );
+            }
+            if !impact.deadline_violations.is_empty() {
+                println!();
+                println!("Deadline violations:");
+                for v in &impact.deadline_violations {
+                    println!("  {}", v);
+                }
+            }
+            println!();
+            if impact.schedulable {
+                println!("Result: \x1b[1;32mSCHEDULABLE\x1b[0m");
+            } else {
+                println!("Result: \x1b[1;31mNOT SCHEDULABLE\x1b[0m");
+            }
+        }
+    }
+
     // Apply source rewrites if requested
     if apply {
         if !result.unallocated.is_empty() {

@@ -33,6 +33,101 @@ pub struct AllocationResult {
     pub warnings: Vec<String>,
 }
 
+/// Impact analysis of a proposed allocation.
+#[derive(Debug, Clone, Serialize)]
+pub struct ImpactAnalysis {
+    /// Per-processor RMA utilization (name, utilization, bound)
+    pub processor_utilization: Vec<ProcessorImpact>,
+    /// Threads that would miss their deadline under the proposed allocation.
+    pub deadline_violations: Vec<String>,
+    /// Whether the proposed allocation is schedulable.
+    pub schedulable: bool,
+}
+
+/// Impact summary for one processor.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessorImpact {
+    pub name: String,
+    pub utilization: f64,
+    pub rma_bound: f64,
+    pub thread_count: usize,
+    pub feasible: bool,
+}
+
+impl AllocationResult {
+    /// Whether all threads were successfully allocated.
+    pub fn is_feasible(&self) -> bool {
+        self.unallocated.is_empty()
+    }
+
+    /// Compute impact analysis for the proposed allocation.
+    ///
+    /// Checks RMA utilization bounds per processor and identifies
+    /// potential deadline violations.
+    pub fn impact(&self, constraints: &ModelConstraints) -> ImpactAnalysis {
+        let mut proc_impacts = Vec::new();
+        let mut deadline_violations = Vec::new();
+        let mut all_feasible = true;
+
+        for (proc_name, total_util) in &self.per_processor_utilization {
+            let threads_on_proc: Vec<_> = self.bindings.iter()
+                .filter(|b| &b.processor == proc_name)
+                .collect();
+            let n = threads_on_proc.len();
+
+            // RMA utilization bound: n * (2^(1/n) - 1)
+            let rma_bound = if n > 0 {
+                (n as f64) * (2.0_f64.powf(1.0 / n as f64) - 1.0)
+            } else {
+                1.0
+            };
+
+            let feasible = *total_util <= 1.0;
+            if !feasible {
+                all_feasible = false;
+            }
+
+            // Check individual thread deadlines (simple utilization-based check)
+            for binding in &threads_on_proc {
+                if let Some(tc) = constraints.threads.iter()
+                    .find(|t| t.name == binding.thread)
+                {
+                    if tc.deadline_ps > 0 && tc.deadline_ps < tc.period_ps && *total_util > rma_bound {
+                        deadline_violations.push(format!(
+                            "{} on {}: utilization {:.1}% exceeds RMA bound {:.1}% with constrained deadline",
+                            binding.thread, proc_name,
+                            total_util * 100.0, rma_bound * 100.0
+                        ));
+                    }
+                }
+            }
+
+            proc_impacts.push(ProcessorImpact {
+                name: proc_name.clone(),
+                utilization: *total_util,
+                rma_bound,
+                thread_count: n,
+                feasible,
+            });
+        }
+
+        if !self.unallocated.is_empty() {
+            all_feasible = false;
+        }
+
+        // Sort for determinism (SOLVER-REQ-023)
+        proc_impacts.sort_by(|a, b| a.name.cmp(&b.name));
+        deadline_violations.sort();
+
+        let schedulable = all_feasible && deadline_violations.is_empty();
+        ImpactAnalysis {
+            processor_utilization: proc_impacts,
+            deadline_violations,
+            schedulable,
+        }
+    }
+}
+
 /// Thread with precomputed utilization, used for sorting.
 struct SortableThread {
     name: String,
