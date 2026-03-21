@@ -18,6 +18,7 @@ spar-hir-def.workspace = true
 spar-hir.workspace = true
 spar-annex.workspace = true
 spar-analysis.workspace = true
+spar-solver.workspace = true
 spar-render.workspace = true
 etch.workspace = true
 rowan.workspace = true

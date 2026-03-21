@@ -643,6 +643,7 @@ dependencies = [
  "spar-hir-def",
  "spar-parser",
  "spar-render",
+ "spar-solver",
  "spar-syntax",
  "toml",
 ]

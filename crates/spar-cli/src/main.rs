@@ -1,6 +1,7 @@
 mod assertion;
 mod diff;
 mod lsp;
+mod refactor;
 mod sarif;
 mod verify;
 
@@ -30,6 +31,7 @@ fn main() {
         "items" => cmd_items(&args[2..]),
         "instance" => cmd_instance(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
+        "allocate" => cmd_allocate(&args[2..]),
         "diff" => cmd_diff(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
         "render" => cmd_render(&args[2..]),
@@ -50,6 +52,7 @@ fn print_usage() {
     eprintln!("  items      Show item tree (declarations) for file(s)");
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
+    eprintln!("  allocate   Allocate threads to processors via bin-packing");
     eprintln!("  diff       Compare two model versions and report changes");
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
     eprintln!("  render     Render architecture SVG from an instantiated system");
@@ -61,6 +64,7 @@ fn print_usage() {
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
+    eprintln!("  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>");
     eprintln!(
         "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
     );
@@ -490,6 +494,243 @@ fn cmd_analyze(args: &[String]) {
         if has_errors {
             process::exit(1);
         }
+    }
+}
+
+fn cmd_allocate(args: &[String]) {
+    let mut root = None;
+    let mut strategy = None;
+    let mut format = None;
+    let mut apply = false;
+    let mut files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--strategy" => {
+                i += 1;
+                if i < args.len() {
+                    strategy = Some(args[i].clone());
+                } else {
+                    eprintln!("--strategy requires a value (ffd|bfd)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json)");
+                    process::exit(1);
+                }
+            }
+            "--apply" => {
+                apply = true;
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    // Parse root reference: Package::Type.Impl
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    // Parse all files and build item trees
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let parsed = spar_syntax::parse(&source);
+        if !parsed.ok() {
+            for err in parsed.errors() {
+                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+            }
+            eprintln!("Cannot allocate: parse errors in {}", file_path);
+            process::exit(1);
+        }
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    // Build global scope and instantiate
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    eprintln!(
+        "Instantiated {}::{}. ({} components)",
+        pkg_name,
+        type_name,
+        inst.component_count()
+    );
+
+    // Extract constraints
+    let constraints = spar_solver::constraints::ModelConstraints::from_instance(&inst);
+
+    if !constraints.warnings.is_empty() {
+        for w in &constraints.warnings {
+            eprintln!("warning: {}", w);
+        }
+        eprintln!();
+    }
+
+    // Run allocator
+    let result = match strategy.as_deref() {
+        Some("bfd") => spar_solver::allocate::Allocator::bfd(&constraints),
+        Some("ffd") | None => spar_solver::allocate::Allocator::ffd(&constraints),
+        Some(other) => {
+            eprintln!("Unknown strategy: {other} (expected ffd or bfd)");
+            process::exit(1);
+        }
+    };
+
+    // Print warnings from allocation
+    for w in &result.warnings {
+        eprintln!("warning: {}", w);
+    }
+
+    // Output results
+    match format.as_deref() {
+        Some("json") => {
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+        _ => {
+            // Text table output
+            if result.bindings.is_empty() && result.unallocated.is_empty() {
+                eprintln!("No threads to allocate.");
+            } else {
+                println!("{:<30} {:<20} {:>12}", "Thread", "Processor", "Utilization");
+                println!("{}", "-".repeat(64));
+                for binding in &result.bindings {
+                    println!(
+                        "{:<30} {:<20} {:>11.4}",
+                        binding.thread, binding.processor, binding.utilization
+                    );
+                }
+                if !result.unallocated.is_empty() {
+                    println!();
+                    println!("Unallocated threads:");
+                    for name in &result.unallocated {
+                        println!("  {}", name);
+                    }
+                }
+                println!();
+                println!("Per-processor utilization:");
+                for (name, util) in &result.per_processor_utilization {
+                    let bar_len = (*util * 40.0) as usize;
+                    let bar: String = "#".repeat(bar_len);
+                    println!("  {:<20} {:>6.1}% [{}]", name, util * 100.0, bar);
+                }
+            }
+        }
+    }
+
+    // Apply source rewrites if requested
+    if apply {
+        if !result.unallocated.is_empty() {
+            eprintln!(
+                "warning: {} thread(s) could not be allocated; skipping --apply for those",
+                result.unallocated.len()
+            );
+        }
+
+        // Group bindings by source file: we need to figure out which file
+        // contains which component implementation. For simplicity, we try
+        // each file for each binding edit.
+        let mut edits_applied = 0;
+
+        // Build edits from bindings (only new ones, not pre-existing)
+        let binding_edits: Vec<refactor::BindingEdit> = result
+            .bindings
+            .iter()
+            .filter(|b| {
+                // Only apply edits for threads that were NOT pre-bound
+                constraints
+                    .threads
+                    .iter()
+                    .find(|t| t.name == b.thread)
+                    .map(|t| t.current_binding.is_none())
+                    .unwrap_or(false)
+            })
+            .map(|b| {
+                // The component_impl is the parent of the thread in the instance hierarchy.
+                // For now, use the root implementation since bindings are typically set there.
+                let impl_ref = format!("{}.{}", type_name, impl_name);
+                refactor::BindingEdit {
+                    component_impl: impl_ref,
+                    property: "Deployment_Properties::Actual_Processor_Binding".to_string(),
+                    value: format!(
+                        "(reference ({})) applies to {}",
+                        b.processor, b.thread
+                    ),
+                }
+            })
+            .collect();
+
+        for edit in &binding_edits {
+            let mut applied = false;
+            for file_path in &files {
+                let source = read_file(file_path);
+                match refactor::apply_binding_edit(&source, edit) {
+                    Ok(new_source) => {
+                        fs::write(file_path, &new_source).unwrap_or_else(|e| {
+                            eprintln!("Cannot write {}: {}", file_path, e);
+                            process::exit(1);
+                        });
+                        eprintln!(
+                            "Applied: {} => {} (in {})",
+                            edit.property, edit.value, file_path
+                        );
+                        edits_applied += 1;
+                        applied = true;
+                        break;
+                    }
+                    Err(_) => continue, // Try next file
+                }
+            }
+            if !applied {
+                eprintln!(
+                    "warning: could not apply binding edit for {} in any source file",
+                    edit.value
+                );
+            }
+        }
+
+        eprintln!("{} binding edit(s) applied.", edits_applied);
+    }
+
+    // Exit with non-zero if there are unallocated threads
+    if !result.unallocated.is_empty() {
+        process::exit(1);
     }
 }
 
