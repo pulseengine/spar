@@ -3217,4 +3217,119 @@ mod tests {
         let name = find_expected_end_name(source, &range);
         assert_eq!(name, Some("Controller".to_string()));
     }
+
+    // ── Salsa integration tests ──────────────────────────────────────
+
+    #[test]
+    fn server_state_scan_and_update() {
+        let mut state = ServerState::new(None);
+        let uri = "file:///test.aadl";
+        let content = "package TestPkg\npublic\n  system Foo\n  end Foo;\nend TestPkg;\n";
+        state.update_file(uri, content);
+
+        // Verify the file is tracked and content is returned via salsa.
+        let source = state.get_source(uri);
+        assert!(source.is_some(), "file should be tracked after update_file");
+        assert_eq!(source.unwrap(), content);
+
+        // Verify we can get an item tree (parse + lower works).
+        let tree = state.get_item_tree(uri);
+        assert!(tree.is_some(), "should produce an item tree");
+    }
+
+    #[test]
+    fn server_state_update_invalidates() {
+        let mut state = ServerState::new(None);
+        let uri = "file:///test.aadl";
+
+        let v1 = "package V1\npublic\nend V1;\n";
+        state.update_file(uri, v1);
+        assert_eq!(state.get_source(uri).unwrap(), v1);
+
+        // Update with new content — salsa should invalidate the old value.
+        let v2 = "package V2\npublic\n  system Bar\n  end Bar;\nend V2;\n";
+        state.update_file(uri, v2);
+        assert_eq!(
+            state.get_source(uri).unwrap(),
+            v2,
+            "second update should replace the first"
+        );
+
+        // The item tree should reflect the new content.
+        let tree = state.get_item_tree(uri).unwrap();
+        let has_bar = tree
+            .component_types
+            .iter()
+            .any(|(_, c)| c.name.as_str() == "Bar");
+        assert!(has_bar, "item tree should contain Bar from updated source");
+    }
+
+    #[test]
+    fn server_state_remove_file() {
+        let mut state = ServerState::new(None);
+        let uri = "file:///test.aadl";
+        let content = "package Pkg\npublic\nend Pkg;\n";
+
+        state.update_file(uri, content);
+        assert!(state.get_source(uri).is_some());
+
+        state.remove_file(uri);
+        assert!(
+            state.get_source(uri).is_none(),
+            "file should be gone after remove_file"
+        );
+        assert!(
+            state.get_item_tree(uri).is_none(),
+            "item tree should be gone after remove_file"
+        );
+    }
+
+    #[test]
+    fn server_state_rebuild_scope() {
+        use spar_hir_def::resolver::CiName;
+
+        let mut state = ServerState::new(None);
+
+        // Add two files: one declares a system type, the other uses it.
+        let uri_a = "file:///a.aadl";
+        let content_a =
+            "package PkgA\npublic\n  system SysType\n  end SysType;\nend PkgA;\n";
+        state.update_file(uri_a, content_a);
+
+        let uri_b = "file:///b.aadl";
+        let content_b = "package PkgB\npublic\n  system SysType2\n  end SysType2;\nend PkgB;\n";
+        state.update_file(uri_b, content_b);
+
+        // Both files should be tracked.
+        assert!(state.get_source(uri_a).is_some());
+        assert!(state.get_source(uri_b).is_some());
+
+        // The global scope should contain definitions from both files.
+        // GlobalScope is rebuilt on each update_file call.
+        let scope = &state.global_scope;
+        assert!(
+            scope.packages.contains_key(&CiName::from_str("pkga")),
+            "global scope should contain PkgA"
+        );
+        assert!(
+            scope.packages.contains_key(&CiName::from_str("pkgb")),
+            "global scope should contain PkgB"
+        );
+
+        // Verify cross-file type visibility: SysType in PkgA, SysType2 in PkgB.
+        let pkg_a = &scope.packages[&CiName::from_str("pkga")];
+        assert!(
+            pkg_a
+                .component_types
+                .contains_key(&CiName::from_str("systype")),
+            "PkgA scope should contain SysType"
+        );
+        let pkg_b = &scope.packages[&CiName::from_str("pkgb")];
+        assert!(
+            pkg_b
+                .component_types
+                .contains_key(&CiName::from_str("systype2")),
+            "PkgB scope should contain SysType2"
+        );
+    }
 }
