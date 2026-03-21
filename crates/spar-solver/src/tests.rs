@@ -5,9 +5,7 @@ use spar_hir_def::instance::{
     ComponentInstance, ComponentInstanceIdx, ConnectionEnd, ConnectionInstance,
     ConnectionInstanceIdx, FeatureInstance, FeatureInstanceIdx, SystemInstance,
 };
-use spar_hir_def::item_tree::{
-    ComponentCategory, ConnectionKind, Direction, FeatureKind,
-};
+use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind, Direction, FeatureKind};
 use spar_hir_def::name::Name;
 use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
@@ -55,21 +53,11 @@ impl TestBuilder {
         })
     }
 
-    fn set_children(
-        &mut self,
-        parent: ComponentInstanceIdx,
-        children: Vec<ComponentInstanceIdx>,
-    ) {
+    fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
         self.components[parent].children = children;
     }
 
-    fn set_property(
-        &mut self,
-        comp: ComponentInstanceIdx,
-        set: &str,
-        name: &str,
-        value: &str,
-    ) {
+    fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
         let map = self.property_maps.entry(comp).or_default();
         map.add(PropertyValue {
             name: spar_hir_def::name::PropertyRef {
@@ -187,10 +175,7 @@ fn extracts_processors() {
     assert_eq!(procs.len(), 2);
 
     // Verify names.
-    let names: Vec<&str> = procs
-        .iter()
-        .map(|&ni| topo.graph[ni].name())
-        .collect();
+    let names: Vec<&str> = procs.iter().map(|&ni| topo.graph[ni].name()).collect();
     assert!(names.contains(&"cpu1"));
     assert!(names.contains(&"cpu2"));
 
@@ -326,24 +311,12 @@ fn topology_is_deterministic() {
     assert_eq!(topo_a.memory_count(), topo_b.memory_count());
 
     // Same node names in the same order (since arenas are deterministic).
-    let names_a: Vec<&str> = topo_a
-        .graph
-        .node_weights()
-        .map(|n| n.name())
-        .collect();
-    let names_b: Vec<&str> = topo_b
-        .graph
-        .node_weights()
-        .map(|n| n.name())
-        .collect();
+    let names_a: Vec<&str> = topo_a.graph.node_weights().map(|n| n.name()).collect();
+    let names_b: Vec<&str> = topo_b.graph.node_weights().map(|n| n.name()).collect();
     assert_eq!(names_a, names_b);
 
     // Same property values.
-    for (a, b) in topo_a
-        .graph
-        .node_weights()
-        .zip(topo_b.graph.node_weights())
-    {
+    for (a, b) in topo_a.graph.node_weights().zip(topo_b.graph.node_weights()) {
         match (a, b) {
             (
                 HwNode::Bus {
@@ -512,8 +485,16 @@ fn impact_detects_overloaded_processor() {
     // Force both threads onto one processor (120% utilization)
     let result = AllocationResult {
         bindings: vec![
-            Binding { thread: "t1".to_string(), processor: "cpu1".to_string(), utilization: 0.6 },
-            Binding { thread: "t2".to_string(), processor: "cpu1".to_string(), utilization: 0.6 },
+            Binding {
+                thread: "t1".to_string(),
+                processor: "cpu1".to_string(),
+                utilization: 0.6,
+            },
+            Binding {
+                thread: "t2".to_string(),
+                processor: "cpu1".to_string(),
+                utilization: 0.6,
+            },
         ],
         unallocated: vec![],
         per_processor_utilization: vec![("cpu1".to_string(), 1.2)],

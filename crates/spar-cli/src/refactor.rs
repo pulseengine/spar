@@ -41,19 +41,21 @@ impl std::fmt::Display for RefactorError {
 /// 2. Locates the component implementation matching `edit.component_impl`.
 /// 3. Inserts or updates the property in the properties section.
 /// 4. Re-parses the result to validate (SOLVER-REQ-016).
-pub(crate) fn apply_binding_edit(source: &str, edit: &BindingEdit) -> Result<String, RefactorError> {
+pub(crate) fn apply_binding_edit(
+    source: &str,
+    edit: &BindingEdit,
+) -> Result<String, RefactorError> {
     let parsed = parse(source);
     let root = parsed.syntax_node();
 
     // Find the COMPONENT_IMPL node matching edit.component_impl
-    let impl_node = find_component_impl(&root, &edit.component_impl).ok_or_else(|| {
-        RefactorError {
+    let impl_node =
+        find_component_impl(&root, &edit.component_impl).ok_or_else(|| RefactorError {
             message: format!(
                 "component implementation '{}' not found in source",
                 edit.component_impl
             ),
-        }
-    })?;
+        })?;
 
     // Determine the property name to match (just the property name part)
     let prop_name_to_match = property_short_name(&edit.property);
@@ -142,7 +144,9 @@ fn extract_impl_name(node: &SyntaxNode) -> Option<String> {
                 let text: Vec<String> = real_node
                     .children_with_tokens()
                     .filter_map(|c| c.into_token())
-                    .filter(|t| t.kind() == SyntaxKind::IDENT || t.kind() == SyntaxKind::COLON_COLON)
+                    .filter(|t| {
+                        t.kind() == SyntaxKind::IDENT || t.kind() == SyntaxKind::COLON_COLON
+                    })
                     .map(|t| t.text().to_string())
                     .collect();
                 realization_name = Some(text.join(""));
@@ -267,11 +271,7 @@ fn insert_into_properties_section(
 
 /// Insert a new `properties` section with the given property text
 /// before the `end` keyword of a COMPONENT_IMPL.
-fn insert_properties_section(
-    source: &str,
-    impl_node: &SyntaxNode,
-    property_text: &str,
-) -> String {
+fn insert_properties_section(source: &str, impl_node: &SyntaxNode, property_text: &str) -> String {
     // Find the END_KW token in the implementation
     let end_kw = impl_node
         .children_with_tokens()
@@ -476,9 +476,6 @@ end Pkg;
         };
         let result = apply_binding_edit(AADL_WITH_PROPERTIES, &edit);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .message
-            .contains("not found"));
+        assert!(result.unwrap_err().message.contains("not found"));
     }
 }

@@ -64,7 +64,9 @@ fn print_usage() {
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
-    eprintln!("  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>");
+    eprintln!(
+        "  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>"
+    );
     eprintln!(
         "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
     );
@@ -724,10 +726,7 @@ fn cmd_allocate(args: &[String]) {
                 refactor::BindingEdit {
                     component_impl: impl_ref,
                     property: "Deployment_Properties::Actual_Processor_Binding".to_string(),
-                    value: format!(
-                        "(reference ({})) applies to {}",
-                        b.processor, b.thread
-                    ),
+                    value: format!("(reference ({})) applies to {}", b.processor, b.thread),
                 }
             })
             .collect();

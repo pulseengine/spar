@@ -224,9 +224,7 @@ pub fn protocols_for_bus_type(bus_type: &str) -> Vec<&'static ProtocolDef> {
 ///
 /// Name matching is case-insensitive.
 pub fn protocol_by_name(name: &str) -> Option<&'static ProtocolDef> {
-    PROTOCOLS
-        .iter()
-        .find(|p| p.name.eq_ignore_ascii_case(name))
+    PROTOCOLS.iter().find(|p| p.name.eq_ignore_ascii_case(name))
 }
 
 #[cfg(test)]
@@ -256,10 +254,7 @@ mod tests {
                 "{} has zero max payload",
                 proto.name
             );
-            assert!(
-                !proto.name.is_empty(),
-                "protocol name must not be empty"
-            );
+            assert!(!proto.name.is_empty(), "protocol name must not be empty");
             assert!(
                 !proto.category.is_empty(),
                 "{} has empty category",

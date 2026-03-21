@@ -102,14 +102,13 @@ impl TopologyGraph {
                         idx: comp_idx,
                         name: comp.name.as_str().to_string(),
                         utilization_budget: None, // placeholder for future work
-                        memory_bytes: None,        // placeholder for future work
+                        memory_bytes: None,       // placeholder for future work
                     })
                 }
                 ComponentCategory::Memory => {
                     let props = instance.properties_for(comp_idx);
                     // Memory_Size is in bits per AADL property convention; convert to bytes.
-                    let size_bytes =
-                        get_size_property(props, "Memory_Size").map(|bits| bits / 8);
+                    let size_bytes = get_size_property(props, "Memory_Size").map(|bits| bits / 8);
                     Some(HwNode::Memory {
                         idx: comp_idx,
                         name: comp.name.as_str().to_string(),
@@ -165,11 +164,11 @@ impl TopologyGraph {
             };
 
             // Both endpoints must be hardware nodes in our graph.
-            let (src_node, dst_node) = match (idx_map.get(&src_comp_idx), idx_map.get(&dst_comp_idx))
-            {
-                (Some(&s), Some(&d)) => (s, d),
-                _ => continue,
-            };
+            let (src_node, dst_node) =
+                match (idx_map.get(&src_comp_idx), idx_map.get(&dst_comp_idx)) {
+                    (Some(&s), Some(&d)) => (s, d),
+                    _ => continue,
+                };
 
             // Determine bus name: one side should be a bus.
             let bus_name = if is_bus_node(&graph[src_node]) {
@@ -182,7 +181,13 @@ impl TopologyGraph {
 
             // Add edge from src to dst (and reverse for bidirectional).
             if !graph.contains_edge(src_node, dst_node) {
-                graph.add_edge(src_node, dst_node, BusEdge { bus_name: bus_name.clone() });
+                graph.add_edge(
+                    src_node,
+                    dst_node,
+                    BusEdge {
+                        bus_name: bus_name.clone(),
+                    },
+                );
             }
             if conn.is_bidirectional && !graph.contains_edge(dst_node, src_node) {
                 graph.add_edge(dst_node, src_node, BusEdge { bus_name });
@@ -222,11 +227,7 @@ impl TopologyGraph {
                     if let (Some(&comp_node), Some(&bus_node)) =
                         (idx_map.get(&comp_idx), idx_map.get(&bus_comp_idx))
                     {
-                        let bus_name = instance
-                            .component(bus_comp_idx)
-                            .name
-                            .as_str()
-                            .to_string();
+                        let bus_name = instance.component(bus_comp_idx).name.as_str().to_string();
                         if !graph.contains_edge(comp_node, bus_node) {
                             graph.add_edge(
                                 comp_node,

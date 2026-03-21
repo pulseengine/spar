@@ -70,7 +70,9 @@ impl AllocationResult {
         let mut all_feasible = true;
 
         for (proc_name, total_util) in &self.per_processor_utilization {
-            let threads_on_proc: Vec<_> = self.bindings.iter()
+            let threads_on_proc: Vec<_> = self
+                .bindings
+                .iter()
                 .filter(|b| &b.processor == proc_name)
                 .collect();
             let n = threads_on_proc.len();
@@ -89,16 +91,19 @@ impl AllocationResult {
 
             // Check individual thread deadlines (simple utilization-based check)
             for binding in &threads_on_proc {
-                if let Some(tc) = constraints.threads.iter()
+                if let Some(tc) = constraints
+                    .threads
+                    .iter()
                     .find(|t| t.name == binding.thread)
+                    && tc.deadline_ps > 0
+                    && tc.deadline_ps < tc.period_ps
+                    && *total_util > rma_bound
                 {
-                    if tc.deadline_ps > 0 && tc.deadline_ps < tc.period_ps && *total_util > rma_bound {
-                        deadline_violations.push(format!(
-                            "{} on {}: utilization {:.1}% exceeds RMA bound {:.1}% with constrained deadline",
-                            binding.thread, proc_name,
-                            total_util * 100.0, rma_bound * 100.0
-                        ));
-                    }
+                    deadline_violations.push(format!(
+                        "{} on {}: utilization {:.1}% exceeds RMA bound {:.1}% with constrained deadline",
+                        binding.thread, proc_name,
+                        total_util * 100.0, rma_bound * 100.0
+                    ));
                 }
             }
 
@@ -172,11 +177,7 @@ impl Allocator {
             warnings.push("No processors available for allocation".to_string());
             return AllocationResult {
                 bindings: Vec::new(),
-                unallocated: constraints
-                    .threads
-                    .iter()
-                    .map(|t| t.name.clone())
-                    .collect(),
+                unallocated: constraints.threads.iter().map(|t| t.name.clone()).collect(),
                 per_processor_utilization: Vec::new(),
                 warnings,
             };
@@ -295,8 +296,7 @@ impl Allocator {
         }
 
         // Build per-processor utilization (sorted by name for determinism).
-        let mut per_processor_utilization: Vec<(String, f64)> =
-            processors.into_iter().collect();
+        let mut per_processor_utilization: Vec<(String, f64)> = processors.into_iter().collect();
         per_processor_utilization.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         AllocationResult {
@@ -372,8 +372,8 @@ mod tests {
     fn ffd_allocates_two_threads_to_one_processor() {
         let constraints = ModelConstraints {
             threads: vec![
-                make_thread("t1", 1000, 200, None),  // util = 0.2
-                make_thread("t2", 1000, 300, None),  // util = 0.3
+                make_thread("t1", 1000, 200, None), // util = 0.2
+                make_thread("t2", 1000, 300, None), // util = 0.3
             ],
             processors: vec![make_processor("cpu1")],
             warnings: Vec::new(),
@@ -399,8 +399,8 @@ mod tests {
     fn ffd_splits_across_processors() {
         let constraints = ModelConstraints {
             threads: vec![
-                make_thread("t1", 1000, 600, None),  // util = 0.6
-                make_thread("t2", 1000, 500, None),  // util = 0.5
+                make_thread("t1", 1000, 600, None), // util = 0.6
+                make_thread("t2", 1000, 500, None), // util = 0.5
             ],
             processors: vec![make_processor("cpu1"), make_processor("cpu2")],
             warnings: Vec::new(),
@@ -420,9 +420,9 @@ mod tests {
     fn ffd_detects_infeasible() {
         let constraints = ModelConstraints {
             threads: vec![
-                make_thread("t1", 1000, 600, None),  // util = 0.6
-                make_thread("t2", 1000, 500, None),  // util = 0.5
-                make_thread("t3", 1000, 600, None),  // util = 0.6
+                make_thread("t1", 1000, 600, None), // util = 0.6
+                make_thread("t2", 1000, 500, None), // util = 0.5
+                make_thread("t3", 1000, 600, None), // util = 0.6
             ],
             processors: vec![make_processor("cpu1")],
             warnings: Vec::new(),
@@ -474,7 +474,12 @@ mod tests {
         assert_eq!(result.bindings[0].thread, "t_good");
         // t_bad should NOT appear in unallocated — it's skipped with a warning
         assert!(result.unallocated.is_empty());
-        assert!(result.warnings.iter().any(|w| w.contains("t_bad") && w.contains("period=0")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("t_bad") && w.contains("period=0"))
+        );
     }
 
     #[test]
@@ -504,8 +509,8 @@ mod tests {
 
         let constraints = ModelConstraints {
             threads: vec![
-                make_thread("t_pre", 1000, 600, Some("cpu2".to_string())),  // 0.6 -> cpu2
-                make_thread("t_new", 1000, 350, None),                      // 0.35
+                make_thread("t_pre", 1000, 600, Some("cpu2".to_string())), // 0.6 -> cpu2
+                make_thread("t_new", 1000, 350, None),                     // 0.35
             ],
             processors: vec![make_processor("cpu1"), make_processor("cpu2")],
             warnings: Vec::new(),
@@ -513,12 +518,20 @@ mod tests {
 
         // FFD: t_pre -> cpu2, t_new -> cpu1 (first fit, cpu1 is at 0.0)
         let ffd_result = Allocator::ffd(&constraints);
-        let ffd_new = ffd_result.bindings.iter().find(|b| b.thread == "t_new").unwrap();
+        let ffd_new = ffd_result
+            .bindings
+            .iter()
+            .find(|b| b.thread == "t_new")
+            .unwrap();
         assert_eq!(ffd_new.processor, "cpu1");
 
         // BFD: t_pre -> cpu2, t_new -> cpu2 (tightest fit, cpu2 at 0.6 has only 0.4 remaining)
         let bfd_result = Allocator::bfd(&constraints);
-        let bfd_new = bfd_result.bindings.iter().find(|b| b.thread == "t_new").unwrap();
+        let bfd_new = bfd_result
+            .bindings
+            .iter()
+            .find(|b| b.thread == "t_new")
+            .unwrap();
         assert_eq!(bfd_new.processor, "cpu2");
     }
 
@@ -568,16 +581,24 @@ mod tests {
     #[test]
     fn pre_bound_to_unknown_processor_warns() {
         let constraints = ModelConstraints {
-            threads: vec![
-                make_thread("t1", 1000, 200, Some("nonexistent".to_string())),
-            ],
+            threads: vec![make_thread(
+                "t1",
+                1000,
+                200,
+                Some("nonexistent".to_string()),
+            )],
             processors: vec![make_processor("cpu1")],
             warnings: Vec::new(),
         };
 
         let result = Allocator::ffd(&constraints);
         assert_eq!(result.unallocated, vec!["t1"]);
-        assert!(result.warnings.iter().any(|w| w.contains("unknown processor")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("unknown processor"))
+        );
     }
 
     #[test]
@@ -595,7 +616,12 @@ mod tests {
         // t1 (0.7) fits, t2 (0.4) would make 1.1 -> rejected
         assert_eq!(result.bindings.len(), 1);
         assert_eq!(result.unallocated, vec!["t2"]);
-        assert!(result.warnings.iter().any(|w| w.contains("exceeds utilization")));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("exceeds utilization"))
+        );
     }
 
     #[test]
