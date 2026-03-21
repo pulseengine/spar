@@ -130,6 +130,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::manual_div_ceil)]
     fn ceil_div_matches_lean_definition() {
         // Lean codegen produces: (a + b - 1) / b
         // Rust uses: a.div_ceil(b)

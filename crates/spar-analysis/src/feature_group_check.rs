@@ -12,9 +12,7 @@
 
 use spar_hir_def::feature_group::{expand_feature_group, flip_direction, ExpandedFeature};
 use spar_hir_def::instance::SystemInstance;
-use spar_hir_def::item_tree::{
-    ConnectionKind, Direction, FeatureKind, ItemRef, ItemTree,
-};
+use spar_hir_def::item_tree::{ConnectionKind, Direction, FeatureKind, ItemTree};
 use spar_hir_def::name::Name;
 use spar_hir_def::resolver::GlobalScope;
 
@@ -367,6 +365,7 @@ fn build_connection_path(
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(unused_imports, unused_variables, dead_code, clippy::manual_div_ceil)]
 mod tests {
     use super::*;
     use la_arena::Arena;
