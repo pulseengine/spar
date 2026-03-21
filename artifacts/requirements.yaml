@@ -597,7 +597,7 @@ artifacts:
       properties (CPU budget, memory size, bus bandwidth). Serves as the
       target graph for deployment optimization.
     status: planned
-    tags: [solver, topology, v040]
+    tags: [solver, topology, v030]
 
   - id: REQ-SOLVER-002
     type: requirement
@@ -608,7 +608,7 @@ artifacts:
       PROFINET, EtherCAT, MAVLink. Each includes latency overhead, bandwidth,
       max payload, security profile, and bus type compatibility properties.
     status: planned
-    tags: [solver, protocol, v040]
+    tags: [solver, protocol, v030]
 
   - id: REQ-SOLVER-003
     type: requirement
@@ -619,7 +619,7 @@ artifacts:
       → partition isolation), security (trust zones → encryption overhead),
       resources (memory/CPU/bandwidth budgets), physical (bus connectivity).
     status: planned
-    tags: [solver, constraints, v040]
+    tags: [solver, constraints, v030]
 
   - id: REQ-SOLVER-004
     type: requirement
@@ -666,7 +666,7 @@ artifacts:
       Actual_Connection_Binding properties. Preserve formatting and comments.
       Validate incrementally via salsa after each change.
     status: planned
-    tags: [solver, refactoring, v040]
+    tags: [solver, refactoring, v030]
 
   - id: REQ-SOLVER-008
     type: requirement

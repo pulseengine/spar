@@ -343,3 +343,28 @@ artifacts:
         Modular, incremental CP-based DSE with optimality certificates.
         Supports cooperative exploration across multiple solver backends.
       relevance: Architecture pattern for spar-solver — modular, multi-backend.
+
+  - id: REF-NDS-LAYERS
+    type: academic-reference
+    title: "NDS-inspired hierarchical deployment solving"
+    fields:
+      technology: NDS (Navigation Data Standard)
+      year: 2026
+      key-finding: >
+        Hierarchical decomposition of deployment optimization into four layers
+        analogous to NDS navigation tile levels. Layer 0 (Component): thread
+        scheduling within a single processor via RTA. Layer 1 (Cluster):
+        process-to-processor bin packing with schedulability validation. Layer 2
+        (System): subsystem-to-zone topology extraction and bus binding
+        optimization. Layer 3 (Global): cross-zone end-to-end latency and safety
+        decomposition optimization. Each layer solves a local optimum; composition
+        of layer solutions approaches the global optimum. Computationally tractable
+        because each layer's problem size is bounded by the hierarchy level.
+      relevance: >
+        Directly inspires the spar deployment solver architecture (ARCH-SOLVER-001).
+        Layers 0-2 are pure Rust / WASM-compatible; Layer 3 optionally uses native
+        exact solver backends.
+    tags: [solver, hierarchy, nds]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-004
