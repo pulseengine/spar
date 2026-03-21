@@ -6,6 +6,7 @@
 //! generating external format text from AADL `ItemTree`s.
 
 pub mod cargo_metadata;
+pub mod protocol_library;
 pub mod rust_crate;
 pub mod wac;
 pub mod wac_parser;
