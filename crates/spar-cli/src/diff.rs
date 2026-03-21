@@ -277,6 +277,48 @@ pub fn compare_structure(base: &SystemInstance, head: &SystemInstance) -> Vec<St
                     changes: comp_changes,
                 });
             }
+
+            // Compare property values between base and head
+            let base_props = base.properties_for(*base_idx);
+            let head_props = head.properties_for(*head_idx);
+
+            let base_prop_map = collect_property_display_map(base_props);
+            let head_prop_map = collect_property_display_map(head_props);
+
+            // Properties changed or removed (in base, compare with head)
+            for (prop_name, base_val) in &base_prop_map {
+                match head_prop_map.get(prop_name) {
+                    Some(head_val) if head_val != base_val => {
+                        changes.push(StructuralChange::PropertyChanged {
+                            path: path.clone(),
+                            property: prop_name.clone(),
+                            old: base_val.clone(),
+                            new: head_val.clone(),
+                        });
+                    }
+                    None => {
+                        changes.push(StructuralChange::PropertyChanged {
+                            path: path.clone(),
+                            property: prop_name.clone(),
+                            old: base_val.clone(),
+                            new: String::new(),
+                        });
+                    }
+                    _ => {} // same value, no change
+                }
+            }
+
+            // Properties added (in head but not in base)
+            for (prop_name, head_val) in &head_prop_map {
+                if !base_prop_map.contains_key(prop_name) {
+                    changes.push(StructuralChange::PropertyChanged {
+                        path: path.clone(),
+                        property: prop_name.clone(),
+                        old: String::new(),
+                        new: head_val.clone(),
+                    });
+                }
+            }
         }
     }
 
@@ -323,6 +365,28 @@ fn collect_component_paths(
 
     current_path.pop();
     result
+}
+
+/// Build a map from property display name to its concatenated value string.
+///
+/// Each property is keyed by `PropertyRef::Display` (e.g. `Timing_Properties::Period`)
+/// and the value is the joined values (for append properties, joined with `, `).
+fn collect_property_display_map(
+    props: &spar_hir_def::properties::PropertyMap,
+) -> std::collections::BTreeMap<String, String> {
+    let mut map = std::collections::BTreeMap::new();
+    for (_key, values) in props.iter() {
+        if let Some(first) = values.first() {
+            let prop_name = format!("{}", first.name);
+            let joined: String = values
+                .iter()
+                .map(|v| v.value.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            map.insert(prop_name, joined);
+        }
+    }
+    map
 }
 
 /// Collect all connections as (src_description, dst_description) pairs.
@@ -830,7 +894,6 @@ mod tests {
                 idx
             }
 
-            #[allow(dead_code)]
             fn set_property(
                 &mut self,
                 comp: ComponentInstanceIdx,
@@ -1209,6 +1272,154 @@ mod tests {
                 "empty systems should produce no changes, got: {:?}",
                 changes
             );
+        }
+
+        #[test]
+        fn detect_property_value_changed() {
+            // Base: sensor has Period = 10ms
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+            let base = b.build(root);
+
+            // Head: sensor has Period = 100ms
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            b.set_property(sensor, "Timing_Properties", "Period", "100 ms");
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let prop_changes: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::PropertyChanged { .. }))
+                .collect();
+            assert_eq!(
+                prop_changes.len(),
+                1,
+                "should detect exactly one property change: {:?}",
+                changes
+            );
+            match &prop_changes[0] {
+                StructuralChange::PropertyChanged {
+                    path,
+                    property,
+                    old,
+                    new,
+                } => {
+                    assert_eq!(path, &vec!["root".to_string(), "sensor".to_string()]);
+                    assert!(
+                        property.contains("Period"),
+                        "property should mention Period, got: {}",
+                        property
+                    );
+                    assert_eq!(old, "10 ms");
+                    assert_eq!(new, "100 ms");
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_property_added() {
+            // Base: sensor has no properties
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            let base = b.build(root);
+
+            // Head: sensor has Period = 50ms
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            b.set_property(sensor, "Timing_Properties", "Period", "50 ms");
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let prop_changes: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::PropertyChanged { .. }))
+                .collect();
+            assert_eq!(
+                prop_changes.len(),
+                1,
+                "should detect exactly one property addition: {:?}",
+                changes
+            );
+            match &prop_changes[0] {
+                StructuralChange::PropertyChanged {
+                    path,
+                    property,
+                    old,
+                    new,
+                } => {
+                    assert_eq!(path, &vec!["root".to_string(), "sensor".to_string()]);
+                    assert!(
+                        property.contains("Period"),
+                        "property should mention Period, got: {}",
+                        property
+                    );
+                    assert!(old.is_empty(), "old should be empty for added property");
+                    assert_eq!(new, "50 ms");
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_property_removed() {
+            // Base: sensor has Period = 10ms
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+            let base = b.build(root);
+
+            // Head: sensor has no properties
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let prop_changes: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::PropertyChanged { .. }))
+                .collect();
+            assert_eq!(
+                prop_changes.len(),
+                1,
+                "should detect exactly one property removal: {:?}",
+                changes
+            );
+            match &prop_changes[0] {
+                StructuralChange::PropertyChanged {
+                    path,
+                    property,
+                    old,
+                    new,
+                } => {
+                    assert_eq!(path, &vec!["root".to_string(), "sensor".to_string()]);
+                    assert!(
+                        property.contains("Period"),
+                        "property should mention Period, got: {}",
+                        property
+                    );
+                    assert_eq!(old, "10 ms");
+                    assert!(new.is_empty(), "new should be empty for removed property");
+                }
+                _ => unreachable!(),
+            }
         }
     }
 }

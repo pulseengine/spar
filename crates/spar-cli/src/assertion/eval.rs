@@ -21,6 +21,8 @@ pub(crate) enum Value {
     Features(Vec<(ComponentInstanceIdx, FeatureInstanceIdx)>),
     /// A boolean result.
     Bool(bool),
+    /// A boolean result with a warning message (e.g. vacuous truth).
+    BoolWithWarning(bool, String),
     /// A count.
     Count(usize),
     /// A set of diagnostics.
@@ -258,6 +260,34 @@ fn eval_quantifier(
             });
         }
     };
+
+    let count = match &value {
+        Value::Components(comps) => comps.len(),
+        Value::Features(feats) => feats.len(),
+        Value::Diagnostics(diags) => diags.len(),
+        _ => unreachable!(),
+    };
+
+    // Detect vacuous truth: all/none on an empty collection returns true trivially.
+    if count == 0 {
+        return match quantifier {
+            Quantifier::All => Ok(Value::BoolWithWarning(
+                true,
+                format!(
+                    "vacuous truth: 0 {type_name} matched the filter \
+                     \u{2014} all() passed trivially",
+                ),
+            )),
+            Quantifier::None => Ok(Value::BoolWithWarning(
+                true,
+                format!(
+                    "vacuous truth: 0 {type_name} matched the filter \
+                     \u{2014} none() passed trivially",
+                ),
+            )),
+            Quantifier::Any => Ok(Value::Bool(false)),
+        };
+    }
 
     let result = match (&quantifier, value) {
         (_, Value::Components(comps)) => {
