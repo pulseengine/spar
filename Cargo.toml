@@ -11,6 +11,7 @@ members = [
     "crates/spar-transform",
     "crates/spar-cli",
     "crates/spar-render",
+    "crates/spar-solver",
     "crates/spar-wasm",
 ]
 
@@ -29,6 +30,7 @@ spar-hir-def = { path = "crates/spar-hir-def" }
 spar-hir = { path = "crates/spar-hir" }
 spar-analysis = { path = "crates/spar-analysis" }
 spar-render = { path = "crates/spar-render" }
+spar-solver = { path = "crates/spar-solver" }
 spar-transform = { path = "crates/spar-transform" }
 rowan = "0.16"
 salsa = "0.26"
