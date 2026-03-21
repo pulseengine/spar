@@ -52,12 +52,12 @@ pub(crate) fn eval_node(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, E
     match node.kind() {
         ExprSyntaxKind::ROOT => {
             // Evaluate the single child expression
-            for child in node.children() {
-                return eval_node(&child, ctx);
-            }
-            Err(EvalError {
-                message: "empty expression".to_string(),
-            })
+            node.children()
+                .next()
+                .map(|child| eval_node(&child, ctx))
+                .unwrap_or(Err(EvalError {
+                    message: "empty expression".to_string(),
+                }))
         }
         ExprSyntaxKind::PIPELINE_EXPR => eval_pipeline(node, ctx),
         _ => Err(EvalError {
@@ -261,33 +261,33 @@ fn eval_quantifier(
 
     let result = match (&quantifier, value) {
         (_, Value::Components(comps)) => {
-            let iter = comps
+            let mut iter = comps
                 .iter()
                 .map(|&idx| eval_component_predicate(&pred_node, idx, ctx));
             match quantifier {
-                Quantifier::All => iter.fold(true, |acc, v| acc && v),
-                Quantifier::Any => iter.fold(false, |acc, v| acc || v),
-                Quantifier::None => !iter.fold(false, |acc, v| acc || v),
+                Quantifier::All => iter.all(|v| v),
+                Quantifier::Any => iter.any(|v| v),
+                Quantifier::None => !iter.any(|v| v),
             }
         }
         (_, Value::Features(feats)) => {
-            let iter = feats
+            let mut iter = feats
                 .iter()
                 .map(|&(c, f)| eval_feature_predicate(&pred_node, c, f, ctx));
             match quantifier {
-                Quantifier::All => iter.fold(true, |acc, v| acc && v),
-                Quantifier::Any => iter.fold(false, |acc, v| acc || v),
-                Quantifier::None => !iter.fold(false, |acc, v| acc || v),
+                Quantifier::All => iter.all(|v| v),
+                Quantifier::Any => iter.any(|v| v),
+                Quantifier::None => !iter.any(|v| v),
             }
         }
         (_, Value::Diagnostics(diags)) => {
-            let iter = diags
+            let mut iter = diags
                 .iter()
                 .map(|d| eval_diagnostic_predicate(&pred_node, d));
             match quantifier {
-                Quantifier::All => iter.fold(true, |acc, v| acc && v),
-                Quantifier::Any => iter.fold(false, |acc, v| acc || v),
-                Quantifier::None => !iter.fold(false, |acc, v| acc || v),
+                Quantifier::All => iter.all(|v| v),
+                Quantifier::Any => iter.any(|v| v),
+                Quantifier::None => !iter.any(|v| v),
             }
         }
         _ => {
@@ -516,12 +516,7 @@ fn eval_diagnostic_predicate(node: &SyntaxNode, diag: &AnalysisDiagnostic) -> bo
             let text = find_contains_text(node);
             diag.message.contains(text.as_str())
         }
-        ExprSyntaxKind::IDENT_EXPR => {
-            let text = node_text(node);
-            match text.as_str() {
-                "connected" | _ => false,
-            }
-        }
+        ExprSyntaxKind::IDENT_EXPR => false,
         ExprSyntaxKind::CALL_EXPR => {
             // has(...) doesn't apply to diagnostics
             false
@@ -574,13 +569,13 @@ pub(crate) fn feature_kind_matches(kind: &FeatureKind, val: &str) -> bool {
 
 pub(crate) fn direction_matches(dir: Option<&Direction>, val: &str) -> bool {
     let normalized = val.to_lowercase().replace('-', "_");
-    match (dir, normalized.as_str()) {
-        (Some(Direction::In), "in") => true,
-        (Some(Direction::Out), "out") => true,
-        (Some(Direction::InOut), "in_out" | "inout") => true,
-        (None, "none") => true,
-        _ => false,
-    }
+    matches!(
+        (dir, normalized.as_str()),
+        (Some(Direction::In), "in")
+            | (Some(Direction::Out), "out")
+            | (Some(Direction::InOut), "in_out" | "inout")
+            | (None, "none")
+    )
 }
 
 // ── Node inspection helpers ─────────────────────────────────────────
@@ -590,10 +585,10 @@ fn node_text(node: &SyntaxNode) -> String {
     // Collect all tokens, trimming whitespace
     let mut s = String::new();
     for token in node.descendants_with_tokens() {
-        if let rowan::NodeOrToken::Token(t) = token {
-            if t.kind() != ExprSyntaxKind::WHITESPACE {
-                s.push_str(t.text());
-            }
+        if let rowan::NodeOrToken::Token(t) = token
+            && t.kind() != ExprSyntaxKind::WHITESPACE
+        {
+            s.push_str(t.text());
         }
     }
     s
@@ -602,10 +597,10 @@ fn node_text(node: &SyntaxNode) -> String {
 /// Get the text of the first non-whitespace token in a node.
 fn first_token_text(node: &SyntaxNode) -> String {
     for token in node.descendants_with_tokens() {
-        if let rowan::NodeOrToken::Token(t) = token {
-            if t.kind() != ExprSyntaxKind::WHITESPACE {
-                return t.text().to_string();
-            }
+        if let rowan::NodeOrToken::Token(t) = token
+            && t.kind() != ExprSyntaxKind::WHITESPACE
+        {
+            return t.text().to_string();
         }
     }
     String::new()
@@ -616,16 +611,16 @@ fn find_string_literal(node: &SyntaxNode) -> Result<String, EvalError> {
     for child in node.children() {
         if child.kind() == ExprSyntaxKind::LITERAL {
             for token in child.descendants_with_tokens() {
-                if let rowan::NodeOrToken::Token(t) = token {
-                    if t.kind() == ExprSyntaxKind::STRING_LIT {
-                        let text = t.text();
-                        // Strip surrounding quotes
-                        let inner = text
-                            .strip_prefix('\'')
-                            .and_then(|s| s.strip_suffix('\''))
-                            .unwrap_or(text);
-                        return Ok(inner.to_string());
-                    }
+                if let rowan::NodeOrToken::Token(t) = token
+                    && t.kind() == ExprSyntaxKind::STRING_LIT
+                {
+                    let text = t.text();
+                    // Strip surrounding quotes
+                    let inner = text
+                        .strip_prefix('\'')
+                        .and_then(|s| s.strip_suffix('\''))
+                        .unwrap_or(text);
+                    return Ok(inner.to_string());
                 }
             }
         }
@@ -733,15 +728,15 @@ fn parse_compare(node: &SyntaxNode) -> (String, String) {
             rowan::NodeOrToken::Node(n) => {
                 if n.kind() == ExprSyntaxKind::LITERAL {
                     for token in n.descendants_with_tokens() {
-                        if let rowan::NodeOrToken::Token(t) = token {
-                            if t.kind() == ExprSyntaxKind::STRING_LIT {
-                                let text = t.text();
-                                let inner = text
-                                    .strip_prefix('\'')
-                                    .and_then(|s| s.strip_suffix('\''))
-                                    .unwrap_or(text);
-                                value = inner.to_string();
-                            }
+                        if let rowan::NodeOrToken::Token(t) = token
+                            && t.kind() == ExprSyntaxKind::STRING_LIT
+                        {
+                            let text = t.text();
+                            let inner = text
+                                .strip_prefix('\'')
+                                .and_then(|s| s.strip_suffix('\''))
+                                .unwrap_or(text);
+                            value = inner.to_string();
                         }
                     }
                 }
@@ -757,15 +752,15 @@ fn find_contains_text(node: &SyntaxNode) -> String {
     for child in node.children() {
         if child.kind() == ExprSyntaxKind::LITERAL {
             for token in child.descendants_with_tokens() {
-                if let rowan::NodeOrToken::Token(t) = token {
-                    if t.kind() == ExprSyntaxKind::STRING_LIT {
-                        let text = t.text();
-                        let inner = text
-                            .strip_prefix('\'')
-                            .and_then(|s| s.strip_suffix('\''))
-                            .unwrap_or(text);
-                        return inner.to_string();
-                    }
+                if let rowan::NodeOrToken::Token(t) = token
+                    && t.kind() == ExprSyntaxKind::STRING_LIT
+                {
+                    let text = t.text();
+                    let inner = text
+                        .strip_prefix('\'')
+                        .and_then(|s| s.strip_suffix('\''))
+                        .unwrap_or(text);
+                    return inner.to_string();
                 }
             }
         }
