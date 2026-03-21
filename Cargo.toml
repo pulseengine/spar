@@ -13,6 +13,7 @@ members = [
     "crates/spar-render",
     "crates/spar-solver",
     "crates/spar-wasm",
+    "crates/spar-solver",
 ]
 
 [workspace.package]
@@ -32,6 +33,7 @@ spar-analysis = { path = "crates/spar-analysis" }
 spar-render = { path = "crates/spar-render" }
 spar-solver = { path = "crates/spar-solver" }
 spar-transform = { path = "crates/spar-transform" }
+spar-solver = { path = "crates/spar-solver" }
 rowan = "0.16"
 salsa = "0.26"
 la-arena = "0.3"
