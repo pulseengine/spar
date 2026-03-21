@@ -471,7 +471,7 @@ artifacts:
       under fixed-priority preemptive scheduling, accounting for higher-priority
       interference and blocking. Reports deadline misses when WCRT exceeds
       Deadline property. Supports multi-processor configurations.
-    status: planned
+    status: implemented
     tags: [analysis, scheduling, v030]
 
   - id: REQ-BUS-001
@@ -481,7 +481,7 @@ artifacts:
       Compute aggregate bandwidth demand on each bus instance from bound
       connections and compare against the bus Bandwidth_Capacity property.
       Report overload when demand exceeds capacity.
-    status: planned
+    status: implemented
     tags: [analysis, resource, v030]
 
   - id: REQ-MEMBUD-001
@@ -491,7 +491,7 @@ artifacts:
       For each memory component, sum Code_Size and Data_Size properties of
       all software components bound to it and compare against Memory_Size.
       Report budget violations with utilization percentage.
-    status: planned
+    status: implemented
     tags: [analysis, resource, v030]
 
   - id: REQ-WEIGHTPOWER-001
@@ -501,7 +501,7 @@ artifacts:
       Aggregate SEI::GrossWeight and SEI::PowerBudget properties upward
       through the component hierarchy. Report when aggregate exceeds
       the capacity declared on the parent component.
-    status: planned
+    status: implemented
     tags: [analysis, resource, v030]
 
   # ── Parser Enhancements ──────────────────────────────────────────────
@@ -513,7 +513,7 @@ artifacts:
       Extend the parser to accept AADL v2.3 syntax additions while
       maintaining backward compatibility with v2.2. New constructs
       include updated property syntax and classifier enhancements.
-    status: planned
+    status: implemented
     tags: [parsing, as5506, v030]
 
   # ── Property Verification ────────────────────────────────────────────
@@ -526,7 +526,7 @@ artifacts:
       Users specify constraints (e.g., all threads must have Period set,
       latency < 100ms) and spar verify evaluates them, reporting pass/fail
       with evidence.
-    status: planned
+    status: implemented
     tags: [verification, properties, v030]
 
   # ── Structural Diff ──────────────────────────────────────────────────
@@ -538,7 +538,7 @@ artifacts:
       Compare two revisions of an AADL model structurally (added/removed/
       changed components, connections, properties) and diff their analysis
       results to show impact of changes on scheduling, latency, etc.
-    status: planned
+    status: implemented
     tags: [diff, git, v030]
 
   - id: REQ-DIFF-002
@@ -548,7 +548,7 @@ artifacts:
       Export analysis diagnostics and diff results in SARIF format for
       integration with GitHub Code Scanning, enabling architectural
       findings as code review annotations.
-    status: planned
+    status: implemented
     tags: [diff, sarif, integration, v030]
 
   - id: REQ-DIFF-003
@@ -596,7 +596,7 @@ artifacts:
       hardware topology: processors as nodes, buses as edges, with capacity
       properties (CPU budget, memory size, bus bandwidth). Serves as the
       target graph for deployment optimization.
-    status: planned
+    status: implemented
     tags: [solver, topology, v030]
 
   - id: REQ-SOLVER-002
@@ -607,7 +607,7 @@ artifacts:
       DDS, SOME/IP, shared memory, CAN, CAN FD, Ethernet, AFDX, SpaceWire,
       PROFINET, EtherCAT, MAVLink. Each includes latency overhead, bandwidth,
       max payload, security profile, and bus type compatibility properties.
-    status: planned
+    status: implemented
     tags: [solver, protocol, v030]
 
   - id: REQ-SOLVER-003
@@ -618,7 +618,7 @@ artifacts:
       (Period, Deadline, WCET → scheduling feasibility), safety (ASIL/DAL
       → partition isolation), security (trust zones → encryption overhead),
       resources (memory/CPU/bandwidth budgets), physical (bus connectivity).
-    status: planned
+    status: implemented
     tags: [solver, constraints, v030]
 
   - id: REQ-SOLVER-004
@@ -665,7 +665,7 @@ artifacts:
       manipulation. Insert/update Actual_Processor_Binding, Actual_Memory_Binding,
       Actual_Connection_Binding properties. Preserve formatting and comments.
       Validate incrementally via salsa after each change.
-    status: planned
+    status: implemented
     tags: [solver, refactoring, v030]
 
   - id: REQ-SOLVER-008

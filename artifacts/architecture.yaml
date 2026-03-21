@@ -327,7 +327,7 @@ artifacts:
 
   - id: ARCH-ANALYSIS-001
     type: design-decision
-    status: planned
+    status: implemented
     title: New analysis passes follow existing Analysis trait
     description: >
       RTA, bus bandwidth, memory budget, and weight/power analysis passes
@@ -355,7 +355,7 @@ artifacts:
 
   - id: ARCH-DIFF-001
     type: design-decision
-    status: planned
+    status: implemented
     title: Git worktrees for revision comparison
     description: >
       Structural diff uses git worktrees to check out two revisions
@@ -406,7 +406,7 @@ artifacts:
 
   - id: ARCH-VERIFY-001
     type: design-decision
-    status: planned
+    status: implemented
     title: Property assertion DSL over HIR instance model
     description: >
       Property assertions are declarative rules written in a compact DSL
@@ -504,7 +504,7 @@ artifacts:
 
   - id: ARCH-SOLVER-002
     type: design-decision
-    status: planned
+    status: implemented
     title: Topology graph as petgraph
     description: >
       Hardware topology extracted from AADL instance model into a petgraph
@@ -524,7 +524,7 @@ artifacts:
 
   - id: ARCH-SOLVER-003
     type: design-decision
-    status: planned
+    status: implemented
     title: Virtual bus library as AADL package
     description: >
       Communication protocols modeled as AADL virtual bus types in a standard
@@ -545,7 +545,7 @@ artifacts:
 
   - id: ARCH-SOLVER-004
     type: design-decision
-    status: planned
+    status: implemented
     title: Pure Rust bin-packing for Layer 1
     description: >
       Process-to-processor allocation uses First-Fit Decreasing (FFD) and
@@ -566,7 +566,7 @@ artifacts:
 
   - id: ARCH-SOLVER-005
     type: design-decision
-    status: planned
+    status: implemented
     title: Source rewriting via rowan CST
     description: >
       Solver output applied by constructing TextEdit operations on the AADL

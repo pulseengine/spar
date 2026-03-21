@@ -444,6 +444,7 @@ impl ExprParser {
 mod tests {
     use super::*;
     use crate::assertion::syntax::ExprSyntaxKind;
+    use proptest::prelude::*;
 
     #[test]
     fn parse_components() {
@@ -544,5 +545,157 @@ mod tests {
         let result = parse_expr("components.foobar()");
         assert!(!result.ok());
         assert!(result.errors()[0].contains("expected method name"));
+    }
+
+    // ── Property-based tests ────────────────────────────────────────
+
+    /// AADL component categories accepted by the assertion language.
+    fn assertion_category() -> impl Strategy<Value = &'static str> {
+        prop_oneof![
+            Just("thread"),
+            Just("process"),
+            Just("system"),
+            Just("processor"),
+            Just("memory"),
+            Just("bus"),
+            Just("device"),
+            Just("data"),
+            Just("subprogram"),
+            Just("abstract"),
+            Just("virtual-processor"),
+            Just("virtual-bus"),
+            Just("thread-group"),
+        ]
+    }
+
+    /// Property names that the assertion engine can reference.
+    fn assertion_property() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("Timing_Properties::Period".to_string()),
+            Just("Timing_Properties::Compute_Execution_Time".to_string()),
+            Just("Deployment_Properties::Actual_Processor_Binding".to_string()),
+            "[a-zA-Z][a-zA-Z0-9_]{0,15}::[a-zA-Z][a-zA-Z0-9_]{0,15}",
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(
+            std::env::var("PROPTEST_CASES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100)
+        ))]
+
+        /// The assertion parser must never panic, regardless of input.
+        #[test]
+        fn parser_never_panics(input in "\\PC{0,300}") {
+            let result = parse_expr(&input);
+            // Must be able to access the syntax node without panicking.
+            let _node = result.syntax_node();
+            let _errors = result.errors();
+        }
+
+        /// The parser must never panic on arbitrary unicode.
+        #[test]
+        fn parser_never_panics_unicode(input in ".{0,200}") {
+            let result = parse_expr(&input);
+            let _node = result.syntax_node();
+        }
+
+        /// Generate valid `components.where(category == '<cat>').all(has('<prop>'))`
+        /// expressions and verify they parse without errors.
+        #[test]
+        fn valid_where_all_has(
+            cat in assertion_category(),
+            prop in assertion_property(),
+        ) {
+            let expr = format!("components.where(category == '{cat}').all(has('{prop}'))");
+            let result = parse_expr(&expr);
+            prop_assert!(
+                result.ok(),
+                "parse errors for valid expression: {:?}\nexpr: {}",
+                result.errors(),
+                expr,
+            );
+            // Root node kind must be ROOT.
+            prop_assert_eq!(result.syntax_node().kind(), ExprSyntaxKind::ROOT);
+        }
+
+        /// Generate valid `components.where(category == '<cat>').any(has('<prop>'))`
+        /// expressions and verify they parse without errors.
+        #[test]
+        fn valid_where_any_has(
+            cat in assertion_category(),
+            prop in assertion_property(),
+        ) {
+            let expr = format!("components.where(category == '{cat}').any(has('{prop}'))");
+            let result = parse_expr(&expr);
+            prop_assert!(
+                result.ok(),
+                "parse errors: {:?}\nexpr: {}",
+                result.errors(),
+                expr,
+            );
+        }
+
+        /// Generate valid `components.where(category == '<cat>').count()`
+        /// expressions and verify they parse without errors.
+        #[test]
+        fn valid_where_count(cat in assertion_category()) {
+            let expr = format!("components.where(category == '{cat}').count()");
+            let result = parse_expr(&expr);
+            prop_assert!(
+                result.ok(),
+                "parse errors: {:?}\nexpr: {}",
+                result.errors(),
+                expr,
+            );
+        }
+
+        /// Generate valid `analysis('<name>').diagnostics.none(severity == '<sev>')`
+        /// expressions and verify they parse without errors.
+        #[test]
+        fn valid_analysis_diagnostics(
+            name in "[a-z][a-z_]{0,15}",
+            sev in prop_oneof![Just("error"), Just("warning"), Just("info")],
+        ) {
+            let expr = format!("analysis('{name}').diagnostics.none(severity == '{sev}')");
+            let result = parse_expr(&expr);
+            prop_assert!(
+                result.ok(),
+                "parse errors: {:?}\nexpr: {}",
+                result.errors(),
+                expr,
+            );
+        }
+
+        /// Boolean combinators: `and`, `or`, `not` with valid predicates.
+        #[test]
+        fn valid_boolean_combinators(
+            cat1 in assertion_category(),
+            cat2 in assertion_category(),
+            prop in assertion_property(),
+        ) {
+            // and
+            let expr = format!(
+                "components.all(has('{prop}') and category == '{cat1}')"
+            );
+            let result = parse_expr(&expr);
+            prop_assert!(result.ok(), "and expr errors: {:?}", result.errors());
+
+            // or
+            let expr = format!(
+                "components.any(category == '{cat1}' or category == '{cat2}')"
+            );
+            let result = parse_expr(&expr);
+            prop_assert!(result.ok(), "or expr errors: {:?}", result.errors());
+
+            // not
+            let expr = format!(
+                "components.none(not has('{prop}'))"
+            );
+            let result = parse_expr(&expr);
+            prop_assert!(result.ok(), "not expr errors: {:?}", result.errors());
+        }
     }
 }

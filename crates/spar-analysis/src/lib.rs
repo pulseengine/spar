@@ -26,6 +26,7 @@ pub mod connectivity;
 pub mod direction_rules;
 pub mod emv2_analysis;
 pub mod extends_rules;
+pub mod feature_group_check;
 pub mod flow_check;
 pub mod flow_rules;
 pub mod hierarchy;
@@ -118,6 +119,7 @@ impl AnalysisRunner {
         use connectivity::ConnectivityAnalysis;
         use direction_rules::DirectionRuleAnalysis;
         use emv2_analysis::Emv2Analysis;
+        use feature_group_check::FeatureGroupCheckAnalysis;
         use flow_check::FlowCheckAnalysis;
         use flow_rules::FlowRuleAnalysis;
         use hierarchy::HierarchyAnalysis;
@@ -161,6 +163,7 @@ impl AnalysisRunner {
         self.register(Box::new(ModeReachabilityAnalysis));
         self.register(Box::new(WeightPowerAnalysis));
         self.register(Box::new(BusBandwidthAnalysis));
+        self.register(Box::new(FeatureGroupCheckAnalysis));
     }
 
     /// Return the number of registered analyses.

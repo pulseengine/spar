@@ -11,11 +11,12 @@ members = [
     "crates/spar-transform",
     "crates/spar-cli",
     "crates/spar-render",
+    "crates/spar-solver",
     "crates/spar-wasm",
 ]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/pulseengine/spar"
@@ -29,6 +30,7 @@ spar-hir-def = { path = "crates/spar-hir-def" }
 spar-hir = { path = "crates/spar-hir" }
 spar-analysis = { path = "crates/spar-analysis" }
 spar-render = { path = "crates/spar-render" }
+spar-solver = { path = "crates/spar-solver" }
 spar-transform = { path = "crates/spar-transform" }
 rowan = "0.16"
 salsa = "0.26"
@@ -40,3 +42,4 @@ toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "d80b36b", package = "etch" }
+proptest = "1"
