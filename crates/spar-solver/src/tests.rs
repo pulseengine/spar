@@ -506,6 +506,325 @@ fn impact_detects_overloaded_processor() {
     assert!(!impact.processor_utilization[0].feasible);
 }
 
+// ── Constraint extraction tests ──────────────────────────────────────
+
+#[test]
+fn constraints_extract_thread_timing() {
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![proc]);
+    b.set_children(proc, vec![thr]);
+
+    b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+    b.set_property(
+        thr,
+        "Timing_Properties",
+        "Compute_Execution_Time",
+        "2 ms",
+    );
+    b.set_property(thr, "Timing_Properties", "Deadline", "5 ms");
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.threads.len(), 1);
+    let tc = &constraints.threads[0];
+    assert_eq!(tc.period_ps, 10_000_000_000); // 10 ms in ps
+    assert_eq!(tc.wcet_ps, 2_000_000_000); // 2 ms in ps
+    assert_eq!(tc.deadline_ps, 5_000_000_000); // 5 ms in ps
+    assert!(constraints.warnings.is_empty());
+}
+
+#[test]
+fn constraints_missing_wcet_warns() {
+    // SOLVER-REQ-020: periodic thread without WCET must produce a warning.
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![proc]);
+    b.set_children(proc, vec![thr]);
+
+    b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+    // No Compute_Execution_Time set.
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.threads.len(), 1);
+    assert_eq!(constraints.threads[0].wcet_ps, 0);
+    assert!(
+        constraints
+            .warnings
+            .iter()
+            .any(|w| w.contains("missing Compute_Execution_Time")),
+        "expected warning about missing WCET, got: {:?}",
+        constraints.warnings
+    );
+}
+
+#[test]
+fn constraints_missing_period_warns() {
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![proc]);
+    b.set_children(proc, vec![thr]);
+
+    b.set_property(
+        thr,
+        "Timing_Properties",
+        "Compute_Execution_Time",
+        "2 ms",
+    );
+    // No Period set.
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.threads.len(), 1);
+    assert_eq!(constraints.threads[0].period_ps, 0);
+    assert!(
+        constraints
+            .warnings
+            .iter()
+            .any(|w| w.contains("missing Period")),
+        "expected warning about missing Period, got: {:?}",
+        constraints.warnings
+    );
+}
+
+#[test]
+fn constraints_deadline_defaults_to_period() {
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![proc]);
+    b.set_children(proc, vec![thr]);
+
+    b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+    b.set_property(
+        thr,
+        "Timing_Properties",
+        "Compute_Execution_Time",
+        "2 ms",
+    );
+    // No Deadline set — should default to Period.
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.threads.len(), 1);
+    let tc = &constraints.threads[0];
+    assert_eq!(tc.deadline_ps, tc.period_ps);
+    assert_eq!(tc.deadline_ps, 10_000_000_000);
+}
+
+#[test]
+fn constraints_extract_processor() {
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+    b.set_children(root, vec![cpu]);
+
+    // 8388608 bits = 1 MB = 1_048_576 bytes
+    b.set_property(cpu, "Memory_Properties", "Memory_Size", "8388608 bits");
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.processors.len(), 1);
+    let pc = &constraints.processors[0];
+    assert!(pc.name.contains("cpu1"));
+    assert_eq!(pc.memory_bytes, Some(1_048_576));
+}
+
+#[test]
+fn constraints_extract_binding() {
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![cpu, proc]);
+    b.set_children(proc, vec![thr]);
+
+    b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+    b.set_property(
+        thr,
+        "Timing_Properties",
+        "Compute_Execution_Time",
+        "2 ms",
+    );
+    b.set_property(
+        thr,
+        "Deployment_Properties",
+        "Actual_Processor_Binding",
+        "reference(cpu1)",
+    );
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    assert_eq!(constraints.threads.len(), 1);
+    assert_eq!(
+        constraints.threads[0].current_binding,
+        Some("cpu1".to_string())
+    );
+}
+
+#[test]
+fn constraints_sorted_deterministically() {
+    // SOLVER-REQ-023: threads and processors must be sorted by name.
+    use crate::constraints::ModelConstraints;
+
+    let mut b = TestBuilder::new();
+    let root = b.add_component("root", ComponentCategory::System, None);
+    let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+    // Create threads in non-alphabetical order.
+    let z = b.add_component("z_thread", ComponentCategory::Thread, Some(proc));
+    let a = b.add_component("a_thread", ComponentCategory::Thread, Some(proc));
+    let m = b.add_component("m_thread", ComponentCategory::Thread, Some(proc));
+    b.set_children(root, vec![proc]);
+    b.set_children(proc, vec![z, a, m]);
+
+    // Give all threads a Period so they don't produce warnings about missing period
+    // that would clutter the assertion.
+    for &thr in &[z, a, m] {
+        b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            thr,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+    }
+
+    let instance = b.build(root);
+    let constraints = ModelConstraints::from_instance(&instance);
+
+    let names: Vec<&str> = constraints.threads.iter().map(|t| t.name.as_str()).collect();
+    // Names must contain the thread name as the last segment.
+    assert!(names[0].ends_with("a_thread"), "first should be a_thread, got {}", names[0]);
+    assert!(names[1].ends_with("m_thread"), "second should be m_thread, got {}", names[1]);
+    assert!(names[2].ends_with("z_thread"), "third should be z_thread, got {}", names[2]);
+}
+
+// ── Impact analysis: deadline violation ─────────────────────────────
+
+#[test]
+fn impact_detects_deadline_violation() {
+    use crate::allocate::{AllocationResult, Binding};
+    use crate::constraints::{ModelConstraints, ProcessorConstraint, ThreadConstraint};
+
+    // Create a dummy ComponentInstanceIdx for test structs.
+    let mut components: Arena<ComponentInstance> = Arena::default();
+    let dummy = components.alloc(ComponentInstance {
+        name: Name::new("dummy"),
+        category: ComponentCategory::System,
+        type_name: Name::new("D"),
+        impl_name: None,
+        package: Name::new("Pkg"),
+        parent: None,
+        children: Vec::new(),
+        features: Vec::new(),
+        connections: Vec::new(),
+        flows: Vec::new(),
+        modes: Vec::new(),
+        mode_transitions: Vec::new(),
+        array_index: None,
+        in_modes: Vec::new(),
+    });
+
+    // Thread t1: period=10ms, wcet=5ms, deadline=7ms → util=0.5
+    // Thread t2: period=10ms, wcet=4ms, deadline=7ms → util=0.4
+    // Total utilization = 0.9
+    // RMA bound for n=2 = 2*(2^(1/2)-1) ≈ 0.828
+    // 0.9 > 0.828 AND deadline < period → triggers deadline violation path
+    let constraints = ModelConstraints {
+        threads: vec![
+            ThreadConstraint {
+                idx: dummy,
+                name: "t1".to_string(),
+                period_ps: 10_000_000_000,
+                wcet_ps: 5_000_000_000,
+                deadline_ps: 7_000_000_000, // deadline < period
+                current_binding: None,
+                priority: None,
+            },
+            ThreadConstraint {
+                idx: dummy,
+                name: "t2".to_string(),
+                period_ps: 10_000_000_000,
+                wcet_ps: 4_000_000_000,
+                deadline_ps: 7_000_000_000, // deadline < period
+                current_binding: None,
+                priority: None,
+            },
+        ],
+        processors: vec![ProcessorConstraint {
+            idx: dummy,
+            name: "cpu1".to_string(),
+            memory_bytes: None,
+        }],
+        warnings: vec![],
+    };
+
+    // Force both threads onto one processor (0.9 total utilization).
+    let result = AllocationResult {
+        bindings: vec![
+            Binding {
+                thread: "t1".to_string(),
+                processor: "cpu1".to_string(),
+                utilization: 0.5,
+            },
+            Binding {
+                thread: "t2".to_string(),
+                processor: "cpu1".to_string(),
+                utilization: 0.4,
+            },
+        ],
+        unallocated: vec![],
+        per_processor_utilization: vec![("cpu1".to_string(), 0.9)],
+        warnings: vec![],
+    };
+
+    let impact = result.impact(&constraints);
+    assert!(
+        !impact.deadline_violations.is_empty(),
+        "expected deadline violations for constrained-deadline threads exceeding RMA bound"
+    );
+    // Both threads have deadline < period and are on the overloaded processor.
+    assert_eq!(
+        impact.deadline_violations.len(),
+        2,
+        "both threads should have deadline violations, got: {:?}",
+        impact.deadline_violations
+    );
+    // The allocation is still "feasible" in utilization terms (0.9 <= 1.0),
+    // but not schedulable due to deadline violations.
+    assert!(
+        !impact.schedulable,
+        "should not be schedulable with deadline violations"
+    );
+}
+
 /// Build a simple schedulable system for impact tests.
 fn build_schedulable_system() -> SystemInstance {
     let mut b = TestBuilder::new();
