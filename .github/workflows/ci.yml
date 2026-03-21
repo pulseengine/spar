@@ -164,19 +164,12 @@ jobs:
   supply-chain:
     name: Supply Chain (cargo-vet)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-vet
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-vet
-      - name: Initialize cargo-vet if needed
-        run: |
-          if [ ! -d supply-chain ]; then
-            cargo vet init
-            echo "::notice::cargo-vet initialized"
-          fi
-      - name: Check supply chain
-        run: cargo vet --locked || echo "::warning::cargo-vet found unaudited crates"
+      - name: Verify supply chain
+        run: cargo vet --locked

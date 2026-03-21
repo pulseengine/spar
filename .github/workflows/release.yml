@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -244,10 +246,28 @@ jobs:
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
+  # ── SBOM (Software Bill of Materials) ─────────────────────────────────
+  build-sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - name: Generate CycloneDX SBOM
+        run: cargo cyclonedx --format json --output-file spar-sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: spar-sbom.cdx.json
+
   # ── Create GitHub Release ─────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
-    needs: [build-binaries, build-compliance, build-test-evidence, build-vsix]
+    needs: [build-binaries, build-compliance, build-test-evidence, build-vsix, build-sbom]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -260,7 +280,7 @@ jobs:
       - name: Collect assets
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) -exec mv {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" -o -name "*.cdx.json" \) -exec mv {} release/ \;
           ls -la release/
 
       - name: Generate checksums
@@ -272,9 +292,20 @@ jobs:
       - name: Create Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/}"
           gh release create "$VERSION" \
             --title "spar $VERSION" \
             --generate-notes \
             release/*
+
+      - name: Attest release artifacts (SLSA provenance)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in release/*; do
+            echo "Attesting: $file"
+            gh attestation create "$file" \
+              --repo "${{ github.repository }}" \
+              --bundle-output "$file.jsonl" || true
+          done
