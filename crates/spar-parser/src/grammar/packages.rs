@@ -89,8 +89,7 @@ fn section_body(p: &mut Parser) {
             }
             // v2.3: `interface feature group TypeName ...`
             SyntaxKind::INTERFACE_KW
-                if p.nth(1) == SyntaxKind::FEATURE_KW
-                    && p.nth(2) == SyntaxKind::GROUP_KW =>
+                if p.nth(1) == SyntaxKind::FEATURE_KW && p.nth(2) == SyntaxKind::GROUP_KW =>
             {
                 // Consume `interface` before delegating to feature_group_type_decl
                 p.bump(SyntaxKind::INTERFACE_KW);

@@ -213,8 +213,7 @@ impl ServerState {
             .values()
             .map(|file| {
                 let result = parse_file(&self.db, *file);
-                let tree =
-                    spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
+                let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
                 Arc::new(tree)
             })
             .collect();

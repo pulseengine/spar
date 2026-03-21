@@ -61,7 +61,9 @@ fn print_usage() {
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
     eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
-    eprintln!("  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>");
+    eprintln!(
+        "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
+    );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -582,7 +584,10 @@ fn cmd_diff(args: &[String]) {
             eprintln!("--new requires --old (or use --base/--head for git refs)");
             process::exit(1);
         });
-        (diff::resolve_dir_sources(&old), diff::resolve_dir_sources(&new))
+        (
+            diff::resolve_dir_sources(&old),
+            diff::resolve_dir_sources(&new),
+        )
     } else if base_ref.is_some() {
         // Git ref-based comparison
         if files.is_empty() {
@@ -646,10 +651,7 @@ fn cmd_diff(args: &[String]) {
 
             // Exit with non-zero if there are regressions
             if !result.regressions.is_empty() {
-                eprintln!(
-                    "\n{} regression(s) detected.",
-                    result.regressions.len()
-                );
+                eprintln!("\n{} regression(s) detected.", result.regressions.len());
                 process::exit(1);
             }
         }

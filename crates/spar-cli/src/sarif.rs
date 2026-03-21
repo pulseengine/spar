@@ -14,10 +14,7 @@ use spar_analysis::{AnalysisDiagnostic, Severity};
 /// - `path` -> logical location (component path)
 ///
 /// `files` is the list of analyzed AADL source files, used for artifact references.
-pub fn to_sarif(
-    diagnostics: &[AnalysisDiagnostic],
-    files: &[String],
-) -> serde_json::Value {
+pub fn to_sarif(diagnostics: &[AnalysisDiagnostic], files: &[String]) -> serde_json::Value {
     let rules = build_rules(diagnostics);
     let results = build_results(diagnostics, files);
     let artifacts = build_artifacts(files);
@@ -64,10 +61,7 @@ fn build_rules(diagnostics: &[AnalysisDiagnostic]) -> Vec<serde_json::Value> {
 }
 
 /// Build SARIF result objects from diagnostics.
-fn build_results(
-    diagnostics: &[AnalysisDiagnostic],
-    files: &[String],
-) -> Vec<serde_json::Value> {
+fn build_results(diagnostics: &[AnalysisDiagnostic], files: &[String]) -> Vec<serde_json::Value> {
     diagnostics
         .iter()
         .map(|diag| {
@@ -154,7 +148,12 @@ fn severity_to_sarif_level(severity: Severity) -> &'static str {
 mod tests {
     use super::*;
 
-    fn make_diag(analysis: &str, severity: Severity, message: &str, path: &[&str]) -> AnalysisDiagnostic {
+    fn make_diag(
+        analysis: &str,
+        severity: Severity,
+        message: &str,
+        path: &[&str],
+    ) -> AnalysisDiagnostic {
         AnalysisDiagnostic {
             analysis: analysis.to_string(),
             severity,
@@ -167,7 +166,12 @@ mod tests {
     fn sarif_schema_present() {
         let sarif = to_sarif(&[], &[]);
         assert_eq!(sarif["version"], "2.1.0");
-        assert!(sarif["$schema"].as_str().unwrap().contains("sarif-schema-2.1.0"));
+        assert!(
+            sarif["$schema"]
+                .as_str()
+                .unwrap()
+                .contains("sarif-schema-2.1.0")
+        );
     }
 
     #[test]
@@ -181,9 +185,12 @@ mod tests {
 
     #[test]
     fn sarif_basic_diagnostic() {
-        let diags = vec![
-            make_diag("connectivity", Severity::Error, "unconnected port", &["root", "cpu"]),
-        ];
+        let diags = vec![make_diag(
+            "connectivity",
+            Severity::Error,
+            "unconnected port",
+            &["root", "cpu"],
+        )];
         let files = vec!["model.aadl".to_string()];
         let sarif = to_sarif(&diags, &files);
 
@@ -215,7 +222,9 @@ mod tests {
             make_diag("scheduling", Severity::Info, "msg3", &["c"]),
         ];
         let sarif = to_sarif(&diags, &[]);
-        let rules = sarif["runs"][0]["tool"]["driver"]["rules"].as_array().unwrap();
+        let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
+            .as_array()
+            .unwrap();
         // Should have 2 unique rules: connectivity and scheduling
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0]["id"], "spar/connectivity");
@@ -235,7 +244,12 @@ mod tests {
     #[test]
     fn sarif_multiple_severities() {
         let diags = vec![
-            make_diag("hierarchy", Severity::Warning, "deep nesting", &["root", "a", "b"]),
+            make_diag(
+                "hierarchy",
+                Severity::Warning,
+                "deep nesting",
+                &["root", "a", "b"],
+            ),
             make_diag("completeness", Severity::Info, "missing binding", &["root"]),
         ];
         let sarif = to_sarif(&diags, &["test.aadl".to_string()]);

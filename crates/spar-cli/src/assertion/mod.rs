@@ -101,7 +101,6 @@ fn cached_parse(input: &str) -> ParseResult {
     })
 }
 
-
 // ── Public API ──────────────────────────────────────────────────────
 
 /// Evaluate a list of assertions against an instance model and diagnostics.
@@ -213,10 +212,8 @@ fn evaluate_one(assertion: &Assertion, ctx: &EvalContext) -> AssertionResult {
 
 #[cfg(test)]
 mod tests {
+    use super::eval::{EvalError, category_matches, direction_matches, feature_kind_matches};
     use super::*;
-    use super::eval::{
-        category_matches, direction_matches, feature_kind_matches, EvalError,
-    };
 
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
@@ -224,9 +221,7 @@ mod tests {
     use spar_hir_def::instance::{
         ComponentInstance, ConnectionEnd, ConnectionInstance, FeatureInstance, SystemInstance,
     };
-    use spar_hir_def::item_tree::{
-        ComponentCategory, ConnectionKind, Direction, FeatureKind,
-    };
+    use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind, Direction, FeatureKind};
     use spar_hir_def::name::Name;
     use spar_hir_def::properties::PropertyMap;
 
@@ -280,16 +275,13 @@ mod tests {
 
     #[test]
     fn parse_or_predicate() {
-        let result = parse_check(
-            "components.any(category == 'thread' or category == 'process')",
-        );
+        let result = parse_check("components.any(category == 'thread' or category == 'process')");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 
     #[test]
     fn parse_not_predicate() {
-        let result =
-            parse_check("components.none(not has('Timing_Properties::Period'))");
+        let result = parse_check("components.none(not has('Timing_Properties::Period'))");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 
@@ -311,8 +303,7 @@ mod tests {
 
     #[test]
     fn parse_count() {
-        let result =
-            parse_check("components.where(category == 'thread').count()");
+        let result = parse_check("components.where(category == 'thread').count()");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 
@@ -658,12 +649,7 @@ mod tests {
             instance: &inst,
             diagnostics: &diags,
         };
-        match eval_check(
-            "components.where(category == 'thread').count()",
-            &ctx,
-        )
-        .unwrap()
-        {
+        match eval_check("components.where(category == 'thread').count()", &ctx).unwrap() {
             Value::Count(n) => assert_eq!(n, 2),
             other => panic!("expected Count, got {:?}", other),
         }
@@ -870,12 +856,7 @@ mod tests {
         }
 
         // count on empty set is 0
-        match eval_check(
-            "components.where(category == 'thread').count()",
-            &ctx,
-        )
-        .unwrap()
-        {
+        match eval_check("components.where(category == 'thread').count()", &ctx).unwrap() {
             Value::Count(n) => assert_eq!(n, 0),
             other => panic!("expected Count, got {:?}", other),
         }
@@ -972,10 +953,7 @@ mod tests {
     fn feature_kind_matching() {
         assert!(feature_kind_matches(&FeatureKind::DataPort, "data_port"));
         assert!(feature_kind_matches(&FeatureKind::DataPort, "dataport"));
-        assert!(feature_kind_matches(
-            &FeatureKind::EventPort,
-            "event_port"
-        ));
+        assert!(feature_kind_matches(&FeatureKind::EventPort, "event_port"));
         assert!(feature_kind_matches(
             &FeatureKind::EventDataPort,
             "event_data_port"

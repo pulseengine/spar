@@ -128,11 +128,7 @@ fn eval_source(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, EvalError>
 }
 
 /// Evaluate a DOT_CALL: `.method(args)` or `.field`.
-fn eval_dot_call(
-    node: &SyntaxNode,
-    value: Value,
-    ctx: &EvalContext,
-) -> Result<Value, EvalError> {
+fn eval_dot_call(node: &SyntaxNode, value: Value, ctx: &EvalContext) -> Result<Value, EvalError> {
     // The DOT_CALL has tokens: DOT, IDENT (method name)
     // and optionally a CALL_ARGS child node.
     let method_name = get_method_name(node);
@@ -209,11 +205,7 @@ enum Quantifier {
     None,
 }
 
-fn eval_where(
-    args_node: &SyntaxNode,
-    value: Value,
-    ctx: &EvalContext,
-) -> Result<Value, EvalError> {
+fn eval_where(args_node: &SyntaxNode, value: Value, ctx: &EvalContext) -> Result<Value, EvalError> {
     let pred_node = find_predicate_in_args(args_node)?;
 
     match value {
@@ -263,7 +255,7 @@ fn eval_quantifier(
             return Err(EvalError {
                 message: "quantifier can only be applied to components, features, or diagnostics"
                     .to_string(),
-            })
+            });
         }
     };
 
@@ -300,10 +292,8 @@ fn eval_quantifier(
         }
         _ => {
             return Err(EvalError {
-                message: format!(
-                    "quantifier can only be applied to {}", type_name
-                ),
-            })
+                message: format!("quantifier can only be applied to {}", type_name),
+            });
         }
     };
 
@@ -494,12 +484,8 @@ fn eval_diagnostic_predicate(node: &SyntaxNode, diag: &AnalysisDiagnostic) -> bo
         ExprSyntaxKind::BINARY_EXPR => {
             let (op, children) = parse_binary_expr(node);
             match op {
-                BinaryOp::And => children
-                    .iter()
-                    .all(|c| eval_diagnostic_predicate(c, diag)),
-                BinaryOp::Or => children
-                    .iter()
-                    .any(|c| eval_diagnostic_predicate(c, diag)),
+                BinaryOp::And => children.iter().all(|c| eval_diagnostic_predicate(c, diag)),
+                BinaryOp::Or => children.iter().any(|c| eval_diagnostic_predicate(c, diag)),
             }
         }
         ExprSyntaxKind::UNARY_EXPR => {

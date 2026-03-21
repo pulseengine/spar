@@ -159,10 +159,7 @@ pub fn resolve_fs_sources(aadl_files: &[String]) -> AadlSources {
 // ── Build pipeline ──────────────────────────────────────────────────
 
 /// Parse and instantiate AADL sources into a system instance and its diagnostics.
-pub fn build_model(
-    sources: &AadlSources,
-    root: &str,
-) -> (SystemInstance, Vec<AnalysisDiagnostic>) {
+pub fn build_model(sources: &AadlSources, root: &str) -> (SystemInstance, Vec<AnalysisDiagnostic>) {
     let (pkg_name, type_name, impl_name) = parse_root_ref(root);
 
     let db = spar_hir_def::HirDefDatabase::default();
@@ -207,10 +204,7 @@ pub fn build_model(
 // ── Structural comparison ───────────────────────────────────────────
 
 /// Compare two SystemInstances and produce structural changes.
-pub fn compare_structure(
-    base: &SystemInstance,
-    head: &SystemInstance,
-) -> Vec<StructuralChange> {
+pub fn compare_structure(base: &SystemInstance, head: &SystemInstance) -> Vec<StructuralChange> {
     let mut changes = Vec::new();
 
     // Build path maps for both instances
@@ -336,23 +330,30 @@ fn collect_connections(inst: &SystemInstance) -> std::collections::BTreeSet<(Str
     let mut conns = std::collections::BTreeSet::new();
 
     for (_idx, conn) in inst.connections.iter() {
-        let src = conn.src.as_ref().map(|e| {
-            match &e.subcomponent {
+        let src = conn
+            .src
+            .as_ref()
+            .map(|e| match &e.subcomponent {
                 Some(sub) => format!("{}.{}", sub, e.feature),
                 None => e.feature.as_str().to_string(),
-            }
-        }).unwrap_or_else(|| "?".to_string());
+            })
+            .unwrap_or_else(|| "?".to_string());
 
-        let dst = conn.dst.as_ref().map(|e| {
-            match &e.subcomponent {
+        let dst = conn
+            .dst
+            .as_ref()
+            .map(|e| match &e.subcomponent {
                 Some(sub) => format!("{}.{}", sub, e.feature),
                 None => e.feature.as_str().to_string(),
-            }
-        }).unwrap_or_else(|| "?".to_string());
+            })
+            .unwrap_or_else(|| "?".to_string());
 
         let owner_comp = inst.component(conn.owner);
         let owner_path = format!("{}/", owner_comp.name);
-        conns.insert((format!("{}{}", owner_path, src), format!("{}{}", owner_path, dst)));
+        conns.insert((
+            format!("{}{}", owner_path, src),
+            format!("{}{}", owner_path, dst),
+        ));
     }
 
     conns
@@ -457,18 +458,10 @@ pub fn format_text(result: &DiffResult) -> String {
         for change in &result.structural {
             match change {
                 StructuralChange::ComponentAdded { path, category } => {
-                    out.push_str(&format!(
-                        "  + [{}] {}\n",
-                        category,
-                        path.join("/")
-                    ));
+                    out.push_str(&format!("  + [{}] {}\n", category, path.join("/")));
                 }
                 StructuralChange::ComponentRemoved { path, category } => {
-                    out.push_str(&format!(
-                        "  - [{}] {}\n",
-                        category,
-                        path.join("/")
-                    ));
+                    out.push_str(&format!("  - [{}] {}\n", category, path.join("/")));
                 }
                 StructuralChange::ComponentModified { path, changes } => {
                     out.push_str(&format!("  ~ {}\n", path.join("/")));
@@ -595,7 +588,12 @@ mod tests {
     use super::*;
     use spar_analysis::Severity;
 
-    fn make_diag(analysis: &str, severity: Severity, message: &str, path: &[&str]) -> AnalysisDiagnostic {
+    fn make_diag(
+        analysis: &str,
+        severity: Severity,
+        message: &str,
+        path: &[&str],
+    ) -> AnalysisDiagnostic {
         AnalysisDiagnostic {
             analysis: analysis.to_string(),
             severity,
@@ -606,12 +604,18 @@ mod tests {
 
     #[test]
     fn compare_diagnostics_no_regressions() {
-        let base = vec![
-            make_diag("connectivity", Severity::Error, "unconnected", &["root"]),
-        ];
-        let head = vec![
-            make_diag("connectivity", Severity::Error, "unconnected", &["root"]),
-        ];
+        let base = vec![make_diag(
+            "connectivity",
+            Severity::Error,
+            "unconnected",
+            &["root"],
+        )];
+        let head = vec![make_diag(
+            "connectivity",
+            Severity::Error,
+            "unconnected",
+            &["root"],
+        )];
 
         let (impacts, regressions) = compare_diagnostics(&base, &head);
         assert_eq!(impacts.len(), 1);
@@ -623,9 +627,12 @@ mod tests {
     #[test]
     fn compare_diagnostics_with_regression() {
         let base = vec![];
-        let head = vec![
-            make_diag("scheduling", Severity::Error, "deadline missed", &["root", "cpu"]),
-        ];
+        let head = vec![make_diag(
+            "scheduling",
+            Severity::Error,
+            "deadline missed",
+            &["root", "cpu"],
+        )];
 
         let (impacts, regressions) = compare_diagnostics(&base, &head);
         assert_eq!(impacts.len(), 1);
@@ -638,9 +645,12 @@ mod tests {
 
     #[test]
     fn compare_diagnostics_fixed_issue() {
-        let base = vec![
-            make_diag("connectivity", Severity::Error, "unconnected", &["root", "sensor"]),
-        ];
+        let base = vec![make_diag(
+            "connectivity",
+            Severity::Error,
+            "unconnected",
+            &["root", "sensor"],
+        )];
         let head = vec![];
 
         let (impacts, regressions) = compare_diagnostics(&base, &head);

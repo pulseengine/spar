@@ -121,8 +121,7 @@ impl ExprParser {
     // ── Token consumption ───────────────────────────────────────────
 
     fn eat_ws(&mut self) {
-        while self.pos < self.tokens.len()
-            && self.tokens[self.pos].0 == ExprSyntaxKind::WHITESPACE
+        while self.pos < self.tokens.len() && self.tokens[self.pos].0 == ExprSyntaxKind::WHITESPACE
         {
             let (kind, ref text) = self.tokens[self.pos];
             self.builder.token(kind.into(), text);
@@ -188,8 +187,7 @@ impl ExprParser {
         self.eat_ws();
         if !self.at_eof() {
             let text = self.current_text().to_string();
-            self.errors
-                .push(format!("unexpected '{}'", text));
+            self.errors.push(format!("unexpected '{}'", text));
             // Consume remaining tokens as error
             while self.pos < self.tokens.len() {
                 let (kind, ref text) = self.tokens[self.pos];
@@ -207,13 +205,11 @@ impl ExprParser {
 
         // Parse source
         if self.at_ident("components") {
-            self.builder
-                .start_node(ExprSyntaxKind::IDENT_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::IDENT_EXPR.into());
             self.bump();
             self.builder.finish_node();
         } else if self.at_ident("analysis") {
-            self.builder
-                .start_node(ExprSyntaxKind::CALL_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::CALL_EXPR.into());
             self.bump(); // 'analysis'
             self.expect(ExprSyntaxKind::L_PAREN);
             self.builder.start_node(ExprSyntaxKind::LITERAL.into());
@@ -243,16 +239,14 @@ impl ExprParser {
 
     /// dot_call = '.' ident [ '(' args ')' ]
     fn parse_dot_call(&mut self) {
-        self.builder
-            .start_node(ExprSyntaxKind::DOT_CALL.into());
+        self.builder.start_node(ExprSyntaxKind::DOT_CALL.into());
         self.expect(ExprSyntaxKind::DOT);
 
         let method = self.current_text().to_string();
         match method.as_str() {
             "where" | "all" | "any" | "none" => {
                 self.bump();
-                self.builder
-                    .start_node(ExprSyntaxKind::CALL_ARGS.into());
+                self.builder.start_node(ExprSyntaxKind::CALL_ARGS.into());
                 self.expect(ExprSyntaxKind::L_PAREN);
                 self.parse_or_expr();
                 self.expect(ExprSyntaxKind::R_PAREN);
@@ -260,8 +254,7 @@ impl ExprParser {
             }
             "count" => {
                 self.bump();
-                self.builder
-                    .start_node(ExprSyntaxKind::CALL_ARGS.into());
+                self.builder.start_node(ExprSyntaxKind::CALL_ARGS.into());
                 self.expect(ExprSyntaxKind::L_PAREN);
                 self.expect(ExprSyntaxKind::R_PAREN);
                 self.builder.finish_node();
@@ -302,8 +295,7 @@ impl ExprParser {
         let has_or = self.has_binary_op_at_level(ExprSyntaxKind::OR_KW);
 
         if has_or {
-            self.builder
-                .start_node(ExprSyntaxKind::BINARY_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::BINARY_EXPR.into());
             self.parse_and_expr();
             while self.at_kind(ExprSyntaxKind::OR_KW) {
                 self.bump(); // 'or'
@@ -319,8 +311,7 @@ impl ExprParser {
         let has_and = self.has_binary_op_at_level(ExprSyntaxKind::AND_KW);
 
         if has_and {
-            self.builder
-                .start_node(ExprSyntaxKind::BINARY_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::BINARY_EXPR.into());
             self.parse_atom();
             while self.at_kind(ExprSyntaxKind::AND_KW) {
                 self.bump(); // 'and'
@@ -369,8 +360,7 @@ impl ExprParser {
 
         // not
         if self.at_kind(ExprSyntaxKind::NOT_KW) {
-            self.builder
-                .start_node(ExprSyntaxKind::UNARY_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::UNARY_EXPR.into());
             self.bump(); // 'not'
             self.parse_atom();
             self.builder.finish_node();
@@ -379,8 +369,7 @@ impl ExprParser {
 
         // parenthesized expression
         if self.at_kind(ExprSyntaxKind::L_PAREN) {
-            self.builder
-                .start_node(ExprSyntaxKind::PAREN_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::PAREN_EXPR.into());
             self.bump(); // '('
             self.parse_or_expr();
             self.expect(ExprSyntaxKind::R_PAREN);
@@ -390,8 +379,7 @@ impl ExprParser {
 
         // has('...')
         if self.at_ident("has") {
-            self.builder
-                .start_node(ExprSyntaxKind::CALL_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::CALL_EXPR.into());
             self.bump(); // 'has'
             self.expect(ExprSyntaxKind::L_PAREN);
             self.builder.start_node(ExprSyntaxKind::LITERAL.into());
@@ -404,8 +392,7 @@ impl ExprParser {
 
         // connected
         if self.at_ident("connected") {
-            self.builder
-                .start_node(ExprSyntaxKind::IDENT_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::IDENT_EXPR.into());
             self.bump();
             self.builder.finish_node();
             return;
@@ -434,8 +421,7 @@ impl ExprParser {
             || self.at_ident("severity")
             || self.at_ident("message")
         {
-            self.builder
-                .start_node(ExprSyntaxKind::COMPARE_EXPR.into());
+            self.builder.start_node(ExprSyntaxKind::COMPARE_EXPR.into());
             self.bump(); // field name
             self.expect(ExprSyntaxKind::EQ_EQ);
             self.builder.start_node(ExprSyntaxKind::LITERAL.into());
@@ -501,25 +487,20 @@ mod tests {
 
     #[test]
     fn parse_or_expr_test() {
-        let result = parse_expr(
-            "components.any(category == 'thread' or category == 'process')",
-        );
+        let result = parse_expr("components.any(category == 'thread' or category == 'process')");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 
     #[test]
     fn parse_not_expr_test() {
-        let result = parse_expr(
-            "components.none(not has('Timing_Properties::Period'))",
-        );
+        let result = parse_expr("components.none(not has('Timing_Properties::Period'))");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 
     #[test]
     fn parse_message_contains() {
-        let result = parse_expr(
-            "analysis('scheduling').diagnostics.none(message.contains('exceeds'))",
-        );
+        let result =
+            parse_expr("analysis('scheduling').diagnostics.none(message.contains('exceeds'))");
         assert!(result.ok(), "errors: {:?}", result.errors());
     }
 

@@ -103,15 +103,15 @@ mod tests {
             kinds,
             vec![
                 ExprSyntaxKind::IDENT,      // components
-                ExprSyntaxKind::DOT,         // .
-                ExprSyntaxKind::IDENT,       // where
-                ExprSyntaxKind::L_PAREN,     // (
-                ExprSyntaxKind::IDENT,       // category
-                ExprSyntaxKind::WHITESPACE,  // ' '
-                ExprSyntaxKind::EQ_EQ,       // ==
-                ExprSyntaxKind::WHITESPACE,  // ' '
-                ExprSyntaxKind::STRING_LIT,  // 'thread'
-                ExprSyntaxKind::R_PAREN,     // )
+                ExprSyntaxKind::DOT,        // .
+                ExprSyntaxKind::IDENT,      // where
+                ExprSyntaxKind::L_PAREN,    // (
+                ExprSyntaxKind::IDENT,      // category
+                ExprSyntaxKind::WHITESPACE, // ' '
+                ExprSyntaxKind::EQ_EQ,      // ==
+                ExprSyntaxKind::WHITESPACE, // ' '
+                ExprSyntaxKind::STRING_LIT, // 'thread'
+                ExprSyntaxKind::R_PAREN,    // )
             ]
         );
     }
