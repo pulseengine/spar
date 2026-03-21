@@ -458,3 +458,130 @@ artifacts:
         target: REQ-MODEL-005
       - type: satisfies
         target: REQ-PROP-002
+
+  # ── v0.3.0 Requirements ─────────────────────────────────────────────────
+
+  # ── Analysis Enhancements ────────────────────────────────────────────
+
+  - id: REQ-RTA-001
+    type: requirement
+    title: RTA per-thread response time with deadline checking
+    description: >
+      Response Time Analysis computes per-thread worst-case response times
+      under fixed-priority preemptive scheduling, accounting for higher-priority
+      interference and blocking. Reports deadline misses when WCRT exceeds
+      Deadline property. Supports multi-processor configurations.
+    status: planned
+    tags: [analysis, scheduling, v030]
+
+  - id: REQ-BUS-001
+    type: requirement
+    title: Bus bandwidth utilization analysis
+    description: >
+      Compute aggregate bandwidth demand on each bus instance from bound
+      connections and compare against the bus Bandwidth_Capacity property.
+      Report overload when demand exceeds capacity.
+    status: planned
+    tags: [analysis, resource, v030]
+
+  - id: REQ-MEMBUD-001
+    type: requirement
+    title: Memory budget analysis (Code_Size + Data_Size vs Memory_Size)
+    description: >
+      For each memory component, sum Code_Size and Data_Size properties of
+      all software components bound to it and compare against Memory_Size.
+      Report budget violations with utilization percentage.
+    status: planned
+    tags: [analysis, resource, v030]
+
+  - id: REQ-WEIGHTPOWER-001
+    type: requirement
+    title: Weight/power property aggregation up hierarchy
+    description: >
+      Aggregate SEI::GrossWeight and SEI::PowerBudget properties upward
+      through the component hierarchy. Report when aggregate exceeds
+      the capacity declared on the parent component.
+    status: planned
+    tags: [analysis, resource, v030]
+
+  # ── Parser Enhancements ──────────────────────────────────────────────
+
+  - id: REQ-PARSER-001
+    type: requirement
+    title: AADL v2.3 syntax acceptance
+    description: >
+      Extend the parser to accept AADL v2.3 syntax additions while
+      maintaining backward compatibility with v2.2. New constructs
+      include updated property syntax and classifier enhancements.
+    status: planned
+    tags: [parsing, as5506, v030]
+
+  # ── Property Verification ────────────────────────────────────────────
+
+  - id: REQ-VERIFY-001
+    type: requirement
+    title: Property assertion rules in spar verify
+    description: >
+      A DSL for declaring assertions over HIR instance model properties.
+      Users specify constraints (e.g., all threads must have Period set,
+      latency < 100ms) and spar verify evaluates them, reporting pass/fail
+      with evidence.
+    status: planned
+    tags: [verification, properties, v030]
+
+  # ── Structural Diff ──────────────────────────────────────────────────
+
+  - id: REQ-DIFF-001
+    type: requirement
+    title: Git-aware structural diff with analysis impact comparison
+    description: >
+      Compare two revisions of an AADL model structurally (added/removed/
+      changed components, connections, properties) and diff their analysis
+      results to show impact of changes on scheduling, latency, etc.
+    status: planned
+    tags: [diff, git, v030]
+
+  - id: REQ-DIFF-002
+    type: requirement
+    title: SARIF output for GitHub Code Scanning integration
+    description: >
+      Export analysis diagnostics and diff results in SARIF format for
+      integration with GitHub Code Scanning, enabling architectural
+      findings as code review annotations.
+    status: planned
+    tags: [diff, sarif, integration, v030]
+
+  - id: REQ-DIFF-003
+    type: requirement
+    title: Three-way merge architectural conflict detection
+    description: >
+      Detect architectural conflicts in three-way merges where concurrent
+      changes affect the same structural elements (components, connections,
+      bindings) or produce incompatible analysis results.
+    status: planned
+    tags: [diff, merge, v030]
+
+  # ── MCP Server ───────────────────────────────────────────────────────
+
+  - id: REQ-MCP-001
+    type: requirement
+    title: MCP server exposing analysis tools and model resources
+    description: >
+      Model Context Protocol server running as a spar CLI subcommand,
+      exposing AADL analysis passes as MCP tools and instance model
+      elements as MCP resources over stdio JSON-RPC transport.
+    status: planned
+    tags: [mcp, integration, v030]
+
+  # ── Query Language ───────────────────────────────────────────────────
+
+  - id: REQ-QUERY-001
+    type: requirement
+    title: Path-expression query language over instance model
+    description: >
+      A query language using path expressions (e.g., components.where(
+      category == thread).property(Period)) to select and filter instance
+      model elements. Supports predicate filtering, property extraction,
+      and aggregation.
+    status: planned
+    tags: [query, instance, v030]

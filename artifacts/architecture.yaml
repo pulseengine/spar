@@ -322,3 +322,158 @@ artifacts:
       shimmed to read workspace files. Webview panel shows interactive
       HTML from etch with ports, orthogonal routing, and pan/zoom.
     tags: [architecture, tooling, vscode]
+
+  # ── v0.3.0 Architecture Decisions ──────────────────────────────────────
+
+  - id: ARCH-ANALYSIS-001
+    type: design-decision
+    status: planned
+    title: New analysis passes follow existing Analysis trait
+    description: >
+      RTA, bus bandwidth, memory budget, and weight/power analysis passes
+      are each independent modules implementing the existing Analysis trait.
+      They register with AnalysisRunner and produce AnalysisDiagnostic
+      results, consistent with the 22 existing passes.
+    fields:
+      rationale: >
+        Reusing the established Analysis trait + AnalysisRunner pattern keeps
+        all passes composable and independently testable. No framework changes
+        needed — new passes are drop-in modules.
+      interfaces:
+        provides: [RtaAnalysis, BusBandwidthAnalysis, MemoryBudgetAnalysis, WeightPowerAnalysis]
+        requires: [spar-hir-def instance model, Analysis trait]
+    tags: [architecture, analysis, v030]
+    links:
+      - type: satisfies
+        target: REQ-RTA-001
+      - type: satisfies
+        target: REQ-BUS-001
+      - type: satisfies
+        target: REQ-MEMBUD-001
+      - type: satisfies
+        target: REQ-WEIGHTPOWER-001
+
+  - id: ARCH-DIFF-001
+    type: design-decision
+    status: planned
+    title: Git worktrees for revision comparison
+    description: >
+      Structural diff uses git worktrees to check out two revisions
+      simultaneously, instantiates each through the standard spar pipeline,
+      and compares the resulting instance models structurally. Analysis
+      impact is computed by running the same passes on both revisions and
+      diffing the diagnostics.
+    fields:
+      rationale: >
+        Git worktrees avoid cloning or temporary directories. Reusing the
+        existing instantiation pipeline means the diff sees exactly what
+        spar analyze sees — no custom model loading. SARIF output reuses
+        the existing diagnostic severity/location types.
+      interfaces:
+        provides: [StructuralDiff, AnalysisImpact, SarifExport, MergeConflictDetector]
+        requires: [spar-hir instance model, spar-analysis, git]
+    tags: [architecture, diff, v030]
+    links:
+      - type: satisfies
+        target: REQ-DIFF-001
+      - type: satisfies
+        target: REQ-DIFF-002
+      - type: satisfies
+        target: REQ-DIFF-003
+
+  - id: ARCH-MCP-001
+    type: design-decision
+    status: planned
+    title: MCP server as CLI command with stdio JSON-RPC transport
+    description: >
+      The MCP server is a new spar CLI subcommand (spar mcp) that
+      communicates over stdio using JSON-RPC. Analysis passes are exposed
+      as MCP tools, instance model elements as MCP resources. The server
+      reuses the existing Database and AnalysisRunner infrastructure.
+    fields:
+      rationale: >
+        stdio JSON-RPC is the standard MCP transport — no HTTP server needed.
+        Implementing as a CLI subcommand means no new binary and reuses the
+        existing spar database initialization. MCP tools map 1:1 to analysis
+        passes, and resources map to instance model queries.
+      interfaces:
+        provides: [spar mcp command, MCP tools, MCP resources]
+        requires: [spar-hir Database, spar-analysis AnalysisRunner]
+    tags: [architecture, mcp, v030]
+    links:
+      - type: satisfies
+        target: REQ-MCP-001
+
+  - id: ARCH-VERIFY-001
+    type: design-decision
+    status: planned
+    title: Property assertion DSL over HIR instance model
+    description: >
+      Property assertions are declarative rules written in a compact DSL
+      that query the HIR instance model. Each assertion specifies a scope
+      (component selector), a property path, and a constraint. The verify
+      command evaluates assertions and reports pass/fail with evidence
+      including the actual property value and component path.
+    fields:
+      rationale: >
+        A declarative DSL avoids requiring users to write Rust code for
+        custom checks. Operating over the HIR instance model means
+        assertions see fully resolved properties after inheritance and
+        default evaluation. The DSL can also reference analysis results.
+      interfaces:
+        provides: [AssertionDSL, spar verify command, AssertionResult]
+        requires: [spar-hir instance model]
+    tags: [architecture, verification, v030]
+    links:
+      - type: satisfies
+        target: REQ-VERIFY-001
+
+  - id: ARCH-QUERY-001
+    type: design-decision
+    status: planned
+    title: "Path-expression query language: components.where().property() pattern"
+    description: >
+      Query expressions use a method-chain syntax over the instance model:
+      components.where(predicate).property(name) selects components matching
+      a predicate and extracts property values. Supports category filters,
+      property existence checks, value comparisons, and aggregation
+      (count, sum, min, max).
+    fields:
+      rationale: >
+        Method-chain syntax is familiar to developers and composable.
+        Path expressions map naturally to the instance model hierarchy.
+        The query layer sits on top of the existing instance model —
+        no separate index or database required.
+      interfaces:
+        provides: [QueryExpression, QueryResult, spar query command]
+        requires: [spar-hir instance model]
+    tags: [architecture, query, v030]
+    links:
+      - type: satisfies
+        target: REQ-QUERY-001
+
+  - id: ARCH-KNOWLEDGE-001
+    type: design-decision
+    status: planned
+    title: Instance model is the knowledge base; query layer on top
+    description: >
+      The spar instance model (SystemInstance with its arena-allocated
+      component, connection, and property data) serves as the single
+      knowledge base for all queries, analysis, and MCP resources. The
+      query language and MCP server access it through the existing HIR
+      facade — no separate database or index is built.
+    fields:
+      rationale: >
+        The instance model already contains all structural and property
+        information needed for queries. Adding a separate database would
+        duplicate data and create synchronization complexity. The salsa
+        incremental engine already provides caching and invalidation.
+      interfaces:
+        provides: [unified knowledge base]
+        requires: [spar-hir-def SystemInstance, spar-hir facade]
+    tags: [architecture, knowledge, v030]
+    links:
+      - type: traces-to
+        target: REQ-QUERY-001
+      - type: traces-to
+        target: REQ-MCP-001
