@@ -809,6 +809,8 @@ mod tests {
             ("or", OR_KW),
             ("refined", REFINED_KW),
             ("self", SELF_KW),
+            ("interface", INTERFACE_KW),
+            ("file", FILE_KW),
         ];
         for (text, expected_kind) in keywords {
             let tokens = lex_tokens(text);
