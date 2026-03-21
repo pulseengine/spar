@@ -18,7 +18,92 @@ use spar_hir_def::item_tree::{
 use spar_hir_def::name::Name;
 use spar_hir_def::resolver::GlobalScope;
 
-use crate::{AnalysisDiagnostic, Severity};
+use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+
+/// Instance-level feature group connection validation.
+///
+/// Checks that every feature group connection references features that
+/// actually exist on the connected components and are of kind
+/// [`FeatureKind::FeatureGroup`]. Complement validation (which requires
+/// a `GlobalScope`) is handled separately by [`check_feature_group_complements`].
+pub struct FeatureGroupCheckAnalysis;
+
+impl Analysis for FeatureGroupCheckAnalysis {
+    fn name(&self) -> &str {
+        "feature_group_check"
+    }
+
+    fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+
+        for (_conn_idx, conn) in instance.connections.iter() {
+            if conn.kind != ConnectionKind::FeatureGroup {
+                continue;
+            }
+
+            let (src_end, dst_end) = match (&conn.src, &conn.dst) {
+                (Some(s), Some(d)) => (s, d),
+                _ => {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "feature group connection '{}' is missing an endpoint",
+                            conn.name
+                        ),
+                        path: component_path(instance, conn.owner),
+                        analysis: "feature_group_check".to_string(),
+                    });
+                    continue;
+                }
+            };
+
+            // Resolve source and destination components.
+            let src_comp = resolve_endpoint_component(instance, conn.owner, &src_end.subcomponent);
+            let dst_comp = resolve_endpoint_component(instance, conn.owner, &dst_end.subcomponent);
+
+            // Check that the referenced features are actually FeatureGroups.
+            if let Some(src_idx) = src_comp {
+                let comp = instance.component(src_idx);
+                let is_fg = comp.features.iter().any(|&fi| {
+                    let feat = &instance.features[fi];
+                    feat.name.eq_ci(&src_end.feature) && feat.kind == FeatureKind::FeatureGroup
+                });
+                if !is_fg && !comp.features.is_empty() {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "feature group connection '{}': source feature '{}' is not a feature group",
+                            conn.name, src_end.feature
+                        ),
+                        path: component_path(instance, conn.owner),
+                        analysis: "feature_group_check".to_string(),
+                    });
+                }
+            }
+
+            if let Some(dst_idx) = dst_comp {
+                let comp = instance.component(dst_idx);
+                let is_fg = comp.features.iter().any(|&fi| {
+                    let feat = &instance.features[fi];
+                    feat.name.eq_ci(&dst_end.feature) && feat.kind == FeatureKind::FeatureGroup
+                });
+                if !is_fg && !comp.features.is_empty() {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "feature group connection '{}': destination feature '{}' is not a feature group",
+                            conn.name, dst_end.feature
+                        ),
+                        path: component_path(instance, conn.owner),
+                        analysis: "feature_group_check".to_string(),
+                    });
+                }
+            }
+        }
+
+        diags
+    }
+}
 
 // ── Feature Group Complement Validation (instance-level) ────────────
 

@@ -723,4 +723,480 @@ mod tests {
         assert_eq!(ty, "Type");
         assert_eq!(im, "Impl");
     }
+
+    // ── compare_structure tests ─────────────────────────────────────
+
+    mod structure_tests {
+        use super::*;
+        use la_arena::Arena;
+        use rustc_hash::FxHashMap;
+        use spar_hir_def::instance::*;
+        use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind};
+        use spar_hir_def::name::Name;
+
+        /// Minimal builder for constructing SystemInstance values in tests.
+        struct TestBuilder {
+            components: Arena<ComponentInstance>,
+            features: Arena<FeatureInstance>,
+            connections: Arena<ConnectionInstance>,
+            property_maps: FxHashMap<ComponentInstanceIdx, spar_hir_def::properties::PropertyMap>,
+        }
+
+        impl TestBuilder {
+            fn new() -> Self {
+                Self {
+                    components: Arena::default(),
+                    features: Arena::default(),
+                    connections: Arena::default(),
+                    property_maps: FxHashMap::default(),
+                }
+            }
+
+            fn add_component(
+                &mut self,
+                name: &str,
+                category: ComponentCategory,
+                parent: Option<ComponentInstanceIdx>,
+            ) -> ComponentInstanceIdx {
+                self.components.alloc(ComponentInstance {
+                    name: Name::new(name),
+                    category,
+                    type_name: Name::new(name),
+                    impl_name: Some(Name::new("impl")),
+                    package: Name::new("Pkg"),
+                    parent,
+                    children: Vec::new(),
+                    features: Vec::new(),
+                    connections: Vec::new(),
+                    flows: Vec::new(),
+                    modes: Vec::new(),
+                    mode_transitions: Vec::new(),
+                    array_index: None,
+                    in_modes: Vec::new(),
+                })
+            }
+
+            fn set_children(
+                &mut self,
+                parent: ComponentInstanceIdx,
+                children: Vec<ComponentInstanceIdx>,
+            ) {
+                self.components[parent].children = children;
+            }
+
+            fn add_feature(
+                &mut self,
+                name: &str,
+                owner: ComponentInstanceIdx,
+            ) -> FeatureInstanceIdx {
+                let idx = self.features.alloc(FeatureInstance {
+                    name: Name::new(name),
+                    kind: spar_hir_def::item_tree::FeatureKind::DataPort,
+                    direction: Some(spar_hir_def::item_tree::Direction::Out),
+                    owner,
+                    classifier: None,
+                    access_kind: None,
+                    array_index: None,
+                });
+                self.components[owner].features.push(idx);
+                idx
+            }
+
+            fn add_connection(
+                &mut self,
+                name: &str,
+                owner: ComponentInstanceIdx,
+                src_sub: Option<&str>,
+                src_feat: &str,
+                dst_sub: Option<&str>,
+                dst_feat: &str,
+            ) -> ConnectionInstanceIdx {
+                let idx = self.connections.alloc(ConnectionInstance {
+                    name: Name::new(name),
+                    kind: ConnectionKind::Port,
+                    is_bidirectional: false,
+                    owner,
+                    src: Some(ConnectionEnd {
+                        subcomponent: src_sub.map(Name::new),
+                        feature: Name::new(src_feat),
+                    }),
+                    dst: Some(ConnectionEnd {
+                        subcomponent: dst_sub.map(Name::new),
+                        feature: Name::new(dst_feat),
+                    }),
+                    in_modes: Vec::new(),
+                });
+                self.components[owner].connections.push(idx);
+                idx
+            }
+
+            #[allow(dead_code)]
+            fn set_property(
+                &mut self,
+                comp: ComponentInstanceIdx,
+                set: &str,
+                name: &str,
+                value: &str,
+            ) {
+                use spar_hir_def::name::PropertyRef;
+                use spar_hir_def::properties::PropertyValue;
+
+                let map = self.property_maps.entry(comp).or_default();
+                map.add(PropertyValue {
+                    name: PropertyRef {
+                        property_set: if set.is_empty() {
+                            None
+                        } else {
+                            Some(Name::new(set))
+                        },
+                        property_name: Name::new(name),
+                    },
+                    value: value.to_string(),
+                    is_append: false,
+                });
+            }
+
+            fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+                SystemInstance {
+                    root,
+                    components: self.components,
+                    features: self.features,
+                    connections: self.connections,
+                    flow_instances: Arena::default(),
+                    end_to_end_flows: Arena::default(),
+                    mode_instances: Arena::default(),
+                    mode_transition_instances: Arena::default(),
+                    diagnostics: Vec::new(),
+                    property_maps: self.property_maps,
+                    semantic_connections: Vec::new(),
+                    system_operation_modes: Vec::new(),
+                }
+            }
+        }
+
+        /// Helper: build a basic system with root -> [sensor, controller, actuator].
+        fn build_basic_system() -> SystemInstance {
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
+            b.set_children(root, vec![sensor, controller, actuator]);
+            b.build(root)
+        }
+
+        #[test]
+        fn compare_identical_systems() {
+            let base = build_basic_system();
+            let head = build_basic_system();
+
+            let changes = compare_structure(&base, &head);
+            assert!(
+                changes.is_empty(),
+                "identical systems should produce no changes, got: {:?}",
+                changes
+            );
+        }
+
+        #[test]
+        fn detect_component_added() {
+            let base = build_basic_system();
+
+            // Head system has an extra component "monitor"
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
+            let monitor = b.add_component("monitor", ComponentCategory::Process, Some(root));
+            b.set_children(root, vec![sensor, controller, actuator, monitor]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let added: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ComponentAdded { .. }))
+                .collect();
+            assert_eq!(added.len(), 1, "should detect exactly one addition: {:?}", changes);
+            match &added[0] {
+                StructuralChange::ComponentAdded { path, category } => {
+                    assert_eq!(path, &vec!["root".to_string(), "monitor".to_string()]);
+                    assert_eq!(category, "process");
+                }
+                _ => unreachable!(),
+            }
+
+            // The root component is modified (child count changed 3 -> 4)
+            let modified: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ComponentModified { .. }))
+                .collect();
+            assert!(
+                !modified.is_empty(),
+                "root should be marked modified (child count changed)"
+            );
+        }
+
+        #[test]
+        fn detect_component_removed() {
+            let base = build_basic_system();
+
+            // Head system is missing "actuator"
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            b.set_children(root, vec![sensor, controller]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let removed: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ComponentRemoved { .. }))
+                .collect();
+            assert_eq!(removed.len(), 1, "should detect exactly one removal: {:?}", changes);
+            match &removed[0] {
+                StructuralChange::ComponentRemoved { path, category } => {
+                    assert_eq!(path, &vec!["root".to_string(), "actuator".to_string()]);
+                    assert_eq!(category, "device");
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_connection_added() {
+            // Base: root with sensor and controller, no connections
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            b.add_feature("data_out", sensor);
+            b.add_feature("data_in", controller);
+            b.set_children(root, vec![sensor, controller]);
+            let base = b.build(root);
+
+            // Head: same components, but with a connection
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            b.add_feature("data_out", sensor);
+            b.add_feature("data_in", controller);
+            b.add_connection(
+                "c1", root, Some("sensor"), "data_out", Some("controller"), "data_in",
+            );
+            b.set_children(root, vec![sensor, controller]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let conn_added: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ConnectionAdded { .. }))
+                .collect();
+            assert_eq!(
+                conn_added.len(),
+                1,
+                "should detect exactly one connection addition: {:?}",
+                changes
+            );
+            match &conn_added[0] {
+                StructuralChange::ConnectionAdded { src, dst } => {
+                    assert!(
+                        src.contains("sensor.data_out"),
+                        "src should contain sensor.data_out, got: {}",
+                        src
+                    );
+                    assert!(
+                        dst.contains("controller.data_in"),
+                        "dst should contain controller.data_in, got: {}",
+                        dst
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_connection_removed() {
+            // Base: root with sensor, controller, and a connection
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            b.add_feature("data_out", sensor);
+            b.add_feature("data_in", controller);
+            b.add_connection(
+                "c1", root, Some("sensor"), "data_out", Some("controller"), "data_in",
+            );
+            b.set_children(root, vec![sensor, controller]);
+            let base = b.build(root);
+
+            // Head: same components, no connections
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            let controller =
+                b.add_component("controller", ComponentCategory::Process, Some(root));
+            b.add_feature("data_out", sensor);
+            b.add_feature("data_in", controller);
+            b.set_children(root, vec![sensor, controller]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let conn_removed: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ConnectionRemoved { .. }))
+                .collect();
+            assert_eq!(
+                conn_removed.len(),
+                1,
+                "should detect exactly one connection removal: {:?}",
+                changes
+            );
+            match &conn_removed[0] {
+                StructuralChange::ConnectionRemoved { src, dst } => {
+                    assert!(
+                        src.contains("sensor.data_out"),
+                        "src should contain sensor.data_out, got: {}",
+                        src
+                    );
+                    assert!(
+                        dst.contains("controller.data_in"),
+                        "dst should contain controller.data_in, got: {}",
+                        dst
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_property_changed() {
+            // compare_structure detects property-related changes through
+            // ComponentModified when structural aspects differ (feature count,
+            // connection count, child count, category). Direct PropertyChanged
+            // variants are not emitted by the current implementation, so we
+            // test that a component with differing feature counts is flagged
+            // as ComponentModified.
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.add_feature("port1", sensor);
+            b.set_children(root, vec![sensor]);
+            let base = b.build(root);
+
+            // Head: sensor has an additional feature (structural property change)
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+            b.add_feature("port1", sensor);
+            b.add_feature("port2", sensor);
+            b.set_children(root, vec![sensor]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let modified: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ComponentModified { .. }))
+                .collect();
+            assert!(
+                !modified.is_empty(),
+                "should detect modification when feature count changes: {:?}",
+                changes
+            );
+            match &modified[0] {
+                StructuralChange::ComponentModified { path, changes } => {
+                    assert_eq!(path, &vec!["root".to_string(), "sensor".to_string()]);
+                    let has_feature_change =
+                        changes.iter().any(|c| c.contains("feature count changed"));
+                    assert!(
+                        has_feature_change,
+                        "changes should mention feature count, got: {:?}",
+                        changes
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn detect_binding_change() {
+            // compare_structure detects binding-related changes through
+            // ComponentModified when the component category changes (e.g.,
+            // replacing a processor with a virtual processor). Direct
+            // BindingAdded/BindingRemoved variants are not emitted by the
+            // current implementation, so we test category change detection.
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+            let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+            b.set_children(root, vec![cpu, proc]);
+            let base = b.build(root);
+
+            // Head: cpu is now a VirtualProcessor (category changed)
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let cpu =
+                b.add_component("cpu", ComponentCategory::VirtualProcessor, Some(root));
+            let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+            b.set_children(root, vec![cpu, proc]);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+
+            let modified: Vec<_> = changes
+                .iter()
+                .filter(|c| matches!(c, StructuralChange::ComponentModified { .. }))
+                .collect();
+            assert!(
+                !modified.is_empty(),
+                "should detect modification when category changes: {:?}",
+                changes
+            );
+            match &modified[0] {
+                StructuralChange::ComponentModified { path, changes } => {
+                    assert_eq!(path, &vec!["root".to_string(), "cpu".to_string()]);
+                    let has_category_change =
+                        changes.iter().any(|c| c.contains("category changed"));
+                    assert!(
+                        has_category_change,
+                        "changes should mention category change, got: {:?}",
+                        changes
+                    );
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        #[test]
+        fn empty_systems_no_changes() {
+            // Two systems with only a root component (no children, connections, etc.)
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let base = b.build(root);
+
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let head = b.build(root);
+
+            let changes = compare_structure(&base, &head);
+            assert!(
+                changes.is_empty(),
+                "empty systems should produce no changes, got: {:?}",
+                changes
+            );
+        }
+    }
 }
