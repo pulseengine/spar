@@ -9,6 +9,8 @@ use std::{fmt, fs, process};
 use serde::{Deserialize, Serialize};
 use spar_analysis::{AnalysisDiagnostic, Severity};
 
+use crate::assertion::{Assertion, AssertionResult};
+
 // ── TOML schema ─────────────────────────────────────────────────────
 
 /// Top-level requirements file.
@@ -16,6 +18,8 @@ use spar_analysis::{AnalysisDiagnostic, Severity};
 pub(crate) struct RequirementsFile {
     #[serde(default)]
     pub requirement: Vec<Requirement>,
+    #[serde(default)]
+    pub assertion: Vec<Assertion>,
 }
 
 /// A single requirement entry from the TOML file.
@@ -117,6 +121,8 @@ pub(crate) struct VerifyReport {
     pub passed: usize,
     pub failed: usize,
     pub results: Vec<RequirementResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<AssertionResult>,
 }
 
 // ── Core logic ──────────────────────────────────────────────────────
@@ -182,34 +188,54 @@ pub(crate) fn evaluate(
         passed,
         failed,
         results,
+        assertions: Vec::new(),
     }
 }
 
 /// Format the report as human-readable text and print to stderr/stdout.
 pub(crate) fn print_text_report(report: &VerifyReport) {
-    eprintln!("Requirements verification: {}", report.root);
-    eprintln!();
+    if !report.results.is_empty() {
+        eprintln!("Requirements verification: {}", report.root);
+        eprintln!();
 
-    for result in &report.results {
-        let icon = match result.status {
-            Status::Pass => "\x1b[1;32mPASS\x1b[0m",
-            Status::Fail => "\x1b[1;31mFAIL\x1b[0m",
-        };
-        eprintln!(
-            "  [{}] {} - {} (analysis={}, found={}, max={})",
-            icon,
-            result.id,
-            result.description,
-            result.analysis,
-            result.matched_count,
-            result.max_count,
-        );
-        for ev in &result.evidence {
+        for result in &report.results {
+            let icon = match result.status {
+                Status::Pass => "\x1b[1;32mPASS\x1b[0m",
+                Status::Fail => "\x1b[1;31mFAIL\x1b[0m",
+            };
             eprintln!(
-                "         [{:>7}] {} (at {})",
-                ev.severity,
-                ev.message,
-                ev.path.join("/")
+                "  [{}] {} - {} (analysis={}, found={}, max={})",
+                icon,
+                result.id,
+                result.description,
+                result.analysis,
+                result.matched_count,
+                result.max_count,
+            );
+            for ev in &result.evidence {
+                eprintln!(
+                    "         [{:>7}] {} (at {})",
+                    ev.severity,
+                    ev.message,
+                    ev.path.join("/")
+                );
+            }
+        }
+    }
+
+    if !report.assertions.is_empty() {
+        eprintln!();
+        eprintln!("Assertions: {}", report.root);
+        eprintln!();
+
+        for result in &report.assertions {
+            let icon = match result.status {
+                Status::Pass => "\x1b[1;32mPASS\x1b[0m",
+                Status::Fail => "\x1b[1;31mFAIL\x1b[0m",
+            };
+            eprintln!(
+                "  [{}] {} - {} ({})",
+                icon, result.id, result.description, result.detail,
             );
         }
     }
@@ -458,6 +484,7 @@ max_count = 2
                 max_count: 0,
                 evidence: vec![],
             }],
+            assertions: vec![],
         };
         let json = serde_json::to_string_pretty(&report).unwrap();
         assert!(json.contains("\"status\": \"pass\""));
@@ -475,5 +502,87 @@ max_count = 2
     fn status_display() {
         assert_eq!(format!("{}", Status::Pass), "PASS");
         assert_eq!(format!("{}", Status::Fail), "FAIL");
+    }
+
+    #[test]
+    fn parse_toml_with_assertions() {
+        let toml_str = r#"
+[[requirement]]
+id = "REQ-001"
+analysis = "latency"
+
+[[assertion]]
+id = "ASSERT-001"
+description = "All threads have Period"
+check = "components.where(category == 'thread').all(has('Timing_Properties::Period'))"
+severity = "error"
+
+[[assertion]]
+id = "ASSERT-002"
+description = "At least one thread exists"
+check = "components.where(category == 'thread').count()"
+"#;
+        let file: RequirementsFile = toml::from_str(toml_str).unwrap();
+        assert_eq!(file.requirement.len(), 1);
+        assert_eq!(file.assertion.len(), 2);
+        assert_eq!(file.assertion[0].id, "ASSERT-001");
+        assert_eq!(file.assertion[0].severity, SeverityFilter::Error);
+        assert_eq!(file.assertion[1].id, "ASSERT-002");
+        // Default severity
+        assert_eq!(file.assertion[1].severity, SeverityFilter::Error);
+    }
+
+    #[test]
+    fn parse_empty_toml_has_no_assertions() {
+        let toml_str = "";
+        let file: RequirementsFile = toml::from_str(toml_str).unwrap();
+        assert!(file.requirement.is_empty());
+        assert!(file.assertion.is_empty());
+    }
+
+    #[test]
+    fn parse_toml_assertions_only() {
+        let toml_str = r#"
+[[assertion]]
+id = "ASSERT-001"
+check = "components.count()"
+"#;
+        let file: RequirementsFile = toml::from_str(toml_str).unwrap();
+        assert!(file.requirement.is_empty());
+        assert_eq!(file.assertion.len(), 1);
+    }
+
+    #[test]
+    fn report_with_assertions_serializes_to_json() {
+        let report = VerifyReport {
+            root: "Pkg::Sys.Impl".into(),
+            total: 2,
+            passed: 1,
+            failed: 1,
+            results: vec![],
+            assertions: vec![
+                AssertionResult {
+                    id: "ASSERT-001".into(),
+                    description: "test assertion".into(),
+                    check: "components.count()".into(),
+                    severity: "error".into(),
+                    status: Status::Pass,
+                    detail: "count = 5".into(),
+                },
+                AssertionResult {
+                    id: "ASSERT-002".into(),
+                    description: "failing assertion".into(),
+                    check: "components.where(category == 'thread').all(has('Timing_Properties::Period'))".into(),
+                    severity: "warning".into(),
+                    status: Status::Fail,
+                    detail: "assertion failed".into(),
+                },
+            ],
+        };
+        let json = serde_json::to_string_pretty(&report).unwrap();
+        assert!(json.contains("\"ASSERT-001\""));
+        assert!(json.contains("\"ASSERT-002\""));
+        assert!(json.contains("\"assertion failed\""));
+        assert!(json.contains("\"count = 5\""));
     }
 }
