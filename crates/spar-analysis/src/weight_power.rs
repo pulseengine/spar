@@ -178,7 +178,7 @@ fn bottom_up_order(instance: &SystemInstance) -> Vec<ComponentInstanceIdx> {
         .map(|(idx, _)| (idx, component_depth(instance, idx)))
         .collect();
     // Sort by depth descending so leaves are processed first.
-    all.sort_by(|a, b| b.1.cmp(&a.1));
+    all.sort_by_key(|b| std::cmp::Reverse(b.1));
     all.into_iter().map(|(idx, _)| idx).collect()
 }
 
