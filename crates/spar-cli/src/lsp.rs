@@ -37,7 +37,9 @@ use lsp_types::{
     RenameParams, ServerCapabilities, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
     TextDocumentSyncKind, TextEdit, Uri, WatchKind, WorkspaceEdit, WorkspaceSymbolResponse,
 };
+use salsa::Setter;
 
+use spar_base_db::{RootDatabase, SourceFile, parse_file};
 use spar_hir_def::ItemTree;
 use spar_hir_def::item_tree::ItemRef;
 use spar_hir_def::resolver::GlobalScope;
@@ -161,10 +163,10 @@ fn main_loop(connection: &Connection, state: &mut ServerState) {
 // ── Server state ────────────────────────────────────────────────────
 
 struct ServerState {
-    /// Open document contents, keyed by URI string.
-    documents: HashMap<String, String>,
-    /// Parsed item trees for all known files, keyed by URI string.
-    item_trees: HashMap<String, Arc<ItemTree>>,
+    /// Salsa incremental database for parsing and analysis.
+    db: RootDatabase,
+    /// Map from URI string to salsa SourceFile input.
+    files: HashMap<String, SourceFile>,
     /// Workspace root directory (if known).
     workspace_root: Option<PathBuf>,
     /// Global scope built from all item trees.
@@ -176,8 +178,8 @@ struct ServerState {
 impl ServerState {
     fn new(workspace_root: Option<PathBuf>) -> Self {
         Self {
-            documents: HashMap::new(),
-            item_trees: HashMap::new(),
+            db: RootDatabase::default(),
+            files: HashMap::new(),
             workspace_root,
             global_scope: GlobalScope::default(),
             open_files: Vec::new(),
@@ -196,38 +198,42 @@ impl ServerState {
         scan_aadl_files_recursive(&root, &mut |path| {
             if let Ok(content) = std::fs::read_to_string(path) {
                 let uri_str = path_to_uri_string(path);
-                // Parse and store item tree.
-                let parsed = spar_syntax::parse(&content);
-                let tree = spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
-                self.item_trees.insert(uri_str.clone(), Arc::new(tree));
-                // Store content for workspace files (but not as "open").
-                self.documents.insert(uri_str, content);
+                let file = SourceFile::new(&self.db, uri_str.clone(), content);
+                self.files.insert(uri_str, file);
                 count += 1;
             }
         });
         eprintln!("spar-lsp: found {count} .aadl files in workspace");
     }
 
-    /// Rebuild the GlobalScope from all known item trees.
+    /// Rebuild the GlobalScope from all known files via salsa.
     fn rebuild_global_scope(&mut self) {
-        let trees: Vec<Arc<ItemTree>> = self.item_trees.values().cloned().collect();
+        let trees: Vec<Arc<ItemTree>> = self
+            .files
+            .values()
+            .map(|file| {
+                let result = parse_file(&self.db, *file);
+                let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
+                Arc::new(tree)
+            })
+            .collect();
         self.global_scope = GlobalScope::from_trees(trees);
     }
 
-    /// Update a single file: parse, store item tree, rebuild scope.
+    /// Update a single file: set text via salsa, rebuild scope.
     fn update_file(&mut self, uri_str: &str, content: &str) {
-        let parsed = spar_syntax::parse(content);
-        let tree = spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
-        self.item_trees.insert(uri_str.to_string(), Arc::new(tree));
-        self.documents
-            .insert(uri_str.to_string(), content.to_string());
+        if let Some(file) = self.files.get(uri_str) {
+            file.set_text(&mut self.db).to(content.to_string());
+        } else {
+            let file = SourceFile::new(&self.db, uri_str.to_string(), content.to_string());
+            self.files.insert(uri_str.to_string(), file);
+        }
         self.rebuild_global_scope();
     }
 
     /// Remove a file from the workspace state.
     fn remove_file(&mut self, uri_str: &str) {
-        self.item_trees.remove(uri_str);
-        self.documents.remove(uri_str);
+        self.files.remove(uri_str);
         self.rebuild_global_scope();
     }
 
@@ -238,6 +244,20 @@ impl ServerState {
                 publish_diagnostics(self, connection, &uri);
             }
         }
+    }
+
+    /// Get the source text for a file URI via salsa.
+    fn get_source(&self, uri_str: &str) -> Option<String> {
+        let file = self.files.get(uri_str)?;
+        Some(file.text(&self.db).clone())
+    }
+
+    /// Get the item tree for a file URI via salsa (parse + lower).
+    fn get_item_tree(&self, uri_str: &str) -> Option<Arc<ItemTree>> {
+        let file = self.files.get(uri_str)?;
+        let result = parse_file(&self.db, *file);
+        let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
+        Some(Arc::new(tree))
     }
 }
 
@@ -380,11 +400,7 @@ fn handle_watched_file_changes(
                 if let Some(path) = uri_to_file_path(&event.uri)
                     && let Ok(content) = std::fs::read_to_string(&path)
                 {
-                    let parsed = spar_syntax::parse(&content);
-                    let tree =
-                        spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
-                    state.item_trees.insert(uri_str.clone(), Arc::new(tree));
-                    state.documents.insert(uri_str, content);
+                    state.update_file(&uri_str, &content);
                     changed = true;
                 }
             }
@@ -406,17 +422,18 @@ fn handle_watched_file_changes(
 
 fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) {
     let uri_str = uri.as_str();
-    let source = match state.documents.get(uri_str) {
-        Some(s) => s,
+    let file = match state.files.get(uri_str) {
+        Some(f) => *f,
         None => return,
     };
 
+    let source = file.text(&state.db).clone();
     let mut diagnostics = Vec::new();
 
-    // 1. Parse the file.
-    let parsed = spar_syntax::parse(source);
-    for err in parsed.errors() {
-        let pos = offset_to_position(source, err.offset);
+    // 1. Parse the file via salsa (memoized).
+    let parse_result = parse_file(&state.db, file);
+    for err in parse_result.errors() {
+        let pos = offset_to_position(&source, err.offset);
         diagnostics.push(Diagnostic {
             range: Range::new(pos, pos),
             severity: Some(DiagnosticSeverity::ERROR),
@@ -426,13 +443,10 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
         });
     }
 
-    // 2. Use the cached item tree for analysis.
-    let tree = match state.item_trees.get(uri_str) {
-        Some(t) => t.clone(),
-        None => {
-            let t = spar_hir_def::item_tree::lower::lower_file(&parsed.syntax_node());
-            Arc::new(t)
-        }
+    // 2. Lower to item tree via salsa-cached parse result.
+    let tree = {
+        let t = spar_hir_def::item_tree::lower::lower_file(&parse_result.syntax_node());
+        Arc::new(t)
     };
 
     let naming_diags = spar_analysis::naming_rules::check_naming_rules(&tree);
@@ -475,11 +489,12 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
 fn handle_hover(state: &ServerState, params: lsp_types::HoverParams) -> Option<Hover> {
     let uri = &params.text_document_position_params.text_document.uri;
     let pos = params.text_document_position_params.position;
-    let source = state.documents.get(uri.as_str())?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(source, pos)?;
-    let parsed = spar_syntax::parse(source);
-    let root = parsed.syntax_node();
+    let offset = position_to_offset(&source, pos)?;
+    let parse_result = parse_file(&state.db, *file);
+    let root = parse_result.syntax_node();
 
     // Find the token at the cursor position.
     let token = root
@@ -701,10 +716,9 @@ fn handle_document_symbols(
     params: lsp_types::DocumentSymbolParams,
 ) -> Option<DocumentSymbolResponse> {
     let uri = &params.text_document.uri;
-    let source = state.documents.get(uri.as_str())?;
-    let parsed = spar_syntax::parse(source);
-    let root = parsed.syntax_node();
-    let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+    let file = state.files.get(uri.as_str())?;
+    let parse_result = parse_file(&state.db, *file);
+    let tree = spar_hir_def::item_tree::lower::lower_file(&parse_result.syntax_node());
 
     let mut symbols = Vec::new();
 
@@ -910,11 +924,12 @@ fn handle_goto_definition(
 ) -> Option<GotoDefinitionResponse> {
     let uri = &params.text_document_position_params.text_document.uri;
     let pos = params.text_document_position_params.position;
-    let source = state.documents.get(uri.as_str())?;
-    let offset = position_to_offset(source, pos)?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
+    let offset = position_to_offset(&source, pos)?;
 
-    let parsed = spar_syntax::parse(source);
-    let root = parsed.syntax_node();
+    let parse_result = parse_file(&state.db, *file);
+    let root = parse_result.syntax_node();
 
     // Find the token at the cursor.
     let token = root
@@ -928,7 +943,7 @@ fn handle_goto_definition(
     let name = token.text();
 
     // Try to find a matching definition in the same file first.
-    if let Some(range) = find_definition_range_in_file(&root, name, source) {
+    if let Some(range) = find_definition_range_in_file(&root, name, &source) {
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: uri.clone(),
             range,
@@ -936,13 +951,14 @@ fn handle_goto_definition(
     }
 
     // Cross-file: search all workspace files for the definition.
-    for (other_uri_str, other_source) in &state.documents {
+    for (other_uri_str, other_file) in &state.files {
         if other_uri_str == uri.as_str() {
             continue; // already checked
         }
-        let other_parsed = spar_syntax::parse(other_source);
-        let other_root = other_parsed.syntax_node();
-        if let Some(range) = find_definition_range_in_file(&other_root, name, other_source)
+        let other_source = other_file.text(&state.db).clone();
+        let other_result = parse_file(&state.db, *other_file);
+        let other_root = other_result.syntax_node();
+        if let Some(range) = find_definition_range_in_file(&other_root, name, &other_source)
             && let Ok(other_uri) = other_uri_str.parse::<Uri>()
         {
             return Some(GotoDefinitionResponse::Scalar(Location {
@@ -1000,12 +1016,13 @@ fn find_definition_range_in_file(
 fn handle_completion(state: &ServerState, params: CompletionParams) -> Option<CompletionResponse> {
     let uri = &params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
-    let source = state.documents.get(uri.as_str())?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(source, pos)?;
+    let offset = position_to_offset(&source, pos)?;
 
     // Determine context by examining the text before the cursor.
-    let context = completion_context(source, offset);
+    let context = completion_context(&source, offset);
 
     let mut items = Vec::new();
 
@@ -1435,11 +1452,14 @@ fn handle_workspace_symbol(
     let query = params.query.to_ascii_lowercase();
     let mut symbols: Vec<SymbolInformation> = Vec::new();
 
-    for (uri_str, tree) in &state.item_trees {
+    for (uri_str, file) in &state.files {
         let uri: Uri = match uri_str.parse() {
             Ok(u) => u,
             Err(_) => continue,
         };
+
+        let result = parse_file(&state.db, *file);
+        let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
 
         let zero_range = Range::new(Position::new(0, 0), Position::new(0, 0));
 
@@ -1575,7 +1595,7 @@ fn handle_code_action(
 ) -> Option<Vec<CodeActionOrCommand>> {
     let uri = &params.text_document.uri;
     let uri_str = uri.as_str();
-    let source = state.documents.get(uri_str)?;
+    let source = state.get_source(uri_str)?;
     let diagnostics = &params.context.diagnostics;
 
     let mut actions = Vec::new();
@@ -1612,7 +1632,7 @@ fn handle_code_action(
             // Fix missing end keyword: `expected END_KW`
             if msg.contains("END_KW") {
                 // Look backward from the diagnostic to find the declaration name
-                if let Some(end_name) = find_expected_end_name(source, &diag.range) {
+                if let Some(end_name) = find_expected_end_name(&source, &diag.range) {
                     let insert_pos = diag.range.start;
                     let edit = TextEdit {
                         range: Range::new(insert_pos, insert_pos),
@@ -1639,7 +1659,7 @@ fn handle_code_action(
             && msg.contains("unresolved")
             && let Some(name) = extract_unresolved_name(msg)
             && let Some(pkg_name) = find_package_for_name(state, &name)
-            && let Some(with_edit) = make_with_clause_edit(source, uri, &pkg_name)
+            && let Some(with_edit) = make_with_clause_edit(&source, uri, &pkg_name)
         {
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Add 'with {};'", pkg_name),
@@ -1653,7 +1673,7 @@ fn handle_code_action(
         // Action 4: Quick-fix port direction mismatch
         if diag_source == "spar-direction_rules" && msg.contains("direction") {
             // Offer to swap connection endpoints
-            if let Some(swap_edit) = make_swap_connection_edit(source, uri, &diag.range) {
+            if let Some(swap_edit) = make_swap_connection_edit(&source, uri, &diag.range) {
                 actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                     title: "Swap connection endpoints".to_string(),
                     kind: Some(CodeActionKind::QUICKFIX),
@@ -2012,8 +2032,8 @@ fn handle_formatting(
     params: &DocumentFormattingParams,
 ) -> Option<Vec<TextEdit>> {
     let uri = &params.text_document.uri;
-    let source = state.documents.get(uri.as_str())?;
-    let edits = format_document(source, &params.options);
+    let source = state.get_source(uri.as_str())?;
+    let edits = format_document(&source, &params.options);
     if edits.is_empty() { None } else { Some(edits) }
 }
 
@@ -2568,11 +2588,12 @@ fn handle_prepare_rename(
 ) -> Option<PrepareRenameResponse> {
     let uri = &params.text_document.uri;
     let pos = params.position;
-    let source = state.documents.get(uri.as_str())?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(source, pos)?;
-    let parsed = spar_syntax::parse(source);
-    let root = parsed.syntax_node();
+    let offset = position_to_offset(&source, pos)?;
+    let result = parse_file(&state.db, *file);
+    let root = result.syntax_node();
 
     let token = root
         .token_at_offset(rowan::TextSize::new(offset as u32))
@@ -2599,11 +2620,12 @@ fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<Workspace
     let uri = &params.text_document_position.text_document.uri;
     let pos = params.text_document_position.position;
     let new_name = &params.new_name;
-    let source = state.documents.get(uri.as_str())?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(source, pos)?;
-    let parsed = spar_syntax::parse(source);
-    let root = parsed.syntax_node();
+    let offset = position_to_offset(&source, pos)?;
+    let result = parse_file(&state.db, *file);
+    let root = result.syntax_node();
 
     let token = root
         .token_at_offset(rowan::TextSize::new(offset as u32))
@@ -2620,13 +2642,14 @@ fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<Workspace
     // Find all references across all documents
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
 
-    for (doc_uri_str, doc_source) in &state.documents {
+    for (doc_uri_str, doc_file) in &state.files {
         let doc_uri: Uri = match doc_uri_str.parse() {
             Ok(u) => u,
             Err(_) => continue,
         };
 
-        let refs = find_references_in_document(doc_source, &old_name, symbol_kind);
+        let doc_source = doc_file.text(&state.db).clone();
+        let refs = find_references_in_document(&doc_source, &old_name, symbol_kind);
         if !refs.is_empty() {
             changes.insert(
                 doc_uri,
@@ -2739,8 +2762,9 @@ fn find_references_in_document(
 
 fn handle_inlay_hints(state: &ServerState, params: &InlayHintParams) -> Option<Vec<InlayHint>> {
     let uri = &params.text_document.uri;
-    let source = state.documents.get(uri.as_str())?;
-    let tree = state.item_trees.get(uri.as_str())?;
+    let file = state.files.get(uri.as_str())?;
+    let source = file.text(&state.db).clone();
+    let tree = state.get_item_tree(uri.as_str())?;
 
     let mut hints = Vec::new();
 
@@ -2748,7 +2772,7 @@ fn handle_inlay_hints(state: &ServerState, params: &InlayHintParams) -> Option<V
     for (_idx, sub) in tree.subcomponents.iter() {
         if sub.classifier.is_some() {
             // Find the subcomponent name in the source to position the hint
-            if let Some(pos) = find_name_position(source, sub.name.as_str()) {
+            if let Some(pos) = find_name_position(&source, sub.name.as_str()) {
                 hints.push(InlayHint {
                     position: pos,
                     label: InlayHintLabel::String(format!(": {}", sub.category)),
@@ -2771,7 +2795,7 @@ fn handle_inlay_hints(state: &ServerState, params: &InlayHintParams) -> Option<V
             "\u{2192}" // →
         };
 
-        if let Some(pos) = find_name_position(source, conn.name.as_str()) {
+        if let Some(pos) = find_name_position(&source, conn.name.as_str()) {
             hints.push(InlayHint {
                 position: pos,
                 label: InlayHintLabel::String(direction_hint.to_string()),
@@ -3015,9 +3039,7 @@ mod tests {
         let uri: Uri = "file:///test.aadl".parse().unwrap();
         // Store a document so the code action handler can access it
         let source = "package Foo\nend Foo\n";
-        state
-            .documents
-            .insert(uri.as_str().to_string(), source.to_string());
+        state.update_file(uri.as_str(), source);
 
         let params = CodeActionParams {
             text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },

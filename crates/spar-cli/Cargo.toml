@@ -21,8 +21,13 @@ spar-analysis.workspace = true
 spar-render.workspace = true
 etch.workspace = true
 rowan.workspace = true
+salsa.workspace = true
 serde.workspace = true
 lsp-server = "0.7"
 lsp-types = "0.97"
 serde_json = "1"
 toml.workspace = true
+
+[dev-dependencies]
+la-arena.workspace = true
+rustc-hash = "2"

@@ -1,4 +1,7 @@
+mod assertion;
+mod diff;
 mod lsp;
+mod sarif;
 mod verify;
 
 use std::{env, fs, process};
@@ -27,6 +30,7 @@ fn main() {
         "items" => cmd_items(&args[2..]),
         "instance" => cmd_instance(&args[2..]),
         "analyze" => cmd_analyze(&args[2..]),
+        "diff" => cmd_diff(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
         "render" => cmd_render(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
@@ -46,6 +50,7 @@ fn print_usage() {
     eprintln!("  items      Show item tree (declarations) for file(s)");
     eprintln!("  instance   Instantiate a root system implementation");
     eprintln!("  analyze    Run analyses on an instantiated system model");
+    eprintln!("  diff       Compare two model versions and report changes");
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
@@ -55,7 +60,10 @@ fn print_usage() {
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
-    eprintln!("  analyze  --root Package::Type.Impl [--format text|json] <file...>");
+    eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
+    eprintln!(
+        "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
+    );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -468,12 +476,184 @@ fn cmd_analyze(args: &[String]) {
         return;
     }
 
+    // SARIF output path
+    if format.as_deref() == Some("sarif") {
+        let sarif_output = sarif::to_sarif(&diagnostics, &files);
+        println!("{}", serde_json::to_string_pretty(&sarif_output).unwrap());
+        return;
+    }
+
     if diagnostics.is_empty() {
         eprintln!("No diagnostics. Model is clean.");
     } else {
         let has_errors = print_diagnostics(&diagnostics);
         if has_errors {
             process::exit(1);
+        }
+    }
+}
+
+fn cmd_diff(args: &[String]) {
+    let mut root = None;
+    let mut base_ref = None;
+    let mut head_ref = None;
+    let mut old_dir = None;
+    let mut new_dir = None;
+    let mut format = None;
+    let mut files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--base" => {
+                i += 1;
+                if i < args.len() {
+                    base_ref = Some(args[i].clone());
+                } else {
+                    eprintln!("--base requires a git ref");
+                    process::exit(1);
+                }
+            }
+            "--head" => {
+                i += 1;
+                if i < args.len() {
+                    head_ref = Some(args[i].clone());
+                } else {
+                    eprintln!("--head requires a git ref");
+                    process::exit(1);
+                }
+            }
+            "--old" => {
+                i += 1;
+                if i < args.len() {
+                    old_dir = Some(args[i].clone());
+                } else {
+                    eprintln!("--old requires a directory path");
+                    process::exit(1);
+                }
+            }
+            "--new" => {
+                i += 1;
+                if i < args.len() {
+                    new_dir = Some(args[i].clone());
+                } else {
+                    eprintln!("--new requires a directory path");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (text|json|sarif)");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    // Resolve base and head sources
+    let (base_sources, head_sources) = if old_dir.is_some() || new_dir.is_some() {
+        // Directory-based comparison
+        let old = old_dir.unwrap_or_else(|| {
+            eprintln!("--old requires --new (or use --base/--head for git refs)");
+            process::exit(1);
+        });
+        let new = new_dir.unwrap_or_else(|| {
+            eprintln!("--new requires --old (or use --base/--head for git refs)");
+            process::exit(1);
+        });
+        (
+            diff::resolve_dir_sources(&old),
+            diff::resolve_dir_sources(&new),
+        )
+    } else if base_ref.is_some() {
+        // Git ref-based comparison
+        if files.is_empty() {
+            eprintln!("Missing .aadl file argument(s)");
+            process::exit(1);
+        }
+        let base = base_ref.unwrap();
+        let head = head_ref.unwrap_or_else(|| "HEAD".to_string());
+        (
+            diff::resolve_git_sources(&base, &files),
+            diff::resolve_git_sources(&head, &files),
+        )
+    } else {
+        eprintln!("Either --base/--head (git refs) or --old/--new (directories) is required");
+        process::exit(1);
+    };
+
+    eprintln!("Building base model...");
+    let (base_inst, base_diags) = diff::build_model(&base_sources, &root);
+    eprintln!(
+        "  Base: {} components, {} diagnostics",
+        base_inst.component_count(),
+        base_diags.len()
+    );
+
+    eprintln!("Building head model...");
+    let (head_inst, head_diags) = diff::build_model(&head_sources, &root);
+    eprintln!(
+        "  Head: {} components, {} diagnostics",
+        head_inst.component_count(),
+        head_diags.len()
+    );
+
+    // Compare
+    let structural = diff::compare_structure(&base_inst, &head_inst);
+    let (analysis_impact, regressions) = diff::compare_diagnostics(&base_diags, &head_diags);
+
+    let result = diff::DiffResult {
+        structural,
+        analysis_impact,
+        regressions,
+    };
+
+    // Output
+    match format.as_deref() {
+        Some("json") => {
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+        Some("sarif") => {
+            let all_files: Vec<String> = base_sources
+                .files
+                .iter()
+                .chain(head_sources.files.iter())
+                .map(|(f, _)| f.clone())
+                .collect();
+            let sarif = diff::format_sarif(&result, &all_files);
+            println!("{}", serde_json::to_string_pretty(&sarif).unwrap());
+        }
+        _ => {
+            print!("{}", diff::format_text(&result));
+
+            // Exit with non-zero if there are regressions
+            if !result.regressions.is_empty() {
+                eprintln!("\n{} regression(s) detected.", result.regressions.len());
+                process::exit(1);
+            }
         }
     }
 }
@@ -779,8 +959,8 @@ fn cmd_verify(args: &[String]) {
     // Parse requirements
     let req_file = verify::parse_requirements(req_path);
 
-    if req_file.requirement.is_empty() {
-        eprintln!("No requirements found in {req_path}");
+    if req_file.requirement.is_empty() && req_file.assertion.is_empty() {
+        eprintln!("No requirements or assertions found in {req_path}");
         process::exit(0);
     }
 
@@ -835,7 +1015,31 @@ fn cmd_verify(args: &[String]) {
     diagnostics.extend(run_all_analyses(&inst));
 
     // Evaluate requirements against diagnostics
-    let report = verify::evaluate(&req_file.requirement, &diagnostics, &root);
+    let mut report = verify::evaluate(&req_file.requirement, &diagnostics, &root);
+
+    // Evaluate assertions against the instance model + diagnostics
+    if !req_file.assertion.is_empty() {
+        let ctx = assertion::EvalContext {
+            instance: &inst,
+            diagnostics: &diagnostics,
+        };
+        let assertion_results = assertion::evaluate_assertions(&req_file.assertion, &ctx);
+
+        // Count assertion pass/fail and merge into report totals
+        let assertion_passed = assertion_results
+            .iter()
+            .filter(|r| r.status == verify::Status::Pass)
+            .count();
+        let assertion_failed = assertion_results
+            .iter()
+            .filter(|r| r.status == verify::Status::Fail)
+            .count();
+
+        report.total += assertion_results.len();
+        report.passed += assertion_passed;
+        report.failed += assertion_failed;
+        report.assertions = assertion_results;
+    }
 
     // Output
     if format.as_deref() == Some("json") {

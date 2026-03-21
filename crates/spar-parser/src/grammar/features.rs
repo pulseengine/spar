@@ -117,10 +117,8 @@ fn feature(p: &mut Parser) {
                         opt_property_block_and_semi(p);
                         m.complete(p, SyntaxKind::FEATURE_GROUP);
                     } else {
-                        // Abstract feature, optionally with classifier reference
-                        if p.at(SyntaxKind::IDENT) || p.current().is_keyword() {
-                            super::classifier_ref(p);
-                        }
+                        // Abstract feature: optionally with classifier(...) or plain ref
+                        abstract_feature_classifier(p);
                         opt_property_block_and_semi(p);
                         m.complete(p, SyntaxKind::ABSTRACT_FEATURE);
                     }
@@ -169,10 +167,8 @@ fn feature(p: &mut Parser) {
                 opt_property_block_and_semi(p);
                 m.complete(p, SyntaxKind::FEATURE_GROUP);
             } else {
-                // Abstract feature, optionally with classifier reference
-                if p.at(SyntaxKind::IDENT) || p.current().is_keyword() {
-                    super::classifier_ref(p);
-                }
+                // Abstract feature: optionally with classifier(...) or plain ref
+                abstract_feature_classifier(p);
                 opt_property_block_and_semi(p);
                 m.complete(p, SyntaxKind::ABSTRACT_FEATURE);
             }
@@ -280,6 +276,41 @@ fn opt_property_block_and_semi(p: &mut Parser) {
         super::properties::property_block(p);
     }
     p.expect(SyntaxKind::SEMICOLON);
+}
+
+/// Parse the optional classifier part of an abstract feature.
+///
+/// AADL v2.3 allows `classifier(Pkg::Type)` syntax after the `feature` keyword,
+/// in addition to the v2.2 plain classifier reference.
+fn abstract_feature_classifier(p: &mut Parser) {
+    if p.at(SyntaxKind::CLASSIFIER_KW) && p.nth(1) == SyntaxKind::L_PAREN {
+        // v2.3 form: `classifier(Pkg::Type)`
+        let m = p.start();
+        p.bump(SyntaxKind::CLASSIFIER_KW);
+        p.bump(SyntaxKind::L_PAREN);
+        super::classifier_ref(p);
+        p.expect(SyntaxKind::R_PAREN);
+        m.complete(p, SyntaxKind::CLASSIFIER_VALUE);
+    } else if p.at(SyntaxKind::IDENT) || (p.current().is_keyword() && !is_section_kw(p)) {
+        super::classifier_ref(p);
+    }
+}
+
+/// Returns true if the current token is a section keyword that should not be
+/// consumed as a classifier name.
+fn is_section_kw(p: &Parser) -> bool {
+    matches!(
+        p.current(),
+        SyntaxKind::END_KW
+            | SyntaxKind::FEATURES_KW
+            | SyntaxKind::FLOWS_KW
+            | SyntaxKind::CONNECTIONS_KW
+            | SyntaxKind::MODES_KW
+            | SyntaxKind::PROPERTIES_KW
+            | SyntaxKind::SUBCOMPONENTS_KW
+            | SyntaxKind::ANNEX_KW
+            | SyntaxKind::CALLS_KW
+    )
 }
 
 fn eat_to_semicolon(p: &mut Parser) {

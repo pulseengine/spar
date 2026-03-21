@@ -183,6 +183,12 @@ pub enum SyntaxKind {
     REFINED_KW,
     SELF_KW,
 
+    // AADL v2.3 (AS5506D) keywords
+    /// `interface` — contextual keyword for feature group type definitions.
+    INTERFACE_KW,
+    /// `file` — keyword for annex file references: `annex Name {* file("path") *};`
+    FILE_KW,
+
     // === Node kinds ===
 
     // Top-level
@@ -366,6 +372,8 @@ pub enum SyntaxKind {
     CLASSIFIER_VALUE,
     /// Computed value: `compute (name)`
     COMPUTED_VALUE,
+    /// File reference value in annex: `file("path/to/file")`
+    FILE_REFERENCE,
 
     // Classifier references
     /// Reference to a classifier: `Pkg::Type.Impl`
@@ -426,7 +434,7 @@ impl SyntaxKind {
     /// Returns true if this is a keyword.
     #[inline]
     pub fn is_keyword(self) -> bool {
-        (self as u16) >= (Self::PACKAGE_KW as u16) && (self as u16) <= (Self::SELF_KW as u16)
+        (self as u16) >= (Self::PACKAGE_KW as u16) && (self as u16) <= (Self::FILE_KW as u16)
     }
 
     /// Returns true if this is a punctuation token.
@@ -542,6 +550,8 @@ impl SyntaxKind {
             "or" => Some(Self::OR_KW),
             "refined" => Some(Self::REFINED_KW),
             "self" => Some(Self::SELF_KW),
+            "interface" => Some(Self::INTERFACE_KW),
+            "file" => Some(Self::FILE_KW),
             _ => None,
         }
     }

@@ -178,7 +178,7 @@ fn bottom_up_order(instance: &SystemInstance) -> Vec<ComponentInstanceIdx> {
         .map(|(idx, _)| (idx, component_depth(instance, idx)))
         .collect();
     // Sort by depth descending so leaves are processed first.
-    all.sort_by(|a, b| b.1.cmp(&a.1));
+    all.sort_by_key(|b| std::cmp::Reverse(b.1));
     all.into_iter().map(|(idx, _)| idx).collect()
 }
 
@@ -240,10 +240,12 @@ fn get_power_capacity_property(props: &spar_hir_def::properties::PropertyMap) ->
 fn parse_weight_value(s: &str) -> Option<f64> {
     let s = s.trim();
     for &(suffix, factor) in WEIGHT_UNITS {
-        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim()) {
-            if let Ok(val) = num_str.parse::<f64>() {
-                return Some(val * factor);
-            }
+        if let Some(val) = s
+            .strip_suffix(suffix)
+            .map(|s| s.trim())
+            .and_then(|n| n.parse::<f64>().ok())
+        {
+            return Some(val * factor);
         }
     }
     // Bare number: assume kg.
@@ -256,10 +258,12 @@ fn parse_weight_value(s: &str) -> Option<f64> {
 fn parse_power_value(s: &str) -> Option<f64> {
     let s = s.trim();
     for &(suffix, factor) in POWER_UNITS {
-        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim()) {
-            if let Ok(val) = num_str.parse::<f64>() {
-                return Some(val * factor);
-            }
+        if let Some(val) = s
+            .strip_suffix(suffix)
+            .map(|s| s.trim())
+            .and_then(|n| n.parse::<f64>().ok())
+        {
+            return Some(val * factor);
         }
     }
     // Bare number: assume mW.

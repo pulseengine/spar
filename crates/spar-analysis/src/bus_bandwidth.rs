@@ -202,10 +202,8 @@ fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Opti
         .or_else(|| props.get("Communication_Properties", "Bandwidth"))
         .or_else(|| props.get("", "Bandwidth"));
 
-    if let Some(val) = raw {
-        if let Some(bps) = parse_bandwidth(val) {
-            return Some(bps);
-        }
+    if let Some(bps) = raw.and_then(parse_bandwidth) {
+        return Some(bps);
     }
 
     // Fall back to Data_Rate.
@@ -253,8 +251,7 @@ fn compute_connection_demand(
     // demand = Data_Size (bits) / Period (seconds)
     // Period is in picoseconds, so Period_sec = period_ps / 1e12
     // demand_bps = data_size_bits / (period_ps / 1e12) = data_size_bits * 1e12 / period_ps
-    let demand_bps = (data_size_bits as f64) * 1e12 / (period_ps as f64);
-    demand_bps
+    (data_size_bits as f64) * 1e12 / (period_ps as f64)
 }
 
 /// Get Data_Size for a component in bits.
@@ -342,10 +339,12 @@ fn parse_bandwidth(s: &str) -> Option<f64> {
 fn parse_data_rate(s: &str) -> Option<f64> {
     let s = s.trim();
     for &(suffix, factor) in DATA_RATE_UNITS {
-        if let Some(num_str) = s.strip_suffix(suffix).map(|s| s.trim()) {
-            if let Ok(val) = num_str.parse::<f64>() {
-                return Some(val * factor);
-            }
+        if let Some(val) = s
+            .strip_suffix(suffix)
+            .map(|s| s.trim())
+            .and_then(|n| n.parse::<f64>().ok())
+        {
+            return Some(val * factor);
         }
     }
     // Try plain number (assume bps).
