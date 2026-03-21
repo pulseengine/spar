@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 6c9791c527ffba43c1db3ef903bfbf944d6807f92386379c78994fea90e6a454 # shrinks to input = "𑵠"
+cc 511a54c84b3c55e570331765370c5142cfd47769ba8f2257e95eb057fcbb23ac # shrinks to pkg_name = "iN", type_name = "A", base_name = "A", category = "system"

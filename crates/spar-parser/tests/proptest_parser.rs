@@ -9,10 +9,26 @@ use proptest::prelude::*;
 
 // ── Strategy helpers ────────────────────────────────────────────────
 
-/// Generate a valid AADL identifier: starts with a letter, followed by
-/// alphanumeric or underscores (1..=20 chars).
+/// AADL keywords that cannot be used as identifiers.
+const AADL_KEYWORDS: &[&str] = &[
+    "aadl", "abstract", "access", "all", "and", "annex", "applies", "binding",
+    "bus", "calls", "classifier", "compute", "connections", "constant", "data",
+    "delta", "device", "end", "enumeration", "event", "extends", "false",
+    "feature", "features", "flow", "flows", "group", "implementation", "in",
+    "inherit", "initial", "inverse", "is", "list", "memory", "mode", "modes",
+    "none", "not", "of", "or", "out", "package", "parameter", "path", "port",
+    "private", "process", "processor", "properties", "property", "prototypes",
+    "provides", "public", "range", "record", "reference", "refined", "renames",
+    "requires", "self", "server", "set", "sink", "source", "subcomponents",
+    "subprogram", "system", "thread", "to", "true", "type", "units", "virtual",
+    "with",
+];
+
+/// Generate a valid AADL identifier that doesn't collide with keywords.
 fn aadl_ident() -> impl Strategy<Value = String> {
-    "[a-zA-Z][a-zA-Z0-9_]{0,19}"
+    "[a-zA-Z][a-zA-Z0-9_]{2,19}".prop_filter("must not be AADL keyword", |s| {
+        !AADL_KEYWORDS.contains(&s.to_lowercase().as_str())
+    })
 }
 
 /// AADL component categories.
