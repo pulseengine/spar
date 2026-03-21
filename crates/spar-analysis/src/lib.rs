@@ -17,6 +17,7 @@
 pub mod arinc653;
 pub mod binding_check;
 pub mod binding_rules;
+pub mod bus_bandwidth;
 pub mod category_check;
 pub mod classifier_match;
 pub mod completeness;
@@ -101,11 +102,12 @@ impl AnalysisRunner {
     /// matching, binding checks, binding rules, flow checks, flow rules,
     /// mode checks, mode rules, modal rules, property rules, connection
     /// rules, subcomponent rules, scheduling, latency, resource budget,
-    /// EMV2 fault-tree, ARINC 653, and wRPC binding.
+    /// EMV2 fault-tree, ARINC 653, wRPC binding, and bus bandwidth.
     pub fn register_all(&mut self) {
         use arinc653::Arinc653Analysis;
         use binding_check::BindingCheckAnalysis;
         use binding_rules::BindingRuleAnalysis;
+        use bus_bandwidth::BusBandwidthAnalysis;
         use classifier_match::ClassifierMatchAnalysis;
         use completeness::CompletenessAnalysis;
         use connection_rules::ConnectionRuleAnalysis;
@@ -148,6 +150,7 @@ impl AnalysisRunner {
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
         self.register(Box::new(ModeReachabilityAnalysis));
+        self.register(Box::new(BusBandwidthAnalysis));
     }
 
     /// Return the number of registered analyses.
