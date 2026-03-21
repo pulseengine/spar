@@ -1199,3 +1199,228 @@ aadl2rust_test!(a2r_connection_in_modes, "connection_in_modes.aadl");
 aadl2rust_test!(a2r_flow_spec_in_modes, "flow_spec_in_modes.aadl");
 aadl2rust_test!(a2r_virtual_bus_type, "virtual_bus_type.aadl");
 aadl2rust_test!(a2r_virtual_processor_type, "virtual_processor_type.aadl");
+
+// ====================================================================
+// AADL v2.3 (AS5506D) parser extension tests
+// ====================================================================
+
+#[test]
+fn v23_abstract_feature_with_classifier() {
+    let input = "\
+package V23_Test
+public
+  system S
+    features
+      f1 : feature;
+      f2 : feature classifier(Pkg::DataType);
+      f3 : in feature classifier(Pkg::DataType);
+  end S;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_abstract_feature_with_plain_ref() {
+    // v2.2 style: abstract feature with plain classifier reference still works
+    let input = "\
+package V23_Test
+public
+  system S
+    features
+      f1 : feature Pkg::DataType;
+  end S;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_range_expression_real() {
+    let input = "\
+package V23_Test
+public
+  thread T
+    properties
+      Compute_Execution_Time => 1.0 ms .. 10.0 ms;
+  end T;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_range_with_delta() {
+    let input = "\
+package V23_Test
+public
+  thread T
+    properties
+      Compute_Execution_Time => 1 ms .. 10 ms delta 1 ms;
+  end T;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_compute_property_expression() {
+    let input = "\
+package V23_Test
+public
+  thread T
+    properties
+      Compute_Execution_Time => compute (CompTime);
+  end T;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_annex_file_reference() {
+    let input = "\
+package V23_Test
+public
+  system S
+    annex EMV2 {** file(\"errors.emv2\") **};
+  end S;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_annex_library_file_reference() {
+    let input = "\
+package V23_Test
+public
+  annex EMV2 {** file(\"error_library.emv2\") **};
+  system S
+  end S;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_interface_feature_group_type() {
+    let input = "\
+package V23_Test
+public
+  interface feature group IFG
+    features
+      data_out : out data port;
+      status : in event port;
+  end IFG;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_record_property_value() {
+    let input = "\
+package V23_Test
+public
+  thread T
+    properties
+      SEI::GrossWeight => [ value => 100; unit => kg; ];
+  end T;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_identifier_range_expression() {
+    // Range expression with identifier-based values
+    let input = "\
+package V23_Test
+public
+  thread T
+    properties
+      Compute_Execution_Time => Low .. High;
+  end T;
+end V23_Test;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
+
+#[test]
+fn v23_existing_v22_still_works() {
+    // Comprehensive v2.2 model that must still parse correctly
+    let input = "\
+package Regression
+public
+  with Base_Types;
+
+  system Controller
+    features
+      sensor_in : in data port;
+      actuator_out : out data port;
+      status : out event port;
+      bus_access : requires bus access;
+    flows
+      ctrl_flow : flow path sensor_in -> actuator_out;
+    modes
+      nominal : initial mode;
+      degraded : mode;
+      t1 : nominal -[status]-> degraded;
+    properties
+      Period => 20 ms;
+  end Controller;
+
+  system implementation Controller.impl
+    subcomponents
+      cpu : processor;
+      proc : process Proc.impl;
+    connections
+      c1 : port sensor_in -> proc.inp;
+      c2 : port proc.outp -> actuator_out;
+    flows
+      ctrl_flow : flow path sensor_in -> c1 -> proc.f -> c2 -> actuator_out;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to proc;
+  end Controller.impl;
+
+  process Proc
+    features
+      inp : in data port;
+      outp : out data port;
+    flows
+      f : flow path inp -> outp;
+  end Proc;
+
+  process implementation Proc.impl
+    subcomponents
+      t : thread Worker;
+    connections
+      c1 : port inp -> t.inp;
+      c2 : port t.outp -> outp;
+  end Proc.impl;
+
+  thread Worker
+    features
+      inp : in data port;
+      outp : out data port;
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 20 ms;
+      Compute_Execution_Time => 2 ms .. 5 ms;
+  end Worker;
+end Regression;
+";
+    check_no_errors(input);
+    check_lossless(input);
+}
