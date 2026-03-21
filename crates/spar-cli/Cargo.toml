@@ -32,3 +32,4 @@ toml.workspace = true
 [dev-dependencies]
 la-arena.workspace = true
 rustc-hash = "2"
+proptest.workspace = true

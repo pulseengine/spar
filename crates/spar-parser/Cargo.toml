@@ -11,3 +11,5 @@ rowan.workspace = true
 
 [dev-dependencies]
 expect-test = "1"
+proptest.workspace = true
+spar-syntax.workspace = true

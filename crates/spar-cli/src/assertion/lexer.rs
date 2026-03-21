@@ -72,9 +72,11 @@ pub(crate) fn lex(input: &str) -> Vec<(ExprSyntaxKind, String)> {
                 tokens.push((kind, text.to_string()));
             }
 
-            // Anything else is an error token
+            // Anything else is an error token — advance a full UTF-8 character
             _ => {
-                pos += 1;
+                // Advance past the full UTF-8 character, not just one byte.
+                let ch = input[start..].chars().next().unwrap();
+                pos += ch.len_utf8();
                 tokens.push((ExprSyntaxKind::ERROR, input[start..pos].to_string()));
             }
         }
@@ -94,6 +96,7 @@ fn is_ident_continue(b: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn lex_simple_pipeline() {
@@ -151,5 +154,41 @@ mod tests {
         let tokens = lex("@");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].0, ExprSyntaxKind::ERROR);
+    }
+
+    // ── Property-based tests ────────────────────────────────────────
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(
+            std::env::var("PROPTEST_CASES")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100)
+        ))]
+
+        /// The lexer must never panic, regardless of input.
+        #[test]
+        fn lexer_never_panics(input in "\\PC{0,300}") {
+            let tokens = lex(&input);
+            // Every byte of input must be accounted for in tokens.
+            let total_len: usize = tokens.iter().map(|(_, text)| text.len()).sum();
+            prop_assert_eq!(total_len, input.len(), "token lengths must sum to input length");
+        }
+
+        /// The lexer must never panic on arbitrary unicode.
+        #[test]
+        fn lexer_never_panics_unicode(input in ".{0,200}") {
+            let tokens = lex(&input);
+            let total_len: usize = tokens.iter().map(|(_, text)| text.len()).sum();
+            prop_assert_eq!(total_len, input.len());
+        }
+
+        /// Concatenating all token texts must reconstruct the original input.
+        #[test]
+        fn lexer_roundtrip(input in "\\PC{0,300}") {
+            let tokens = lex(&input);
+            let reconstructed: String = tokens.iter().map(|(_, text)| text.as_str()).collect();
+            prop_assert_eq!(reconstructed, input, "token texts must reconstruct input");
+        }
     }
 }

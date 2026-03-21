@@ -42,3 +42,4 @@ toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "d80b36b", package = "etch" }
+proptest = "1"

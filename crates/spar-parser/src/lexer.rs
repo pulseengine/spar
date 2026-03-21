@@ -64,6 +64,15 @@ impl<'a> Cursor<'a> {
         self.pos += 1;
     }
 
+    /// Advance by one full UTF-8 character (1–4 bytes).
+    #[inline]
+    fn bump_char(&mut self) {
+        if self.pos < self.input.len() {
+            let ch = self.input[self.pos..].chars().next().unwrap();
+            self.pos += ch.len_utf8();
+        }
+    }
+
     /// Advance by `n` bytes.
     #[inline]
     fn bump_n(&mut self, n: usize) {
@@ -391,9 +400,9 @@ fn scan_token<'a>(c: &mut Cursor<'a>) -> (SyntaxKind, &'a str) {
             SyntaxKind::HASH
         }
 
-        // Unknown / error character
+        // Unknown / error character — advance a full UTF-8 character
         _ => {
-            c.bump();
+            c.bump_char();
             SyntaxKind::ERROR
         }
     };
