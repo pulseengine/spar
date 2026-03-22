@@ -559,7 +559,7 @@ artifacts:
       changes affect the same structural elements (components, connections,
       bindings) or produce incompatible analysis results.
     status: planned
-    tags: [diff, merge, v030]
+    tags: [diff, merge, v040]
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -571,7 +571,7 @@ artifacts:
       exposing AADL analysis passes as MCP tools and instance model
       elements as MCP resources over stdio JSON-RPC transport.
     status: planned
-    tags: [mcp, integration, v030]
+    tags: [mcp, integration, v040]
 
   # ── Query Language ───────────────────────────────────────────────────
 
@@ -584,7 +584,7 @@ artifacts:
       model elements. Supports predicate filtering, property extraction,
       and aggregation.
     status: planned
-    tags: [query, instance, v030]
+    tags: [query, instance, v040]
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 

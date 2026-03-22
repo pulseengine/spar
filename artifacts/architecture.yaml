@@ -399,7 +399,7 @@ artifacts:
       interfaces:
         provides: [spar mcp command, MCP tools, MCP resources]
         requires: [spar-hir Database, spar-analysis AnalysisRunner]
-    tags: [architecture, mcp, v030]
+    tags: [architecture, mcp, v040]
     links:
       - type: satisfies
         target: REQ-MCP-001
@@ -447,7 +447,7 @@ artifacts:
       interfaces:
         provides: [QueryExpression, QueryResult, spar query command]
         requires: [spar-hir instance model]
-    tags: [architecture, query, v030]
+    tags: [architecture, query, v040]
     links:
       - type: satisfies
         target: REQ-QUERY-001
@@ -471,7 +471,7 @@ artifacts:
       interfaces:
         provides: [unified knowledge base]
         requires: [spar-hir-def SystemInstance, spar-hir facade]
-    tags: [architecture, knowledge, v030]
+    tags: [architecture, knowledge, v040]
     links:
       - type: traces-to
         target: REQ-QUERY-001
