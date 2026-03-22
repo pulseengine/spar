@@ -294,7 +294,9 @@ jobs:
         with:
           tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
-        run: cargo cyclonedx --format json --output-file spar-sbom.cdx.json
+        run: |
+          cargo cyclonedx --format json --all --override-filename spar-sbom
+          ls -la spar-sbom*.json || ls -la *.json
       - uses: actions/upload-artifact@v4
         with:
           name: sbom
