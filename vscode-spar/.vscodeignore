@@ -6,3 +6,5 @@ scripts/**
 !out/**
 tsconfig.json
 tsconfig.tsbuildinfo
+bin/esbuild.js
+!bin/**

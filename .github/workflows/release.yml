@@ -203,24 +203,59 @@ jobs:
           name: test-evidence
           path: spar-*-test-evidence.tar.gz
 
-  # ── VS Code Extension ────────────────────────────────────────────────
+  # ── VS Code Extension (per-platform) ─────────────────────────────────
   build-vsix:
-    name: Build VS Code Extension
+    name: Build VS Code Extension (${{ matrix.target }})
+    needs: [build-binaries]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            rust-target: aarch64-apple-darwin
+            binary: spar
+          - target: darwin-x64
+            rust-target: x86_64-apple-darwin
+            binary: spar
+          - target: linux-x64
+            rust-target: x86_64-unknown-linux-gnu
+            binary: spar
+          - target: linux-arm64
+            rust-target: aarch64-unknown-linux-gnu
+            binary: spar
+          - target: win32-x64
+            rust-target: x86_64-pc-windows-msvc
+            binary: spar.exe
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Download binary for ${{ matrix.rust-target }}
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.rust-target }}
+          path: binary-artifact
+      - name: Extract and place binary
+        run: |
+          mkdir -p vscode-spar/bin
+          cd binary-artifact
+          if ls *.tar.gz 1>/dev/null 2>&1; then
+            tar -xzf *.tar.gz
+          elif ls *.zip 1>/dev/null 2>&1; then
+            unzip *.zip
+          fi
+          cp ${{ matrix.binary }} ../vscode-spar/bin/${{ matrix.binary }}
+          chmod +x ../vscode-spar/bin/${{ matrix.binary }} 2>/dev/null || true
       - name: Install and compile extension
         working-directory: vscode-spar
         run: npm install && npm run compile
-      - name: Package VSIX
+      - name: Package platform VSIX
         working-directory: vscode-spar
-        run: npx @vscode/vsce package --no-dependencies
+        run: npx @vscode/vsce package --target ${{ matrix.target }} --no-dependencies
       - uses: actions/upload-artifact@v4
         with:
-          name: vsix
+          name: vsix-${{ matrix.target }}
           path: vscode-spar/*.vsix
 
   # ── Publish to VS Code Marketplace ──────────────────────────────────
@@ -231,8 +266,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: vsix
+          pattern: vsix-*
           path: vsix
+          merge-multiple: true
       - uses: actions/setup-node@v4
         with:
           node-version: 20
