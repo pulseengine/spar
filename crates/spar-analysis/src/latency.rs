@@ -739,4 +739,265 @@ mod tests {
             infos[0].message
         );
     }
+
+    // ── Boundary tests for latency bound checking ─────────────────
+
+    #[test]
+    fn latency_exactly_at_bound_no_warning() {
+        // Worst-case latency exactly equals bound — should NOT warn
+        // Kills `>` → `>=` mutant on `worst_case_ps > latency_bound`
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        // sensor: exec=3ms, period=10ms; controller: exec=2ms, period=20ms
+        // Worst case: 3 + 2 exec + 20 sampling (controller after c1) = 25ms
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "3 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+
+        b.set_property(
+            ctrl,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "2 ms",
+        );
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+
+        // Set bound exactly equal to worst case: 25ms
+        b.set_property(root, "Timing_Properties", "Latency", "25 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let bound_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .collect();
+        assert!(
+            bound_warns.is_empty(),
+            "latency exactly at bound should NOT warn (only > bound): {:?}",
+            bound_warns
+        );
+    }
+
+    #[test]
+    fn latency_one_unit_over_bound_warns() {
+        // Worst-case latency is 1ms over bound — should warn.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        // sensor: exec=3ms, period=10ms; controller: exec=2ms, period=20ms
+        // Worst case: 3 + 2 exec + 20 sampling = 25ms
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "3 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+
+        b.set_property(
+            ctrl,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "2 ms",
+        );
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+
+        // Set bound 1ms under worst case: 24ms < 25ms
+        b.set_property(root, "Timing_Properties", "Latency", "24 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let bound_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .collect();
+        assert_eq!(
+            bound_warns.len(),
+            1,
+            "latency 1ms over bound should warn: {:?}",
+            diags
+        );
+        assert!(
+            bound_warns[0].message.contains("25.000 ms"),
+            "should show worst-case latency: {}",
+            bound_warns[0].message
+        );
+        assert!(
+            bound_warns[0].message.contains("24.000 ms"),
+            "should show bound: {}",
+            bound_warns[0].message
+        );
+    }
+
+    #[test]
+    fn latency_sampling_delay_formula() {
+        // Verify that sampling delay is added for connections AFTER the first component.
+        // 3-component flow: A -> c1 -> B -> c2 -> C
+        // Best case = exec_A + exec_B + exec_C
+        // Worst case = exec_A + exec_B + period_B + exec_C + period_C
+        // (period_B added because c1 is before B, period_C because c2 is before C)
+        // Sensor (first component) does NOT get sampling delay.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("comp_a", ComponentCategory::Device, Some(root));
+        let bb = b.add_component("comp_b", ComponentCategory::Thread, Some(root));
+        let c = b.add_component("comp_c", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![a, bb, c]);
+        b.add_connection_inst("c1", root);
+        b.add_connection_inst("c2", root);
+
+        b.add_e2e(
+            "e2e_abc",
+            root,
+            vec!["comp_a.src", "c1", "comp_b.pass", "c2", "comp_c.sink"],
+        );
+
+        // A: exec=2ms, period=5ms
+        b.set_property(
+            a,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "2 ms",
+        );
+        b.set_property(a, "Timing_Properties", "Period", "5 ms");
+
+        // B: exec=3ms, period=10ms
+        b.set_property(
+            bb,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "3 ms",
+        );
+        b.set_property(bb, "Timing_Properties", "Period", "10 ms");
+
+        // C: exec=1ms, period=8ms
+        b.set_property(
+            c,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(c, "Timing_Properties", "Period", "8 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        // Best case: 2 + 3 + 1 = 6ms
+        // Worst case: 2 + 3 + 10 (B sampling) + 1 + 8 (C sampling) = 24ms
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report one latency range: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("6.000 ms"),
+            "best case should be 6ms: {}",
+            infos[0].message
+        );
+        assert!(
+            infos[0].message.contains("24.000 ms"),
+            "worst case should be 24ms (exec + sampling for B and C): {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn latency_within_bound_no_warning() {
+        // Worst-case latency well under bound — should NOT warn
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![sensor]);
+
+        b.add_e2e("simple", root, vec!["sensor.src"]);
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+
+        // Bound = 100ms, worst case = 1ms — no warning
+        b.set_property(root, "Timing_Properties", "Latency", "100 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let bound_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .collect();
+        assert!(
+            bound_warns.is_empty(),
+            "latency well within bound should not warn: {:?}",
+            bound_warns
+        );
+    }
+
+    #[test]
+    fn latency_no_sampling_delay_for_first_component() {
+        // Verify the first component in a flow does NOT get sampling delay added.
+        // Single component flow: best = worst = exec only, no period added.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![sensor]);
+
+        b.add_e2e("simple", root, vec!["sensor.src"]);
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "5 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "100 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1);
+        // Both best and worst case should be 5ms (period NOT added for first component)
+        assert!(
+            infos[0].message.contains("[5.000 ms .. 5.000 ms]"),
+            "first component should not get sampling delay: {}",
+            infos[0].message
+        );
+    }
 }
