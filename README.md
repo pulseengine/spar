@@ -11,6 +11,9 @@
 ![AADL](https://img.shields.io/badge/AADL_v2.2-AS5506D-654FF0?style=flat-square&labelColor=1a1b27)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square&labelColor=1a1b27)
 
+[![CI](https://github.com/pulseengine/spar/actions/workflows/ci.yml/badge.svg)](https://github.com/pulseengine/spar/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pulseengine/spar/graph/badge.svg)](https://codecov.io/gh/pulseengine/spar)
+
 &nbsp;
 
 <h6>
