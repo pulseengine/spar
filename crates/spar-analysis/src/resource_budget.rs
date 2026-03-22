@@ -476,6 +476,304 @@ mod tests {
         assert_eq!(parse_data_rate("invalid"), None);
     }
 
+    // ── Boundary tests (kill > vs >= mutants) ─────────────────────
+
+    #[test]
+    fn memory_budget_exactly_at_capacity() {
+        // Demand == capacity must NOT error (boundary: > not >=).
+        // 100 KByte = 819200 bits
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        // Capacity = 100 KByte = 819200 bits
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "100 KByte");
+        // Demand = exactly 100 KByte via Source_Code_Size
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 KByte");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "demand == capacity should NOT error (> boundary): {:?}",
+            errors
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "demand == capacity should emit info: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("100.0%"),
+            "should show 100.0%% utilization: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn memory_budget_one_bit_over_capacity() {
+        // Demand = capacity + 1 bit must error.
+        // Capacity: 8192 bits (1 KByte)
+        // Demand: 8192 + 1 = 8193 bits
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // Capacity: 1 KByte = 8192 bits
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "1 KByte");
+        // t1: 1 KByte = 8192 bits
+        b.set_property(t1, "Memory_Properties", "Source_Code_Size", "1 KByte");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+        // t2: 1 bit (the 1-bit that pushes demand over capacity)
+        b.set_property(t2, "Memory_Properties", "Source_Code_Size", "1 bits");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "demand > capacity by 1 bit should error: {:?}",
+            diags
+        );
+        assert!(
+            errors[0].message.contains("exceeded"),
+            "should mention exceeded: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn memory_budget_one_bit_under_capacity() {
+        // Demand = capacity - 1 bit must NOT error.
+        // Use bit-level precision: capacity=8192, demand=8191.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        // Capacity: 8192 bits (1 KByte)
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "1 KByte");
+        // Demand: 8191 bits (1 less than capacity)
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "8191 bits");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "demand < capacity by 1 bit should NOT error: {:?}",
+            errors
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "demand < capacity should emit info: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn bandwidth_budget_exactly_at_capacity() {
+        // Rate == capacity must NOT warn (boundary: > not >=).
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let bus = b.add_component("eth0", ComponentCategory::Bus, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![bus, proc]);
+
+        // Bus capacity: exactly 1000 bps
+        b.set_property(bus, "Communication_Properties", "Data_Rate", "1000 bitsps");
+        // Component demand: exactly 1000 bps
+        b.set_property(proc, "Communication_Properties", "Data_Rate", "1000 bitsps");
+        b.set_property(
+            proc,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (eth0)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeded"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "rate == capacity should NOT warn about exceeded: {:?}",
+            warnings
+        );
+    }
+
+    #[test]
+    fn bandwidth_budget_one_bps_over_capacity() {
+        // Rate > capacity by 1 bps must warn.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let bus = b.add_component("eth0", ComponentCategory::Bus, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![bus, proc]);
+
+        // Bus capacity: 1000 bps
+        b.set_property(bus, "Communication_Properties", "Data_Rate", "1000 bitsps");
+        // Component demand: 1001 bps (1 over)
+        b.set_property(proc, "Communication_Properties", "Data_Rate", "1001 bitsps");
+        b.set_property(
+            proc,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (eth0)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeded"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "rate > capacity by 1 bps should warn: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn memory_demand_is_sum_not_product() {
+        // Verify compute_memory_demand uses addition, not multiplication.
+        // If mutated to *, 100+200+300=600 would become 100*200*300=6000000.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        // Capacity: 700 bits (just above sum of 100+200+300=600)
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "700 bits");
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "100 bits");
+        b.set_property(thread, "Memory_Properties", "Data_Size", "200 bits");
+        b.set_property(thread, "Memory_Properties", "Stack_Size", "300 bits");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let inst = b.build(root);
+        let diags = ResourceBudgetAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "100+200+300=600 < 700 should not error (if * were used, 6M > 700 would error): {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn resource_budget_analysis_field_matches_name() {
+        // Verify every diagnostic has .analysis == self.name().
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![thread]);
+
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "1 KByte");
+        b.set_property(thread, "Memory_Properties", "Source_Code_Size", "2 KByte");
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let inst = b.build(root);
+        let pass = ResourceBudgetAnalysis;
+        let diags = pass.analyze(&inst);
+
+        assert!(!diags.is_empty(), "should produce diagnostics");
+        for diag in &diags {
+            assert_eq!(
+                diag.analysis,
+                pass.name(),
+                "diagnostic .analysis must match .name(): {:?}",
+                diag,
+            );
+        }
+    }
+
     #[test]
     fn memory_multiple_properties_summed() {
         // Test that Source_Code_Size + Data_Size + Stack_Size are all summed
