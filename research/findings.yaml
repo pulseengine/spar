@@ -389,22 +389,24 @@ artifacts:
 
   - id: TECH-SYSMLV2-IMPORT
     type: technology-evaluation
-    title: SysML v2 textual notation import/export for spar-transform
+    title: SysML v2 rowan parser + AADL lowering (spar-sysml2)
     description: >
-      SysML v2's textual grammar could be parsed by spar-transform
-      (like WIT/WAC transforms) to bridge SysML system models with
-      AADL deployment analysis. SysML v2 blocks → AADL components,
-      constraint definitions → spar assertions, requirement definitions
-      → rivet requirements. This would make spar the deployment
-      verification backend for SysML v2-based system design.
+      SysML v2 textual notation (KerML grammar) is parseable with rowan
+      the same way AADL is parsed. No Rust parser exists — pilot impl
+      is Java-only (github.com/Systems-Modeling/SysML-v2-Release).
+      SEI is specifying the SysML v2 → AADL mapping rules
+      (sei.cmu.edu/annual-reviews/2023-year-in-review/extending-sysml-v2-
+      with-aadl-concepts). Three-layer pipeline: SysML v2 (system) →
+      AADL (deployment) → WIT/code (implementation), with rivet tracing
+      through all layers. SysML v2 requirement elements → rivet YAML.
     fields:
-      technology: SysML v2 Textual Grammar
+      technology: SysML v2 Textual Grammar (KerML)
       category: standard
       maturity: stable
       rust-compatible: true
       wasm-compatible: true
       license: OMG specification (open)
-      recommendation: assess
+      recommendation: adopt
     tags: [transform, sysml, interop, v050]
 
   - id: TECH-REQIF

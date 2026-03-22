@@ -809,12 +809,21 @@ artifacts:
 
   - id: REQ-INTEROP-001
     type: requirement
-    title: SysML v2 textual notation import/export
+    title: SysML v2 textual notation parser + AADL lowering
     description: >
-      Parse SysML v2 textual grammar and transform to/from AADL via
-      spar-transform. Blocks → components, constraint definitions →
-      assertions, interfaces → feature groups. Makes spar the deployment
-      verification backend for SysML v2-based system design.
+      New spar-sysml2 crate: rowan-based parser for SysML v2 textual
+      notation (KerML grammar). Same pattern as spar-parser. No Rust
+      parser exists — the pilot implementation is Java-only.
+      Three capabilities:
+      1. Parse .sysml files into rowan CST (like AADL parsing)
+      2. Lower SysML v2 system models to AADL execution platform models
+         where timing/scheduling semantics exist — implementing the
+         SEI mapping rules (sei.cmu.edu/annual-reviews/2023-year-in-review/
+         extending-sysml-v2-with-aadl-concepts)
+      3. Extract SysML v2 requirement elements into rivet YAML artifacts
+      Result: SysML v2 (system-level) → AADL (deployment-level) →
+      WIT/code (implementation-level), with rivet tracing through all
+      three layers and spar analyzing architecture at every level.
     status: planned
     tags: [transform, sysml, interop, v050]
 
