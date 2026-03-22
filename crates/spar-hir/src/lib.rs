@@ -491,23 +491,49 @@ impl Instance {
             })
             .collect();
 
-        let connections = comp
-            .connections
+        // Connection instances per AS5506 Ch.14: only "across" connections
+        // (both endpoints reference subcomponents) are connection instances.
+        // Up/down connections are consumed as parts of end-to-end traces and
+        // do not produce their own connection instances.
+        //
+        // We use the semantic connections that have been traced end-to-end,
+        // grouped by the component that owns the originating across connection.
+        let connections = self
+            .inner
+            .semantic_connections
             .iter()
-            .map(|&ci| {
-                let c = &self.inner.connections[ci];
+            .filter(|sc| {
+                // Find the original across connection from the path.
+                sc.connection_path
+                    .first()
+                    .map(|&ci| self.inner.connections[ci].owner == idx)
+                    .unwrap_or(false)
+            })
+            .map(|sc| {
+                let src_name = {
+                    let (comp_idx, feat_name) = &sc.ultimate_source;
+                    if *comp_idx == idx {
+                        feat_name.as_str().to_string()
+                    } else {
+                        let path = self.component_path_from(idx, *comp_idx);
+                        format!("{}.{}", path, feat_name)
+                    }
+                };
+                let dst_name = {
+                    let (comp_idx, feat_name) = &sc.ultimate_destination;
+                    if *comp_idx == idx {
+                        feat_name.as_str().to_string()
+                    } else {
+                        let path = self.component_path_from(idx, *comp_idx);
+                        format!("{}.{}", path, feat_name)
+                    }
+                };
                 InstanceConnection {
-                    name: c.name.as_str().to_string(),
-                    kind: c.kind,
-                    is_bidirectional: c.is_bidirectional,
-                    source: c.src.as_ref().map(|e| match &e.subcomponent {
-                        Some(sub) => format!("{}.{}", sub, e.feature),
-                        None => e.feature.as_str().to_string(),
-                    }),
-                    destination: c.dst.as_ref().map(|e| match &e.subcomponent {
-                        Some(sub) => format!("{}.{}", sub, e.feature),
-                        None => e.feature.as_str().to_string(),
-                    }),
+                    name: sc.name.as_str().to_string(),
+                    kind: sc.kind,
+                    is_bidirectional: false,
+                    source: Some(src_name),
+                    destination: Some(dst_name),
                 }
             })
             .collect();
@@ -530,6 +556,27 @@ impl Instance {
             children,
             diagnostics: vec![],
         }
+    }
+
+    /// Build a dotted path from an ancestor component to a descendant component.
+    ///
+    /// Returns a string like "p2.t1" representing the path through the hierarchy.
+    fn component_path_from(
+        &self,
+        ancestor: spar_hir_def::instance::ComponentInstanceIdx,
+        descendant: spar_hir_def::instance::ComponentInstanceIdx,
+    ) -> String {
+        let mut path = Vec::new();
+        let mut current = descendant;
+        while current != ancestor {
+            path.push(self.inner.component(current).name.as_str().to_string());
+            match self.inner.component(current).parent {
+                Some(parent) => current = parent,
+                None => break,
+            }
+        }
+        path.reverse();
+        path.join(".")
     }
 }
 
