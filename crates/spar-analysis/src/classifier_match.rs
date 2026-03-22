@@ -860,6 +860,742 @@ mod tests {
         );
     }
 
+    // ── check_port_classifier_match: guard condition tests ─────────
+
+    #[test]
+    fn port_conn_src_carries_data_dst_event_port_checks_classifier() {
+        // Only src carries data (DataPort), dst is EventPort (no data).
+        // The guard `!carries_data(src) && !carries_data(dst)` is false because
+        // src DOES carry data → check proceeds.
+        // If `&&` were mutated to `||`, both src-carries and dst-not-carries
+        // would short-circuit to return early, missing the info diagnostic.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "SensorData"),
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::EventPort,
+            Some(Direction::In),
+            bb,
+            None,
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        // Src has classifier, dst has None → should emit Info about type safety gap
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info)
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "src with classifier, dst EventPort without → should emit info: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn port_conn_dst_carries_data_src_event_port_checks_classifier() {
+        // Only dst carries data (DataPort), src is EventPort.
+        // Guard `!carries_data(src) && !carries_data(dst)` is false because dst carries data.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::EventPort,
+            Some(Direction::Out),
+            a,
+            None,
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "SensorData"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info)
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "dst with classifier, src EventPort without → should emit info: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn port_conn_both_non_data_ports_skipped() {
+        // Both are EventPort → neither carries data → guard returns early
+        // No diagnostics should be produced.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::EventPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "Alarm"),
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::EventPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "Alert"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "both EventPort (non-data) should skip classifier check: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn port_conn_parameter_features_checked() {
+        // Parameter features carry data → should be checked
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "param1",
+            FeatureKind::Parameter,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "IntType"),
+            None,
+        );
+        b.add_feature(
+            "param2",
+            FeatureKind::Parameter,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "FloatType"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Feature,
+            root,
+            end(Some("a"), "param1"),
+            end(Some("b"), "param2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("data types must match"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "Parameter features with mismatching classifiers should error: {:?}",
+            diags
+        );
+    }
+
+    // ── check_access_match: guard condition tests ───────────────────
+
+    #[test]
+    fn access_conn_src_is_access_dst_is_not_still_checks() {
+        // Only src is DataAccess, dst is DataPort (not access).
+        // Guard `!is_access(src) && !is_access(dst)` is false because src IS access.
+        // If `&&` mutated to `||`, this would skip the check.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "acc1",
+            FeatureKind::DataAccess,
+            None,
+            a,
+            cls("DataTypes", "SharedBuf"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "port1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            None,
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "port1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        // src has classifier, dst has None → should emit Info
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info)
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "access src with classifier, non-access dst without → info: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn access_conn_neither_is_access_skipped() {
+        // Both features are DataPort (not access kind) → guard returns early
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "port1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "TypeA"),
+            None,
+        );
+        b.add_feature(
+            "port2",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "TypeB"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "port1"),
+            end(Some("b"), "port2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        // Neither is access → should skip, producing no access-related diagnostics
+        assert!(
+            diags.is_empty(),
+            "neither feature is access → should skip access check: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn access_subprogram_access_features_checked() {
+        // SubprogramAccess is in the is_access set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "sp1",
+            FeatureKind::SubprogramAccess,
+            None,
+            a,
+            cls("Code", "Handler"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "sp2",
+            FeatureKind::SubprogramAccess,
+            None,
+            bb,
+            cls("Code", "Handler"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "sp1"),
+            end(Some("b"), "sp2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "matching SubprogramAccess provides/requires should be clean: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn access_subprogram_group_access_features_checked() {
+        // SubprogramGroupAccess is in the is_access set
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "spg1",
+            FeatureKind::SubprogramGroupAccess,
+            None,
+            a,
+            cls("Code", "HandlerGroup"),
+            Some(AccessKind::Requires),
+        );
+        b.add_feature(
+            "spg2",
+            FeatureKind::SubprogramGroupAccess,
+            None,
+            bb,
+            cls("Code", "HandlerGroup"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "spg1"),
+            end(Some("b"), "spg2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("provides"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "SubprogramGroupAccess both requires → same-direction error: {:?}",
+            diags
+        );
+    }
+
+    // ── classifiers_match: package qualifier tests ──────────────────
+
+    #[test]
+    fn classifiers_match_both_packages_same() {
+        let a = ClassifierRef::qualified(Name::new("DataTypes"), Name::new("Sensor"));
+        let b = ClassifierRef::qualified(Name::new("DataTypes"), Name::new("Sensor"));
+        assert!(classifiers_match(&a, &b));
+    }
+
+    #[test]
+    fn classifiers_match_both_packages_different() {
+        let a = ClassifierRef::qualified(Name::new("PkgA"), Name::new("Sensor"));
+        let b = ClassifierRef::qualified(Name::new("PkgB"), Name::new("Sensor"));
+        assert!(
+            !classifiers_match(&a, &b),
+            "different package qualifiers should NOT match"
+        );
+    }
+
+    #[test]
+    fn classifiers_match_one_unqualified() {
+        // One has package, other doesn't → treated as match
+        let a = ClassifierRef::qualified(Name::new("Pkg"), Name::new("Sensor"));
+        let b = ClassifierRef::type_only(Name::new("Sensor"));
+        assert!(
+            classifiers_match(&a, &b),
+            "one unqualified should still match"
+        );
+    }
+
+    #[test]
+    fn classifiers_match_neither_qualified() {
+        let a = ClassifierRef::type_only(Name::new("Sensor"));
+        let b = ClassifierRef::type_only(Name::new("Sensor"));
+        assert!(classifiers_match(&a, &b));
+    }
+
+    #[test]
+    fn classifiers_match_type_names_different() {
+        let a = ClassifierRef::qualified(Name::new("Pkg"), Name::new("TypeA"));
+        let b = ClassifierRef::qualified(Name::new("Pkg"), Name::new("TypeB"));
+        assert!(
+            !classifiers_match(&a, &b),
+            "different type names should NOT match"
+        );
+    }
+
+    #[test]
+    fn classifiers_match_type_names_case_insensitive() {
+        let a = ClassifierRef::qualified(Name::new("Pkg"), Name::new("SENSOR"));
+        let b = ClassifierRef::qualified(Name::new("pkg"), Name::new("sensor"));
+        assert!(
+            classifiers_match(&a, &b),
+            "case-insensitive type and package names should match"
+        );
+    }
+
+    // ── Port classifier: both have classifiers, match vs mismatch ──
+
+    #[test]
+    fn port_classifier_both_present_matching_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::EventDataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "Msg"),
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::EventDataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "Msg"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "both classifiers present and matching → no diagnostic: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn port_classifier_both_present_mismatching_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::EventDataPort,
+            Some(Direction::Out),
+            a,
+            cls("DataTypes", "MsgA"),
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::EventDataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "MsgB"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("data types must match"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "both classifiers present but mismatching → error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn port_classifier_dst_has_src_none_info() {
+        // src None, dst Some → Info
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "out1",
+            FeatureKind::DataPort,
+            Some(Direction::Out),
+            a,
+            None,
+            None,
+        );
+        b.add_feature(
+            "in1",
+            FeatureKind::DataPort,
+            Some(Direction::In),
+            bb,
+            cls("DataTypes", "SensorData"),
+            None,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("destination"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "src None, dst Some → Info about destination having classifier: {:?}",
+            diags
+        );
+    }
+
+    // ── Access: same vs different classifier ────────────────────────
+
+    #[test]
+    fn access_same_classifier_provides_requires_clean() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "acc1",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("HW", "PCI"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "acc2",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("HW", "PCI"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "same classifier + provides/requires → clean: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn access_different_classifier_provides_requires_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "acc1",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("HW", "PCI"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "acc2",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("HW", "USB"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("access types must match"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "different classifier on access → error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn access_both_requires_same_classifier_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "acc1",
+            FeatureKind::DataAccess,
+            None,
+            a,
+            cls("Data", "Buf"),
+            Some(AccessKind::Requires),
+        );
+        b.add_feature(
+            "acc2",
+            FeatureKind::DataAccess,
+            None,
+            bb,
+            cls("Data", "Buf"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "both requires → same-direction error: {:?}",
+            diags
+        );
+        assert!(errors[0].message.contains("provides"));
+    }
+
+    #[test]
+    fn access_no_access_kind_on_one_side_no_direction_error() {
+        // One side has no access_kind → skip direction check
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "acc1",
+            FeatureKind::DataAccess,
+            None,
+            a,
+            cls("Data", "Buf"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "acc2",
+            FeatureKind::DataAccess,
+            None,
+            bb,
+            cls("Data", "Buf"),
+            None, // no access_kind
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "acc1"),
+            end(Some("b"), "acc2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "missing access_kind on one side → no direction error: {:?}",
+            diags
+        );
+    }
+
     #[test]
     fn incomplete_connection_skipped() {
         let mut b = TestBuilder::new();

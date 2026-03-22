@@ -371,62 +371,130 @@ fn build_connection_path(
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(unused_imports, unused_variables, dead_code, clippy::manual_div_ceil)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
-    use std::sync::Arc;
 
     use spar_hir_def::feature_group::ExpandedFeature;
     use spar_hir_def::instance::*;
     use spar_hir_def::item_tree::*;
     use spar_hir_def::name::{ClassifierRef, Name};
-    use spar_hir_def::resolver::GlobalScope;
 
-    // ── Helper: build a feature group tree ──────────────────────────
+    // ── TestBuilder ─────────────────────────────────────────────────
 
-    fn build_fg_tree(
-        pkg_name: &str,
-        fg_name: &str,
-        features: Vec<(&str, FeatureKind, Option<Direction>)>,
-        inverse_of: Option<ClassifierRef>,
-    ) -> ItemTree {
-        let mut tree = ItemTree::default();
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+    }
 
-        let mut feat_indices = Vec::new();
-        for (name, kind, dir) in features {
-            let idx = tree.features.alloc(Feature {
-                name: Name::new(name),
-                kind,
-                direction: dir,
-                access_kind: None,
-                classifier: None,
-                is_refined: false,
-                array_dimensions: Vec::new(),
-                property_associations: Vec::new(),
-            });
-            feat_indices.push(idx);
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+            }
         }
 
-        let fgt_idx = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new(fg_name),
-            is_public: true,
-            extends: None,
-            inverse_of,
-            features: feat_indices,
-            prototypes: Vec::new(),
-        });
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: Some(Name::new("impl")),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        }
 
-        tree.packages.alloc(Package {
-            name: Name::new(pkg_name),
-            with_clauses: Vec::new(),
-            public_items: vec![ItemRef::FeatureGroupType(fgt_idx)],
-            private_items: Vec::new(),
-            renames: Vec::new(),
-        });
+        fn add_feature(
+            &mut self,
+            name: &str,
+            kind: FeatureKind,
+            direction: Option<Direction>,
+            owner: ComponentInstanceIdx,
+        ) -> FeatureInstanceIdx {
+            let idx = self.features.alloc(FeatureInstance {
+                name: Name::new(name),
+                kind,
+                direction,
+                owner,
+                classifier: None,
+                access_kind: None,
+                array_index: None,
+            });
+            self.components[owner].features.push(idx);
+            idx
+        }
 
-        tree
+        fn add_connection(
+            &mut self,
+            name: &str,
+            kind: ConnectionKind,
+            owner: ComponentInstanceIdx,
+            src: Option<ConnectionEnd>,
+            dst: Option<ConnectionEnd>,
+        ) -> ConnectionInstanceIdx {
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind,
+                is_bidirectional: false,
+                owner,
+                src,
+                dst,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+            idx
+        }
+
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
+            self.components[parent].children = children;
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: FxHashMap::default(),
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    fn end(sub: Option<&str>, feat: &str) -> ConnectionEnd {
+        ConnectionEnd {
+            subcomponent: sub.map(Name::new),
+            feature: Name::new(feat),
+        }
     }
 
     // ── validate_complement tests ───────────────────────────────────
