@@ -12,12 +12,9 @@ project:
     - aspice
     - stpa
     - aadl
-    - research
 
 sources:
   - path: artifacts
-    format: generic-yaml
-  - path: research
     format: generic-yaml
   - path: safety/stpa
     format: stpa-yaml

@@ -259,6 +259,56 @@ artifacts:
     status: implemented
     tags: [integration, serde]
 
+  # ── Rendering (STPA-derived) ──────────────────────────────────────────
+
+  - id: RENDER-REQ-001
+    type: requirement
+    title: Orthogonal edge routing
+    description: >
+      Edges must use orthogonal routing to minimize visual crossings.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-002
+    type: requirement
+    title: Port visibility with directional indicators
+    description: >
+      Ports must be visible with directional indicators and type coloring.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-003
+    type: requirement
+    title: Interactive HTML with zoom/pan/minimap/search
+    description: >
+      Interactive HTML output must support zoom, pan, minimap, and search.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-004
+    type: requirement
+    title: Deterministic layout
+    description: >
+      Layout must be deterministic — same model always produces same layout.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-005
+    type: requirement
+    title: Selection and group highlighting
+    description: >
+      Selection and group highlighting must be supported in interactive mode.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-006
+    type: requirement
+    title: Semantic zoom for overview levels
+    description: >
+      Semantic zoom must reduce clutter at overview levels.
+    status: partial
+    tags: [rendering, stpa]
+
   - id: REQ-WASM-001
     type: requirement
     title: WASM component target

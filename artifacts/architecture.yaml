@@ -321,7 +321,17 @@ artifacts:
       for in-process diagram rendering. WASI filesystem calls are
       shimmed to read workspace files. Webview panel shows interactive
       HTML from etch with ports, orthogonal routing, and pan/zoom.
+    fields:
+      rationale: >
+        Bundling the native binary per platform ensures zero-config
+        installation. WASM renderer provides in-process rendering
+        without spawning a child process.
     tags: [architecture, tooling, vscode]
+    links:
+      - type: satisfies
+        target: REQ-LSP-001
+      - type: satisfies
+        target: RENDER-REQ-003
 
   # ── v0.3.0 Architecture Decisions ──────────────────────────────────────
 
@@ -473,7 +483,7 @@ artifacts:
         requires: [spar-hir-def SystemInstance, spar-hir facade]
     tags: [architecture, knowledge, v040]
     links:
-      - type: traces-to
+      - type: satisfies
         target: REQ-QUERY-001
       - type: traces-to
         target: REQ-MCP-001
