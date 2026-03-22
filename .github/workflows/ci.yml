@@ -142,7 +142,6 @@ jobs:
     name: Mutation Testing
     needs: [test]
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -152,7 +151,21 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run cargo-mutants on spar-analysis
-        run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib
+        run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib || true
+      - name: Check surviving mutants
+        run: |
+          MISSED=$(grep -c '^MISSED' mutants-out/caught.txt 2>/dev/null || echo 0)
+          if [ -f mutants-out/missed.txt ]; then
+            MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
+          fi
+          echo "Surviving mutants: $MISSED"
+          # Hard gate: zero surviving mutants allowed
+          if [ "$MISSED" -gt 0 ]; then
+            echo "::error::$MISSED mutant(s) survived — add tests to kill them"
+            cat mutants-out/missed.txt 2>/dev/null | head -30
+            exit 1
+          fi
+          echo "All mutants killed!"
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
