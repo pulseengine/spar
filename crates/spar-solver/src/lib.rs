@@ -5,6 +5,7 @@
 
 pub mod allocate;
 pub mod constraints;
+pub mod nsga2;
 pub mod topology;
 
 #[cfg(test)]
