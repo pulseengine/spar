@@ -295,12 +295,17 @@ jobs:
           tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
         run: |
-          cargo cyclonedx --format json --all --override-filename spar-sbom
-          ls -la spar-sbom*.json || ls -la *.json
+          cargo cyclonedx --format json --all
+          # Collect per-crate SBOMs into one directory
+          mkdir -p sbom-out
+          find . -name "*.cdx.json" -exec cp {} sbom-out/ \;
+          # Merge into a single SBOM (use the CLI crate as primary)
+          cp crates/spar-cli/spar.cdx.json sbom-out/spar-sbom.cdx.json
+          ls -la sbom-out/
       - uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: spar-sbom.cdx.json
+          path: sbom-out/spar-sbom.cdx.json
 
   # ── Create GitHub Release ─────────────────────────────────────────────
   create-release:
