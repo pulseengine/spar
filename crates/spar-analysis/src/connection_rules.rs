@@ -515,6 +515,90 @@ mod tests {
         );
     }
 
+    // ── Self-loop on owner component (both None subcomponents) ──────
+
+    #[test]
+    fn self_loop_on_owner_component() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_feature("port1", FeatureKind::DataPort, Some(Direction::InOut), root);
+        // Self-loop: both subcomponents are None, same feature
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(None, "port1"),
+            end(None, "port1"),
+        );
+
+        let inst = b.build(root);
+        let diags = ConnectionRuleAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("self-loop"))
+            .collect();
+        assert_eq!(errors.len(), 1, "None/None same feature = self-loop: {:?}", diags);
+    }
+
+    // ── Not a self-loop: one sub None, other Some ───────────────────
+
+    #[test]
+    fn not_self_loop_one_none_one_some() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        b.add_feature("port1", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("port1", FeatureKind::DataPort, Some(Direction::In), root);
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "port1"),
+            end(None, "port1"),
+        );
+        b.set_children(root, vec![a]);
+
+        let inst = b.build(root);
+        let diags = ConnectionRuleAnalysis.analyze(&inst);
+        let self_loop_errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("self-loop"))
+            .collect();
+        assert!(
+            self_loop_errors.is_empty(),
+            "None vs Some should not be self-loop: {:?}",
+            self_loop_errors
+        );
+    }
+
+    // ── Feature kind resolution: unresolvable feature is skipped ────
+
+    #[test]
+    fn unresolvable_feature_kind_skipped() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        // a has feature "out1", but b has no feature "in1"
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            end(Some("a"), "out1"),
+            end(Some("b"), "in1"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ConnectionRuleAnalysis.analyze(&inst);
+        let kind_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("feature kinds must match"))
+            .collect();
+        assert!(kind_errs.is_empty(), "unresolvable features should be skipped: {:?}", kind_errs);
+    }
+
     // ── Incomplete connection skipped ───────────────────────────────
 
     #[test]

@@ -657,7 +657,153 @@ mod tests {
         );
     }
 
-    // ── Test 7: format_time helper ──────────────────────────────────
+    // ── Test 7: Response time exactly at deadline (boundary) ────────
+    #[test]
+    fn response_time_exactly_at_deadline() {
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+
+        // Single thread: period=10ms, exec=10ms, deadline=10ms => R=C=10ms == deadline
+        bind_thread(&mut b, t1, "10 ms", "10 ms", Some("10 ms"));
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        // R = C = 10ms, deadline = 10ms → R <= deadline → Info, not Error
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "exactly at deadline should NOT error: {:?}", errors);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("response time"))
+            .collect();
+        assert_eq!(infos.len(), 1, "expected 1 info: {:?}", diags);
+    }
+
+    // ── Test 8: Response time 1 unit over deadline ───────────────────
+    #[test]
+    fn response_time_one_over_deadline() {
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1, t2]);
+
+        // t1: period=10ms, exec=6ms (high priority)
+        bind_thread(&mut b, t1, "10 ms", "6 ms", None);
+        // t2: period=20ms, exec=4ms, deadline=9ms
+        // R0=4, R1=4+ceil(4/10)*6=4+6=10 > deadline 9 → miss
+        bind_thread(&mut b, t2, "20 ms", "4 ms", Some("9 ms"));
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("t2"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "1 over deadline should produce error: {:?}",
+            diags
+        );
+    }
+
+    // ── Test 9: Unbound threads skipped ──────────────────────────────
+    #[test]
+    fn unbound_threads_skipped() {
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+
+        // Set period and exec but NO processor binding
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        // Unbound threads go to "__unbound__" which is skipped
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("response time"))
+            .collect();
+        assert!(infos.is_empty(), "unbound threads should be skipped: {:?}", infos);
+    }
+
+    // ── Test 10: get_priority helper ─────────────────────────────────
+    #[test]
+    fn get_priority_parses_correctly() {
+        use spar_hir_def::properties::PropertyMap;
+        use spar_hir_def::properties::PropertyValue;
+        use spar_hir_def::name::PropertyRef;
+
+        let mut props = PropertyMap::new();
+        props.add(PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new("Deployment_Properties")),
+                property_name: Name::new("Priority"),
+            },
+            value: "5".to_string(),
+            is_append: false,
+        });
+
+        assert_eq!(get_priority(&props), Some(5));
+    }
+
+    #[test]
+    fn get_priority_missing_returns_none() {
+        let props = spar_hir_def::properties::PropertyMap::new();
+        assert_eq!(get_priority(&props), None);
+    }
+
+    #[test]
+    fn get_priority_invalid_value_returns_none() {
+        use spar_hir_def::properties::PropertyMap;
+        use spar_hir_def::properties::PropertyValue;
+        use spar_hir_def::name::PropertyRef;
+
+        let mut props = PropertyMap::new();
+        props.add(PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new("Deployment_Properties")),
+                property_name: Name::new("Priority"),
+            },
+            value: "not_a_number".to_string(),
+            is_append: false,
+        });
+
+        assert_eq!(get_priority(&props), None);
+    }
+
+    // ── Test 11: format_time helper ──────────────────────────────────
     #[test]
     fn format_time_units() {
         assert_eq!(format_time(500), "500 ps");

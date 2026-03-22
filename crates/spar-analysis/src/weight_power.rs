@@ -753,6 +753,209 @@ mod tests {
         );
     }
 
+    // ── Weight: exactly at limit (boundary) ──────────────────────
+
+    #[test]
+    fn weight_exactly_at_limit() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("aircraft", ComponentCategory::System, None);
+        let wing = b.add_component("wing", ComponentCategory::System, Some(root));
+        let engine = b.add_component("engine", ComponentCategory::System, Some(root));
+        b.set_children(root, vec![wing, engine]);
+
+        // Children weigh 60 + 40 = 100 kg, limit is exactly 100 kg
+        b.set_property(wing, "SEI", "GrossWeight", "60 kg");
+        b.set_property(engine, "SEI", "GrossWeight", "40 kg");
+        b.set_property(root, "SEI", "WeightLimit", "100 kg");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "exactly at limit should NOT error: {:?}", errors);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("weight budget"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report weight info: {:?}", diags);
+        assert!(
+            infos[0].message.contains("100.0%"),
+            "expected 100% utilization: {}",
+            infos[0].message
+        );
+    }
+
+    // ── Weight: 1 unit over limit ──────────────────────────────
+
+    #[test]
+    fn weight_one_over_limit() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("aircraft", ComponentCategory::System, None);
+        let wing = b.add_component("wing", ComponentCategory::System, Some(root));
+        let engine = b.add_component("engine", ComponentCategory::System, Some(root));
+        b.set_children(root, vec![wing, engine]);
+
+        // Children weigh 60 + 41 = 101 kg, limit is 100 kg
+        b.set_property(wing, "SEI", "GrossWeight", "60 kg");
+        b.set_property(engine, "SEI", "GrossWeight", "41 kg");
+        b.set_property(root, "SEI", "WeightLimit", "100 kg");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "1 over limit should error: {:?}", diags);
+        assert!(
+            errors[0].message.contains("weight limit exceeded"),
+            "expected weight limit message: {}",
+            errors[0].message
+        );
+    }
+
+    // ── Power: exactly at capacity (boundary) ──────────────────
+
+    #[test]
+    fn power_exactly_at_capacity() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("board", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let gpu = b.add_component("gpu", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![cpu, gpu]);
+
+        // Children power: 60W + 40W = 100W = 100000 mW, capacity = 100W = 100000 mW
+        b.set_property(cpu, "", "PowerBudget", "60 W");
+        b.set_property(gpu, "", "PowerBudget", "40 W");
+        b.set_property(root, "", "PowerCapacity", "100 W");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "exactly at capacity should NOT error: {:?}", errors);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("power budget"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report power info: {:?}", diags);
+        assert!(
+            infos[0].message.contains("100.0%"),
+            "expected 100% utilization: {}",
+            infos[0].message
+        );
+    }
+
+    // ── Power: 1 unit over capacity ────────────────────────────
+
+    #[test]
+    fn power_one_over_capacity() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("board", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let gpu = b.add_component("gpu", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![cpu, gpu]);
+
+        // Children power: 60W + 41W = 101W = 101000 mW, capacity = 100W = 100000 mW
+        b.set_property(cpu, "", "PowerBudget", "60 W");
+        b.set_property(gpu, "", "PowerBudget", "41 W");
+        b.set_property(root, "", "PowerCapacity", "100 W");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "1 over capacity should error: {:?}", diags);
+        assert!(
+            errors[0].message.contains("power capacity exceeded"),
+            "expected power capacity message: {}",
+            errors[0].message
+        );
+    }
+
+    // ── Total aggregation: zero total not inserted into map ─────
+
+    #[test]
+    fn zero_weight_children_skip_aggregation() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("sys", ComponentCategory::System, None);
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root));
+        let leaf = b.add_component("leaf", ComponentCategory::System, Some(sub));
+        b.set_children(root, vec![sub]);
+        b.set_children(sub, vec![leaf]);
+
+        // leaf has no weight, sub has weight limit — children_weight == 0.0
+        b.set_property(sub, "SEI", "WeightLimit", "50 kg");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        // No diagnostics for weight because children_weight is 0.0
+        let weight_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("weight"))
+            .collect();
+        assert!(
+            weight_diags.is_empty(),
+            "zero children weight = no weight diagnostic: {:?}",
+            weight_diags
+        );
+    }
+
+    // ── Property alternatives: unqualified Weight ───────────────
+
+    #[test]
+    fn unqualified_weight_property() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("sys", ComponentCategory::System, None);
+        let part = b.add_component("part", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![part]);
+
+        b.set_property(part, "", "Weight", "5 kg");
+        b.set_property(root, "", "Weight_Limit", "10 kg");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "within budget: {:?}", errors);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("weight budget"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report weight: {:?}", diags);
+    }
+
+    // ── Parse helpers: uW power unit ────────────────────────────
+
+    #[test]
+    fn parse_power_uw() {
+        assert_eq!(parse_power_value("500 uW"), Some(0.5));
+    }
+
+    // ── Parse helpers: mg weight unit ───────────────────────────
+
+    #[test]
+    fn parse_weight_mg() {
+        assert_eq!(parse_weight_value("5000000 mg"), Some(5.0));
+    }
+
     // ── Limit with no children weights: no diagnostic ───────────
 
     #[test]

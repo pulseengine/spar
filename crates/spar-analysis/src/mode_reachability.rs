@@ -1246,6 +1246,133 @@ mod tests {
         );
     }
 
+    // ── Additional mutation-killing tests ────────────────────────────
+
+    #[test]
+    fn single_mode_component_skipped() {
+        // Component with only 1 mode and no transitions should not produce a matrix
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("only", true, ctrl);
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let matrices = compute_reachability_matrices(&inst);
+        assert!(matrices.is_empty(), "single mode = no matrix: {:?}", matrices);
+    }
+
+    #[test]
+    fn two_modes_no_transitions_skipped() {
+        // 2 modes but no transitions → skipped
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("idle", true, ctrl);
+        b.add_mode("active", false, ctrl);
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let matrices = compute_reachability_matrices(&inst);
+        assert!(matrices.is_empty(), "no transitions = no matrix");
+    }
+
+    #[test]
+    fn no_initial_mode_skipped() {
+        // 2 modes with transitions but no initial → skipped
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("idle", false, ctrl);
+        b.add_mode("active", false, ctrl);
+        b.add_mode_transition(Some("t1"), "idle", "active", vec![], ctrl);
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let matrices = compute_reachability_matrices(&inst);
+        assert!(matrices.is_empty(), "no initial mode = no matrix");
+    }
+
+    #[test]
+    fn self_reachability_in_matrix() {
+        // Each mode should be reachable from itself (matrix[i][i] = true)
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("idle", true, ctrl);
+        b.add_mode("active", false, ctrl);
+        b.add_mode_transition(Some("t1"), "idle", "active", vec![], ctrl);
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let matrices = compute_reachability_matrices(&inst);
+        assert_eq!(matrices.len(), 1);
+
+        let m = &matrices[0];
+        for i in 0..m.modes.len() {
+            assert!(m.matrix[i][i], "mode {} should be reachable from itself", m.modes[i]);
+        }
+    }
+
+    #[test]
+    fn reachability_summary_count() {
+        // 3 modes, 1 unreachable: summary should say 2/3
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("idle", true, ctrl);
+        b.add_mode("active", false, ctrl);
+        b.add_mode("orphan", false, ctrl);
+        b.add_mode_transition(Some("t1"), "idle", "active", vec![], ctrl);
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let diags = ModeReachabilityAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("2/3"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report 2/3 reachable: {:?}", diags);
+    }
+
+    #[test]
+    fn dead_transition_with_connection_on_self() {
+        // Connection on the component itself (not from parent) → trigger is connected
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let ctrl = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_feature("go", FeatureKind::EventPort, Direction::In, ctrl);
+        b.add_mode("idle", true, ctrl);
+        b.add_mode("active", false, ctrl);
+        b.add_mode_transition(Some("activate"), "idle", "active", vec!["go"], ctrl);
+
+        // Connection on ctrl itself with dst feature "go" and no subcomponent
+        let conn_idx = b.connections.alloc(ConnectionInstance {
+            name: Name::new("c_internal"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: ctrl,
+            src: Some(ConnectionEnd {
+                subcomponent: None,
+                feature: Name::new("something"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: None,
+                feature: Name::new("go"),
+            }),
+            in_modes: Vec::new(),
+        });
+        b.components[ctrl].connections.push(conn_idx);
+
+        b.set_children(root, vec![ctrl]);
+
+        let inst = b.build(root);
+        let matrices = compute_reachability_matrices(&inst);
+        assert_eq!(matrices.len(), 1);
+        assert!(matrices[0].dead_transitions.is_empty(), "connected via self connection: should NOT be dead");
+    }
+
     // ── sanitize_dot_id tests ─────────────────────────────────────────
 
     #[test]

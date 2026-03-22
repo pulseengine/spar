@@ -496,6 +496,48 @@ mod tests {
         assert!(!is_valid_containment(Data, Thread));
     }
 
+    // ── Abstract child accepted by any parent ─────────────────────
+
+    #[test]
+    fn abstract_child_accepted_by_thread() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let abs = b.add_component("abs", ComponentCategory::Abstract, Some(thread));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![thread]);
+        b.set_children(thread, vec![abs]);
+
+        let inst = b.build(root);
+        let diags = SubcomponentRuleAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("cannot contain") && d.message.contains("abstract"))
+            .collect();
+        assert!(errors.is_empty(), "abstract child accepted by any: {:?}", errors);
+    }
+
+    // ── Three children: two unique, one duplicate ───────────────────
+
+    #[test]
+    fn three_children_one_duplicate() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("sensor", ComponentCategory::System, Some(root));
+        let bb = b.add_component("controller", ComponentCategory::System, Some(root));
+        let c = b.add_component("sensor", ComponentCategory::System, Some(root));
+        b.set_children(root, vec![a, bb, c]);
+
+        let inst = b.build(root);
+        let diags = SubcomponentRuleAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("duplicate subcomponent name"))
+            .collect();
+        assert_eq!(errors.len(), 1, "one duplicate among three: {:?}", diags);
+    }
+
     // ── No children: clean ──────────────────────────────────────────
 
     #[test]

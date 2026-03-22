@@ -359,6 +359,136 @@ mod tests {
         assert_eq!(extract_reference_target("invalid"), None);
     }
 
+    // ── Process without memory binding info ────────────────────
+
+    #[test]
+    fn process_without_memory_binding_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("mem", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![mem, proc]);
+
+        let inst = b.build(root);
+        let diags = BindingCheckAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Actual_Memory_Binding"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "process should note missing memory binding: {:?}",
+            diags
+        );
+    }
+
+    // ── Process with memory binding: no warning ─────────────────
+
+    #[test]
+    fn process_with_memory_binding_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("mem", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![mem, proc]);
+        b.set_property(
+            proc,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (mem)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingCheckAnalysis.analyze(&inst);
+        let binding_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Actual_Memory_Binding") && d.message.contains("proc"))
+            .collect();
+        assert!(
+            binding_diags.is_empty(),
+            "bound process should not warn: {:?}",
+            binding_diags
+        );
+    }
+
+    // ── No memory in model: no memory binding info ──────────────
+
+    #[test]
+    fn no_memory_in_model_no_binding_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![proc]);
+
+        let inst = b.build(root);
+        let diags = BindingCheckAnalysis.analyze(&inst);
+        let binding_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Actual_Memory_Binding"))
+            .collect();
+        assert!(
+            binding_diags.is_empty(),
+            "no memory = no binding needed: {:?}",
+            binding_diags
+        );
+    }
+
+    // ── Binding to valid processor target (no error) ────────────
+
+    #[test]
+    fn binding_to_valid_processor_target() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu, thread]);
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingCheckAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "valid binding should not error: {:?}", errors);
+    }
+
+    // ── Binding to nonexistent target (no error — graceful) ─────
+
+    #[test]
+    fn binding_to_nonexistent_target_graceful() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu, thread]);
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (ghost)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingCheckAnalysis.analyze(&inst);
+        // binding_check does NOT error on nonexistent target (it just returns)
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("ghost"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "nonexistent target is not flagged in binding_check: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn binding_to_wrong_category() {
         let mut b = TestBuilder::new();

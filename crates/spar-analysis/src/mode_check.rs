@@ -520,6 +520,67 @@ mod tests {
         );
     }
 
+    // ── Case-insensitive trigger match ─────────────────────────────
+
+    #[test]
+    fn case_insensitive_trigger_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_feature("Start_Cmd", FeatureKind::EventPort, Direction::In, child);
+        b.add_mode("idle", true, child);
+        b.add_mode("active", false, child);
+        // Trigger uses lowercase "start_cmd" but feature is "Start_Cmd"
+        b.add_mode_transition(Some("activate"), "idle", "active", vec!["start_cmd"], child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModeCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("trigger"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "case-insensitive trigger should match: {:?}",
+            warnings
+        );
+    }
+
+    // ── Multiple triggers, one mismatched ────────────────────────────
+
+    #[test]
+    fn multiple_triggers_one_unmatched() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_feature("start_cmd", FeatureKind::EventPort, Direction::In, child);
+        b.add_mode("idle", true, child);
+        b.add_mode("active", false, child);
+        // Two triggers: "start_cmd" matches, "missing" does not
+        b.add_mode_transition(
+            Some("activate"),
+            "idle",
+            "active",
+            vec!["start_cmd", "missing"],
+            child,
+        );
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModeCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("trigger 'missing'"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one unmatched trigger should warn: {:?}",
+            diags
+        );
+    }
+
     // ── No modes at all: clean ──────────────────────────────────────
 
     #[test]

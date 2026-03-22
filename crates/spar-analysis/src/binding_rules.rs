@@ -620,6 +620,70 @@ mod tests {
         );
     }
 
+    // ── Memory binding to thread (wrong category) ─────────────────
+
+    #[test]
+    fn memory_binding_to_thread_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("mem", ComponentCategory::Memory, Some(root));
+        let worker = b.add_component("worker", ComponentCategory::Thread, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![mem, worker, proc]);
+        b.set_property(
+            proc,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (worker)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingRuleAnalysis.analyze(&inst);
+        let cat_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error
+                    && d.message.contains("Actual_Memory_Binding")
+                    && d.message.contains("thread")
+            })
+            .collect();
+        assert_eq!(
+            cat_errs.len(),
+            1,
+            "memory binding to thread should error: {:?}",
+            diags
+        );
+    }
+
+    // ── Virtual processor binding accepted ───────────────────────────
+
+    #[test]
+    fn processor_binding_to_virtual_processor_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let vp = b.add_component("vp", ComponentCategory::VirtualProcessor, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![vp, thread]);
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (vp)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingRuleAnalysis.analyze(&inst);
+        let cat_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("expected one of"))
+            .collect();
+        assert!(
+            cat_errs.is_empty(),
+            "virtual processor binding should be valid: {:?}",
+            cat_errs
+        );
+    }
+
     // ── extract_reference_target tests ──────────────────────────────
 
     #[test]

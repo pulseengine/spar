@@ -138,3 +138,230 @@ impl Analysis for CompletenessAnalysis {
         diags
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+    use spar_hir_def::instance::*;
+    use spar_hir_def::item_tree::ComponentCategory;
+    use spar_hir_def::name::Name;
+
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+        diagnostics: Vec<spar_hir_def::instance::InstanceDiagnostic>,
+    }
+
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+                diagnostics: Vec::new(),
+            }
+        }
+
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+            impl_name: Option<&str>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: impl_name.map(Name::new),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        }
+
+        fn add_feature(
+            &mut self,
+            name: &str,
+            owner: ComponentInstanceIdx,
+        ) {
+            let idx = self.features.alloc(FeatureInstance {
+                name: Name::new(name),
+                kind: spar_hir_def::item_tree::FeatureKind::DataPort,
+                direction: Some(spar_hir_def::item_tree::Direction::In),
+                owner,
+                classifier: None,
+                access_kind: None,
+                array_index: None,
+            });
+            self.components[owner].features.push(idx);
+        }
+
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
+            self.components[parent].children = children;
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: self.diagnostics,
+                property_maps: FxHashMap::default(),
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn complete_model_no_warnings() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root), Some("impl"));
+        b.add_feature("port", sub);
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error || d.severity == Severity::Warning)
+            .collect();
+        assert!(errors.is_empty(), "complete model: {:?}", errors);
+    }
+
+    #[test]
+    fn empty_type_name_warns() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let sub_idx = b.components.alloc(ComponentInstance {
+            name: Name::new("sub"),
+            category: ComponentCategory::System,
+            type_name: Name::new(""),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+        b.set_children(root, vec![sub_idx]);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no classifier reference"))
+            .collect();
+        assert_eq!(warns.len(), 1, "empty type_name should warn: {:?}", diags);
+    }
+
+    #[test]
+    fn type_only_subcomponent_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        // sub has no impl_name and no other implementation in scope
+        let sub = b.add_component("sensor", ComponentCategory::Device, Some(root), None);
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("no implementation"))
+            .collect();
+        assert_eq!(infos.len(), 1, "type-only subcomponent should produce info: {:?}", diags);
+    }
+
+    #[test]
+    fn featureless_system_subcomponent_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        // System subcomponent with no features
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root), Some("impl"));
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("has no features"))
+            .collect();
+        assert_eq!(infos.len(), 1, "featureless system should produce info: {:?}", diags);
+    }
+
+    #[test]
+    fn featureless_data_subcomponent_no_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        // Data subcomponent with no features — trivially featureless, should NOT warn
+        let sub = b.add_component("data", ComponentCategory::Data, Some(root), Some("impl"));
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("has no features"))
+            .collect();
+        assert!(infos.is_empty(), "data should be trivially featureless: {:?}", infos);
+    }
+
+    #[test]
+    fn instance_diagnostics_forwarded() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        b.diagnostics.push(spar_hir_def::instance::InstanceDiagnostic {
+            message: "unresolved reference foo".to_string(),
+            path: vec![Name::new("root")],
+        });
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("unresolved reference"))
+            .collect();
+        assert_eq!(errors.len(), 1, "instance diagnostics should be forwarded: {:?}", diags);
+    }
+
+    #[test]
+    fn root_component_not_checked_for_type_only() {
+        let mut b = TestBuilder::new();
+        // Root has no impl_name, but it's not a subcomponent (parent is None)
+        let root = b.add_component("root", ComponentCategory::System, None, None);
+
+        let inst = b.build(root);
+        let diags = CompletenessAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("no implementation"))
+            .collect();
+        assert!(infos.is_empty(), "root component should not be checked for type-only: {:?}", infos);
+    }
+}

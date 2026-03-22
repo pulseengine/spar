@@ -421,6 +421,79 @@ mod tests {
         );
     }
 
+    // ── Connection with one endpoint unresolvable: skip ────────────
+
+    #[test]
+    fn connection_with_unresolvable_endpoint_skipped() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("top", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, sender]);
+
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        // Connection references "nonexistent" child
+        b.add_connection("c1", root, "sender", "out_port", "nonexistent", "in_port");
+
+        let inst = b.build(root);
+        let diags = WrpcBindingAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "unresolvable endpoint should skip: {:?}",
+            diags
+        );
+    }
+
+    // ── Inherited processor binding from parent ─────────────────────
+
+    #[test]
+    fn inherited_processor_binding_detected() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("top", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let proc1 = b.add_component("proc1", ComponentCategory::Process, Some(root));
+        let proc2 = b.add_component("proc2", ComponentCategory::Process, Some(root));
+        let thread1 = b.add_component("t1", ComponentCategory::Thread, Some(proc1));
+        let thread2 = b.add_component("t2", ComponentCategory::Thread, Some(proc2));
+        b.set_children(root, vec![cpu1, cpu2, proc1, proc2]);
+        b.set_children(proc1, vec![thread1]);
+        b.set_children(proc2, vec![thread2]);
+
+        // Bind parent processes to different processors
+        b.set_property(
+            proc1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            proc2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        // Connection between proc1 and proc2
+        b.add_connection("c1", root, "proc1", "out_port", "proc2", "in_port");
+
+        let inst = b.build(root);
+        let diags = WrpcBindingAnalysis.analyze(&inst);
+        assert_eq!(
+            diags.len(),
+            1,
+            "cross-processor via inherited binding should warn: {:?}",
+            diags
+        );
+    }
+
     #[test]
     fn no_processor_bindings_no_warning() {
         let mut b = TestBuilder::new();

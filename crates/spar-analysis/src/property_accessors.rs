@@ -357,6 +357,16 @@ mod tests {
     }
 
     #[test]
+    fn reference_target_no_closing_paren() {
+        assert_eq!(extract_reference_target("reference (cpu"), None);
+    }
+
+    #[test]
+    fn reference_target_no_opening_paren() {
+        assert_eq!(extract_reference_target("reference cpu)"), None);
+    }
+
+    #[test]
     fn reference_target_whitespace_handling() {
         assert_eq!(
             extract_reference_target("  reference (  cpu1  )  "),

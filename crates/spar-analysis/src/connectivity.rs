@@ -154,6 +154,251 @@ impl Analysis for ConnectivityAnalysis {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+    use spar_hir_def::instance::*;
+    use spar_hir_def::item_tree::*;
+    use spar_hir_def::name::Name;
+
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+    }
+
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+            }
+        }
+
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: Some(Name::new("impl")),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        }
+
+        fn add_feature(
+            &mut self,
+            name: &str,
+            kind: FeatureKind,
+            dir: Option<Direction>,
+            owner: ComponentInstanceIdx,
+        ) {
+            let idx = self.features.alloc(FeatureInstance {
+                name: Name::new(name),
+                kind,
+                direction: dir,
+                owner,
+                classifier: None,
+                access_kind: None,
+                array_index: None,
+            });
+            self.components[owner].features.push(idx);
+        }
+
+        fn add_connection(&mut self, name: &str, owner: ComponentInstanceIdx) {
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                owner,
+                src: None,
+                dst: None,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+        }
+
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
+            self.components[parent].children = children;
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: FxHashMap::default(),
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn unconnected_input_port_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "unconnected input port should warn: {:?}", diags);
+    }
+
+    #[test]
+    fn unconnected_output_port_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no outgoing"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "unconnected output port should warn: {:?}", diags);
+    }
+
+    #[test]
+    fn connected_port_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), comp);
+        // Add connection on parent (root) — covers child features
+        b.add_connection("c1", root);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
+            .collect();
+        assert!(warnings.is_empty(), "connected port should not warn: {:?}", warnings);
+    }
+
+    #[test]
+    fn no_direction_feature_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("feat", FeatureKind::DataPort, None, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("no direction"))
+            .collect();
+        assert_eq!(infos.len(), 1, "no-direction feature should produce info: {:?}", diags);
+    }
+
+    #[test]
+    fn non_port_feature_skipped() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        // BusAccess is not a port feature
+        b.add_feature("bus", FeatureKind::BusAccess, Some(Direction::In), comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let port_warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no incoming") || d.message.contains("no outgoing"))
+            .collect();
+        assert!(port_warnings.is_empty(), "non-port features should be skipped: {:?}", port_warnings);
+    }
+
+    #[test]
+    fn featureless_child_with_parent_connections_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_connection("c1", root);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no features but parent"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "featureless child with parent connections: {:?}", diags);
+    }
+
+    #[test]
+    fn component_with_connections_but_no_features_or_children() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // Root has a connection but no features and no children
+        b.add_connection("c1", root);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no features or subcomponents"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "connection but no features/children: {:?}", diags);
+    }
+
+    #[test]
+    fn inout_port_unconnected_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("bidir", FeatureKind::DataPort, Some(Direction::InOut), comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "inout port counts as input: {:?}", diags);
+    }
+}
+
 /// Check if a feature is a port-like feature (data port, event port, event data port).
 fn is_port_feature(_feat_idx: FeatureInstanceIdx, instance: &SystemInstance) -> bool {
     use spar_hir_def::item_tree::FeatureKind;
