@@ -41,5 +41,5 @@ serde_json = "1"
 toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
-etch = { git = "https://github.com/pulseengine/rivet.git", rev = "d80b36b", package = "etch" }
+etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
 proptest = "1"

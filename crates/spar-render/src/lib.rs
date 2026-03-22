@@ -33,8 +33,7 @@ pub fn render_instance(instance: &SystemInstance, options: &RenderOptions) -> St
         &layout_opts,
     );
 
-    let svg = render_svg(&gl, &make_svg_opts(options));
-    postprocess_svg(&svg)
+    render_svg(&gl, &make_svg_opts(options))
 }
 
 /// Render an AADL system instance to interactive HTML.
@@ -59,8 +58,7 @@ pub fn render_instance_html(
         &layout_opts,
     );
 
-    let html = etch::html::render_html(&gl, &make_svg_opts(options), html_options);
-    postprocess_svg(&html)
+    etch::html::render_html(&gl, &make_svg_opts(options), html_options)
 }
 
 fn make_layout_opts(options: &RenderOptions) -> LayoutOptions {
@@ -78,6 +76,7 @@ fn make_layout_opts(options: &RenderOptions) -> LayoutOptions {
 fn make_svg_opts(options: &RenderOptions) -> SvgOptions {
     SvgOptions {
         type_colors: category_colors(),
+        type_shapes: aadl_shapes(),
         interactive: options.interactive,
         base_url: options.base_url.clone(),
         highlight: options.highlight.clone(),
@@ -313,529 +312,243 @@ fn category_colors() -> HashMap<String, String> {
 }
 
 // ---------------------------------------------------------------------------
-// SVG post-processing: AADL-standard shapes and visual improvements
+// AADL-standard shape providers for etch's type_shapes API
 // ---------------------------------------------------------------------------
 
-/// AADL component categories that use dashed borders.
-const DASHED_CATEGORIES: &[&str] = &[
-    "thread-group",
-    "virtual-processor",
-    "virtual-bus",
-    "subprogram-group",
-];
-
-/// Post-process SVG output from etch to apply AADL-standard component shapes,
-/// a drop shadow filter, and improved CSS styling.
+/// Build AADL-standard shape providers for all 14 component categories.
 ///
-/// This replaces generic `<rect>` elements inside node groups with category-
-/// specific `<path>` or shape elements per AS5506 Appendix A, and patches
-/// the embedded `<style>` and `<defs>` for a refined visual appearance.
-fn postprocess_svg(svg: &str) -> String {
-    let mut result = svg.to_string();
+/// Each closure receives `(node_type, x, y, width, height, fill, stroke)` and
+/// returns raw SVG element string per AS5506 Appendix A conventions.
+fn aadl_shapes() -> HashMap<String, etch::svg::ShapeProvider> {
+    let mut m = HashMap::new();
 
-    // 1. Inject drop shadow filter into <defs>.
-    result = inject_drop_shadow(result);
-
-    // 2. Patch CSS style block for improved typography and softer strokes.
-    result = patch_css_style(result);
-
-    // 3. Replace <rect> inside node groups with AADL-standard shapes.
-    result = replace_node_shapes(result);
-
-    result
-}
-
-/// Inject a subtle drop shadow SVG filter into the `<defs>` block.
-fn inject_drop_shadow(svg: String) -> String {
-    let shadow_filter = "\
-    <filter id=\"shadow\" x=\"-4%\" y=\"-4%\" width=\"108%\" height=\"112%\">\n\
-      <feDropShadow dx=\"1\" dy=\"2\" stdDeviation=\"2\" flood-color=\"#00000018\" />\n\
-    </filter>";
-
-    // Insert before </defs>
-    if let Some(pos) = svg.find("</defs>") {
-        let mut result = String::with_capacity(svg.len() + shadow_filter.len() + 10);
-        result.push_str(&svg[..pos]);
-        result.push_str("    ");
-        result.push_str(shadow_filter);
-        result.push('\n');
-        result.push_str("  ");
-        result.push_str(&svg[pos..]);
-        result
-    } else {
-        svg
-    }
-}
-
-/// Patch the CSS `<style>` block for softer strokes and improved typography.
-fn patch_css_style(svg: String) -> String {
-    // Replace the node rect stroke color from #333 to #555
-    let svg = svg.replace(
-        ".node rect { stroke: #333;",
-        ".node rect, .node path, .node ellipse { stroke: #555;",
+    // System: chamfered top-left corner
+    m.insert(
+        "system".into(),
+        Box::new(
+            |_type: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let ch = 12.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
+                     fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + ch, y,
+                    x + w, y,
+                    x + w, y + h,
+                    x, y + h,
+                    x, y + ch,
+                    fill, stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
     );
-    // Add drop shadow filter reference to nodes via additional CSS-like approach:
-    // Since SVG CSS `filter:` works, we add it to .node styling.
-    // But we need to do this via the attribute on each node group instead.
-    // We'll add filter="url(#shadow)" to each node <g>.
-    let svg = svg.replace(
-        ".node:hover rect { filter: brightness(0.92); }",
-        ".node:hover rect, .node:hover path, .node:hover ellipse { filter: brightness(0.92); }",
-    );
-    // Update container CSS to apply to path elements too
-    let svg = svg.replace(
-        ".node.container rect { stroke-dasharray: 4 2; }",
-        ".node.container rect, .node.container path { stroke-dasharray: 4 2; }",
-    );
-    // Also fix .node.selected rect in HTML mode
-    let svg = svg.replace(
-        ".node.selected rect {",
-        ".node.selected rect, .node.selected path, .node.selected ellipse {",
-    );
-    svg
-}
 
-/// Replace `<rect>` elements inside `<g class="node type-XYZ ...">` groups
-/// with AADL-standard shapes based on the component category.
-fn replace_node_shapes(svg: String) -> String {
-    let mut result = String::with_capacity(svg.len() + 1024);
-    let mut remaining = svg.as_str();
-
-    while let Some(g_start) = remaining.find("<g class=\"node type-") {
-        // Copy everything before this node group.
-        result.push_str(&remaining[..g_start]);
-
-        let after_g = &remaining[g_start..];
-
-        // Extract the node type from the class attribute.
-        let category = extract_node_category(after_g);
-
-        // Check if this is a container node.
-        let is_container = after_g
-            .get(..200)
-            .unwrap_or(after_g)
-            .contains(" container");
-
-        // Find the <rect .../>  inside this <g>.
-        if let Some(rect_start_rel) = after_g.find("<rect ") {
-            // Only process if the rect is within this node group (before next </g>)
-            let g_end = after_g.find("</g>").unwrap_or(after_g.len());
-            if rect_start_rel < g_end {
-                // Copy up to the <rect
-                let g_tag_and_prefix = &after_g[..rect_start_rel];
-
-                // Add filter="url(#shadow)" to the <g> opening tag
-                let g_tag_with_shadow = add_shadow_to_g_tag(g_tag_and_prefix);
-                result.push_str(&g_tag_with_shadow);
-
-                let rect_str = &after_g[rect_start_rel..];
-
-                // Find the end of the <rect .../> element
-                if let Some(rect_end) = rect_str.find("/>") {
-                    let rect_full = &rect_str[..rect_end + 2];
-
-                    // Parse rect attributes.
-                    if let Some(dims) = parse_rect_attrs(rect_full) {
-                        // Generate the replacement shape.
-                        let shape = generate_aadl_shape(
-                            &category,
-                            is_container,
-                            dims.x,
-                            dims.y,
-                            dims.width,
-                            dims.height,
-                            &dims.fill,
-                            &dims.stroke,
-                            &dims.stroke_width,
-                        );
-                        result.push_str(&shape);
-                    } else {
-                        // Could not parse; keep original rect.
-                        result.push_str(rect_full);
-                    }
-
-                    // Continue after the rect element.
-                    remaining = &after_g[rect_start_rel + rect_end + 2..];
-                } else {
-                    // Malformed rect; keep as-is.
-                    result.push_str(after_g);
-                    remaining = "";
-                }
-            } else {
-                // Rect not inside this group; copy the whole group start.
-                result.push_str(&after_g[..g_end + 4]);
-                remaining = &after_g[g_end + 4..];
-            }
-        } else {
-            // No rect found; copy rest as-is.
-            result.push_str(after_g);
-            remaining = "";
-        }
-    }
-
-    // Copy any remaining content.
-    result.push_str(remaining);
-    result
-}
-
-/// Add `filter="url(#shadow)"` to the `<g class="node ...">` opening tag.
-fn add_shadow_to_g_tag(g_prefix: &str) -> String {
-    // The g_prefix contains `<g class="node type-XYZ...">` followed by whitespace/newline.
-    // We want to inject filter="url(#shadow)" before the closing >.
-    if let Some(close_pos) = g_prefix.find(">\n") {
-        let mut result = String::with_capacity(g_prefix.len() + 30);
-        result.push_str(&g_prefix[..close_pos]);
-        result.push_str(" filter=\"url(#shadow)\"");
-        result.push_str(&g_prefix[close_pos..]);
-        result
-    } else if let Some(close_pos) = g_prefix.rfind('>') {
-        let mut result = String::with_capacity(g_prefix.len() + 30);
-        result.push_str(&g_prefix[..close_pos]);
-        result.push_str(" filter=\"url(#shadow)\"");
-        result.push_str(&g_prefix[close_pos..]);
-        result
-    } else {
-        g_prefix.to_string()
-    }
-}
-
-/// Extract the AADL category type from a `<g class="node type-XYZ ...">` tag.
-fn extract_node_category(g_tag: &str) -> String {
-    // Pattern: class="node type-XYZ" or class="node type-XYZ container"
-    let prefix = "type-";
-    if let Some(start) = g_tag.find(prefix) {
-        let after = &g_tag[start + prefix.len()..];
-        // The category ends at the next space or quote.
-        let end = after
-            .find(|c: char| c == '"' || c == ' ')
-            .unwrap_or(after.len());
-        after[..end].to_string()
-    } else {
-        String::new()
-    }
-}
-
-/// Parsed rectangle attributes.
-struct RectDims {
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    fill: String,
-    stroke: String,
-    stroke_width: String,
-}
-
-/// Parse x, y, width, height, fill, stroke, stroke-width from a `<rect .../>` element.
-fn parse_rect_attrs(rect: &str) -> Option<RectDims> {
-    let x = parse_attr_f64(rect, "x")?;
-    let y = parse_attr_f64(rect, "y")?;
-    let width = parse_attr_f64(rect, "width")?;
-    let height = parse_attr_f64(rect, "height")?;
-    let fill = parse_attr_str(rect, "fill").unwrap_or_else(|| "#e8e8e8".to_string());
-    let stroke = parse_attr_str(rect, "stroke").unwrap_or_else(|| "#555".to_string());
-    let stroke_width =
-        parse_attr_str(rect, "stroke-width").unwrap_or_else(|| "1.5".to_string());
-
-    Some(RectDims {
-        x,
-        y,
-        width,
-        height,
-        fill,
-        stroke,
-        stroke_width,
-    })
-}
-
-/// Parse a numeric attribute value from an SVG element string.
-fn parse_attr_f64(s: &str, attr: &str) -> Option<f64> {
-    // Match `attr="value"` — need to be careful with attribute names that are
-    // prefixes of other attributes (e.g. "x" vs "rx"). We look for the attribute
-    // preceded by a space and followed by `="`.
-    let pattern = format!(" {}=\"", attr);
-    let start = s.find(&pattern)?;
-    let val_start = start + pattern.len();
-    let val_end = s[val_start..].find('"')?;
-    s[val_start..val_start + val_end].parse().ok()
-}
-
-/// Parse a string attribute value from an SVG element string.
-fn parse_attr_str(s: &str, attr: &str) -> Option<String> {
-    let pattern = format!(" {}=\"", attr);
-    let start = s.find(&pattern)?;
-    let val_start = start + pattern.len();
-    let val_end = s[val_start..].find('"')?;
-    Some(s[val_start..val_start + val_end].to_string())
-}
-
-/// Generate the AADL-standard SVG shape for a given component category.
-///
-/// Returns the SVG element(s) that replace the original `<rect>`.
-#[allow(clippy::too_many_arguments)]
-fn generate_aadl_shape(
-    category: &str,
-    is_container: bool,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    fill: &str,
-    stroke: &str,
-    stroke_width: &str,
-) -> String {
-    let dash = if DASHED_CATEGORIES.contains(&category) {
-        " stroke-dasharray=\"6 3\""
-    } else {
-        ""
-    };
-
-    // Containers keep rectangular shapes (with chamfer for system) for clean
-    // nesting; only leaf nodes get the full distinctive shapes.
-    if is_container {
-        return generate_container_shape(category, x, y, w, h, fill, stroke, stroke_width, dash);
-    }
-
-    match category {
-        // System: rectangle with chamfered (angled) top-left corner.
-        "system" => {
-            let c = 14.0_f64.min(w * 0.15).min(h * 0.3);
-            format!(
-                "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + c, y,           // top-left after chamfer
-                x + w, y,           // top-right
-                x + w, y + h,       // bottom-right
-                x, y + h,           // bottom-left
-                x, y + c,           // left side up to chamfer
-                fill, stroke, stroke_width, dash,
-            )
-        }
-        // Process: stadium/capsule shape (rectangle with fully rounded left/right sides).
-        "process" => {
-            let r = (h / 2.0).min(w / 4.0);
+    // Process: stadium/capsule (rounded ends)
+    m.insert(
+        "process".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let r = h / 2.0;
             format!(
                 "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x, y, w, h, r, r, fill, stroke, stroke_width, dash,
+                 rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                x, y, w, h, r, r, fill, stroke,
             )
-        }
-        // Thread: parallelogram (slanted right).
-        "thread" => {
-            let skew = 10.0_f64.min(w * 0.08);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Thread: parallelogram
+    m.insert(
+        "thread".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let skew = 10.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
                 x + skew, y,
                 x + w, y,
                 x + w - skew, y + h,
                 x, y + h,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Thread Group: parallelogram with dashed border (dash already applied).
-        "thread-group" => {
-            let skew = 10.0_f64.min(w * 0.08);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Thread Group: parallelogram + dashed
+    m.insert(
+        "thread-group".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let skew = 10.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
                 x + skew, y,
                 x + w, y,
                 x + w - skew, y + h,
                 x, y + h,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Processor: parallelogram (same shape as thread, different color).
-        "processor" => {
-            let skew = 10.0_f64.min(w * 0.08);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Processor: parallelogram (same shape, different color distinguishes)
+    m.insert(
+        "processor".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let skew = 10.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
                 x + skew, y,
                 x + w, y,
                 x + w - skew, y + h,
                 x, y + h,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Virtual Processor: parallelogram with dashed border.
-        "virtual-processor" => {
-            let skew = 10.0_f64.min(w * 0.08);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Virtual Processor: parallelogram + dashed
+    m.insert(
+        "virtual-processor".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let skew = 10.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
                 x + skew, y,
                 x + w, y,
                 x + w - skew, y + h,
                 x, y + h,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Memory: trapezoid (wider at top).
-        "memory" => {
-            let inset = 12.0_f64.min(w * 0.08);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Memory: trapezoid (wider at top)
+    m.insert(
+        "memory".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let inset = 12.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
                 x, y,
                 x + w, y,
                 x + w - inset, y + h,
                 x + inset, y + h,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Bus: hexagonal double-arrow/bar shape.
-        "bus" => {
-            let arrow = 10.0_f64.min(w * 0.06);
-            let inset_y = h * 0.25;
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Bus: hexagon/double-arrow
+    m.insert(
+        "bus".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let arrow = 12.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + arrow, y + inset_y,
-                x + w - arrow, y + inset_y,
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                x + arrow, y,
+                x + w - arrow, y,
                 x + w, y + h / 2.0,
-                x + w - arrow, y + h - inset_y,
-                x + arrow, y + h - inset_y,
+                x + w - arrow, y + h,
+                x + arrow, y + h,
                 x, y + h / 2.0,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Virtual Bus: hexagonal shape with dashed border.
-        "virtual-bus" => {
-            let arrow = 10.0_f64.min(w * 0.06);
-            let inset_y = h * 0.25;
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Virtual Bus: hexagon + dashed
+    m.insert(
+        "virtual-bus".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let arrow = 12.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + arrow, y + inset_y,
-                x + w - arrow, y + inset_y,
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                x + arrow, y,
+                x + w - arrow, y,
                 x + w, y + h / 2.0,
-                x + w - arrow, y + h - inset_y,
-                x + arrow, y + h - inset_y,
+                x + w - arrow, y + h,
+                x + arrow, y + h,
                 x, y + h / 2.0,
-                fill, stroke, stroke_width, dash,
+                fill, stroke,
             )
-        }
-        // Device: slightly tilted rectangle.
-        "device" => {
-            let dx = 4.0_f64.min(w * 0.03);
-            let dy = 3.0_f64.min(h * 0.06);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Device: slightly tilted rectangle
+    m.insert(
+        "device".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            let tilt = 4.0;
             format!(
                 "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + dx, y + dy,
-                x + w - dy, y,
-                x + w - dx, y + h - dy,
-                x + dy, y + h,
-                fill, stroke, stroke_width, dash,
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                x + tilt, y,
+                x + w, y + tilt,
+                x + w - tilt, y + h,
+                x, y + h - tilt,
+                fill, stroke,
             )
-        }
-        // Data: rectangle with a horizontal header stripe.
-        "data" => {
-            let header_h = 14.0_f64.min(h * 0.3);
-            format!(
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"2\" ry=\"2\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />\
-                 <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" \
-                 stroke=\"{}\" stroke-width=\"1\" />",
-                x, y, w, h, fill, stroke, stroke_width, dash,
-                x, y + header_h, x + w, y + header_h, stroke,
-            )
-        }
-        // Subprogram: ellipse.
-        "subprogram" => {
-            format!(
-                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + w / 2.0,
-                y + h / 2.0,
-                w / 2.0,
-                h / 2.0,
-                fill, stroke, stroke_width, dash,
-            )
-        }
-        // Subprogram Group: ellipse with dashed border.
-        "subprogram-group" => {
-            format!(
-                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + w / 2.0,
-                y + h / 2.0,
-                w / 2.0,
-                h / 2.0,
-                fill, stroke, stroke_width, dash,
-            )
-        }
-        // Abstract: plain rectangle with double border (inner stroke).
-        "abstract" => {
-            let inset = 3.0;
-            format!(
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"2\" ry=\"2\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />\
-                 <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"1\" ry=\"1\" fill=\"none\" stroke=\"{}\" stroke-width=\"0.5\" />",
-                x, y, w, h, fill, stroke, stroke_width, dash,
-                x + inset, y + inset, w - inset * 2.0, h - inset * 2.0, stroke,
-            )
-        }
-        // Fallback: keep as rectangle.
-        _ => {
-            format!(
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"4\" ry=\"4\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x, y, w, h, fill, stroke, stroke_width, dash,
-            )
-        }
-    }
-}
+        }) as etch::svg::ShapeProvider,
+    );
 
-/// Generate shapes for container nodes. Containers use rectangular outlines
-/// with a category-specific top-left treatment for clean child nesting.
-fn generate_container_shape(
-    category: &str,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    fill: &str,
-    stroke: &str,
-    stroke_width: &str,
-    dash: &str,
-) -> String {
-    match category {
-        // System container: chamfered top-left corner.
-        "system" => {
-            let c = 16.0_f64.min(w * 0.05).min(h * 0.05);
+    // Data: rectangle with header stripe
+    m.insert(
+        "data".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
             format!(
-                "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
-                 fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x + c, y,
-                x + w, y,
-                x + w, y + h,
-                x, y + h,
-                x, y + c,
-                fill, stroke, stroke_width, dash,
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"2\" ry=\"2\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />\
+                 <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\" />",
+                x, y, w, h, fill, stroke,
+                x, y + 16.0, x + w, y + 16.0, stroke,
             )
-        }
-        // Process container: rounded rect with generous radius.
-        "process" => {
-            let r = 8.0_f64.min(w * 0.05).min(h * 0.1);
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Subprogram: ellipse
+    m.insert(
+        "subprogram".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
             format!(
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x, y, w, h, r, r, fill, stroke, stroke_width, dash,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                x + w / 2.0, y + h / 2.0, w / 2.0, h / 2.0, fill, stroke,
             )
-        }
-        // All other containers: plain rect with standard corner radius.
-        _ => {
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Subprogram Group: ellipse + dashed
+    m.insert(
+        "subprogram-group".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
             format!(
-                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
-                 rx=\"4\" ry=\"4\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"{} />",
-                x, y, w, h, fill, stroke, stroke_width, dash,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                x + w / 2.0, y + h / 2.0, w / 2.0, h / 2.0, fill, stroke,
             )
-        }
-    }
+        }) as etch::svg::ShapeProvider,
+    );
+
+    // Abstract: plain rectangle with double border
+    m.insert(
+        "abstract".into(),
+        Box::new(|_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+            format!(
+                "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" ry=\"3\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />\
+                 <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"2\" ry=\"2\" \
+                 fill=\"none\" stroke=\"{}\" stroke-width=\"0.5\" />",
+                x, y, w, h, fill, stroke,
+                x + 3.0, y + 3.0, w - 6.0, h - 6.0, stroke,
+            )
+        }) as etch::svg::ShapeProvider,
+    );
+
+    m
 }
 
 #[cfg(test)]
@@ -913,100 +626,78 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Post-processing tests
+    // Shape provider tests
     // -----------------------------------------------------------------------
 
-    #[test]
-    fn extract_category_from_node_group() {
-        assert_eq!(
-            extract_node_category(r#"<g class="node type-system container">"#),
-            "system"
-        );
-        assert_eq!(
-            extract_node_category(r#"<g class="node type-thread">"#),
-            "thread"
-        );
-        assert_eq!(
-            extract_node_category(r#"<g class="node type-virtual-processor">"#),
-            "virtual-processor"
-        );
-        assert_eq!(
-            extract_node_category(r#"<g class="node type-subprogram-group container">"#),
-            "subprogram-group"
-        );
+    /// Helper: invoke a shape provider by category name.
+    fn call_shape(category: &str, x: f64, y: f64, w: f64, h: f64) -> String {
+        let shapes = aadl_shapes();
+        let provider = shapes.get(category).unwrap_or_else(|| panic!("no shape for {category}"));
+        provider(category, x, y, w, h, "#eee", "#555")
     }
 
     #[test]
-    fn parse_rect_attributes() {
-        let rect = r##"<rect x="10" y="20" width="200" height="60" rx="4" ry="4" fill="#dce8f5" stroke="#555" stroke-width="1.5" />"##;
-        let dims = parse_rect_attrs(rect).unwrap();
-        assert_eq!(dims.x, 10.0);
-        assert_eq!(dims.y, 20.0);
-        assert_eq!(dims.width, 200.0);
-        assert_eq!(dims.height, 60.0);
-        assert_eq!(dims.fill, "#dce8f5");
-        assert_eq!(dims.stroke, "#555");
-        assert_eq!(dims.stroke_width, "1.5");
-    }
-
-    #[test]
-    fn parse_attr_f64_distinguishes_x_from_rx() {
-        let rect = r#"<rect x="10" y="20" width="200" height="60" rx="4" ry="4" />"#;
-        assert_eq!(parse_attr_f64(rect, "x"), Some(10.0));
-        assert_eq!(parse_attr_f64(rect, "rx"), Some(4.0));
-        assert_eq!(parse_attr_f64(rect, "width"), Some(200.0));
+    fn shape_providers_cover_all_categories() {
+        let shapes = aadl_shapes();
+        let expected = [
+            "system", "process", "thread", "thread-group", "processor",
+            "virtual-processor", "memory", "bus", "virtual-bus", "device",
+            "data", "subprogram", "subprogram-group", "abstract",
+        ];
+        for cat in expected {
+            assert!(shapes.contains_key(cat), "missing shape for {cat}");
+        }
+        assert_eq!(shapes.len(), 14);
     }
 
     #[test]
     fn system_shape_is_chamfered_path() {
-        let shape = generate_aadl_shape("system", false, 10.0, 20.0, 200.0, 60.0, "#dce8f5", "#555", "1.5");
+        let shape = call_shape("system", 10.0, 20.0, 200.0, 60.0);
         assert!(shape.starts_with("<path d=\"M "));
         assert!(shape.contains(" Z\""));
-        assert!(shape.contains("fill=\"#dce8f5\""));
+        assert!(shape.contains("fill=\"#eee\""));
+        assert!(shape.contains("stroke-width=\"1.5\""));
         assert!(!shape.contains("stroke-dasharray"));
     }
 
     #[test]
     fn process_shape_is_stadium() {
-        let shape = generate_aadl_shape("process", false, 0.0, 0.0, 200.0, 60.0, "#d5edd8", "#555", "1.5");
+        let shape = call_shape("process", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<rect "));
-        // Stadium has rx = h/2 (capped at w/4).
-        assert!(shape.contains("rx=\"30\""));
+        assert!(shape.contains("rx=\"30\"")); // h/2 = 30
     }
 
     #[test]
     fn thread_shape_is_parallelogram() {
-        let shape = generate_aadl_shape("thread", false, 0.0, 0.0, 200.0, 60.0, "#fef3d0", "#555", "1.5");
+        let shape = call_shape("thread", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<path d=\"M "));
-        // The first point should be offset (parallelogram skew).
-        assert!(shape.contains("M 10,0"));
+        assert!(shape.contains("M 10,0")); // skew = 10
     }
 
     #[test]
     fn thread_group_has_dashed_border() {
-        let shape = generate_aadl_shape("thread-group", false, 0.0, 0.0, 200.0, 60.0, "#fef3d0", "#555", "1.5");
+        let shape = call_shape("thread-group", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.contains("stroke-dasharray=\"6 3\""));
     }
 
     #[test]
     fn bus_shape_is_hexagonal() {
-        let shape = generate_aadl_shape("bus", false, 0.0, 0.0, 200.0, 60.0, "#f0ece4", "#555", "1.5");
+        let shape = call_shape("bus", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<path d=\"M "));
-        // Hexagon has 6 L commands (6 points).
-        assert_eq!(shape.matches(" L ").count(), 5); // M + 5 L + Z
+        // Hexagon: M + 5 L + Z = 6 points
+        assert_eq!(shape.matches(" L ").count(), 5);
     }
 
     #[test]
     fn memory_shape_is_trapezoid() {
-        let shape = generate_aadl_shape("memory", false, 0.0, 0.0, 200.0, 60.0, "#e8dff0", "#555", "1.5");
+        let shape = call_shape("memory", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<path d=\"M "));
-        // Bottom should be narrower: bottom-left x > 0.
         assert!(shape.contains("M 0,0")); // top-left at origin
     }
 
     #[test]
     fn subprogram_shape_is_ellipse() {
-        let shape = generate_aadl_shape("subprogram", false, 0.0, 0.0, 200.0, 60.0, "#e8e8ef", "#555", "1.5");
+        let shape = call_shape("subprogram", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<ellipse "));
         assert!(shape.contains("cx=\"100\""));
         assert!(shape.contains("cy=\"30\""));
@@ -1014,43 +705,28 @@ mod tests {
 
     #[test]
     fn data_shape_has_header_stripe() {
-        let shape = generate_aadl_shape("data", false, 0.0, 0.0, 200.0, 60.0, "#fff8e1", "#555", "1.5");
+        let shape = call_shape("data", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.contains("<rect "));
         assert!(shape.contains("<line "));
     }
 
     #[test]
     fn abstract_shape_has_double_border() {
-        let shape = generate_aadl_shape("abstract", false, 0.0, 0.0, 200.0, 60.0, "#f5f5f5", "#555", "1.5");
-        // Should have two rect elements.
+        let shape = call_shape("abstract", 0.0, 0.0, 200.0, 60.0);
         assert_eq!(shape.matches("<rect ").count(), 2);
         assert!(shape.contains("fill=\"none\""));
     }
 
     #[test]
     fn device_shape_is_tilted() {
-        let shape = generate_aadl_shape("device", false, 0.0, 0.0, 200.0, 60.0, "#ddf0ee", "#555", "1.5");
+        let shape = call_shape("device", 0.0, 0.0, 200.0, 60.0);
         assert!(shape.starts_with("<path d=\"M "));
-    }
-
-    #[test]
-    fn container_system_is_chamfered() {
-        let shape = generate_aadl_shape("system", true, 0.0, 0.0, 400.0, 300.0, "#eef3fa", "#555", "2.0");
-        assert!(shape.starts_with("<path d=\"M "));
-        assert!(shape.contains(" Z\""));
-    }
-
-    #[test]
-    fn container_process_is_rounded_rect() {
-        let shape = generate_aadl_shape("process", true, 0.0, 0.0, 400.0, 300.0, "#eaf6ec", "#555", "2.0");
-        assert!(shape.starts_with("<rect "));
-        assert!(shape.contains("rx=\"8\""));
     }
 
     #[test]
     fn virtual_categories_are_dashed() {
         for cat in &["virtual-processor", "virtual-bus", "thread-group", "subprogram-group"] {
-            let shape = generate_aadl_shape(cat, false, 0.0, 0.0, 200.0, 60.0, "#eee", "#555", "1.5");
+            let shape = call_shape(cat, 0.0, 0.0, 200.0, 60.0);
             assert!(
                 shape.contains("stroke-dasharray"),
                 "{cat} should have dashed border"
@@ -1059,73 +735,20 @@ mod tests {
     }
 
     #[test]
-    fn inject_drop_shadow_adds_filter() {
-        let svg = "<defs>\n  <marker>...</marker>\n  </defs>";
-        let result = inject_drop_shadow(svg.to_string());
-        assert!(result.contains("<filter id=\"shadow\""));
-        assert!(result.contains("feDropShadow"));
-        assert!(result.contains("</defs>"));
+    fn solid_categories_not_dashed() {
+        for cat in &["system", "process", "thread", "processor", "memory", "bus", "device", "data", "subprogram", "abstract"] {
+            let shape = call_shape(cat, 0.0, 0.0, 200.0, 60.0);
+            assert!(
+                !shape.contains("stroke-dasharray"),
+                "{cat} should NOT have dashed border"
+            );
+        }
     }
 
     #[test]
-    fn patch_css_updates_stroke_selectors() {
-        let css = ".node rect { stroke: #333; stroke-width: 1.5; }";
-        let result = patch_css_style(css.to_string());
-        assert!(result.contains(".node rect, .node path, .node ellipse { stroke: #555;"));
-    }
-
-    #[test]
-    fn postprocess_replaces_system_rect_with_path() {
-        let svg = r##"<svg><defs>
-    <marker>...</marker>
-  </defs>
-  <style>
-    .node rect { stroke: #333; stroke-width: 1.5; }
-    .node.container rect { stroke-dasharray: 4 2; }
-    .node:hover rect { filter: brightness(0.92); }
-  </style>
-  <g class="node type-system">
-        <rect x="10" y="20" width="200" height="60" rx="4" ry="4" fill="#dce8f5" stroke="#555" stroke-width="1.5" />
-        <text x="110" y="50">sys</text>
-  </g>
-</svg>"##;
-        let result = postprocess_svg(svg);
-        // The rect should be replaced with a path (chamfered system).
-        assert!(result.contains("<path d=\"M "), "system should become a <path>");
-        assert!(!result.contains(r#"<rect x="10" y="20" width="200" height="60" rx="4""#),
-                "original rect should be replaced");
-        // Drop shadow filter should be injected.
-        assert!(result.contains(r#"<filter id="shadow""#));
-        // CSS should be patched.
-        assert!(result.contains(".node rect, .node path, .node ellipse"));
-        // Shadow filter should be on the node group.
-        assert!(result.contains(r#"filter="url(#shadow)""#));
-    }
-
-    #[test]
-    fn postprocess_preserves_non_node_rects() {
-        let svg = r##"<svg><defs></defs><rect width="100" height="100" fill="#fff" /></svg>"##;
-        let result = postprocess_svg(svg);
-        // The background rect should be preserved.
-        assert!(result.contains(r##"width="100" height="100" fill="#fff""##));
-    }
-
-    #[test]
-    fn postprocess_handles_multiple_nodes() {
-        let svg = r##"<svg><defs></defs>
-  <g class="node type-system">
-        <rect x="0" y="0" width="200" height="60" rx="4" ry="4" fill="#dce8f5" stroke="#555" stroke-width="1.5" />
-  </g>
-  <g class="node type-thread">
-        <rect x="0" y="100" width="200" height="60" rx="4" ry="4" fill="#fef3d0" stroke="#555" stroke-width="1.5" />
-  </g>
-</svg>"##;
-        let result = postprocess_svg(svg);
-        // Both should be converted: system -> chamfered path, thread -> parallelogram path.
-        assert_eq!(
-            result.matches("<path d=\"M ").count(),
-            2,
-            "both nodes should become paths"
-        );
+    fn make_svg_opts_includes_shapes() {
+        let opts = make_svg_opts(&RenderOptions::default());
+        assert_eq!(opts.type_shapes.len(), 14);
+        assert!(opts.type_colors.contains_key("system"));
     }
 }
