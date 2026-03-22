@@ -683,7 +683,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
-        assert!(errors.is_empty(), "exactly at deadline should NOT error: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "exactly at deadline should NOT error: {:?}",
+            errors
+        );
 
         let infos: Vec<_> = diags
             .iter()
@@ -755,15 +759,19 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("response time"))
             .collect();
-        assert!(infos.is_empty(), "unbound threads should be skipped: {:?}", infos);
+        assert!(
+            infos.is_empty(),
+            "unbound threads should be skipped: {:?}",
+            infos
+        );
     }
 
     // ── Test 10: get_priority helper ─────────────────────────────────
     #[test]
     fn get_priority_parses_correctly() {
+        use spar_hir_def::name::PropertyRef;
         use spar_hir_def::properties::PropertyMap;
         use spar_hir_def::properties::PropertyValue;
-        use spar_hir_def::name::PropertyRef;
 
         let mut props = PropertyMap::new();
         props.add(PropertyValue {
@@ -786,9 +794,9 @@ mod tests {
 
     #[test]
     fn get_priority_invalid_value_returns_none() {
+        use spar_hir_def::name::PropertyRef;
         use spar_hir_def::properties::PropertyMap;
         use spar_hir_def::properties::PropertyValue;
-        use spar_hir_def::name::PropertyRef;
 
         let mut props = PropertyMap::new();
         props.add(PropertyValue {

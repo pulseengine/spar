@@ -769,12 +769,7 @@ mod tests {
         );
         b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
 
-        b.set_property(
-            ctrl,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
 
         // Set bound exactly equal to worst case: 25ms
@@ -820,12 +815,7 @@ mod tests {
         );
         b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
 
-        b.set_property(
-            ctrl,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
 
         // Set bound 1ms under worst case: 24ms < 25ms
@@ -880,30 +870,15 @@ mod tests {
         );
 
         // A: exec=2ms, period=5ms
-        b.set_property(
-            a,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(a, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(a, "Timing_Properties", "Period", "5 ms");
 
         // B: exec=3ms, period=10ms
-        b.set_property(
-            bb,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "3 ms",
-        );
+        b.set_property(bb, "Timing_Properties", "Compute_Execution_Time", "3 ms");
         b.set_property(bb, "Timing_Properties", "Period", "10 ms");
 
         // C: exec=1ms, period=8ms
-        b.set_property(
-            c,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "1 ms",
-        );
+        b.set_property(c, "Timing_Properties", "Compute_Execution_Time", "1 ms");
         b.set_property(c, "Timing_Properties", "Period", "8 ms");
 
         let inst = b.build(root);

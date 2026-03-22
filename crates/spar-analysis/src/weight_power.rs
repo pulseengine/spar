@@ -775,7 +775,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
-        assert!(errors.is_empty(), "exactly at limit should NOT error: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "exactly at limit should NOT error: {:?}",
+            errors
+        );
 
         let infos: Vec<_> = diags
             .iter()
@@ -841,7 +845,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
-        assert!(errors.is_empty(), "exactly at capacity should NOT error: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "exactly at capacity should NOT error: {:?}",
+            errors
+        );
 
         let infos: Vec<_> = diags
             .iter()

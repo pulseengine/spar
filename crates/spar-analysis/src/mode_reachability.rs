@@ -1259,7 +1259,11 @@ mod tests {
 
         let inst = b.build(root);
         let matrices = compute_reachability_matrices(&inst);
-        assert!(matrices.is_empty(), "single mode = no matrix: {:?}", matrices);
+        assert!(
+            matrices.is_empty(),
+            "single mode = no matrix: {:?}",
+            matrices
+        );
     }
 
     #[test]
@@ -1310,7 +1314,11 @@ mod tests {
 
         let m = &matrices[0];
         for i in 0..m.modes.len() {
-            assert!(m.matrix[i][i], "mode {} should be reachable from itself", m.modes[i]);
+            assert!(
+                m.matrix[i][i],
+                "mode {} should be reachable from itself",
+                m.modes[i]
+            );
         }
     }
 
@@ -1370,7 +1378,10 @@ mod tests {
         let inst = b.build(root);
         let matrices = compute_reachability_matrices(&inst);
         assert_eq!(matrices.len(), 1);
-        assert!(matrices[0].dead_transitions.is_empty(), "connected via self connection: should NOT be dead");
+        assert!(
+            matrices[0].dead_transitions.is_empty(),
+            "connected via self connection: should NOT be dead"
+        );
     }
 
     // ── sanitize_dot_id tests ─────────────────────────────────────────

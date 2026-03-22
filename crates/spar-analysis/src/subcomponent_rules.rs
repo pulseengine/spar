@@ -513,9 +513,17 @@ mod tests {
         let diags = SubcomponentRuleAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("cannot contain") && d.message.contains("abstract"))
+            .filter(|d| {
+                d.severity == Severity::Error
+                    && d.message.contains("cannot contain")
+                    && d.message.contains("abstract")
+            })
             .collect();
-        assert!(errors.is_empty(), "abstract child accepted by any: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "abstract child accepted by any: {:?}",
+            errors
+        );
     }
 
     // ── Three children: two unique, one duplicate ───────────────────
@@ -533,7 +541,9 @@ mod tests {
         let diags = SubcomponentRuleAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("duplicate subcomponent name"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("duplicate subcomponent name")
+            })
             .collect();
         assert_eq!(errors.len(), 1, "one duplicate among three: {:?}", diags);
     }

@@ -154,6 +154,54 @@ impl Analysis for ConnectivityAnalysis {
     }
 }
 
+/// Check if a feature is a port-like feature (data port, event port, event data port).
+fn is_port_feature(_feat_idx: FeatureInstanceIdx, instance: &SystemInstance) -> bool {
+    use spar_hir_def::item_tree::FeatureKind;
+    let feat = &instance.features[_feat_idx];
+    matches!(
+        feat.kind,
+        FeatureKind::DataPort | FeatureKind::EventPort | FeatureKind::EventDataPort
+    )
+}
+
+/// Check if a feature is annotated as intentionally unconnected.
+///
+/// Looks for the `SPAR_Properties::Intentionally_Unconnected` property on the
+/// component that owns the feature. The property value can be:
+/// - `"all"` — all ports on the component are intentionally unconnected
+/// - `"true"` — same as "all"
+/// - A comma-separated list of feature names (case-insensitive), e.g. `"(feat1, feat2)"`
+///   or `"feat1, feat2"`
+fn is_intentionally_unconnected(
+    instance: &SystemInstance,
+    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
+    feature_name: &str,
+) -> bool {
+    let props = instance.properties_for(comp_idx);
+    let value = match props.get("SPAR_Properties", "Intentionally_Unconnected") {
+        Some(v) => v,
+        None => return false,
+    };
+
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+
+    // "all" or "true" means every port is intentionally unconnected.
+    if lower == "all" || lower == "true" {
+        return true;
+    }
+
+    // Strip optional surrounding parentheses.
+    let inner = lower
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .unwrap_or(&lower);
+
+    // Split by comma and check if the feature name appears in the list.
+    let feat_lower = feature_name.to_ascii_lowercase();
+    inner.split(',').any(|item| item.trim() == feat_lower)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,7 +322,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
             .collect();
-        assert_eq!(warnings.len(), 1, "unconnected input port should warn: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "unconnected input port should warn: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -291,7 +344,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no outgoing"))
             .collect();
-        assert_eq!(warnings.len(), 1, "unconnected output port should warn: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "unconnected output port should warn: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -310,7 +368,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
             .collect();
-        assert!(warnings.is_empty(), "connected port should not warn: {:?}", warnings);
+        assert!(
+            warnings.is_empty(),
+            "connected port should not warn: {:?}",
+            warnings
+        );
     }
 
     #[test]
@@ -327,7 +389,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("no direction"))
             .collect();
-        assert_eq!(infos.len(), 1, "no-direction feature should produce info: {:?}", diags);
+        assert_eq!(
+            infos.len(),
+            1,
+            "no-direction feature should produce info: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -345,7 +412,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("no incoming") || d.message.contains("no outgoing"))
             .collect();
-        assert!(port_warnings.is_empty(), "non-port features should be skipped: {:?}", port_warnings);
+        assert!(
+            port_warnings.is_empty(),
+            "non-port features should be skipped: {:?}",
+            port_warnings
+        );
     }
 
     #[test]
@@ -360,9 +431,16 @@ mod tests {
         let diags = ConnectivityAnalysis.analyze(&inst);
         let warnings: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("no features but parent"))
+            .filter(|d| {
+                d.severity == Severity::Warning && d.message.contains("no features but parent")
+            })
             .collect();
-        assert_eq!(warnings.len(), 1, "featureless child with parent connections: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "featureless child with parent connections: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -376,9 +454,17 @@ mod tests {
         let diags = ConnectivityAnalysis.analyze(&inst);
         let warnings: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("no features or subcomponents"))
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("no features or subcomponents")
+            })
             .collect();
-        assert_eq!(warnings.len(), 1, "connection but no features/children: {:?}", diags);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "connection but no features/children: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -397,52 +483,4 @@ mod tests {
             .collect();
         assert_eq!(warnings.len(), 1, "inout port counts as input: {:?}", diags);
     }
-}
-
-/// Check if a feature is a port-like feature (data port, event port, event data port).
-fn is_port_feature(_feat_idx: FeatureInstanceIdx, instance: &SystemInstance) -> bool {
-    use spar_hir_def::item_tree::FeatureKind;
-    let feat = &instance.features[_feat_idx];
-    matches!(
-        feat.kind,
-        FeatureKind::DataPort | FeatureKind::EventPort | FeatureKind::EventDataPort
-    )
-}
-
-/// Check if a feature is annotated as intentionally unconnected.
-///
-/// Looks for the `SPAR_Properties::Intentionally_Unconnected` property on the
-/// component that owns the feature. The property value can be:
-/// - `"all"` — all ports on the component are intentionally unconnected
-/// - `"true"` — same as "all"
-/// - A comma-separated list of feature names (case-insensitive), e.g. `"(feat1, feat2)"`
-///   or `"feat1, feat2"`
-fn is_intentionally_unconnected(
-    instance: &SystemInstance,
-    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
-    feature_name: &str,
-) -> bool {
-    let props = instance.properties_for(comp_idx);
-    let value = match props.get("SPAR_Properties", "Intentionally_Unconnected") {
-        Some(v) => v,
-        None => return false,
-    };
-
-    let trimmed = value.trim();
-    let lower = trimmed.to_ascii_lowercase();
-
-    // "all" or "true" means every port is intentionally unconnected.
-    if lower == "all" || lower == "true" {
-        return true;
-    }
-
-    // Strip optional surrounding parentheses.
-    let inner = lower
-        .strip_prefix('(')
-        .and_then(|s| s.strip_suffix(')'))
-        .unwrap_or(&lower);
-
-    // Split by comma and check if the feature name appears in the list.
-    let feat_lower = feature_name.to_ascii_lowercase();
-    inner.split(',').any(|item| item.trim() == feat_lower)
 }

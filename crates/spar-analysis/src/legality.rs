@@ -1141,7 +1141,10 @@ mod tests {
             analysis: "naming_rules".to_string(),
         };
         let rule = classify_naming_rule(&d);
-        assert_eq!(rule.id, "N-2", "duplicate without 'with clause' should be N-2, not N-3");
+        assert_eq!(
+            rule.id, "N-2",
+            "duplicate without 'with clause' should be N-2, not N-3"
+        );
     }
 
     // ── classify_category_rule coverage ──────────────────────────

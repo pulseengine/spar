@@ -1643,7 +1643,12 @@ fn analysis_diagnostics_carry_correct_pass_name() {
         Some(root),
     );
     // Unconnected ports for connectivity/direction analysis.
-    b.add_feature("port_in", FeatureKind::DataPort, Some(Direction::In), thread);
+    b.add_feature(
+        "port_in",
+        FeatureKind::DataPort,
+        Some(Direction::In),
+        thread,
+    );
     b.add_feature(
         "port_out",
         FeatureKind::DataPort,

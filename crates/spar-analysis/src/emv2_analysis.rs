@@ -738,9 +738,16 @@ mod tests {
 
         let no_annot: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("no error model annotations") && d.message.contains("cpu"))
+            .filter(|d| {
+                d.message.contains("no error model annotations") && d.message.contains("cpu")
+            })
             .collect();
-        assert_eq!(no_annot.len(), 1, "processor leaf should be flagged: {:?}", diags);
+        assert_eq!(
+            no_annot.len(),
+            1,
+            "processor leaf should be flagged: {:?}",
+            diags
+        );
     }
 
     // ── Non-leaf process (with children) not flagged ────────────
@@ -759,7 +766,9 @@ mod tests {
 
         let proc_annot: Vec<_> = diags
             .iter()
-            .filter(|d| d.message.contains("no error model annotations") && d.message.contains("'proc'"))
+            .filter(|d| {
+                d.message.contains("no error model annotations") && d.message.contains("'proc'")
+            })
             .collect();
         assert!(
             proc_annot.is_empty(),

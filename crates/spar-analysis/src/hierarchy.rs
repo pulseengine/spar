@@ -96,6 +96,70 @@ impl Analysis for HierarchyAnalysis {
     }
 }
 
+/// Check AADL containment rules per AS5506 section 4.5.
+///
+/// Returns `true` if `parent_cat` is allowed to contain `child_cat`.
+///
+/// The rules are:
+/// - **system**: system, process, device, memory, bus, processor, virtual processor, virtual bus, abstract, data
+/// - **process**: thread, thread group, data, abstract, subprogram, subprogram group
+/// - **thread**: data, subprogram, abstract
+/// - **thread group**: thread, thread group, data, subprogram, abstract
+/// - **processor**: memory, bus, virtual processor, virtual bus, abstract
+/// - **virtual processor**: virtual processor, virtual bus, abstract
+/// - **memory**: memory, bus, abstract
+/// - **bus**: virtual bus, abstract
+/// - **virtual bus**: virtual bus, abstract
+/// - **device**: bus, virtual bus, data, abstract
+/// - **subprogram**: data, abstract
+/// - **subprogram group**: subprogram, subprogram group, data, abstract
+/// - **data**: data, subprogram, abstract
+/// - **abstract**: (can contain anything — it's the universal category)
+pub fn is_valid_containment(parent: ComponentCategory, child: ComponentCategory) -> bool {
+    use ComponentCategory::*;
+
+    // Abstract can contain anything.
+    if parent == Abstract {
+        return true;
+    }
+
+    // Abstract can be contained by anything.
+    if child == Abstract {
+        return true;
+    }
+
+    match parent {
+        System => matches!(
+            child,
+            System
+                | Process
+                | Device
+                | Memory
+                | Bus
+                | Processor
+                | VirtualProcessor
+                | VirtualBus
+                | Data
+        ),
+        Process => matches!(
+            child,
+            Thread | ThreadGroup | Data | Subprogram | SubprogramGroup
+        ),
+        Thread => matches!(child, Data | Subprogram),
+        ThreadGroup => matches!(child, Thread | ThreadGroup | Data | Subprogram),
+        Processor => matches!(child, Memory | Bus | VirtualProcessor | VirtualBus),
+        VirtualProcessor => matches!(child, VirtualProcessor | VirtualBus),
+        Memory => matches!(child, Memory | Bus),
+        Bus => matches!(child, VirtualBus),
+        VirtualBus => matches!(child, VirtualBus),
+        Device => matches!(child, Bus | VirtualBus | Data),
+        Subprogram => matches!(child, Data),
+        SubprogramGroup => matches!(child, Subprogram | SubprogramGroup | Data),
+        Data => matches!(child, Data | Subprogram),
+        Abstract => true, // handled above, but for exhaustiveness
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +280,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("has no subcomponents"))
             .collect();
-        assert_eq!(infos.len(), 1, "empty impl should produce info: {:?}", diags);
+        assert_eq!(
+            infos.len(),
+            1,
+            "empty impl should produce info: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -230,9 +299,17 @@ mod tests {
         let diags = HierarchyAnalysis.analyze(&inst);
         let infos: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Info && d.message.contains("has no subcomponents") && d.message.contains("data"))
+            .filter(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("has no subcomponents")
+                    && d.message.contains("data")
+            })
             .collect();
-        assert!(infos.is_empty(), "data should be trivially empty: {:?}", infos);
+        assert!(
+            infos.is_empty(),
+            "data should be trivially empty: {:?}",
+            infos
+        );
     }
 
     #[test]
@@ -258,7 +335,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("nesting depth"))
             .collect();
-        assert!(!depth_warns.is_empty(), "deep nesting should warn: {:?}", depth_warns);
+        assert!(
+            !depth_warns.is_empty(),
+            "deep nesting should warn: {:?}",
+            depth_warns
+        );
     }
 
     #[test]
@@ -284,7 +365,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Warning && d.message.contains("nesting depth"))
             .collect();
-        assert!(depth_warns.is_empty(), "exactly at limit should not warn: {:?}", depth_warns);
+        assert!(
+            depth_warns.is_empty(),
+            "exactly at limit should not warn: {:?}",
+            depth_warns
+        );
     }
 
     #[test]
@@ -299,86 +384,42 @@ mod tests {
         let diags = HierarchyAnalysis.analyze(&inst);
         let infos: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Info && d.message.contains("has no subcomponents") && d.message.contains("sub"))
+            .filter(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("has no subcomponents")
+                    && d.message.contains("sub")
+            })
             .collect();
-        assert!(infos.is_empty(), "no impl_name = no empty warning: {:?}", infos);
+        assert!(
+            infos.is_empty(),
+            "no impl_name = no empty warning: {:?}",
+            infos
+        );
     }
 
     // ── Containment table unit tests ────────────────────────────────
 
     #[test]
     fn containment_abstract_parent() {
-        assert!(is_valid_containment(ComponentCategory::Abstract, ComponentCategory::Thread));
-        assert!(is_valid_containment(ComponentCategory::Abstract, ComponentCategory::System));
+        assert!(is_valid_containment(
+            ComponentCategory::Abstract,
+            ComponentCategory::Thread
+        ));
+        assert!(is_valid_containment(
+            ComponentCategory::Abstract,
+            ComponentCategory::System
+        ));
     }
 
     #[test]
     fn containment_abstract_child() {
-        assert!(is_valid_containment(ComponentCategory::Thread, ComponentCategory::Abstract));
-        assert!(is_valid_containment(ComponentCategory::Bus, ComponentCategory::Abstract));
-    }
-}
-
-/// Check AADL containment rules per AS5506 section 4.5.
-///
-/// Returns `true` if `parent_cat` is allowed to contain `child_cat`.
-///
-/// The rules are:
-/// - **system**: system, process, device, memory, bus, processor, virtual processor, virtual bus, abstract, data
-/// - **process**: thread, thread group, data, abstract, subprogram, subprogram group
-/// - **thread**: data, subprogram, abstract
-/// - **thread group**: thread, thread group, data, subprogram, abstract
-/// - **processor**: memory, bus, virtual processor, virtual bus, abstract
-/// - **virtual processor**: virtual processor, virtual bus, abstract
-/// - **memory**: memory, bus, abstract
-/// - **bus**: virtual bus, abstract
-/// - **virtual bus**: virtual bus, abstract
-/// - **device**: bus, virtual bus, data, abstract
-/// - **subprogram**: data, abstract
-/// - **subprogram group**: subprogram, subprogram group, data, abstract
-/// - **data**: data, subprogram, abstract
-/// - **abstract**: (can contain anything — it's the universal category)
-pub fn is_valid_containment(parent: ComponentCategory, child: ComponentCategory) -> bool {
-    use ComponentCategory::*;
-
-    // Abstract can contain anything.
-    if parent == Abstract {
-        return true;
-    }
-
-    // Abstract can be contained by anything.
-    if child == Abstract {
-        return true;
-    }
-
-    match parent {
-        System => matches!(
-            child,
-            System
-                | Process
-                | Device
-                | Memory
-                | Bus
-                | Processor
-                | VirtualProcessor
-                | VirtualBus
-                | Data
-        ),
-        Process => matches!(
-            child,
-            Thread | ThreadGroup | Data | Subprogram | SubprogramGroup
-        ),
-        Thread => matches!(child, Data | Subprogram),
-        ThreadGroup => matches!(child, Thread | ThreadGroup | Data | Subprogram),
-        Processor => matches!(child, Memory | Bus | VirtualProcessor | VirtualBus),
-        VirtualProcessor => matches!(child, VirtualProcessor | VirtualBus),
-        Memory => matches!(child, Memory | Bus),
-        Bus => matches!(child, VirtualBus),
-        VirtualBus => matches!(child, VirtualBus),
-        Device => matches!(child, Bus | VirtualBus | Data),
-        Subprogram => matches!(child, Data),
-        SubprogramGroup => matches!(child, Subprogram | SubprogramGroup | Data),
-        Data => matches!(child, Data | Subprogram),
-        Abstract => true, // handled above, but for exhaustiveness
+        assert!(is_valid_containment(
+            ComponentCategory::Thread,
+            ComponentCategory::Abstract
+        ));
+        assert!(is_valid_containment(
+            ComponentCategory::Bus,
+            ComponentCategory::Abstract
+        ));
     }
 }

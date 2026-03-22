@@ -1038,7 +1038,9 @@ mod tests {
         let diags = ClassifierMatchAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("data types must match"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("data types must match")
+            })
             .collect();
         assert_eq!(
             errors.len(),
@@ -1362,7 +1364,9 @@ mod tests {
         let diags = ClassifierMatchAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("data types must match"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("data types must match")
+            })
             .collect();
         assert_eq!(
             errors.len(),
@@ -1495,7 +1499,9 @@ mod tests {
         let diags = ClassifierMatchAnalysis.analyze(&inst);
         let errors: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Error && d.message.contains("access types must match"))
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("access types must match")
+            })
             .collect();
         assert_eq!(
             errors.len(),

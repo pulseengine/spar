@@ -1160,12 +1160,7 @@ mod tests {
                 d.severity == Severity::Info && d.message.contains("partition window utilization")
             })
             .collect();
-        assert_eq!(
-            infos.len(),
-            1,
-            "should report info for 100%: {:?}",
-            diags
-        );
+        assert_eq!(infos.len(), 1, "should report info for 100%: {:?}", diags);
         assert!(
             infos[0].message.contains("100.0%"),
             "utilization should be 100%: {}",

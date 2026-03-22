@@ -1173,6 +1173,7 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn instantiate_component(
         &mut self,
         instance_name: &Name,
@@ -1195,7 +1196,10 @@ impl<'a> Builder<'a> {
         let resolved = self.scope.resolve_classifier(from_package, &ref_);
 
         let (category, impl_loc, resolved_package) = match &resolved {
-            ResolvedClassifier::ComponentImpl { loc, package: res_pkg } => {
+            ResolvedClassifier::ComponentImpl {
+                loc,
+                package: res_pkg,
+            } => {
                 let ci = self.scope.get_component_impl(*loc);
                 let cat = ci.map(|c| c.category).unwrap_or(ComponentCategory::System);
                 (cat, Some(*loc), res_pkg.clone())
@@ -1403,10 +1407,8 @@ impl<'a> Builder<'a> {
                                         type_name: cls_ref.type_name.clone(),
                                         impl_name: None,
                                     };
-                                    let type_resolved = self.scope.resolve_classifier(
-                                        &resolved_package,
-                                        &type_ref,
-                                    );
+                                    let type_resolved =
+                                        self.scope.resolve_classifier(&resolved_package, &type_ref);
                                     let (leaf_type_loc, leaf_pkg) = match &type_resolved {
                                         ResolvedClassifier::ComponentType {
                                             loc,
@@ -1521,13 +1523,11 @@ impl<'a> Builder<'a> {
 
                         // Resolve call references in parameter connection endpoints.
                         if conn_kind == ConnectionKind::Parameter && !call_map.is_empty() {
-                            for endpoint in [&mut src, &mut dst] {
-                                if let Some(ep) = endpoint {
-                                    if let Some(sub_name) = &ep.subcomponent {
-                                        let key = sub_name.as_str().to_ascii_lowercase();
-                                        if let Some(target_sub) = call_map.get(&key) {
-                                            ep.subcomponent = Some(target_sub.clone());
-                                        }
+                            for endpoint in [&mut src, &mut dst].into_iter().flatten() {
+                                if let Some(sub_name) = &endpoint.subcomponent {
+                                    let key = sub_name.as_str().to_ascii_lowercase();
+                                    if let Some(target_sub) = call_map.get(&key) {
+                                        endpoint.subcomponent = Some(target_sub.clone());
                                     }
                                 }
                             }

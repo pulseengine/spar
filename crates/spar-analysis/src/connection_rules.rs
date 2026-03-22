@@ -537,7 +537,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("self-loop"))
             .collect();
-        assert_eq!(errors.len(), 1, "None/None same feature = self-loop: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "None/None same feature = self-loop: {:?}",
+            diags
+        );
     }
 
     // ── Not a self-loop: one sub None, other Some ───────────────────
@@ -596,7 +601,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("feature kinds must match"))
             .collect();
-        assert!(kind_errs.is_empty(), "unresolvable features should be skipped: {:?}", kind_errs);
+        assert!(
+            kind_errs.is_empty(),
+            "unresolvable features should be skipped: {:?}",
+            kind_errs
+        );
     }
 
     // ── Incomplete connection skipped ───────────────────────────────

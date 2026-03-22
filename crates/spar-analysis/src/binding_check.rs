@@ -456,7 +456,11 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error)
             .collect();
-        assert!(errors.is_empty(), "valid binding should not error: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "valid binding should not error: {:?}",
+            errors
+        );
     }
 
     // ── Binding to nonexistent target (no error — graceful) ─────

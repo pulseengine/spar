@@ -1028,7 +1028,11 @@ mod tests {
         let inst = b.build(root);
 
         let diags = FeatureGroupCheckAnalysis.analyze(&inst);
-        assert_eq!(diags.len(), 1, "only c_bad should produce a warning: {diags:?}");
+        assert_eq!(
+            diags.len(),
+            1,
+            "only c_bad should produce a warning: {diags:?}"
+        );
         assert!(diags[0].message.contains("c_bad"));
         assert!(diags[0].message.contains("source feature"));
     }

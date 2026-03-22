@@ -190,11 +190,7 @@ mod tests {
             })
         }
 
-        fn add_feature(
-            &mut self,
-            name: &str,
-            owner: ComponentInstanceIdx,
-        ) {
+        fn add_feature(&mut self, name: &str, owner: ComponentInstanceIdx) {
             let idx = self.features.alloc(FeatureInstance {
                 name: Name::new(name),
                 kind: spar_hir_def::item_tree::FeatureKind::DataPort,
@@ -295,7 +291,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("no implementation"))
             .collect();
-        assert_eq!(infos.len(), 1, "type-only subcomponent should produce info: {:?}", diags);
+        assert_eq!(
+            infos.len(),
+            1,
+            "type-only subcomponent should produce info: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -312,7 +313,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("has no features"))
             .collect();
-        assert_eq!(infos.len(), 1, "featureless system should produce info: {:?}", diags);
+        assert_eq!(
+            infos.len(),
+            1,
+            "featureless system should produce info: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -329,17 +335,22 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("has no features"))
             .collect();
-        assert!(infos.is_empty(), "data should be trivially featureless: {:?}", infos);
+        assert!(
+            infos.is_empty(),
+            "data should be trivially featureless: {:?}",
+            infos
+        );
     }
 
     #[test]
     fn instance_diagnostics_forwarded() {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
-        b.diagnostics.push(spar_hir_def::instance::InstanceDiagnostic {
-            message: "unresolved reference foo".to_string(),
-            path: vec![Name::new("root")],
-        });
+        b.diagnostics
+            .push(spar_hir_def::instance::InstanceDiagnostic {
+                message: "unresolved reference foo".to_string(),
+                path: vec![Name::new("root")],
+            });
 
         let inst = b.build(root);
         let diags = CompletenessAnalysis.analyze(&inst);
@@ -347,7 +358,12 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("unresolved reference"))
             .collect();
-        assert_eq!(errors.len(), 1, "instance diagnostics should be forwarded: {:?}", diags);
+        assert_eq!(
+            errors.len(),
+            1,
+            "instance diagnostics should be forwarded: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -362,6 +378,10 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Info && d.message.contains("no implementation"))
             .collect();
-        assert!(infos.is_empty(), "root component should not be checked for type-only: {:?}", infos);
+        assert!(
+            infos.is_empty(),
+            "root component should not be checked for type-only: {:?}",
+            infos
+        );
     }
 }

@@ -1470,12 +1470,7 @@ mod tests {
         // For n=2, RMA bound = 2*(2^(1/2) - 1) ≈ 0.8284.
         // Use period=10000, exec=4142 for each thread -> U = 2*(4142/10000) = 0.8284
         b.set_property(t1, "Timing_Properties", "Period", "10000 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "4142 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "4142 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1484,12 +1479,7 @@ mod tests {
         );
 
         b.set_property(t2, "Timing_Properties", "Period", "10000 ms");
-        b.set_property(
-            t2,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "4142 ms",
-        );
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "4142 ms");
         b.set_property(
             t2,
             "Deployment_Properties",
@@ -1503,10 +1493,7 @@ mod tests {
         // U = 0.8284 ≈ RMA bound. The code uses `>`, so exactly at bound should NOT warn.
         let rma_warnings: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Warning
-                    && d.message.contains("exceeds RMA bound")
-            })
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
             .collect();
         assert!(
             rma_warnings.is_empty(),
@@ -1540,12 +1527,7 @@ mod tests {
 
         // Single thread: U = 10/10 = 1.0 exactly
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "10 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "10 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1571,10 +1553,7 @@ mod tests {
         // Therefore no RMA warning either.
         let rma_warns: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Warning
-                    && d.message.contains("exceeds RMA bound")
-            })
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
             .collect();
         assert!(
             rma_warns.is_empty(),
@@ -1596,12 +1575,7 @@ mod tests {
 
         // Single thread: U = 11/10 = 1.1 > 1.0
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "11 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "11 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1616,12 +1590,7 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
             .collect();
-        assert_eq!(
-            errors.len(),
-            1,
-            "U=1.1 should be overloaded: {:?}",
-            diags
-        );
+        assert_eq!(errors.len(), 1, "U=1.1 should be overloaded: {:?}", diags);
     }
 
     #[test]
@@ -1639,12 +1608,7 @@ mod tests {
 
         // Each thread: U = 4.5/10 = 0.45, total = 0.90 > 0.828, < 1.0
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "4500 us",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "4500 us");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1653,12 +1617,7 @@ mod tests {
         );
 
         b.set_property(t2, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t2,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "4500 us",
-        );
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "4500 us");
         b.set_property(
             t2,
             "Deployment_Properties",
@@ -1682,10 +1641,7 @@ mod tests {
 
         let rma_warns: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Warning
-                    && d.message.contains("exceeds RMA bound")
-            })
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
             .collect();
         assert_eq!(
             rma_warns.len(),
@@ -1712,12 +1668,7 @@ mod tests {
         // Each thread: U = 3.9/10 = 0.39, total = 0.78 <= RMA bound 0.828
         // +10%: 0.858 > 0.828
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "3900 us",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3900 us");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1726,12 +1677,7 @@ mod tests {
         );
 
         b.set_property(t2, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t2,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "3900 us",
-        );
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3900 us");
         b.set_property(
             t2,
             "Deployment_Properties",
@@ -1774,12 +1720,7 @@ mod tests {
 
         // Each thread: U = 2/10 = 0.2, total = 0.4. +10% = 0.44, still << RMA 0.828
         b.set_property(t1, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1788,12 +1729,7 @@ mod tests {
         );
 
         b.set_property(t2, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t2,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(
             t2,
             "Deployment_Properties",
@@ -1829,12 +1765,7 @@ mod tests {
 
         // U = 92/100 = 0.92. +10% = 1.012 > 1.0
         b.set_property(t1, "Timing_Properties", "Period", "100 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "92 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "92 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1876,12 +1807,7 @@ mod tests {
         b.set_children(proc, vec![t1, t2, t3]);
 
         b.set_property(t1, "Timing_Properties", "Period", "4 ms");
-        b.set_property(
-            t1,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "1 ms",
-        );
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
         b.set_property(
             t1,
             "Deployment_Properties",
@@ -1890,12 +1816,7 @@ mod tests {
         );
 
         b.set_property(t2, "Timing_Properties", "Period", "5 ms");
-        b.set_property(
-            t2,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "2 ms",
-        );
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "2 ms");
         b.set_property(
             t2,
             "Deployment_Properties",
@@ -1904,12 +1825,7 @@ mod tests {
         );
 
         b.set_property(t3, "Timing_Properties", "Period", "10 ms");
-        b.set_property(
-            t3,
-            "Timing_Properties",
-            "Compute_Execution_Time",
-            "1 ms",
-        );
+        b.set_property(t3, "Timing_Properties", "Compute_Execution_Time", "1 ms");
         b.set_property(
             t3,
             "Deployment_Properties",
@@ -1935,10 +1851,7 @@ mod tests {
         // RMA bound for n=3 ≈ 78.0%. 75% < 78% so no warning.
         let rma_warns: Vec<_> = diags
             .iter()
-            .filter(|d| {
-                d.severity == Severity::Warning
-                    && d.message.contains("exceeds RMA bound")
-            })
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
             .collect();
         assert!(
             rma_warns.is_empty(),

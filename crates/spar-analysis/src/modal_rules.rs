@@ -607,7 +607,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("not reachable"))
             .collect();
-        assert!(warns.is_empty(), "all modes reachable via chain: {:?}", warns);
+        assert!(
+            warns.is_empty(),
+            "all modes reachable via chain: {:?}",
+            warns
+        );
     }
 
     // ── Single mode: no initial mode error ──────────────────────────
@@ -646,7 +650,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("not reachable"))
             .collect();
-        assert!(warns.is_empty(), "single mode = no reachability check: {:?}", warns);
+        assert!(
+            warns.is_empty(),
+            "single mode = no reachability check: {:?}",
+            warns
+        );
     }
 
     // ── No modes: clean ────────────────────────────────────────────

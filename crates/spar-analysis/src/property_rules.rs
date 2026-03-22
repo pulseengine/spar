@@ -934,12 +934,7 @@ mod tests {
             .iter()
             .filter(|d| d.severity == Severity::Error && d.message.contains("lower bound"))
             .collect();
-        assert_eq!(
-            range_errs.len(),
-            1,
-            "51..50 should error: {:?}",
-            range_errs
-        );
+        assert_eq!(range_errs.len(), 1, "51..50 should error: {:?}", range_errs);
     }
 
     #[test]
@@ -1315,7 +1310,12 @@ mod tests {
     fn non_timing_property_on_system_no_warning() {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
-        b.set_property(root, "Deployment_Properties", "Actual_Processor_Binding", "reference (cpu1)");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
 
         let inst = b.build(root);
         let diags = PropertyRuleAnalysis.analyze(&inst);

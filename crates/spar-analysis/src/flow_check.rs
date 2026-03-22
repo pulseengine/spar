@@ -471,7 +471,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("no output ports"))
             .collect();
-        assert!(warnings.is_empty(), "inout satisfies source: {:?}", warnings);
+        assert!(
+            warnings.is_empty(),
+            "inout satisfies source: {:?}",
+            warnings
+        );
     }
 
     // ── Flow sink on inout component (valid) ────────────────────
@@ -546,7 +550,11 @@ mod tests {
             .iter()
             .filter(|d| d.message.contains("not a known connection"))
             .collect();
-        assert!(warnings.is_empty(), "dotted segment skipped: {:?}", warnings);
+        assert!(
+            warnings.is_empty(),
+            "dotted segment skipped: {:?}",
+            warnings
+        );
     }
 
     // ── Flow path with both in and out ports (valid) ────────────

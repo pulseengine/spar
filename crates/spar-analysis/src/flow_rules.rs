@@ -976,7 +976,11 @@ mod tests {
         let diags = FlowRuleAnalysis.analyze(&inst);
         let infos: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Info && d.message.contains("not referenced") && d.message.contains("pass_through"))
+            .filter(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("not referenced")
+                    && d.message.contains("pass_through")
+            })
             .collect();
         assert!(
             infos.is_empty(),
