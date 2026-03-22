@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="sys_impl_Instance" category="system">
+  <componentInstance name="a">
+    <featureInstance name="input" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="output" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.1"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../SuperBasic.aadl#SuperBasic.Thing.one"/>
+  </componentInstance>
+  <componentInstance name="b">
+    <featureInstance name="input" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="output" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.1"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../SuperBasic.aadl#SuperBasic.Thing.two"/>
+  </componentInstance>
+  <componentInstance name="c">
+    <featureInstance name="input" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="output" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.1"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.2"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../SuperBasic.aadl#SuperBasic.Thing.three"/>
+  </componentInstance>
+  <connectionInstance name="a.output -> b.input" complete="true" destination="//@componentInstance.1/@featureInstance.0" source="//@componentInstance.0/@featureInstance.1">
+    <connectionReference context="/" source="//@componentInstance.0/@featureInstance.1" destination="//@componentInstance.1/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.0"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="b.output -> c.input" complete="true" destination="//@componentInstance.2/@featureInstance.0" source="//@componentInstance.1/@featureInstance.1">
+    <connectionReference context="/" source="//@componentInstance.1/@featureInstance.1" destination="//@componentInstance.2/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../SuperBasic.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.1"/>
+    </connectionReference>
+  </connectionInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../SuperBasic.aadl#SuperBasic.sys.impl"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../SuperBasic.aadl#SuperBasic.sys.impl"/>
+</instance:SystemInstance>

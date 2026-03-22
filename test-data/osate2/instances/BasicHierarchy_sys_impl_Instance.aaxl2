@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="sys_impl_Instance" category="system">
+  <componentInstance name="p1" category="process">
+    <featureInstance name="pIn" category="eventPort">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.0"/>
+    </featureInstance>
+    <featureInstance name="pOut" category="eventPort" direction="out">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.1"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedProcessSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:ProcessImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.proc.one"/>
+  </componentInstance>
+  <componentInstance name="p2" category="process">
+    <featureInstance name="pIn" category="eventPort">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.0"/>
+    </featureInstance>
+    <featureInstance name="pOut" category="eventPort" direction="out">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.1"/>
+    </featureInstance>
+    <componentInstance name="t1" category="thread">
+      <featureInstance name="tIn" category="eventPort">
+        <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedEventPort.0"/>
+      </featureInstance>
+      <featureInstance name="tOut" category="eventPort" direction="out">
+        <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedEventPort.1"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:ThreadSubcomponent" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedThreadSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:ThreadImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.thd.one"/>
+    </componentInstance>
+    <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedProcessSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:ProcessImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.proc.two"/>
+  </componentInstance>
+  <componentInstance name="p3" category="process">
+    <featureInstance name="pIn" category="eventPort">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.0"/>
+    </featureInstance>
+    <featureInstance name="pOut" category="eventPort" direction="out">
+      <feature xsi:type="aadl2:EventPort" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedEventPort.1"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedProcessSubcomponent.2"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:ProcessImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.proc.three"/>
+  </componentInstance>
+  <connectionInstance name="p1.pOut -> p2.t1.tIn" complete="true" kind="portConnection" destination="//@componentInstance.1/@componentInstance.0/@featureInstance.0" source="//@componentInstance.0/@featureInstance.1">
+    <connectionReference context="/" source="//@componentInstance.0/@featureInstance.1" destination="//@componentInstance.1/@featureInstance.0">
+      <connection xsi:type="aadl2:PortConnection" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPortConnection.0"/>
+    </connectionReference>
+    <connectionReference context="//@componentInstance.1" source="//@componentInstance.1/@featureInstance.0" destination="//@componentInstance.1/@componentInstance.0/@featureInstance.0">
+      <connection xsi:type="aadl2:PortConnection" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.0"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="p2.t1.tOut -> p3.pIn" complete="true" kind="portConnection" destination="//@componentInstance.2/@featureInstance.0" source="//@componentInstance.1/@componentInstance.0/@featureInstance.1">
+    <connectionReference context="//@componentInstance.1" source="//@componentInstance.1/@componentInstance.0/@featureInstance.1" destination="//@componentInstance.1/@featureInstance.1">
+      <connection xsi:type="aadl2:PortConnection" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.1"/>
+    </connectionReference>
+    <connectionReference context="/" source="//@componentInstance.1/@featureInstance.1" destination="//@componentInstance.2/@featureInstance.0">
+      <connection xsi:type="aadl2:PortConnection" href="../BasicHierarchy.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPortConnection.1"/>
+    </connectionReference>
+  </connectionInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.sys.impl"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../BasicHierarchy.aadl#ConnectionInstantiationExample.sys.impl"/>
+</instance:SystemInstance>

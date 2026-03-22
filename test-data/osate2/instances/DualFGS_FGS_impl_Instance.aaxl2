@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="ASCII"?>
+<xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:EMV2Instance="http://www.osate.org/EMV2Instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance">
+  <instance:SystemInstance name="FGS_impl_Instance" category="system">
+    <featureInstance name="powersupply" category="busAccess" type="/1">
+      <feature xsi:type="aadl2:BusAccess" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedBusAccess.0"/>
+    </featureInstance>
+    <featureInstance name="inport">
+      <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+    </featureInstance>
+    <featureInstance name="outport" direction="out">
+      <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+    </featureInstance>
+    <componentInstance name="network" category="bus">
+      <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+        <subclauses href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+        <propagations xsi:type="EMV2Instance:BindingPropagation" name="bindings" binding="bindings">
+          <outErrorPropagation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        </propagations>
+      </annexInstance>
+      <subcomponent xsi:type="aadl2:BusSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedBusSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:BusType" href="../DualFGS.aadl#DualFGS.EtherSwitch"/>
+    </componentInstance>
+    <componentInstance name="AP1" category="system" inMode="/0/@modeInstance.0">
+      <featureInstance name="InPort">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDataPort.0"/>
+      </featureInstance>
+      <featureInstance name="OutPort" direction="out">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDataPort.1"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSystemSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:SystemType" href="../DualFGS.aadl#DualFGS.AP"/>
+    </componentInstance>
+    <componentInstance name="AP2" category="system">
+      <featureInstance name="InPort">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDataPort.0"/>
+      </featureInstance>
+      <featureInstance name="OutPort" direction="out">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDataPort.1"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSystemSubcomponent.1"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:SystemType" href="../DualFGS.aadl#DualFGS.AP"/>
+    </componentInstance>
+    <componentInstance name="FG1" category="system" inMode="/0/@modeInstance.0">
+      <featureInstance name="InPort">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.0"/>
+      </featureInstance>
+      <featureInstance name="OutPort" direction="out">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.1"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSystemSubcomponent.2"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:SystemType" href="../DualFGS.aadl#DualFGS.FG"/>
+    </componentInstance>
+    <componentInstance name="FG2" category="system">
+      <featureInstance name="InPort">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.0"/>
+      </featureInstance>
+      <featureInstance name="OutPort" direction="out">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.1"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSystemSubcomponent.3"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:SystemType" href="../DualFGS.aadl#DualFGS.FG"/>
+    </componentInstance>
+    <componentInstance name="AC" category="system">
+      <featureInstance name="FromAP1Port">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedDataPort.0"/>
+      </featureInstance>
+      <featureInstance name="FromAP2Port">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedDataPort.1"/>
+      </featureInstance>
+      <featureInstance name="OutPort" direction="out">
+        <feature xsi:type="aadl2:DataPort" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedDataPort.2"/>
+      </featureInstance>
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSystemSubcomponent.4"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:SystemType" href="../DualFGS.aadl#DualFGS.AC"/>
+    </componentInstance>
+    <modeInstance name="Critical">
+      <mode href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedMode.0"/>
+    </modeInstance>
+    <modeInstance name="NonCritical" initial="true">
+      <mode href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedMode.1"/>
+    </modeInstance>
+    <connectionInstance name="inport -> FG1.InPort" inSystemOperationMode="/0/@systemOperationMode.0" kind="portConnection" destination="/0/@componentInstance.3/@featureInstance.0" source="/0/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@featureInstance.1" destination="/0/@componentInstance.3/@featureInstance.0">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.0"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="inport -> FG2.InPort" kind="portConnection" destination="/0/@componentInstance.4/@featureInstance.0" source="/0/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@featureInstance.1" destination="/0/@componentInstance.4/@featureInstance.0">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.1"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="AP1.OutPort -> AC.FromAP1Port" inSystemOperationMode="/0/@systemOperationMode.0" complete="true" kind="portConnection" destination="/0/@componentInstance.5/@featureInstance.0" source="/0/@componentInstance.1/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@componentInstance.1/@featureInstance.1" destination="/0/@componentInstance.5/@featureInstance.0">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.4"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="AP2.OutPort -> AC.FromAP2Port" complete="true" kind="portConnection" destination="/0/@componentInstance.5/@featureInstance.1" source="/0/@componentInstance.2/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@componentInstance.2/@featureInstance.1" destination="/0/@componentInstance.5/@featureInstance.1">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.5"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="FG1.OutPort -> AP1.InPort" inSystemOperationMode="/0/@systemOperationMode.0" complete="true" kind="portConnection" destination="/0/@componentInstance.1/@featureInstance.0" source="/0/@componentInstance.3/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@componentInstance.3/@featureInstance.1" destination="/0/@componentInstance.1/@featureInstance.0">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.2"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="FG1.OutPort -> AP2.InPort" inSystemOperationMode="/0/@systemOperationMode.0" complete="true" kind="portConnection" destination="/0/@componentInstance.2/@featureInstance.0" source="/0/@componentInstance.3/@featureInstance.1">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@componentInstance.3/@featureInstance.1" destination="/0/@componentInstance.2/@featureInstance.0">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.3"/>
+      </connectionReference>
+    </connectionInstance>
+    <connectionInstance name="AC.OutPort -> outport" kind="portConnection" destination="/0/@featureInstance.2" source="/0/@componentInstance.5/@featureInstance.2">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="/0/@componentInstance.0"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <connectionReference context="/0" source="/0/@componentInstance.5/@featureInstance.2" destination="/0/@featureInstance.2">
+        <connection xsi:type="aadl2:PortConnection" href="../DualFGS.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedPortConnection.6"/>
+      </connectionReference>
+    </connectionInstance>
+    <classifier xsi:type="aadl2:SystemImplementation" href="../DualFGS.aadl#DualFGS.FGS.impl"/>
+    <systemOperationMode name="som_1" currentMode="/0/@modeInstance.0"/>
+    <systemOperationMode name="som_2" currentMode="/0/@modeInstance.1"/>
+    <componentImplementation xsi:type="aadl2:SystemImplementation" href="../DualFGS.aadl#DualFGS.FGS.impl"/>
+  </instance:SystemInstance>
+  <instance:ComponentInstance name="DualFGS::PowerSupply" category="bus">
+    <classifier xsi:type="aadl2:BusType" href="../DualFGS.aadl#DualFGS.PowerSupply"/>
+  </instance:ComponentInstance>
+</xmi:XMI>

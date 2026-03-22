@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="ASCII"?>
+<xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance">
+  <instance:SystemInstance name="DCS_dualtier2_Instance" category="system">
+    <featureInstance name="power" category="abstractFeature" type="/1">
+      <feature xsi:type="aadl2:AbstractFeature" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="canbusaccess" category="busAccess" direction="out" type="/2">
+      <feature xsi:type="aadl2:BusAccess" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedBusAccess.0"/>
+    </featureInstance>
+    <featureInstance name="sensor1in" type="/3">
+      <feature xsi:type="aadl2:DataPort" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDataPort.0"/>
+    </featureInstance>
+    <featureInstance name="sensor2In" type="/4">
+      <feature xsi:type="aadl2:DataPort" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDataPort.1"/>
+    </featureInstance>
+    <featureInstance name="actuatorOut" direction="out" type="/5">
+      <feature xsi:type="aadl2:DataPort" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDataPort.2"/>
+    </featureInstance>
+    <componentInstance name="app" category="system">
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedSystemSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.7.53.0::18::/5"/>
+    </componentInstance>
+    <componentInstance name="hw" category="system">
+      <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.8/@ownedSystemSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.8.53.0::18::/5"/>
+    </componentInstance>
+    <flowSpecification name="sensorprocessing" source="/0/@featureInstance.2" destination="/0/@featureInstance.4">
+      <flowSpecification href="../DigitalControlSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <classifier xsi:type="aadl2:SystemImplementation" href="../DigitalControlSystem.aadl#DigitalControlSystem.DCS.dualtier2"/>
+    <systemOperationMode name="No Modes"/>
+    <componentImplementation xsi:type="aadl2:SystemImplementation" href="../DigitalControlSystem.aadl#DigitalControlSystem.DCS.dualtier2"/>
+  </instance:SystemInstance>
+  <instance:ComponentInstance name="PhysicalResources::ElectricalPower">
+    <classifier xsi:type="aadl2:AbstractType" href="platform:/plugin/org.osate.contribution.sei/resources/packages/PhysicalResources.aadl#PhysicalResources.ElectricalPower"/>
+  </instance:ComponentInstance>
+  <instance:ComponentInstance name="null">
+    <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.4.29.0::15::/5"/>
+  </instance:ComponentInstance>
+  <instance:ComponentInstance name="null">
+    <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.4.31.0::17::/7"/>
+  </instance:ComponentInstance>
+  <instance:ComponentInstance name="null">
+    <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.4.31.1::17::/7"/>
+  </instance:ComponentInstance>
+  <instance:ComponentInstance name="null">
+    <classifier xsi:type="aadl2:AbstractType" href="../DigitalControlSystem.aadl#|::0.5.9.4.31.2::17::/7"/>
+  </instance:ComponentInstance>
+</xmi:XMI>

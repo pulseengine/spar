@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="sys_impl_Instance" category="system">
+  <componentInstance name="a1">
+    <featureInstance name="o" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f1" destination="//@componentInstance.0/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing1.impl"/>
+  </componentInstance>
+  <componentInstance name="a2">
+    <featureInstance name="o" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f1" destination="//@componentInstance.1/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing1.impl"/>
+  </componentInstance>
+  <componentInstance name="a3">
+    <featureInstance name="o" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f1" destination="//@componentInstance.2/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.2"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing1.impl"/>
+  </componentInstance>
+  <componentInstance name="b">
+    <featureInstance name="i1" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="i2" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.1"/>
+    </featureInstance>
+    <featureInstance name="i3" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.2"/>
+    </featureInstance>
+    <featureInstance name="o1" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.3"/>
+    </featureInstance>
+    <featureInstance name="o2" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.4"/>
+    </featureInstance>
+    <featureInstance name="o3" category="abstractFeature" direction="out">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedAbstractFeature.5"/>
+    </featureInstance>
+    <flowSpecification name="f2" source="//@componentInstance.3/@featureInstance.2" destination="//@componentInstance.3/@featureInstance.3">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.3"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing2.impl"/>
+  </componentInstance>
+  <componentInstance name="c1">
+    <featureInstance name="i" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f3" source="//@componentInstance.4/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.4"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing3.impl"/>
+  </componentInstance>
+  <componentInstance name="c2">
+    <featureInstance name="i" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f3" source="//@componentInstance.5/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.5"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing3.impl"/>
+  </componentInstance>
+  <componentInstance name="c3">
+    <featureInstance name="i" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <flowSpecification name="f3" source="//@componentInstance.6/@featureInstance.0">
+      <flowSpecification href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedFlowSpecification.0"/>
+    </flowSpecification>
+    <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedAbstractSubcomponent.6"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.Thing3.impl"/>
+  </componentInstance>
+  <endToEndFlow name="f" flowElement="//@componentInstance.2/@flowSpecification.0 //@connectionInstance.2 //@componentInstance.3/@flowSpecification.0 //@connectionInstance.3 //@componentInstance.4/@flowSpecification.0">
+    <endToEndFlow href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedEndToEndFlow.0"/>
+  </endToEndFlow>
+  <connectionInstance name="a1.o -> b.i1" complete="true" destination="//@componentInstance.3/@featureInstance.0" source="//@componentInstance.0/@featureInstance.0">
+    <connectionReference context="/" source="//@componentInstance.0/@featureInstance.0" destination="//@componentInstance.3/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.0"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="a2.o -> b.i2" complete="true" destination="//@componentInstance.3/@featureInstance.1" source="//@componentInstance.1/@featureInstance.0">
+    <connectionReference context="/" source="//@componentInstance.1/@featureInstance.0" destination="//@componentInstance.3/@featureInstance.1">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.1"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="a3.o -> b.i3" complete="true" destination="//@componentInstance.3/@featureInstance.2" source="//@componentInstance.2/@featureInstance.0">
+    <connectionReference context="/" source="//@componentInstance.2/@featureInstance.0" destination="//@componentInstance.3/@featureInstance.2">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.2"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="b.o1 -> c1.i" complete="true" destination="//@componentInstance.4/@featureInstance.0" source="//@componentInstance.3/@featureInstance.3">
+    <connectionReference context="/" source="//@componentInstance.3/@featureInstance.3" destination="//@componentInstance.4/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.3"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="b.o2 -> c2.i" complete="true" destination="//@componentInstance.5/@featureInstance.0" source="//@componentInstance.3/@featureInstance.4">
+    <connectionReference context="/" source="//@componentInstance.3/@featureInstance.4" destination="//@componentInstance.5/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.4"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="b.o3 -> c3.i" complete="true" destination="//@componentInstance.6/@featureInstance.0" source="//@componentInstance.3/@featureInstance.5">
+    <connectionReference context="/" source="//@componentInstance.3/@featureInstance.5" destination="//@componentInstance.6/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../BasicEndToEndFlow.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedFeatureConnection.5"/>
+    </connectionReference>
+  </connectionInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.sys.impl"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../BasicEndToEndFlow.aadl#BasicFlow.sys.impl"/>
+</instance:SystemInstance>

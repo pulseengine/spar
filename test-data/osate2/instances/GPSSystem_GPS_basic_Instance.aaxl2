@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="GPS_basic_Instance" category="system">
+  <featureInstance name="satelliteSignal" category="abstractFeature">
+    <feature xsi:type="aadl2:AbstractFeature" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedAbstractFeature.0"/>
+  </featureInstance>
+  <featureInstance name="location" direction="out">
+    <feature xsi:type="aadl2:DataPort" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.0"/>
+  </featureInstance>
+  <componentInstance name="network" category="bus">
+    <subcomponent xsi:type="aadl2:BusSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedBusSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.45.0::18::/5"/>
+  </componentInstance>
+  <componentInstance name="SatelliteSignalReceiver1" category="device">
+    <subcomponent xsi:type="aadl2:DeviceSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDeviceSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.47.0::18::/5"/>
+  </componentInstance>
+  <componentInstance name="SatelliteSignalReceiver2" category="device">
+    <subcomponent xsi:type="aadl2:DeviceSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDeviceSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.47.1::18::/5"/>
+  </componentInstance>
+  <componentInstance name="powersupply1" category="device">
+    <subcomponent xsi:type="aadl2:DeviceSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDeviceSubcomponent.2"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.47.2::18::/5"/>
+  </componentInstance>
+  <componentInstance name="processing" category="process">
+    <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedProcessSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.49.0::18::/5"/>
+  </componentInstance>
+  <componentInstance name="cpu1" category="processor">
+    <subcomponent xsi:type="aadl2:ProcessorSubcomponent" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedProcessorSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../GPSSystem.aadl#|::0.5.9.4.50.0::18::/5"/>
+  </componentInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../GPSSystem.aadl#GPSSystem.GPS.basic"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../GPSSystem.aadl#GPSSystem.GPS.basic"/>
+</instance:SystemInstance>

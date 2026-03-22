@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:EMV2Instance="http://www.osate.org/EMV2Instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="s_i_Instance" category="system">
+  <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+    <propagationPaths xsi:type="EMV2Instance:BindingPath" name="proc.EMV2.bindings -> ps.t.EMV2.processor" sourcePropagations="//@componentInstance.4/@annexInstance.0/@propagations.0" destinationPropagations="//@componentInstance.3/@componentInstance.0/@annexInstance.0/@propagations.0"/>
+    <propagationPaths xsi:type="EMV2Instance:BindingPath" name="d.EMV2.memory -> m.EMV2.bindings" type="memory" sourcePropagations="//@componentInstance.1/@annexInstance.0/@propagations.0" destinationPropagations="//@componentInstance.2/@annexInstance.0/@propagations.0"/>
+    <propagationPaths xsi:type="EMV2Instance:BindingPath" name="b.EMV2.bindings -> vb.EMV2.connection" type="connection" sourcePropagations="//@componentInstance.0/@annexInstance.0/@propagations.0" destinationPropagations="//@componentInstance.7/@annexInstance.0/@propagations.0"/>
+  </annexInstance>
+  <componentInstance name="b" category="bus">
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.8/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="bindings" binding="bindings">
+        <outErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.8/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <outTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </outTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSourceInstance" name="o3Src" propagation="//@componentInstance.0/@annexInstance.0/@propagations.0">
+        <errorSource href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.8/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:BusSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedBusSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:BusType" href="../BasicBinding.aadl#BasicBinding.b"/>
+  </componentInstance>
+  <componentInstance name="d" category="data">
+    <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+      <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Memory_Binding"/>
+      <ownedValue>
+        <ownedValue xsi:type="aadl2:ListValue">
+          <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="//@componentInstance.2"/>
+        </ownedValue>
+      </ownedValue>
+      <propertyAssociation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPropertyAssociation.1"/>
+    </ownedPropertyAssociation>
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="memory" binding="memory">
+        <outErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <outTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </outTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSourceInstance" name="o2Src" propagation="//@componentInstance.1/@annexInstance.0/@propagations.0">
+        <errorSource href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:DataSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDataSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:DataType" href="../BasicBinding.aadl#BasicBinding.d"/>
+  </componentInstance>
+  <componentInstance name="m" category="memory">
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="bindings" binding="bindings">
+        <inErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <inTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </inTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSinkInstance" name="o2Snk" propagation="//@componentInstance.2/@annexInstance.0/@propagations.0">
+        <errorSink href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:MemorySubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedMemorySubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:MemoryType" href="../BasicBinding.aadl#BasicBinding.m"/>
+  </componentInstance>
+  <componentInstance name="ps" category="process">
+    <componentInstance name="t" category="thread">
+      <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+        <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Processor_Binding"/>
+        <ownedValue>
+          <ownedValue xsi:type="aadl2:ListValue">
+            <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="//@componentInstance.4"/>
+          </ownedValue>
+        </ownedValue>
+        <propertyAssociation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPropertyAssociation.0"/>
+      </ownedPropertyAssociation>
+      <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+        <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+        <propagations xsi:type="EMV2Instance:BindingPropagation" name="processor">
+          <inErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+          <inTypeSet name="{ServiceError}">
+            <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+              <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+            </elements>
+          </inTypeSet>
+        </propagations>
+        <errorFlows xsi:type="EMV2Instance:ErrorSinkInstance" name="o1Snk" propagation="//@componentInstance.3/@componentInstance.0/@annexInstance.0/@propagations.0">
+          <errorSink href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+          <typeSet name="{ServiceError}">
+            <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+              <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+            </elements>
+          </typeSet>
+        </errorFlows>
+      </annexInstance>
+      <subcomponent xsi:type="aadl2:ThreadSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedThreadSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:ThreadType" href="../BasicBinding.aadl#BasicBinding.t"/>
+    </componentInstance>
+    <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedProcessSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:ProcessImplementation" href="../BasicBinding.aadl#BasicBinding.ps.i"/>
+  </componentInstance>
+  <componentInstance name="proc" category="processor">
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="bindings" binding="bindings">
+        <outErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <outTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </outTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSourceInstance" name="o1Src" propagation="//@componentInstance.4/@annexInstance.0/@propagations.0">
+        <errorSource href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:ProcessorSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedProcessorSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:ProcessorType" href="../BasicBinding.aadl#BasicBinding.proc"/>
+  </componentInstance>
+  <componentInstance name="sys1" category="system">
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.10/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="bindings" binding="bindings">
+        <outErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.10/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <outTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </outTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSourceInstance" name="o4src" propagation="//@componentInstance.5/@annexInstance.0/@propagations.0">
+        <errorSource href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.10/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedSystemSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:SystemType" href="../BasicBinding.aadl#BasicBinding.sys1"/>
+  </componentInstance>
+  <componentInstance name="sys2" category="system">
+    <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+      <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Function_Binding"/>
+      <ownedValue>
+        <ownedValue xsi:type="aadl2:ListValue">
+          <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="//@componentInstance.5"/>
+        </ownedValue>
+      </ownedValue>
+      <propertyAssociation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPropertyAssociation.3"/>
+    </ownedPropertyAssociation>
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.11/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="binding" binding="binding">
+        <inErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.11/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <inTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </inTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSinkInstance" name="o4snk" propagation="//@componentInstance.6/@annexInstance.0/@propagations.0">
+        <errorSink href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.11/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedSystemSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:SystemType" href="../BasicBinding.aadl#BasicBinding.sys2"/>
+  </componentInstance>
+  <componentInstance name="vb" category="virtual bus">
+    <ownedPropertyAssociation xsi:type="instance:PropertyAssociationInstance">
+      <property href="platform:/plugin/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/Deployment_Properties.aadl#Deployment_Properties.Actual_Connection_Binding"/>
+      <ownedValue>
+        <ownedValue xsi:type="aadl2:ListValue">
+          <ownedListElement xsi:type="instance:InstanceReferenceValue" referencedInstanceObject="//@componentInstance.0"/>
+        </ownedValue>
+      </ownedValue>
+      <propertyAssociation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedPropertyAssociation.2"/>
+    </ownedPropertyAssociation>
+    <annexInstance xsi:type="EMV2Instance:EMV2AnnexInstance" name="EMV2">
+      <subclauses href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedAnnexSubclause.0/@parsedAnnexSubclause"/>
+      <propagations xsi:type="EMV2Instance:BindingPropagation" name="connection" binding="connection">
+        <inErrorPropagation href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@propagations.0"/>
+        <inTypeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </inTypeSet>
+      </propagations>
+      <errorFlows xsi:type="EMV2Instance:ErrorSinkInstance" name="o3Snk" propagation="//@componentInstance.7/@annexInstance.0/@propagations.0">
+        <errorSink href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedAnnexSubclause.0/@parsedAnnexSubclause/@flows.0"/>
+        <typeSet name="{ServiceError}">
+          <elements xsi:type="EMV2Instance:TypeInstance" name="ServiceError">
+            <type href="platform:/plugin/org.osate.aadl2.errormodel.contrib/resources/packages/ErrorLibrary.aadl#emv2$ErrorLibrary.ServiceError"/>
+          </elements>
+        </typeSet>
+      </errorFlows>
+    </annexInstance>
+    <subcomponent xsi:type="aadl2:VirtualBusSubcomponent" href="../BasicBinding.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedVirtualBusSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:VirtualBusType" href="../BasicBinding.aadl#BasicBinding.vb"/>
+  </componentInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../BasicBinding.aadl#BasicBinding.s.i"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../BasicBinding.aadl#BasicBinding.s.i"/>
+</instance:SystemInstance>
