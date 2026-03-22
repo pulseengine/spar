@@ -832,6 +832,7 @@ dependencies = [
  "spar-analysis",
  "spar-annex",
  "spar-base-db",
+ "spar-codegen",
  "spar-hir",
  "spar-hir-def",
  "spar-parser",
@@ -867,6 +868,18 @@ dependencies = [
  "salsa",
  "spar-annex",
  "spar-syntax",
+]
+
+[[package]]
+name = "spar-codegen"
+version = "0.3.0"
+dependencies = [
+ "la-arena",
+ "serde",
+ "serde_json",
+ "spar-base-db",
+ "spar-hir-def",
+ "toml",
 ]
 
 [[package]]

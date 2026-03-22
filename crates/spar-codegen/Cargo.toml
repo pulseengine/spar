@@ -1,0 +1,19 @@
+[package]
+name = "spar-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Code generation from AADL instance models (Rust, WIT, Lean4, Kani, Bazel)"
+
+[dependencies]
+spar-hir-def.workspace = true
+la-arena.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+spar-hir-def.workspace = true
+spar-base-db.workspace = true
+la-arena.workspace = true

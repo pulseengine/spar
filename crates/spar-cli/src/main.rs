@@ -36,6 +36,7 @@ fn main() {
         "modes" => cmd_modes(&args[2..]),
         "render" => cmd_render(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
+        "codegen" => cmd_codegen(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -57,6 +58,7 @@ fn print_usage() {
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
+    eprintln!("  codegen    Generate code from an instantiated system model");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -74,6 +76,9 @@ fn print_usage() {
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
         "  verify   --root Package::Type.Impl [--format text|json] requirements.toml <file...>"
+    );
+    eprintln!(
+        "  codegen  --root Package::Type.Impl [--output dir] [--format rust|wit|both] [--verify all|build|test|proof] [--rivet] [--dry-run] <file...>"
     );
 }
 
@@ -1449,6 +1454,172 @@ fn print_instance_tree(
 
     for &child in &comp.children {
         print_instance_tree(inst, child, indent + 2);
+    }
+}
+
+fn cmd_codegen(args: &[String]) {
+    let mut root = None;
+    let mut output = None;
+    let mut format = None;
+    let mut verify = None;
+    let mut rivet = false;
+    let mut dry_run = false;
+    let mut files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--output" | "-o" => {
+                i += 1;
+                if i < args.len() {
+                    output = Some(args[i].clone());
+                } else {
+                    eprintln!("--output requires a directory path");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    format = Some(args[i].clone());
+                } else {
+                    eprintln!("--format requires a value (rust|wit|both)");
+                    process::exit(1);
+                }
+            }
+            "--verify" => {
+                i += 1;
+                if i < args.len() {
+                    verify = Some(args[i].clone());
+                } else {
+                    eprintln!("--verify requires a value (all|build|test|proof)");
+                    process::exit(1);
+                }
+            }
+            "--rivet" => rivet = true,
+            "--dry-run" => dry_run = true,
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    let output_format = match format.as_deref() {
+        Some("rust") => spar_codegen::OutputFormat::Rust,
+        Some("wit") => spar_codegen::OutputFormat::Wit,
+        Some("both") => spar_codegen::OutputFormat::Both,
+        None => spar_codegen::OutputFormat::Both,
+        Some(other) => {
+            eprintln!("Unknown format: {other} (expected rust|wit|both)");
+            process::exit(1);
+        }
+    };
+
+    let verify_mode = match verify.as_deref() {
+        Some("all") => Some(spar_codegen::VerifyMode::All),
+        Some("build") => Some(spar_codegen::VerifyMode::Build),
+        Some("test") => Some(spar_codegen::VerifyMode::Test),
+        Some("proof") => Some(spar_codegen::VerifyMode::Proof),
+        None => None,
+        Some(other) => {
+            eprintln!("Unknown verify mode: {other} (expected all|build|test|proof)");
+            process::exit(1);
+        }
+    };
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    // Parse all files and build item trees
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let parsed = spar_syntax::parse(&source);
+        if !parsed.ok() {
+            for err in parsed.errors() {
+                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+            }
+            eprintln!("Cannot codegen: parse errors in {}", file_path);
+            process::exit(1);
+        }
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    eprintln!(
+        "Generating code for {}::{}. ({} components)",
+        pkg_name,
+        type_name,
+        inst.component_count()
+    );
+
+    let output_dir = output.unwrap_or_else(|| "generated".to_string());
+
+    let config = spar_codegen::CodegenConfig {
+        root_name: format!("{pkg_name}_{type_name}"),
+        output_dir: output_dir.clone(),
+        format: output_format,
+        verify: verify_mode,
+        rivet,
+        dry_run,
+    };
+
+    let result = spar_codegen::generate(&inst, &config);
+
+    if dry_run {
+        eprintln!("Dry run: {} files would be generated", result.files.len());
+        for file in &result.files {
+            println!("{}/{}", output_dir, file.path);
+        }
+    } else {
+        let mut count = 0;
+        for file in &result.files {
+            let full_path = format!("{}/{}", output_dir, file.path);
+            // Create parent directories
+            if let Some(parent) = std::path::Path::new(&full_path).parent() {
+                fs::create_dir_all(parent).unwrap_or_else(|e| {
+                    eprintln!("Cannot create directory {}: {e}", parent.display());
+                    process::exit(1);
+                });
+            }
+            fs::write(&full_path, &file.content).unwrap_or_else(|e| {
+                eprintln!("Cannot write {full_path}: {e}");
+                process::exit(1);
+            });
+            count += 1;
+        }
+        eprintln!("Generated {count} files in {output_dir}/");
     }
 }
 
