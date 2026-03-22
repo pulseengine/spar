@@ -1,0 +1,4 @@
+// Minimal EASE headless test using JVM compiled engine
+System.out.println("EASE JVM engine is working!");
+System.out.println("Java version: " + System.getProperty("java.version"));
+System.out.println("OSATE is alive.");
