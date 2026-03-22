@@ -812,6 +812,526 @@ mod tests {
 
     // ── parse_numeric_value tests ───────────────────────────────────
 
+    // ── PROP-DUPLICATE boundary tests ─────────────────────────────
+
+    #[test]
+    fn duplicate_non_append_replaced_by_property_map() {
+        // PropertyMap::add replaces on non-append, so calling set_property
+        // twice with the same key results in only the last value surviving.
+        // values.len() == 1, so no duplicate is flagged.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "Custom", "Speed", "100");
+        b.set_property(root, "Custom", "Speed", "200");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "PropertyMap replaces on non-append, so len==1, no dup: {:?}",
+            dups
+        );
+    }
+
+    #[test]
+    fn single_property_value_no_duplicate() {
+        // values.len() == 1, not > 1 → skip duplicate check entirely
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "Custom", "Speed", "100");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "single value should not flag duplicate: {:?}",
+            dups
+        );
+    }
+
+    #[test]
+    fn exactly_one_non_append_with_one_append_no_duplicate() {
+        // values.len() == 2 (> 1 passes), but non_append_count == 1 (not > 1)
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property_ext(root, "Custom", "Items", "a", false);
+        b.set_property_ext(root, "Custom", "Items", "b", true);
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "one non-append + one append should not flag duplicate: {:?}",
+            dups
+        );
+    }
+
+    #[test]
+    fn two_append_properties_no_duplicate() {
+        // values.len() == 2 (> 1 passes), but non_append_count == 0 (not > 1)
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property_ext(root, "Custom", "Items", "a", true);
+        b.set_property_ext(root, "Custom", "Items", "b", true);
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "two append properties should not flag duplicate: {:?}",
+            dups
+        );
+    }
+
+    // ── PROP-RANGE-ORDER boundary tests ───────────────────────────
+
+    #[test]
+    fn range_low_equals_high_minus_one_no_error() {
+        // low < high (49 < 50) → no error
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Weight", "49 .. 50");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .collect();
+        assert!(
+            range_errs.is_empty(),
+            "49..50 should not error: {:?}",
+            range_errs
+        );
+    }
+
+    #[test]
+    fn range_low_one_more_than_high_error() {
+        // low > high (51 > 50) → error
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Weight", "51 .. 50");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("lower bound"))
+            .collect();
+        assert_eq!(range_errs.len(), 1, "51..50 should error: {:?}", range_errs);
+    }
+
+    #[test]
+    fn range_with_units_inverted_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "CET", "200ms .. 100ms");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("lower bound"))
+            .collect();
+        assert_eq!(
+            range_errs.len(),
+            1,
+            "inverted range with units should error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn non_range_with_dots_no_error() {
+        // Value contains ".." but non-numeric sides → no range check
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Path", "a..b");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .collect();
+        assert!(
+            range_errs.is_empty(),
+            "non-numeric range should not produce range error: {:?}",
+            range_errs
+        );
+    }
+
+    // ── PROP-LIST-ELEMENT-TYPE boundary tests ─────────────────────
+
+    #[test]
+    fn list_value_not_starting_with_paren_no_check() {
+        // Doesn't start with '(' → not treated as list
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "[1, \"hello\"]");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "non-paren list should not trigger list check: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_value_not_ending_with_paren_no_check() {
+        // Starts with '(' but doesn't end with ')' → not treated as list
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(1, \"hello\"");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "unclosed paren should not trigger list check: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_all_other_elements_no_warning() {
+        // All elements classify as ElemType::Other → first_type == Other → return early
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(foo, bar, baz)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "all-Other elements should not trigger mixed warning: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_second_elem_other_with_first_numeric_no_warning() {
+        // First is Numeric, second is Other → elem_type == Other means skip
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(1, foo, 3)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "numeric + Other should not trigger mixed warning: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_boolean_elements_consistent() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Flags", "(true, false, TRUE)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "all-boolean list should not warn: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_reference_elements_consistent() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Refs", "(reference(a), reference(b))");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "all-reference list should not warn: {:?}",
+            list_warns
+        );
+    }
+
+    #[test]
+    fn list_boolean_vs_numeric_mixed_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(true, 42)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert_eq!(
+            list_warns.len(),
+            1,
+            "boolean + numeric should trigger mixed warning: {:?}",
+            diags
+        );
+    }
+
+    // ── PROP-VALUE-TYPE boundary tests ────────────────────────────
+
+    #[test]
+    fn balanced_parens_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Val", "(a, (b, c))");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let paren_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("unbalanced"))
+            .collect();
+        assert!(
+            paren_errs.is_empty(),
+            "balanced parens should not error: {:?}",
+            paren_errs
+        );
+    }
+
+    #[test]
+    fn extra_close_paren_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Val", "a))");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let paren_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("unbalanced"))
+            .collect();
+        assert_eq!(
+            paren_errs.len(),
+            1,
+            "extra close paren should error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn nonempty_value_no_empty_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Val", "something");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let empty_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("empty value"))
+            .collect();
+        assert!(
+            empty_warns.is_empty(),
+            "non-empty value should not trigger empty warning: {:?}",
+            empty_warns
+        );
+    }
+
+    // ── PROP-CONSTANT-EXISTS boundary tests ───────────────────────
+
+    #[test]
+    fn reference_with_space_before_paren_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Bind", "reference  (cpu)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let ref_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("without proper parenthesized"))
+            .collect();
+        assert!(
+            ref_warns.is_empty(),
+            "reference with space before paren should be OK: {:?}",
+            ref_warns
+        );
+    }
+
+    #[test]
+    fn value_without_reference_keyword_no_check() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Val", "some_value cpu1");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let ref_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("without proper parenthesized"))
+            .collect();
+        assert!(
+            ref_warns.is_empty(),
+            "no 'reference' keyword = no check: {:?}",
+            ref_warns
+        );
+    }
+
+    // ── PROP-APPLIES-TO boundary tests ────────────────────────────
+
+    #[test]
+    fn thread_property_on_abstract_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let abs = b.add_component("a1", ComponentCategory::Abstract, Some(root));
+        b.set_children(root, vec![abs]);
+        b.set_property(abs, "Timing_Properties", "Dispatch_Protocol", "Periodic");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let applies_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("typically only applicable"))
+            .collect();
+        assert!(
+            applies_warns.is_empty(),
+            "thread property on abstract should not warn: {:?}",
+            applies_warns
+        );
+    }
+
+    #[test]
+    fn thread_property_on_process_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("p1", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![proc]);
+        b.set_property(proc, "Timing_Properties", "Deadline", "10 ms");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let applies_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("typically only applicable"))
+            .collect();
+        assert_eq!(
+            applies_warns.len(),
+            1,
+            "thread property on process should warn: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn thread_property_on_processor_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        b.set_children(root, vec![proc]);
+        b.set_property(proc, "Timing_Properties", "Compute_Execution_Time", "5 ms");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let applies_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("typically only applicable"))
+            .collect();
+        assert_eq!(
+            applies_warns.len(),
+            1,
+            "thread property on processor should warn: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn thread_property_without_set_prefix_on_system_warning() {
+        // Tests the `prop_map.get("", name).is_some()` branch in check_applies_to
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // Set with empty property set name — the `get("", name)` path
+        b.set_property(root, "", "Period", "10 ms");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let applies_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("typically only applicable"))
+            .collect();
+        assert_eq!(
+            applies_warns.len(),
+            1,
+            "thread property with empty set on system should warn: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn non_timing_property_on_system_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let applies_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("typically only applicable"))
+            .collect();
+        assert!(
+            applies_warns.is_empty(),
+            "non-timing property on system should not warn: {:?}",
+            applies_warns
+        );
+    }
+
+    // ── parse_numeric_value tests ───────────────────────────────────
+
     #[test]
     fn parse_numeric_integers() {
         assert_eq!(parse_numeric_value("42"), Ok(42.0));

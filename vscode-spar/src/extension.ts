@@ -119,25 +119,20 @@ async function initWasmRenderer(context: vscode.ExtensionContext) {
 // --- Binary discovery ---
 
 function findSparBinary(context: vscode.ExtensionContext): string | undefined {
-  const configured = vscode.workspace.getConfiguration('spar').get<string>('binaryPath');
-  if (configured && configured.length > 0) return configured;
-
-  // Prefer bundled binary (guaranteed correct version)
   const binaryName = process.platform === 'win32' ? 'spar.exe' : 'spar';
   const bundled = path.join(context.extensionPath, 'bin', binaryName);
   if (fs.existsSync(bundled)) {
-    console.log('spar: using bundled binary at', bundled);
+    // Ensure it's executable on Unix
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(bundled, 0o755); } catch { /* ignore */ }
+    }
     return bundled;
   }
-
-  // Fall back to PATH
-  try {
-    const found = execFileSync('which', ['spar'], { encoding: 'utf8' }).trim();
-    console.log('spar: using PATH binary at', found);
-    return found;
-  } catch {
-    return undefined;
-  }
+  // No fallback. The binary MUST be bundled.
+  vscode.window.showErrorMessage(
+    'spar binary not found. Please reinstall the extension or download from GitHub Releases.'
+  );
+  return undefined;
 }
 
 // --- Diagram ---
@@ -201,7 +196,7 @@ async function renderDiagram(_context: vscode.ExtensionContext) {
       if (!sparPath) {
         diagramPanel.webview.html = errorHtml(
           'No renderer available',
-          'WASM assets not found and spar binary not on PATH.\n\nDownload spar from GitHub Releases.'
+          'spar binary not found. Please reinstall the extension or download from GitHub Releases.'
         );
         return;
       }

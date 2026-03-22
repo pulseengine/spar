@@ -371,62 +371,129 @@ fn build_connection_path(
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[allow(unused_imports, unused_variables, dead_code, clippy::manual_div_ceil)]
 mod tests {
     use super::*;
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
-    use std::sync::Arc;
 
     use spar_hir_def::feature_group::ExpandedFeature;
     use spar_hir_def::instance::*;
     use spar_hir_def::item_tree::*;
     use spar_hir_def::name::{ClassifierRef, Name};
-    use spar_hir_def::resolver::GlobalScope;
 
-    // ── Helper: build a feature group tree ──────────────────────────
+    // ── TestBuilder ─────────────────────────────────────────────────
 
-    fn build_fg_tree(
-        pkg_name: &str,
-        fg_name: &str,
-        features: Vec<(&str, FeatureKind, Option<Direction>)>,
-        inverse_of: Option<ClassifierRef>,
-    ) -> ItemTree {
-        let mut tree = ItemTree::default();
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+    }
 
-        let mut feat_indices = Vec::new();
-        for (name, kind, dir) in features {
-            let idx = tree.features.alloc(Feature {
-                name: Name::new(name),
-                kind,
-                direction: dir,
-                access_kind: None,
-                classifier: None,
-                is_refined: false,
-                array_dimensions: Vec::new(),
-                property_associations: Vec::new(),
-            });
-            feat_indices.push(idx);
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+            }
         }
 
-        let fgt_idx = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new(fg_name),
-            is_public: true,
-            extends: None,
-            inverse_of,
-            features: feat_indices,
-            prototypes: Vec::new(),
-        });
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: Some(Name::new("impl")),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        }
 
-        tree.packages.alloc(Package {
-            name: Name::new(pkg_name),
-            with_clauses: Vec::new(),
-            public_items: vec![ItemRef::FeatureGroupType(fgt_idx)],
-            private_items: Vec::new(),
-            renames: Vec::new(),
-        });
+        fn add_feature(
+            &mut self,
+            name: &str,
+            kind: FeatureKind,
+            direction: Option<Direction>,
+            owner: ComponentInstanceIdx,
+        ) -> FeatureInstanceIdx {
+            let idx = self.features.alloc(FeatureInstance {
+                name: Name::new(name),
+                kind,
+                direction,
+                owner,
+                classifier: None,
+                access_kind: None,
+                array_index: None,
+            });
+            self.components[owner].features.push(idx);
+            idx
+        }
 
-        tree
+        fn add_connection(
+            &mut self,
+            name: &str,
+            kind: ConnectionKind,
+            owner: ComponentInstanceIdx,
+            src: Option<ConnectionEnd>,
+            dst: Option<ConnectionEnd>,
+        ) -> ConnectionInstanceIdx {
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind,
+                is_bidirectional: false,
+                owner,
+                src,
+                dst,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+            idx
+        }
+
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
+            self.components[parent].children = children;
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: FxHashMap::default(),
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    fn end(sub: Option<&str>, feat: &str) -> ConnectionEnd {
+        ConnectionEnd {
+            subcomponent: sub.map(Name::new),
+            feature: Name::new(feat),
+        }
     }
 
     // ── validate_complement tests ───────────────────────────────────
@@ -644,531 +711,415 @@ mod tests {
         assert!(diags[0].message.contains("inverse of"));
     }
 
-    // ── Feature group connection expansion in instance model ────────
+    // ── FeatureGroupCheckAnalysis::analyze tests ─────────────────────
 
     #[test]
-    #[ignore = "pre-existing: FG expansion not yet implemented in instance model"]
-    fn fg_connection_expands_to_individual_ports() {
-        // Build an ItemTree with:
-        // - Package P
-        //   - Feature group type SensorData: temp (out data port), pressure (out data port)
-        //   - Component type Sender with feature group sensors: SensorData
-        //   - Component type Receiver with feature group sensors: SensorData
-        //   - System type Top
-        //   - System implementation Top.impl with:
-        //     - subcomponent tx: Sender
-        //     - subcomponent rx: Receiver
-        //     - feature group connection: tx.sensors -> rx.sensors
-        let mut tree = ItemTree::default();
+    fn analysis_name_is_feature_group_check() {
+        let analysis = FeatureGroupCheckAnalysis;
+        assert_eq!(analysis.name(), "feature_group_check");
+    }
 
-        // Feature group type features
-        let fg_f0 = tree.features.alloc(Feature {
-            name: Name::new("temp"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let fg_f1 = tree.features.alloc(Feature {
-            name: Name::new("pressure"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let fgt_idx = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new("SensorData"),
-            is_public: true,
-            extends: None,
-            inverse_of: None,
-            features: vec![fg_f0, fg_f1],
-            prototypes: Vec::new(),
-        });
-
-        // Sender type with feature group "sensors" of type SensorData
-        let sender_fg = tree.features.alloc(Feature {
-            name: Name::new("sensors"),
-            kind: FeatureKind::FeatureGroup,
-            direction: None,
-            access_kind: None,
-            classifier: Some(ClassifierRef::type_only(Name::new("SensorData"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let sender_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Sender"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: vec![sender_fg],
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Receiver type with feature group "sensors" of type SensorData
-        let receiver_fg = tree.features.alloc(Feature {
-            name: Name::new("sensors"),
-            kind: FeatureKind::FeatureGroup,
-            direction: None,
-            access_kind: None,
-            classifier: Some(ClassifierRef::type_only(Name::new("SensorData"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let receiver_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Receiver"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: vec![receiver_fg],
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Top type and implementation
-        let top_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Top"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: Vec::new(),
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Subcomponents
-        let sub_tx = tree.subcomponents.alloc(SubcomponentItem {
-            name: Name::new("tx"),
-            category: ComponentCategory::System,
-            classifier: Some(ClassifierRef::type_only(Name::new("Sender"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let sub_rx = tree.subcomponents.alloc(SubcomponentItem {
-            name: Name::new("rx"),
-            category: ComponentCategory::System,
-            classifier: Some(ClassifierRef::type_only(Name::new("Receiver"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Feature group connection
-        let conn = tree.connections.alloc(ConnectionItem {
-            name: Name::new("c1"),
-            kind: ConnectionKind::FeatureGroup,
-            is_bidirectional: false,
-            is_refined: false,
-            src: Some(ConnectedElementRef {
-                subcomponent: Some(Name::new("tx")),
-                feature: Name::new("sensors"),
-            }),
-            dst: Some(ConnectedElementRef {
-                subcomponent: Some(Name::new("rx")),
-                feature: Name::new("sensors"),
-            }),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let top_impl = tree.component_impls.alloc(ComponentImplItem {
-            type_name: Name::new("Top"),
-            impl_name: Name::new("impl"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            subcomponents: vec![sub_tx, sub_rx],
-            connections: vec![conn],
-            end_to_end_flows: Vec::new(),
-            flow_impls: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            call_sequences: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        tree.packages.alloc(Package {
-            name: Name::new("P"),
-            with_clauses: Vec::new(),
-            public_items: vec![
-                ItemRef::FeatureGroupType(fgt_idx),
-                ItemRef::ComponentType(sender_ct),
-                ItemRef::ComponentType(receiver_ct),
-                ItemRef::ComponentType(top_ct),
-                ItemRef::ComponentImpl(top_impl),
-            ],
-            private_items: Vec::new(),
-            renames: Vec::new(),
-        });
-
-        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let instance = SystemInstance::instantiate(
-            &scope,
-            &Name::new("P"),
-            &Name::new("Top"),
-            &Name::new("impl"),
+    #[test]
+    fn analyze_skips_non_feature_group_connections() {
+        // A port connection should not trigger any FG diagnostics.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("p_out", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("p_in", FeatureKind::DataPort, Some(Direction::In), bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::Port,
+            root,
+            Some(end(Some("a"), "p_out")),
+            Some(end(Some("b"), "p_in")),
         );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
 
-        // The instance should have semantic connections from FG expansion.
-        // We should find individual semantic connections for "temp" and "pressure".
-        let fg_semantic: Vec<_> = instance
-            .semantic_connections
-            .iter()
-            .filter(|sc| sc.name.as_str().starts_with("c1."))
-            .collect();
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(diags.is_empty(), "port connections should be skipped");
+    }
 
+    #[test]
+    fn analyze_valid_fg_connection_no_diagnostics() {
+        // Both endpoints are FeatureGroup kind -- no warnings.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, a);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "valid FG connection should have no warnings: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn analyze_missing_dst_endpoint_reports_error() {
+        // Connection with a missing destination endpoint.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_connection(
+            "c_broken",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(None, "fg_out")),
+            None,
+        );
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].message.contains("missing an endpoint"));
+        assert!(diags[0].message.contains("c_broken"));
+    }
+
+    #[test]
+    fn analyze_missing_src_endpoint_reports_error() {
+        // Connection with a missing source endpoint.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_connection(
+            "c_no_src",
+            ConnectionKind::FeatureGroup,
+            root,
+            None,
+            Some(end(None, "fg_in")),
+        );
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].message.contains("missing an endpoint"));
+    }
+
+    #[test]
+    fn analyze_both_endpoints_missing_reports_error() {
+        // Connection with both endpoints missing.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_connection("c_none", ConnectionKind::FeatureGroup, root, None, None);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert!(diags[0].message.contains("missing an endpoint"));
+    }
+
+    #[test]
+    fn analyze_src_not_feature_group_warns() {
+        // Source feature is a DataPort, not a FeatureGroup.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("out_port", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "out_port")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1, "expected 1 warning: {diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert!(diags[0].message.contains("source feature"));
+        assert!(diags[0].message.contains("out_port"));
+        assert!(diags[0].message.contains("not a feature group"));
+    }
+
+    #[test]
+    fn analyze_dst_not_feature_group_warns() {
+        // Destination feature is an EventPort, not a FeatureGroup.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, a);
+        b.add_feature("evt", FeatureKind::EventPort, Some(Direction::In), bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "evt")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1, "expected 1 warning: {diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert!(diags[0].message.contains("destination feature"));
+        assert!(diags[0].message.contains("evt"));
+        assert!(diags[0].message.contains("not a feature group"));
+    }
+
+    #[test]
+    fn analyze_both_endpoints_not_fg_warns_twice() {
+        // Both source and destination features are non-FG.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("dp_out", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("dp_in", FeatureKind::DataPort, Some(Direction::In), bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "dp_out")),
+            Some(end(Some("b"), "dp_in")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 2, "expected 2 warnings: {diags:?}");
+        assert!(diags.iter().all(|d| d.severity == Severity::Warning));
+        assert!(diags[0].message.contains("source feature"));
+        assert!(diags[1].message.contains("destination feature"));
+    }
+
+    #[test]
+    fn analyze_empty_features_no_warning() {
+        // If the component has no features at all, the check is skipped
+        // (can't say "not a FG" when there are no features to check).
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        // Intentionally add NO features to a or bb.
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "no features on component means no warning: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn analyze_self_reference_connection_no_subcomponent() {
+        // Connection where endpoints reference the owner itself (no subcomponent).
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, root);
+        b.add_feature("sensors_out", FeatureKind::FeatureGroup, None, root);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(None, "sensors")),
+            Some(end(None, "sensors_out")),
+        );
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(diags.is_empty(), "both features are FG: {diags:?}");
+    }
+
+    #[test]
+    fn analyze_unresolved_subcomponent_no_crash() {
+        // Connection references a subcomponent that doesn't exist as a child.
+        // resolve_endpoint_component returns None, so no feature check happens.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("nonexistent"), "sensors")),
+            Some(end(Some("also_missing"), "sensors")),
+        );
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "unresolved subcomponents produce no warning: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn analyze_case_insensitive_feature_match() {
+        // Feature name matching for FG check should be case-insensitive.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        // Feature names use different casing than the connection references.
+        b.add_feature("Sensors", FeatureKind::FeatureGroup, None, a);
+        b.add_feature("SENSORS", FeatureKind::FeatureGroup, None, bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "case-insensitive match should find FG: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn analyze_multiple_fg_connections() {
+        // Two FG connections: one valid, one with src not being FG.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, a);
+        b.add_feature("data_out", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, bb);
+        // Valid connection
+        b.add_connection(
+            "c_ok",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        // Bad connection: source is a DataPort
+        b.add_connection(
+            "c_bad",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "data_out")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
         assert_eq!(
-            fg_semantic.len(),
-            2,
-            "feature group connection should expand into 2 individual connections, \
-             got {} semantic connections: {:?}",
-            fg_semantic.len(),
-            instance
-                .semantic_connections
-                .iter()
-                .map(|sc| sc.name.as_str())
-                .collect::<Vec<_>>()
-        );
-
-        // Check that we have connections for both temp and pressure
-        let names: Vec<_> = fg_semantic.iter().map(|sc| sc.name.as_str()).collect();
-        assert!(
-            names.contains(&"c1.temp"),
-            "should have c1.temp: {:?}",
-            names
-        );
-        assert!(
-            names.contains(&"c1.pressure"),
-            "should have c1.pressure: {:?}",
-            names
-        );
-
-        // Each expanded connection should be of kind Port (since the features are DataPort)
-        for sc in &fg_semantic {
-            assert_eq!(
-                sc.kind,
-                ConnectionKind::Port,
-                "expanded FG connection should be Port kind"
-            );
-        }
-    }
-
-    #[test]
-    #[ignore = "pre-existing: FG complement check requires GlobalScope in instance"]
-    fn fg_complement_check_reports_mismatches() {
-        // Build a model where source FG has "temp out" and "pressure out"
-        // but destination FG has "temp out" (should be in!) and no "pressure".
-        let mut tree = ItemTree::default();
-
-        // Source FGT
-        let src_f0 = tree.features.alloc(Feature {
-            name: Name::new("temp"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let src_f1 = tree.features.alloc(Feature {
-            name: Name::new("pressure"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let src_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new("SourceFG"),
-            is_public: true,
-            extends: None,
-            inverse_of: None,
-            features: vec![src_f0, src_f1],
-            prototypes: Vec::new(),
-        });
-
-        // Destination FGT (wrong: temp is out instead of in, missing pressure)
-        let dst_f0 = tree.features.alloc(Feature {
-            name: Name::new("temp"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let dst_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new("DestFG"),
-            is_public: true,
-            extends: None,
-            inverse_of: None,
-            features: vec![dst_f0],
-            prototypes: Vec::new(),
-        });
-
-        // Sender type
-        let sender_fg = tree.features.alloc(Feature {
-            name: Name::new("fg_out"),
-            kind: FeatureKind::FeatureGroup,
-            direction: None,
-            access_kind: None,
-            classifier: Some(ClassifierRef::type_only(Name::new("SourceFG"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let sender_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Sender"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: vec![sender_fg],
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Receiver type
-        let receiver_fg = tree.features.alloc(Feature {
-            name: Name::new("fg_in"),
-            kind: FeatureKind::FeatureGroup,
-            direction: None,
-            access_kind: None,
-            classifier: Some(ClassifierRef::type_only(Name::new("DestFG"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let receiver_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Receiver"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: vec![receiver_fg],
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        // Top type + impl
-        let top_ct = tree.component_types.alloc(ComponentTypeItem {
-            name: Name::new("Top"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            features: Vec::new(),
-            flow_specs: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let sub_tx = tree.subcomponents.alloc(SubcomponentItem {
-            name: Name::new("tx"),
-            category: ComponentCategory::System,
-            classifier: Some(ClassifierRef::type_only(Name::new("Sender"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let sub_rx = tree.subcomponents.alloc(SubcomponentItem {
-            name: Name::new("rx"),
-            category: ComponentCategory::System,
-            classifier: Some(ClassifierRef::type_only(Name::new("Receiver"))),
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let fg_conn = tree.connections.alloc(ConnectionItem {
-            name: Name::new("c1"),
-            kind: ConnectionKind::FeatureGroup,
-            is_bidirectional: false,
-            is_refined: false,
-            src: Some(ConnectedElementRef {
-                subcomponent: Some(Name::new("tx")),
-                feature: Name::new("fg_out"),
-            }),
-            dst: Some(ConnectedElementRef {
-                subcomponent: Some(Name::new("rx")),
-                feature: Name::new("fg_in"),
-            }),
-            in_modes: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let top_impl = tree.component_impls.alloc(ComponentImplItem {
-            type_name: Name::new("Top"),
-            impl_name: Name::new("impl"),
-            category: ComponentCategory::System,
-            is_public: true,
-            extends: None,
-            subcomponents: vec![sub_tx, sub_rx],
-            connections: vec![fg_conn],
-            end_to_end_flows: Vec::new(),
-            flow_impls: Vec::new(),
-            modes: Vec::new(),
-            mode_transitions: Vec::new(),
-            prototypes: Vec::new(),
-            call_sequences: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        tree.packages.alloc(Package {
-            name: Name::new("P"),
-            with_clauses: Vec::new(),
-            public_items: vec![
-                ItemRef::FeatureGroupType(src_fgt),
-                ItemRef::FeatureGroupType(dst_fgt),
-                ItemRef::ComponentType(sender_ct),
-                ItemRef::ComponentType(receiver_ct),
-                ItemRef::ComponentType(top_ct),
-                ItemRef::ComponentImpl(top_impl),
-            ],
-            private_items: Vec::new(),
-            renames: Vec::new(),
-        });
-
-        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-        let instance = SystemInstance::instantiate(
-            &scope,
-            &Name::new("P"),
-            &Name::new("Top"),
-            &Name::new("impl"),
-        );
-
-        let diags = check_feature_group_complements(&instance, &scope);
-
-        // Should report: temp has direction mismatch, pressure is unmatched
-        assert!(
-            diags.len() >= 2,
-            "expected at least 2 diagnostics (unmatched + direction mismatch), got {}: {:?}",
             diags.len(),
-            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+            1,
+            "only c_bad should produce a warning: {diags:?}"
         );
-
-        let unmatched: Vec<_> = diags
-            .iter()
-            .filter(|d| d.message.contains("no matching"))
-            .collect();
-        assert_eq!(unmatched.len(), 1, "pressure should be unmatched");
-        assert!(unmatched[0].message.contains("pressure"));
-
-        let mismatches: Vec<_> = diags
-            .iter()
-            .filter(|d| d.message.contains("incompatible directions"))
-            .collect();
-        assert_eq!(mismatches.len(), 1, "temp should have direction mismatch");
-        assert!(mismatches[0].message.contains("temp"));
+        assert!(diags[0].message.contains("c_bad"));
+        assert!(diags[0].message.contains("source feature"));
     }
 
     #[test]
-    #[ignore = "pre-existing: FG inverse expansion not yet implemented"]
-    fn inverse_of_produces_correct_complement() {
-        // Build a tree where SensorInput is inverse of SensorOutput.
-        // A connection between them should pass complement validation.
-        let mut tree = ItemTree::default();
-
-        // SensorOutput features
-        let f0 = tree.features.alloc(Feature {
-            name: Name::new("temp"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-        let f1 = tree.features.alloc(Feature {
-            name: Name::new("pressure"),
-            kind: FeatureKind::DataPort,
-            direction: Some(Direction::Out),
-            access_kind: None,
-            classifier: None,
-            is_refined: false,
-            array_dimensions: Vec::new(),
-            property_associations: Vec::new(),
-        });
-
-        let src_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new("SensorOutput"),
-            is_public: true,
-            extends: None,
-            inverse_of: None,
-            features: vec![f0, f1],
-            prototypes: Vec::new(),
-        });
-
-        // SensorInput: inverse of SensorOutput
-        let dst_fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
-            name: Name::new("SensorInput"),
-            is_public: true,
-            extends: None,
-            inverse_of: Some(ClassifierRef::type_only(Name::new("SensorOutput"))),
-            features: Vec::new(),
-            prototypes: Vec::new(),
-        });
-
-        // Expand both and verify they are complements
-        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
-
-        let src_expanded =
-            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorOutput"), false);
-        let dst_expanded =
-            expand_feature_group(&scope, &Name::new("P"), &Name::new("SensorInput"), false);
-
-        assert_eq!(src_expanded.len(), 2);
-        assert_eq!(dst_expanded.len(), 2);
-
-        // SensorOutput: temp=Out, pressure=Out
-        // SensorInput (inverse): temp=In, pressure=In
-        let result = validate_complement(&src_expanded, &dst_expanded);
-        assert!(
-            result.unmatched_source.is_empty(),
-            "inverse should match all features"
+    fn analyze_path_includes_owner_component() {
+        // Verify the diagnostic path includes the owning component.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        b.add_feature("dp", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "dp")),
+            None,
         );
+        b.set_children(root, vec![a]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1);
+        // Path should contain the root component name.
         assert!(
-            result.direction_mismatches.is_empty(),
-            "inverse should have complementary directions: {:?}",
-            result.direction_mismatches
+            diags[0].path.iter().any(|p| p == "root"),
+            "path should include owner: {:?}",
+            diags[0].path
         );
+    }
+
+    #[test]
+    fn analyze_analysis_field_is_set() {
+        // All diagnostics should have analysis = "feature_group_check".
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(None, "fg")),
+            None,
+        );
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].analysis, "feature_group_check");
+    }
+
+    #[test]
+    fn analyze_no_connections_no_diagnostics() {
+        // System with no connections at all.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn analyze_feature_name_not_found_but_other_features_exist() {
+        // Component has features, but not the one referenced by the connection.
+        // The feature check iterates features looking for a name+kind match.
+        // If no match is found and features exist, that's a warning.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        // "a" has a feature but with a different name than the connection references.
+        b.add_feature("other_fg", FeatureKind::FeatureGroup, None, a);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        // "a" has features but none named "sensors" that is a FeatureGroup, so warning.
+        assert_eq!(diags.len(), 1, "expected 1 warning: {diags:?}");
+        assert!(diags[0].message.contains("source feature"));
+        assert!(diags[0].message.contains("sensors"));
     }
 }

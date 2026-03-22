@@ -159,3 +159,267 @@ pub fn is_valid_containment(parent: ComponentCategory, child: ComponentCategory)
         Abstract => true, // handled above, but for exhaustiveness
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use la_arena::Arena;
+    use rustc_hash::FxHashMap;
+    use spar_hir_def::instance::*;
+    use spar_hir_def::name::Name;
+
+    struct TestBuilder {
+        components: Arena<ComponentInstance>,
+        features: Arena<FeatureInstance>,
+        connections: Arena<ConnectionInstance>,
+    }
+
+    impl TestBuilder {
+        fn new() -> Self {
+            Self {
+                components: Arena::default(),
+                features: Arena::default(),
+                connections: Arena::default(),
+            }
+        }
+
+        fn add_component(
+            &mut self,
+            name: &str,
+            category: ComponentCategory,
+            parent: Option<ComponentInstanceIdx>,
+            impl_name: Option<&str>,
+        ) -> ComponentInstanceIdx {
+            self.components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new(name),
+                impl_name: impl_name.map(Name::new),
+                package: Name::new("Pkg"),
+                parent,
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        }
+
+        fn set_children(
+            &mut self,
+            parent: ComponentInstanceIdx,
+            children: Vec<ComponentInstanceIdx>,
+        ) {
+            self.components[parent].children = children;
+        }
+
+        fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
+            SystemInstance {
+                root,
+                components: self.components,
+                features: self.features,
+                connections: self.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances: Arena::default(),
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: FxHashMap::default(),
+                semantic_connections: Vec::new(),
+                system_operation_modes: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn valid_containment_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root), Some("impl"));
+        b.set_children(root, vec![proc]);
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "valid containment: {:?}", errors);
+    }
+
+    #[test]
+    fn invalid_containment_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let thread = b.add_component("t1", ComponentCategory::Thread, Some(root), Some("impl"));
+        b.set_children(root, vec![thread]);
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("cannot contain"))
+            .collect();
+        assert_eq!(errors.len(), 1, "system cannot contain thread: {:?}", diags);
+    }
+
+    #[test]
+    fn empty_impl_non_trivial_category_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        // System with impl_name but no children → info
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root), Some("impl"));
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("has no subcomponents"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "empty impl should produce info: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn empty_impl_data_category_no_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let data = b.add_component("data", ComponentCategory::Data, Some(root), Some("impl"));
+        b.set_children(root, vec![data]);
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("has no subcomponents")
+                    && d.message.contains("data")
+            })
+            .collect();
+        assert!(
+            infos.is_empty(),
+            "data should be trivially empty: {:?}",
+            infos
+        );
+    }
+
+    #[test]
+    fn deep_nesting_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let mut parent = root;
+        // Create a chain of 10 nested systems (depth > MAX_RECOMMENDED_DEPTH=8)
+        for i in 0..10 {
+            let child = b.add_component(
+                &format!("s{i}"),
+                ComponentCategory::System,
+                Some(parent),
+                Some("impl"),
+            );
+            b.set_children(parent, vec![child]);
+            parent = child;
+        }
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let depth_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("nesting depth"))
+            .collect();
+        assert!(
+            !depth_warns.is_empty(),
+            "deep nesting should warn: {:?}",
+            depth_warns
+        );
+    }
+
+    #[test]
+    fn depth_exactly_at_limit_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        let mut parent = root;
+        // Create chain of exactly MAX_RECOMMENDED_DEPTH=8 levels
+        for i in 0..MAX_RECOMMENDED_DEPTH {
+            let child = b.add_component(
+                &format!("s{i}"),
+                ComponentCategory::System,
+                Some(parent),
+                Some("impl"),
+            );
+            b.set_children(parent, vec![child]);
+            parent = child;
+        }
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let depth_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("nesting depth"))
+            .collect();
+        assert!(
+            depth_warns.is_empty(),
+            "exactly at limit should not warn: {:?}",
+            depth_warns
+        );
+    }
+
+    #[test]
+    fn no_impl_name_no_empty_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None, Some("impl"));
+        // sub has no impl_name, so no "empty implementation" info
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root), None);
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = HierarchyAnalysis.analyze(&inst);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("has no subcomponents")
+                    && d.message.contains("sub")
+            })
+            .collect();
+        assert!(
+            infos.is_empty(),
+            "no impl_name = no empty warning: {:?}",
+            infos
+        );
+    }
+
+    // ── Containment table unit tests ────────────────────────────────
+
+    #[test]
+    fn containment_abstract_parent() {
+        assert!(is_valid_containment(
+            ComponentCategory::Abstract,
+            ComponentCategory::Thread
+        ));
+        assert!(is_valid_containment(
+            ComponentCategory::Abstract,
+            ComponentCategory::System
+        ));
+    }
+
+    #[test]
+    fn containment_abstract_child() {
+        assert!(is_valid_containment(
+            ComponentCategory::Thread,
+            ComponentCategory::Abstract
+        ));
+        assert!(is_valid_containment(
+            ComponentCategory::Bus,
+            ComponentCategory::Abstract
+        ));
+    }
+}

@@ -429,6 +429,175 @@ mod tests {
         );
     }
 
+    // ── Flow sink on output-only component ────────────────────
+
+    #[test]
+    fn flow_sink_on_output_only_component() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("output", FeatureKind::DataPort, Direction::Out, comp);
+        b.add_flow("bad_sink", FlowKind::Sink, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no input ports"))
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "should warn about sink with no in: {:?}",
+            diags
+        );
+    }
+
+    // ── Flow source on inout component (valid) ──────────────────
+
+    #[test]
+    fn flow_source_on_inout_component() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("bidir", FeatureKind::DataPort, Direction::InOut, comp);
+        b.add_flow("src", FlowKind::Source, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no output ports"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "inout satisfies source: {:?}",
+            warnings
+        );
+    }
+
+    // ── Flow sink on inout component (valid) ────────────────────
+
+    #[test]
+    fn flow_sink_on_inout_component() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("bidir", FeatureKind::DataPort, Direction::InOut, comp);
+        b.add_flow("snk", FlowKind::Sink, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no input ports"))
+            .collect();
+        assert!(warnings.is_empty(), "inout satisfies sink: {:?}", warnings);
+    }
+
+    // ── Flow on featureless component: skip check ───────────────
+
+    #[test]
+    fn flow_source_on_featureless_component_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        // No features at all — we skip the check
+        b.add_flow("src", FlowKind::Source, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("flow source"))
+            .collect();
+        assert!(warnings.is_empty(), "featureless = skip: {:?}", warnings);
+    }
+
+    // ── E2E flow with 1 segment (odd, no even warning) ──────────
+
+    #[test]
+    fn e2e_flow_one_segment_no_even_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.add_e2e("short_flow", root, vec!["a.src"]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("expected odd"))
+            .collect();
+        assert!(warnings.is_empty(), "1 segment is odd: {:?}", warnings);
+    }
+
+    // ── E2E flow with valid connection at odd index (dotted seg) ─
+
+    #[test]
+    fn e2e_flow_dotted_connection_segment_no_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // A dotted connection segment like "sub.port" should not warn
+        b.add_e2e("flow", root, vec!["a.src", "sub.port", "b.sink"]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("not a known connection"))
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "dotted segment skipped: {:?}",
+            warnings
+        );
+    }
+
+    // ── Flow path with both in and out ports (valid) ────────────
+
+    #[test]
+    fn flow_path_with_both_directions_valid() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("input", FeatureKind::DataPort, Direction::In, comp);
+        b.add_feature("output", FeatureKind::DataPort, Direction::Out, comp);
+        b.add_flow("pass_through", FlowKind::Path, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lacks both"))
+            .collect();
+        assert!(warnings.is_empty(), "valid path with both: {:?}", warnings);
+    }
+
+    // ── Flow path with only output (missing input) ──────────────
+
+    #[test]
+    fn flow_path_missing_input() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let comp = b.add_component("comp", ComponentCategory::System, Some(root));
+        b.add_feature("output", FeatureKind::DataPort, Direction::Out, comp);
+        b.add_flow("pass_through", FlowKind::Path, comp);
+        b.set_children(root, vec![comp]);
+
+        let inst = b.build(root);
+        let diags = FlowCheckAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lacks both"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "path missing input: {:?}", diags);
+    }
+
     #[test]
     fn flow_path_needs_both_directions() {
         let mut b = TestBuilder::new();

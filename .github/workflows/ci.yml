@@ -142,7 +142,6 @@ jobs:
     name: Mutation Testing
     needs: [test]
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -152,7 +151,23 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run cargo-mutants on spar-analysis
-        run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib
+        run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib || true
+      - name: Check surviving mutants
+        run: |
+          MISSED=$(grep -c '^MISSED' mutants-out/caught.txt 2>/dev/null || echo 0)
+          if [ -f mutants-out/missed.txt ]; then
+            MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
+          fi
+          echo "Surviving mutants: $MISSED"
+          # Ratchet gate: fail if more mutants survive than the threshold.
+          # Lower this number as tests improve. Target: 0.
+          MAX_MISSED=142
+          if [ "$MISSED" -gt "$MAX_MISSED" ]; then
+            echo "::error::$MISSED mutant(s) survived (threshold: $MAX_MISSED) — add tests to kill them"
+            cat mutants-out/missed.txt 2>/dev/null | head -30
+            exit 1
+          fi
+          echo "Mutant survivors ($MISSED) within threshold ($MAX_MISSED). Target: 0."
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4

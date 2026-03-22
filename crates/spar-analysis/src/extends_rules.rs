@@ -891,6 +891,173 @@ mod tests {
         assert!(diags.is_empty(), "no extends = no diagnostics: {:?}", diags);
     }
 
+    // ── EXT-NO-SELF impl: different impl name, same type → no error ──
+
+    #[test]
+    fn impl_extends_different_impl_name_no_self_ref() {
+        let mut tree = ItemTree::default();
+
+        let ci_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("Top"),
+            impl_name: Name::new("impl1"),
+            category: ComponentCategory::System,
+            extends: Some(ClassifierRef::implementation(
+                None,
+                Name::new("Top"),
+                Name::new("impl2"),
+            )),
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentImpl(ci_idx)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let diags = check_extends_rules(&tree);
+        let self_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends itself"))
+            .collect();
+        assert!(
+            self_errs.is_empty(),
+            "different impl name should not be self-ref: {:?}",
+            self_errs
+        );
+    }
+
+    // ── EXT-NO-SELF: impl extends type only (no impl_name) → no self ──
+
+    #[test]
+    fn impl_extends_type_only_no_self_ref() {
+        let mut tree = ItemTree::default();
+
+        let ci_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("Top"),
+            impl_name: Name::new("impl"),
+            category: ComponentCategory::System,
+            extends: Some(ClassifierRef::type_only(Name::new("Top"))),
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentImpl(ci_idx)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let diags = check_extends_rules(&tree);
+        let self_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("extends itself"))
+            .collect();
+        assert!(
+            self_errs.is_empty(),
+            "type-only ref from impl should not be self-ref: {:?}",
+            self_errs
+        );
+    }
+
+    // ── EXT-FEATURE-COMPAT: same kind but different direction → no error ──
+
+    #[test]
+    fn feature_same_kind_different_direction_no_error() {
+        let mut tree = ItemTree::default();
+
+        let base_f = tree.features.alloc(Feature {
+            name: Name::new("port_a"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::In),
+            access_kind: None,
+            classifier: None,
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let ext_f = tree.features.alloc(Feature {
+            name: Name::new("port_a"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            access_kind: None,
+            classifier: None,
+            is_refined: true,
+            array_dimensions: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        let base_ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Base"),
+            category: ComponentCategory::System,
+            extends: None,
+            features: vec![base_f],
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        let ext_ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Ext"),
+            category: ComponentCategory::System,
+            extends: Some(ClassifierRef::type_only(Name::new("Base"))),
+            features: vec![ext_f],
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(base_ct),
+                ItemRef::ComponentType(ext_ct),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let diags = check_extends_rules(&tree);
+        let feat_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("refined features must preserve kind"))
+            .collect();
+        assert!(
+            feat_errs.is_empty(),
+            "same kind, different direction should be ok: {:?}",
+            feat_errs
+        );
+    }
+
     // ── Case-insensitive self-ref ────────────────────────────────────
 
     #[test]

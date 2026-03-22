@@ -321,7 +321,17 @@ artifacts:
       for in-process diagram rendering. WASI filesystem calls are
       shimmed to read workspace files. Webview panel shows interactive
       HTML from etch with ports, orthogonal routing, and pan/zoom.
+    fields:
+      rationale: >
+        Bundling the native binary per platform ensures zero-config
+        installation. WASM renderer provides in-process rendering
+        without spawning a child process.
     tags: [architecture, tooling, vscode]
+    links:
+      - type: satisfies
+        target: REQ-LSP-001
+      - type: satisfies
+        target: RENDER-REQ-003
 
   # ── v0.3.0 Architecture Decisions ──────────────────────────────────────
 
@@ -399,7 +409,7 @@ artifacts:
       interfaces:
         provides: [spar mcp command, MCP tools, MCP resources]
         requires: [spar-hir Database, spar-analysis AnalysisRunner]
-    tags: [architecture, mcp, v030]
+    tags: [architecture, mcp, v040]
     links:
       - type: satisfies
         target: REQ-MCP-001
@@ -447,7 +457,7 @@ artifacts:
       interfaces:
         provides: [QueryExpression, QueryResult, spar query command]
         requires: [spar-hir instance model]
-    tags: [architecture, query, v030]
+    tags: [architecture, query, v040]
     links:
       - type: satisfies
         target: REQ-QUERY-001
@@ -471,9 +481,9 @@ artifacts:
       interfaces:
         provides: [unified knowledge base]
         requires: [spar-hir-def SystemInstance, spar-hir facade]
-    tags: [architecture, knowledge, v030]
+    tags: [architecture, knowledge, v040]
     links:
-      - type: traces-to
+      - type: satisfies
         target: REQ-QUERY-001
       - type: traces-to
         target: REQ-MCP-001
@@ -605,3 +615,37 @@ artifacts:
         target: REQ-SOLVER-005
       - type: satisfies
         target: REQ-SOLVER-006
+
+  # ── SysML v2 Integration (v0.5.0) ───────────────────────────────────
+
+  - id: ARCH-SYSML2-001
+    type: design-decision
+    status: planned
+    title: "SysML v2 rowan-based parser (spar-sysml2 crate)"
+    description: >
+      New spar-sysml2 crate implementing a rowan-based parser for SysML v2
+      textual notation (KerML grammar). Same architecture as spar-parser:
+      hand-written recursive descent, lossless CST, error recovery. No Rust
+      SysML v2 parser exists — the pilot implementation is Java-only.
+      SysML v2 spec: github.com/Systems-Modeling/SysML-v2-Release.
+      Three-layer pipeline: SysML v2 (system-level) → AADL (deployment-level)
+      → WIT/code (implementation-level). Lowering implements the SEI mapping
+      rules from sei.cmu.edu/annual-reviews/2023-year-in-review/extending-
+      sysml-v2-with-aadl-concepts. SysML v2 requirement elements flow
+      directly into rivet artifacts.
+    fields:
+      rationale: >
+        KerML is just another grammar — parseable with rowan the same way
+        AADL is parsed. The SysML v2 → AADL lowering maps system models
+        to execution platform models where timing/scheduling semantics exist.
+        This is exactly what the SEI is specifying. Requirements extraction
+        bridges SysML v2 requirements with rivet traceability. Result: one
+        tool analyzing architecture from system design through deployment
+        through implementation.
+      interfaces:
+        provides: [parse_sysml2, lower_to_aadl, extract_requirements]
+        requires: [spar-parser pattern, spar-transform, rivet YAML]
+    tags: [architecture, sysml, v050]
+    links:
+      - type: satisfies
+        target: REQ-INTEROP-001

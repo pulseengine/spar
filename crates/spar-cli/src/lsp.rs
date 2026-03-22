@@ -471,7 +471,20 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
         });
     }
 
-    // 3. Publish.
+    // 3. Add completeness note so engineers know the LSP does not run
+    //    the full suite of instance-level analyses.
+    diagnostics.push(Diagnostic {
+        range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+        severity: Some(DiagnosticSeverity::HINT),
+        source: Some("spar".to_string()),
+        message: "Note: LSP provides parse-level and naming diagnostics only. \
+                  Run 'spar analyze' for full instance-level analysis \
+                  (scheduling, latency, connectivity, etc.)"
+            .to_string(),
+        ..Default::default()
+    });
+
+    // 4. Publish.
     let params = PublishDiagnosticsParams {
         uri: uri.clone(),
         diagnostics,

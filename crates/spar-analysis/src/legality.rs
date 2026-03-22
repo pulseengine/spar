@@ -1029,6 +1029,551 @@ mod tests {
 
     // ── Category rule tagging ──────────────────────────────────────
 
+    // ── classify_naming_rule coverage ─────────────────────────────
+
+    #[test]
+    fn naming_rule_empty_name_tagged_n1() {
+        // Exercise the "empty name" branch of classify_naming_rule
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "component has empty name".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-1");
+    }
+
+    #[test]
+    fn naming_rule_empty_type_name_tagged_n1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "component has empty type name".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-1");
+    }
+
+    #[test]
+    fn naming_rule_empty_impl_name_tagged_n1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "component has empty impl name".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-1");
+    }
+
+    #[test]
+    fn naming_rule_duplicate_with_clause_tagged_n3() {
+        // Exercises the `contains("duplicate") && contains("with clause")` branch
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "duplicate entry 'Foo' in with clause".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-3");
+    }
+
+    #[test]
+    fn naming_rule_imports_itself_tagged_n3() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "package 'Foo' imports itself".to_string(),
+            path: vec!["Foo".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-3");
+    }
+
+    #[test]
+    fn naming_rule_duplicate_property_definition_tagged_n4() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "duplicate property definition 'X'".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-4");
+    }
+
+    #[test]
+    fn naming_rule_duplicate_property_type_tagged_n4() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "duplicate property type 'Y'".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-4");
+    }
+
+    #[test]
+    fn naming_rule_duplicate_feature_tagged_n2() {
+        // Fallthrough: a "duplicate" message that does NOT contain "with clause"
+        // or "property definition" or "property type"
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "duplicate feature name 'port_a'".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(rule.id, "N-2");
+    }
+
+    #[test]
+    fn naming_rule_duplicate_only_not_with_clause_is_n2() {
+        // Contains "duplicate" but NOT "with clause" → should NOT be N-3
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "duplicate subcomponent name 'foo'".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "naming_rules".to_string(),
+        };
+        let rule = classify_naming_rule(&d);
+        assert_eq!(
+            rule.id, "N-2",
+            "duplicate without 'with clause' should be N-2, not N-3"
+        );
+    }
+
+    // ── classify_category_rule coverage ──────────────────────────
+
+    #[test]
+    fn category_rule_feature_tagged_c1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "feature 'p' not allowed on data component".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "category_check".to_string(),
+        };
+        let rule = classify_category_rule(&d);
+        assert_eq!(rule.id, "C-1");
+    }
+
+    #[test]
+    fn category_rule_subcomponent_tagged_c2() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "subcomponent 'x' not allowed in data component".to_string(),
+            path: vec!["Pkg".into()],
+            analysis: "category_check".to_string(),
+        };
+        let rule = classify_category_rule(&d);
+        assert_eq!(rule.id, "C-2");
+    }
+
+    // ── classify_instance_rule coverage ──────────────────────────
+
+    #[test]
+    fn instance_rule_bidirectional_tagged_d4() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "bidirectional connection requires in out".to_string(),
+            path: vec![],
+            analysis: "direction_rules".to_string(),
+        };
+        let rule = classify_instance_rule("direction_rules", &d);
+        assert_eq!(rule.id, "D-4");
+    }
+
+    #[test]
+    fn instance_rule_across_tagged_d1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "across connection direction mismatch".to_string(),
+            path: vec![],
+            analysis: "direction_rules".to_string(),
+        };
+        let rule = classify_instance_rule("direction_rules", &d);
+        assert_eq!(rule.id, "D-1");
+    }
+
+    #[test]
+    fn instance_rule_up_tagged_d2() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "up connection direction mismatch".to_string(),
+            path: vec![],
+            analysis: "direction_rules".to_string(),
+        };
+        let rule = classify_instance_rule("direction_rules", &d);
+        assert_eq!(rule.id, "D-2");
+    }
+
+    #[test]
+    fn instance_rule_down_tagged_d3() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "down connection direction mismatch".to_string(),
+            path: vec![],
+            analysis: "direction_rules".to_string(),
+        };
+        let rule = classify_instance_rule("direction_rules", &d);
+        assert_eq!(rule.id, "D-3");
+    }
+
+    #[test]
+    fn instance_rule_generic_direction_tagged_d1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "port direction mismatch".to_string(),
+            path: vec![],
+            analysis: "direction_rules".to_string(),
+        };
+        let rule = classify_instance_rule("direction_rules", &d);
+        assert_eq!(rule.id, "D-1");
+    }
+
+    #[test]
+    fn instance_rule_binding_error_references_tagged_b2() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "binding references non-existent target".to_string(),
+            path: vec![],
+            analysis: "binding_check".to_string(),
+        };
+        let rule = classify_instance_rule("binding_check", &d);
+        assert_eq!(rule.id, "B-2");
+    }
+
+    #[test]
+    fn instance_rule_binding_warning_tagged_b1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "binding references something".to_string(),
+            path: vec![],
+            analysis: "binding_check".to_string(),
+        };
+        // severity is Warning, not Error — should fallthrough to B-1
+        let rule = classify_instance_rule("binding_check", &d);
+        assert_eq!(rule.id, "B-1");
+    }
+
+    #[test]
+    fn instance_rule_binding_no_references_tagged_b1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "missing deployment binding".to_string(),
+            path: vec![],
+            analysis: "binding_check".to_string(),
+        };
+        // Contains no "references" keyword — should be B-1
+        let rule = classify_instance_rule("binding_check", &d);
+        assert_eq!(rule.id, "B-1");
+    }
+
+    #[test]
+    fn instance_rule_flow_end_to_end_tagged_f2() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "end-to-end flow has broken segment".to_string(),
+            path: vec![],
+            analysis: "flow_check".to_string(),
+        };
+        let rule = classify_instance_rule("flow_check", &d);
+        assert_eq!(rule.id, "F-2");
+    }
+
+    #[test]
+    fn instance_rule_flow_segment_tagged_f2() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "flow segment mismatch".to_string(),
+            path: vec![],
+            analysis: "flow_check".to_string(),
+        };
+        let rule = classify_instance_rule("flow_check", &d);
+        assert_eq!(rule.id, "F-2");
+    }
+
+    #[test]
+    fn instance_rule_flow_spec_tagged_f1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "flow spec port inconsistency".to_string(),
+            path: vec![],
+            analysis: "flow_check".to_string(),
+        };
+        let rule = classify_instance_rule("flow_check", &d);
+        assert_eq!(rule.id, "F-1");
+    }
+
+    #[test]
+    fn instance_rule_connectivity_tagged_conn1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "unconnected port".to_string(),
+            path: vec![],
+            analysis: "connectivity".to_string(),
+        };
+        let rule = classify_instance_rule("connectivity", &d);
+        assert_eq!(rule.id, "CONN-1");
+    }
+
+    #[test]
+    fn instance_rule_hierarchy_tagged_h1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "hierarchy violation".to_string(),
+            path: vec![],
+            analysis: "hierarchy".to_string(),
+        };
+        let rule = classify_instance_rule("hierarchy", &d);
+        assert_eq!(rule.id, "H-1");
+    }
+
+    #[test]
+    fn instance_rule_completeness_tagged_comp1() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "missing type".to_string(),
+            path: vec![],
+            analysis: "completeness".to_string(),
+        };
+        let rule = classify_instance_rule("completeness", &d);
+        assert_eq!(rule.id, "COMP-1");
+    }
+
+    #[test]
+    fn instance_rule_connection_self_loop_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "connection self-loop detected".to_string(),
+            path: vec![],
+            analysis: "connection_rules".to_string(),
+        };
+        let rule = classify_instance_rule("connection_rules", &d);
+        assert_eq!(rule.id, "CONN-SELF");
+    }
+
+    #[test]
+    fn instance_rule_connection_type_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "feature kind mismatch".to_string(),
+            path: vec![],
+            analysis: "connection_rules".to_string(),
+        };
+        let rule = classify_instance_rule("connection_rules", &d);
+        assert_eq!(rule.id, "CONN-TYPE");
+    }
+
+    #[test]
+    fn instance_rule_mode_duplicate_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "duplicate mode name 'active'".to_string(),
+            path: vec![],
+            analysis: "mode_rules".to_string(),
+        };
+        let rule = classify_instance_rule("mode_rules", &d);
+        assert_eq!(rule.id, "MODE-UNIQUE");
+    }
+
+    #[test]
+    fn instance_rule_mode_trigger_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Warning,
+            message: "mode transition trigger should be event port".to_string(),
+            path: vec![],
+            analysis: "mode_rules".to_string(),
+        };
+        let rule = classify_instance_rule("mode_rules", &d);
+        assert_eq!(rule.id, "MODE-TRIGGER");
+    }
+
+    #[test]
+    fn instance_rule_subcomponent_duplicate_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "duplicate subcomponent name 'cpu'".to_string(),
+            path: vec![],
+            analysis: "subcomponent_rules".to_string(),
+        };
+        let rule = classify_instance_rule("subcomponent_rules", &d);
+        assert_eq!(rule.id, "SUB-UNIQUE");
+    }
+
+    #[test]
+    fn instance_rule_subcomponent_category_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Error,
+            message: "invalid subcomponent category".to_string(),
+            path: vec![],
+            analysis: "subcomponent_rules".to_string(),
+        };
+        let rule = classify_instance_rule("subcomponent_rules", &d);
+        assert_eq!(rule.id, "SUB-CAT");
+    }
+
+    #[test]
+    fn instance_rule_unknown_analysis_tagged() {
+        let d = AnalysisDiagnostic {
+            severity: Severity::Info,
+            message: "something".to_string(),
+            path: vec![],
+            analysis: "unknown_analysis".to_string(),
+        };
+        let rule = classify_instance_rule("unknown_analysis", &d);
+        assert_eq!(rule.id, "UNKNOWN");
+    }
+
+    // ── L-impl-type: empty type_name edge case ──────────────────
+
+    #[test]
+    fn impl_with_empty_type_name_not_flagged() {
+        // When type_name is empty, the `!tn_lower.is_empty()` guard should
+        // prevent an L-impl-type diagnostic.
+        let mut tree = ItemTree::default();
+
+        let ci_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new(""),
+            impl_name: Name::new("impl"),
+            category: ComponentCategory::System,
+            extends: None,
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentImpl(ci_idx)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let diags = check_impl_type_match(&tree);
+        let impl_type: Vec<_> = diags
+            .iter()
+            .filter(|d| d.rule.id == "L-impl-type")
+            .collect();
+        assert!(
+            impl_type.is_empty(),
+            "empty type_name should not produce L-impl-type diagnostic"
+        );
+    }
+
+    // ── L-fg-features: inverse_of present but no features ───────
+
+    #[test]
+    fn feature_group_with_inverse_of_no_warning() {
+        // Feature group has inverse_of set but no features — the `&&`
+        // ensures this does NOT produce a warning.
+        let mut tree = ItemTree::default();
+
+        tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("InverseGroup"),
+            extends: None,
+            inverse_of: Some(spar_hir_def::name::ClassifierRef::type_only(Name::new(
+                "OtherGroup",
+            ))),
+            features: Vec::new(),
+            prototypes: Vec::new(),
+            is_public: true,
+        });
+
+        let diags = check_feature_group_nonempty(&tree);
+        assert!(
+            diags.is_empty(),
+            "feature group with inverse_of should not warn even if features are empty"
+        );
+    }
+
+    #[test]
+    fn feature_group_no_features_no_inverse_warns() {
+        // Ensures features.is_empty() && inverse_of.is_none() → warning
+        let mut tree = ItemTree::default();
+
+        tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("EmptyGroup"),
+            extends: None,
+            inverse_of: None,
+            features: Vec::new(),
+            prototypes: Vec::new(),
+            is_public: true,
+        });
+
+        let diags = check_feature_group_nonempty(&tree);
+        assert_eq!(diags.len(), 1, "empty group without inverse_of should warn");
+        assert_eq!(diags[0].rule.id, "L-fg-features");
+    }
+
+    // ── L-impl-type: case-insensitive matching ──────────────────
+
+    #[test]
+    fn impl_type_match_case_insensitive() {
+        let mut tree = ItemTree::default();
+
+        let ct_idx = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("mycontroller"),
+            category: ComponentCategory::System,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        let ci_idx = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("MyController"),
+            impl_name: Name::new("impl"),
+            category: ComponentCategory::System,
+            extends: None,
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+            is_public: true,
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg"),
+            with_clauses: Vec::new(),
+            public_items: vec![
+                ItemRef::ComponentType(ct_idx),
+                ItemRef::ComponentImpl(ci_idx),
+            ],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let diags = check_impl_type_match(&tree);
+        assert!(
+            diags.is_empty(),
+            "case-insensitive type match should not flag L-impl-type"
+        );
+    }
+
+    // ── Category rule tagging ──────────────────────────────────────
+
     #[test]
     fn category_feature_violation_tagged_c1() {
         let mut tree = ItemTree::default();

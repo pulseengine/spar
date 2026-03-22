@@ -918,6 +918,169 @@ mod tests {
         assert!(diags.is_empty(), "no bus = no diagnostics: {:?}", diags);
     }
 
+    // ── Boundary tests (kill > vs >= mutants) ─────────────────────
+
+    #[test]
+    fn bandwidth_exactly_at_capacity() {
+        // demand == capacity must NOT error (boundary: > not >=).
+        // Bus: 8192 bitsps, Data_Size: 1 KByte = 8192 bits, Period: 1 sec
+        // demand = 8192 / 1 = 8192 bps == capacity
+        let (b, root) = build_basic_model("8192 bitsps", "1 KByte", "1 sec");
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "demand == capacity should NOT error: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn bandwidth_one_bps_over_capacity() {
+        // demand > capacity must error.
+        // Bus: 8191 bitsps, Data_Size: 1 KByte = 8192 bits, Period: 1 sec
+        // demand = 8192 bps > 8191 bps
+        let (b, root) = build_basic_model("8191 bitsps", "1 KByte", "1 sec");
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "demand > capacity should error: {:?}",
+            diags
+        );
+        assert!(
+            errors[0].message.contains("exceeded"),
+            "should mention exceeded: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn bandwidth_exactly_80_percent_no_warning() {
+        // 80% utilization must NOT warn (boundary: > 80.0, not >= 80.0).
+        // Bus: 10240 bitsps, demand: 8192 bps => 80.0% exactly
+        let (b, root) = build_basic_model("10240 bitsps", "1 KByte", "1 sec");
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "80%% utilization should not error: {:?}",
+            errors
+        );
+        assert!(
+            warnings.is_empty(),
+            "exactly 80%% should NOT warn (> 80, not >=): {:?}",
+            warnings
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should emit info for 80%% utilization: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn bandwidth_just_above_80_percent_warns() {
+        // Just above 80% should warn.
+        // Bus: 10239 bitsps, demand: 8192 bps => 80.008...% > 80%
+        let (b, root) = build_basic_model("10239 bitsps", "1 KByte", "1 sec");
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "just above 80%% should warn: {:?}",
+            diags
+        );
+        assert!(
+            warnings[0].message.contains("high"),
+            "should mention high utilization: {}",
+            warnings[0].message
+        );
+    }
+
+    #[test]
+    fn compute_connection_demand_uses_multiply_not_add() {
+        // demand = data_size * (1e12 / period), verify it's multiplication.
+        // Data_Size: 100 bits, Period: 1 sec = 1e12 ps
+        // demand = 100 * 1e12 / 1e12 = 100 bps (multiply)
+        // If mutated to +: 100 + 1e12/1e12 = 101 bps
+        // Use capacity of 99 bps: if multiply, 100 > 99 => error.
+        // If add, 101 > 99 => also error, so this test won't distinguish.
+        //
+        // Better: capacity 150, Data_Size: 10 bits, Period: 100 ms = 1e11 ps
+        // demand = 10 * 1e12 / 1e11 = 100 bps (multiply) => under 150
+        // If add: 10 + 1e12/1e11 = 10 + 10 = 20 bps => also under 150
+        //
+        // Actually use: capacity 50, Data_Size: 10 bits, Period: 100 ms
+        // multiply: 10 * 1e12/1e11 = 100 bps > 50 => error
+        // add: 10 + 10 = 20 bps < 50 => no error
+        let (b, root) = build_basic_model("50 bitsps", "10 bits", "100 ms");
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "demand = 10 bits / 0.1 sec = 100 bps > 50 bps should error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn bus_bandwidth_analysis_field_matches_name() {
+        // Verify every diagnostic has .analysis == self.name().
+        let (b, root) = build_basic_model("1 Mbitsps", "1 KByte", "1 sec");
+        let inst = b.build(root);
+        let pass = BusBandwidthAnalysis;
+        let diags = pass.analyze(&inst);
+
+        assert!(!diags.is_empty(), "should produce diagnostics");
+        for diag in &diags {
+            assert_eq!(
+                diag.analysis,
+                pass.name(),
+                "diagnostic .analysis must match .name(): {:?}",
+                diag,
+            );
+        }
+    }
+
     // ── parse_data_rate tests ───────────────────────────────────────
 
     #[test]

@@ -875,4 +875,382 @@ mod tests {
             util_diags
         );
     }
+
+    // ── find_ancestor_of_category unit tests ──────────────────────
+
+    #[test]
+    fn find_ancestor_of_category_returns_self_when_matching() {
+        // Component IS in the right category — should return itself
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc1", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![proc]);
+
+        let inst = b.build(root);
+        let result = find_ancestor_of_category(&inst, proc, ComponentCategory::Process);
+        assert_eq!(result, Some(proc), "process should match itself");
+    }
+
+    #[test]
+    fn find_ancestor_of_category_returns_none_when_not_matching() {
+        // Component is NOT in the right category and no ancestor matches
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc1", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![proc]);
+
+        let inst = b.build(root);
+        // Looking for a VirtualProcessor ancestor — none exists
+        let result = find_ancestor_of_category(&inst, proc, ComponentCategory::VirtualProcessor);
+        assert_eq!(
+            result, None,
+            "no VirtualProcessor ancestor should return None"
+        );
+    }
+
+    #[test]
+    fn find_ancestor_of_category_walks_up_hierarchy() {
+        // Thread -> Process -> VirtualProcessor: should find VP ancestor
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let proc = b.add_component("proc1", ComponentCategory::Process, Some(vp));
+        let thr = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp]);
+        b.set_children(vp, vec![proc]);
+        b.set_children(proc, vec![thr]);
+
+        let inst = b.build(root);
+        let result = find_ancestor_of_category(&inst, thr, ComponentCategory::VirtualProcessor);
+        assert_eq!(result, Some(vp), "should walk up to VP ancestor");
+    }
+
+    // ── owning_partition unit tests ───────────────────────────────
+
+    #[test]
+    fn owning_partition_thread_inside_vp() {
+        // Thread directly under VirtualProcessor — owning_partition returns VP
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let thr = b.add_component("t1", ComponentCategory::Thread, Some(vp));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp]);
+        b.set_children(vp, vec![thr]);
+
+        let inst = b.build(root);
+        let result = owning_partition(&inst, thr);
+        assert_eq!(result, Some(vp), "thread under VP should return VP");
+    }
+
+    #[test]
+    fn owning_partition_thread_outside_vp() {
+        // Thread under System (not VP) with no binding — owning_partition returns None
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let thr = b.add_component("t1", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![thr]);
+
+        let inst = b.build(root);
+        let result = owning_partition(&inst, thr);
+        assert_eq!(
+            result, None,
+            "thread not under VP and no binding should return None"
+        );
+    }
+
+    #[test]
+    fn owning_partition_via_binding_to_non_vp_returns_none() {
+        // Thread bound to a regular Processor (not VP) — should return None
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let thr = b.add_component("t1", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![cpu, thr]);
+
+        // Bind to processor (not a virtual processor)
+        b.set_property(
+            thr,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let result = owning_partition(&inst, thr);
+        assert_eq!(
+            result, None,
+            "binding to Processor (not VP) should return None"
+        );
+    }
+
+    // ── check_partition_isolation: same partition (no warn) ────────
+
+    #[test]
+    fn partition_isolation_same_vp_via_semantic_connections_no_warn() {
+        // Two processes under the SAME VP with a semantic connection — no warning
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("p1", ComponentCategory::Process, Some(vp));
+        let p2 = b.add_component("p2", ComponentCategory::Process, Some(vp));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(p1));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(p2));
+
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), t1);
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), t2);
+
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp]);
+        b.set_children(vp, vec![p1, p2]);
+        b.set_children(p1, vec![t1]);
+        b.set_children(p2, vec![t2]);
+
+        let mut inst = b.build(root);
+        inst.semantic_connections.push(SemanticConnection {
+            name: Name::new("sc1"),
+            kind: ConnectionKind::Port,
+            ultimate_source: (t1, Name::new("out1")),
+            ultimate_destination: (t2, Name::new("in1")),
+            connection_path: Vec::new(),
+        });
+
+        let diags = Arinc653Analysis.analyze(&inst);
+        let isolation: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("ARINC-PARTITION-ISOLATION"))
+            .collect();
+        assert!(
+            isolation.is_empty(),
+            "same-partition semantic connection should not warn: {:?}",
+            isolation
+        );
+    }
+
+    #[test]
+    fn partition_isolation_different_vp_via_semantic_connections_warns() {
+        // Two processes under DIFFERENT VPs with a semantic connection — should warn
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("part_a", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("part_b", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("app1", ComponentCategory::Process, Some(vp1));
+        let p2 = b.add_component("app2", ComponentCategory::Process, Some(vp2));
+        let t1 = b.add_component("sender", ComponentCategory::Thread, Some(p1));
+        let t2 = b.add_component("receiver", ComponentCategory::Thread, Some(p2));
+
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), t1);
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), t2);
+
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp1, vp2]);
+        b.set_children(vp1, vec![p1]);
+        b.set_children(vp2, vec![p2]);
+        b.set_children(p1, vec![t1]);
+        b.set_children(p2, vec![t2]);
+
+        let mut inst = b.build(root);
+        inst.semantic_connections.push(SemanticConnection {
+            name: Name::new("cross_sc"),
+            kind: ConnectionKind::Port,
+            ultimate_source: (t1, Name::new("out1")),
+            ultimate_destination: (t2, Name::new("in1")),
+            connection_path: Vec::new(),
+        });
+
+        let diags = Arinc653Analysis.analyze(&inst);
+        let isolation: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("ARINC-PARTITION-ISOLATION"))
+            .collect();
+        assert_eq!(
+            isolation.len(),
+            1,
+            "cross-partition semantic connection should warn: {:?}",
+            diags
+        );
+        assert!(isolation[0].message.contains("part_a"));
+        assert!(isolation[0].message.contains("part_b"));
+        assert!(isolation[0].message.contains("app1"));
+        assert!(isolation[0].message.contains("app2"));
+    }
+
+    #[test]
+    fn partition_isolation_same_process_via_semantic_no_warn() {
+        // Both endpoints in the SAME process — no isolation concern (line 188: src_proc == dst_proc)
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("p1", ComponentCategory::Process, Some(vp));
+        let t1 = b.add_component("sender", ComponentCategory::Thread, Some(p1));
+        let t2 = b.add_component("receiver", ComponentCategory::Thread, Some(p1));
+
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), t1);
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), t2);
+
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp]);
+        b.set_children(vp, vec![p1]);
+        b.set_children(p1, vec![t1, t2]);
+
+        let mut inst = b.build(root);
+        inst.semantic_connections.push(SemanticConnection {
+            name: Name::new("intra_process"),
+            kind: ConnectionKind::Port,
+            ultimate_source: (t1, Name::new("out1")),
+            ultimate_destination: (t2, Name::new("in1")),
+            connection_path: Vec::new(),
+        });
+
+        let diags = Arinc653Analysis.analyze(&inst);
+        let isolation: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("ARINC-PARTITION-ISOLATION"))
+            .collect();
+        assert!(
+            isolation.is_empty(),
+            "same-process connection should not warn: {:?}",
+            isolation
+        );
+    }
+
+    // ── check_window_utilization: boundary tests ──────────────────
+
+    #[test]
+    fn window_utilization_exactly_at_period_is_info() {
+        // Total VP exec time == period exactly (100%) — should be Info, NOT Error
+        // Kills `>` → `>=` mutant at line 335
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("vp2", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp1, vp2]);
+
+        // Processor period = 100 ms, total VP time = 60 + 40 = 100 ms = 100%
+        b.set_property(cpu, "Timing_Properties", "Period", "100 ms");
+        b.set_property(vp1, "Timing_Properties", "Execution_Time", "60 ms");
+        b.set_property(vp2, "Timing_Properties", "Execution_Time", "40 ms");
+
+        let inst = b.build(root);
+        let diags = Arinc653Analysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
+            })
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "exactly 100% utilization should NOT be Error (only >100%): {:?}",
+            errors
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info && d.message.contains("partition window utilization")
+            })
+            .collect();
+        assert_eq!(infos.len(), 1, "should report info for 100%: {:?}", diags);
+        assert!(
+            infos[0].message.contains("100.0%"),
+            "utilization should be 100%: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn window_utilization_just_over_period_is_error() {
+        // Total VP exec time slightly > period — should be Error
+        // Verifies the `>` threshold works at just over 100%
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("vp2", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp1, vp2]);
+
+        // Processor period = 100 ms, total VP time = 60 + 41 = 101 ms > 100 ms
+        b.set_property(cpu, "Timing_Properties", "Period", "100 ms");
+        b.set_property(vp1, "Timing_Properties", "Execution_Time", "60 ms");
+        b.set_property(vp2, "Timing_Properties", "Execution_Time", "41 ms");
+
+        let inst = b.build(root);
+        let diags = Arinc653Analysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "101% utilization should be error: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn window_utilization_accumulates_multiple_vps() {
+        // Ensures `+=` is correct (kills `+=` → `-=` mutant at line 320)
+        // 3 VPs with known exec times, verify the sum is correct
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("vp2", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp3 = b.add_component("vp3", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp1, vp2, vp3]);
+
+        // period = 200 ms, exec = 50+50+50 = 150 ms -> 75%
+        b.set_property(cpu, "Timing_Properties", "Period", "200 ms");
+        b.set_property(vp1, "Timing_Properties", "Execution_Time", "50 ms");
+        b.set_property(vp2, "Timing_Properties", "Execution_Time", "50 ms");
+        b.set_property(vp3, "Timing_Properties", "Execution_Time", "50 ms");
+
+        let inst = b.build(root);
+        let diags = Arinc653Analysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info && d.message.contains("partition window utilization")
+            })
+            .collect();
+        assert_eq!(infos.len(), 1, "should report utilization: {:?}", diags);
+        assert!(
+            infos[0].message.contains("75.0%"),
+            "3 VPs at 50ms each with 200ms period = 75%: {}",
+            infos[0].message
+        );
+        assert!(
+            infos[0].message.contains("3 partitions"),
+            "should count 3 partitions: {}",
+            infos[0].message
+        );
+
+        // If -= were used instead of +=, the result would be negative or 0%
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "75% utilization should have no errors: {:?}",
+            errors
+        );
+    }
 }

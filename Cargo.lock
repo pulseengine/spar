@@ -160,8 +160,8 @@ dependencies = [
 
 [[package]]
 name = "etch"
-version = "0.2.0-dev"
-source = "git+https://github.com/pulseengine/rivet.git?rev=d80b36b#d80b36b09bf95a79b2a613dbf48cd25dd9328a53"
+version = "0.2.0"
+source = "git+https://github.com/pulseengine/rivet.git?rev=4c067093ac34fc9e32227bc5bc853d47e9220540#4c067093ac34fc9e32227bc5bc853d47e9220540"
 dependencies = [
  "petgraph 0.7.1",
 ]

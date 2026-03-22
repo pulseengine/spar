@@ -1451,6 +1451,414 @@ mod tests {
             diags
         );
     }
+
+    // ── Boundary tests for utilization thresholds ─────────────────
+
+    #[test]
+    fn utilization_exactly_at_rma_bound_no_warning() {
+        // 2 threads: RMA bound for n=2 is ~82.8%. Set U = 82.8% exactly.
+        // Should NOT trigger "exceeds RMA bound" warning — kills `>` → `>=` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // For n=2, RMA bound = 2*(2^(1/2) - 1) ≈ 0.8284.
+        // Use period=10000, exec=4142 for each thread -> U = 2*(4142/10000) = 0.8284
+        b.set_property(t1, "Timing_Properties", "Period", "10000 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "4142 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t2, "Timing_Properties", "Period", "10000 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "4142 ms");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // U = 0.8284 ≈ RMA bound. The code uses `>`, so exactly at bound should NOT warn.
+        let rma_warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
+            .collect();
+        assert!(
+            rma_warnings.is_empty(),
+            "utilization at RMA bound should not trigger warning: {:?}",
+            rma_warnings
+        );
+
+        // Should NOT be error either
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "utilization at 82.8% should not be error: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn utilization_exactly_at_100_percent_is_error_boundary() {
+        // U = 1.0 exactly should NOT be "overloaded" (code uses `> 1.0`).
+        // Kills `>` → `>=` mutant on the utilization > 1.0 check.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // Single thread: U = 10/10 = 1.0 exactly
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "10 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // U = 1.0, code checks `> 1.0` for overload, so 1.0 is NOT overloaded
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "U=1.0 exactly should not be overloaded (only >1.0): {:?}",
+            errors
+        );
+
+        // For n=1, RMA bound = 1.0, and U = 1.0, so `utilization > rma_bound` is false.
+        // Therefore no RMA warning either.
+        let rma_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
+            .collect();
+        assert!(
+            rma_warns.is_empty(),
+            "U=1.0 with n=1 (RMA bound=1.0) should not warn: {:?}",
+            rma_warns
+        );
+    }
+
+    #[test]
+    fn utilization_just_over_100_percent_is_overloaded() {
+        // U just above 1.0 should produce overloaded error.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // Single thread: U = 11/10 = 1.1 > 1.0
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "11 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
+            .collect();
+        assert_eq!(errors.len(), 1, "U=1.1 should be overloaded: {:?}", diags);
+    }
+
+    #[test]
+    fn utilization_between_rma_and_100_is_uncertain() {
+        // U above RMA bound but below 1.0: should warn (uncertain) but NOT error
+        // Use n=2, RMA bound ≈ 0.828
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // Each thread: U = 4.5/10 = 0.45, total = 0.90 > 0.828, < 1.0
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "4500 us");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t2, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "4500 us");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // Should warn about RMA but NOT error
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("overloaded"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "U=0.90 should not be overloaded: {:?}",
+            errors
+        );
+
+        let rma_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
+            .collect();
+        assert_eq!(
+            rma_warns.len(),
+            1,
+            "U=0.90 > RMA bound 0.828 should warn: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn sensitivity_rma_boundary_crossing() {
+        // Nominal U at RMA bound, but +10% would cross it.
+        // Kills `&&` → `||` in sensitivity condition.
+        // Use n=2, RMA bound ≈ 0.828. Set U = 0.78 so +10% = 0.858 > 0.828.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // Each thread: U = 3.9/10 = 0.39, total = 0.78 <= RMA bound 0.828
+        // +10%: 0.858 > 0.828
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "3900 us");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t2, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3900 us");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // The sensitivity check should fire: nominal <= rma_bound AND perturbed > rma_bound
+        let sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("RMA bound")
+            })
+            .collect();
+        assert_eq!(
+            sensitivity.len(),
+            1,
+            "should warn about thin RMA margin: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn sensitivity_no_false_positive_when_both_sides_pass() {
+        // Nominal U well below RMA, +10% still below RMA.
+        // Sensitivity should NOT fire.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        // Each thread: U = 2/10 = 0.2, total = 0.4. +10% = 0.44, still << RMA 0.828
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t2, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("sensitivity"))
+            .collect();
+        assert!(
+            sensitivity.is_empty(),
+            "ample margin should not trigger sensitivity: {:?}",
+            sensitivity
+        );
+    }
+
+    #[test]
+    fn sensitivity_edf_boundary_crossing() {
+        // Nominal U <= 1.0 but +10% > 1.0.
+        // Should trigger "critically thin timing margins" warning.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 92/100 = 0.92. +10% = 1.012 > 1.0
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "92 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let critical_sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("100% utilization")
+            })
+            .collect();
+        assert_eq!(
+            critical_sensitivity.len(),
+            1,
+            "should warn about EDF boundary crossing: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn utilization_arithmetic_correct_multi_rate() {
+        // Multi-rate task set: verify utilization arithmetic
+        // t1: 1ms/4ms = 0.25, t2: 2ms/5ms = 0.4, t3: 1ms/10ms = 0.1 -> total = 0.75
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        let t3 = b.add_component("t3", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2, t3]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "4 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t2, "Timing_Properties", "Period", "5 ms");
+        b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(
+            t2,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(t3, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t3, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t3,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // U = 0.25 + 0.4 + 0.1 = 0.75 (75.0%)
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization:"))
+            .collect();
+        assert!(!infos.is_empty(), "should report utilization: {:?}", diags);
+        assert!(
+            infos[0].message.contains("75.0%"),
+            "utilization should be 75.0%: {}",
+            infos[0].message
+        );
+
+        // RMA bound for n=3 ≈ 78.0%. 75% < 78% so no warning.
+        let rma_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds RMA bound"))
+            .collect();
+        assert!(
+            rma_warns.is_empty(),
+            "75% < RMA bound should not warn: {:?}",
+            rma_warns
+        );
+    }
 }
 
 /// Conformance tests: verify that the inlined scheduling math in

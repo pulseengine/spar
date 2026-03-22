@@ -586,6 +586,77 @@ mod tests {
         );
     }
 
+    // ── Multiple reachable modes: chain ────────────────────────────
+
+    #[test]
+    fn chain_of_modes_all_reachable() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("a", true, child);
+        b.add_mode("b", false, child);
+        b.add_mode("c", false, child);
+        b.add_mode_transition(Some("t1"), "a", "b", vec![], child);
+        b.add_mode_transition(Some("t2"), "b", "c", vec![], child);
+        b.add_connection("c1", child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModalRuleAnalysis.analyze(&inst);
+        let warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("not reachable"))
+            .collect();
+        assert!(
+            warns.is_empty(),
+            "all modes reachable via chain: {:?}",
+            warns
+        );
+    }
+
+    // ── Single mode: no initial mode error ──────────────────────────
+
+    #[test]
+    fn single_mode_is_initial_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("only", true, child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModalRuleAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("initial"))
+            .collect();
+        assert!(errors.is_empty(), "single initial mode ok: {:?}", errors);
+    }
+
+    // ── Modes with connections: reachability check triggered ─────────
+
+    #[test]
+    fn single_mode_with_connections_no_reachability_check() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("only", true, child);
+        b.add_connection("c1", child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModalRuleAnalysis.analyze(&inst);
+        let warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("not reachable"))
+            .collect();
+        assert!(
+            warns.is_empty(),
+            "single mode = no reachability check: {:?}",
+            warns
+        );
+    }
+
     // ── No modes: clean ────────────────────────────────────────────
 
     #[test]

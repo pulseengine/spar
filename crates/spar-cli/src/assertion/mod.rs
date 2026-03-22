@@ -149,6 +149,22 @@ fn evaluate_one(assertion: &Assertion, ctx: &EvalContext) -> AssertionResult {
             status: crate::verify::Status::Fail,
             detail: "assertion failed".to_string(),
         },
+        Ok(Value::BoolWithWarning(true, warning)) => AssertionResult {
+            id: assertion.id.clone(),
+            description: assertion.description.clone(),
+            check: assertion.check.clone(),
+            severity: sev,
+            status: crate::verify::Status::Pass,
+            detail: format!("assertion passed (warning: {})", warning),
+        },
+        Ok(Value::BoolWithWarning(false, warning)) => AssertionResult {
+            id: assertion.id.clone(),
+            description: assertion.description.clone(),
+            check: assertion.check.clone(),
+            severity: sev,
+            status: crate::verify::Status::Fail,
+            detail: format!("assertion failed (warning: {})", warning),
+        },
         Ok(Value::Count(n)) => AssertionResult {
             id: assertion.id.clone(),
             description: assertion.description.clone(),
@@ -822,18 +838,24 @@ mod tests {
             diagnostics: &[],
         };
 
-        // all() on empty set is vacuously true
+        // all() on empty set is vacuously true, with warning
         match eval_check(
             "components.where(category == 'thread').all(has('Timing_Properties::Period'))",
             &ctx,
         )
         .unwrap()
         {
-            Value::Bool(b) => assert!(b, "all() on empty set should be true"),
-            other => panic!("expected Bool, got {:?}", other),
+            Value::BoolWithWarning(b, ref warning) => {
+                assert!(b, "all() on empty set should be true");
+                assert!(
+                    warning.contains("vacuous truth"),
+                    "expected vacuous truth warning, got: {warning}"
+                );
+            }
+            other => panic!("expected BoolWithWarning, got {:?}", other),
         }
 
-        // any() on empty set is false
+        // any() on empty set is false (no warning needed)
         match eval_check(
             "components.where(category == 'thread').any(has('Timing_Properties::Period'))",
             &ctx,
@@ -844,21 +866,158 @@ mod tests {
             other => panic!("expected Bool, got {:?}", other),
         }
 
-        // none() on empty set is vacuously true
+        // none() on empty set is vacuously true, with warning
         match eval_check(
             "components.where(category == 'thread').none(has('Timing_Properties::Period'))",
             &ctx,
         )
         .unwrap()
         {
-            Value::Bool(b) => assert!(b, "none() on empty set should be true"),
-            other => panic!("expected Bool, got {:?}", other),
+            Value::BoolWithWarning(b, ref warning) => {
+                assert!(b, "none() on empty set should be true");
+                assert!(
+                    warning.contains("vacuous truth"),
+                    "expected vacuous truth warning, got: {warning}"
+                );
+            }
+            other => panic!("expected BoolWithWarning, got {:?}", other),
         }
 
         // count on empty set is 0
         match eval_check("components.where(category == 'thread').count()", &ctx).unwrap() {
             Value::Count(n) => assert_eq!(n, 0),
             other => panic!("expected Count, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn all_on_empty_set_warns_vacuous_truth() {
+        // components.where(category == 'nonexistent').all(has('X'))
+        // should pass but with a vacuous truth warning
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        // Filter to a category that doesn't exist -> empty set
+        let result = eval_check(
+            "components.where(category == 'virtual_bus').all(has('X'))",
+            &ctx,
+        )
+        .unwrap();
+
+        match result {
+            Value::BoolWithWarning(b, ref warning) => {
+                assert!(b, "all() on empty set should be true");
+                assert!(
+                    warning.contains("vacuous truth"),
+                    "expected vacuous truth warning, got: {warning}"
+                );
+                assert!(
+                    warning.contains("0 components"),
+                    "warning should mention 0 components, got: {warning}"
+                );
+                assert!(
+                    warning.contains("passed trivially"),
+                    "warning should mention passed trivially, got: {warning}"
+                );
+            }
+            other => panic!("expected BoolWithWarning, got {:?}", other),
+        }
+
+        // Verify the warning surfaces through evaluate_assertions
+        let assertions = vec![Assertion {
+            id: "ASSERT-VAC".to_string(),
+            description: "vacuous check".to_string(),
+            check: "components.where(category == 'virtual_bus').all(has('X'))".to_string(),
+            severity: SeverityFilter::Error,
+        }];
+        let results = evaluate_assertions(&assertions, &ctx);
+        assert_eq!(results[0].status, crate::verify::Status::Pass);
+        assert!(
+            results[0].detail.contains("vacuous truth"),
+            "detail should contain vacuous truth warning, got: {}",
+            results[0].detail
+        );
+    }
+
+    #[test]
+    fn none_on_empty_set_warns_vacuous_truth() {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        let result = eval_check(
+            "components.where(category == 'virtual_bus').none(has('X'))",
+            &ctx,
+        )
+        .unwrap();
+
+        match result {
+            Value::BoolWithWarning(b, ref warning) => {
+                assert!(b, "none() on empty set should be true");
+                assert!(
+                    warning.contains("vacuous truth"),
+                    "expected vacuous truth warning, got: {warning}"
+                );
+                assert!(
+                    warning.contains("none()"),
+                    "warning should mention none(), got: {warning}"
+                );
+            }
+            other => panic!("expected BoolWithWarning, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn any_on_empty_set_has_no_warning() {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        // any() on empty set should return plain Bool(false), no warning
+        let result = eval_check(
+            "components.where(category == 'virtual_bus').any(has('X'))",
+            &ctx,
+        )
+        .unwrap();
+
+        match result {
+            Value::Bool(b) => assert!(!b, "any() on empty set should be false"),
+            other => panic!("expected Bool(false), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn all_on_nonempty_set_has_no_warning() {
+        // When the collection is non-empty, all() should return plain Bool
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        let result = eval_check(
+            "components.where(category == 'thread').all(has('Timing_Properties::Period'))",
+            &ctx,
+        )
+        .unwrap();
+
+        match result {
+            Value::Bool(b) => {
+                // thread2 lacks Period, so this should be false, but importantly no warning
+                assert!(!b, "not all threads have Period");
+            }
+            other => panic!("expected Bool, got {:?}", other),
         }
     }
 

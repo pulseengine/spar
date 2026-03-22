@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="ASCII"?>
+<xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance">
+  <instance:SystemInstance name="Root_impl_Instance" category="system">
+    <componentInstance name="p" category="process">
+      <componentInstance name="t1" category="thread">
+        <featureInstance name="output" direction="out" type="/1">
+          <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedDataPort.0"/>
+        </featureInstance>
+        <featureInstance name="shared_sub" category="subprogramAccess" direction="out" type="/2">
+          <feature xsi:type="aadl2:SubprogramAccess" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.4/@ownedSubprogramAccess.0"/>
+        </featureInstance>
+        <componentInstance name="abs">
+          <featureInstance name="input" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+          </featureInstance>
+          <featureInstance name="output" direction="out" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+          </featureInstance>
+          <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAbstractSubcomponent.0"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:AbstractType" href="../StopAndGo.aadl#StopAndGo.A"/>
+        </componentInstance>
+        <componentInstance name="abs2">
+          <featureInstance name="input" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+          </featureInstance>
+          <featureInstance name="output" direction="out" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+          </featureInstance>
+          <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAbstractSubcomponent.1"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:AbstractType" href="../StopAndGo.aadl#StopAndGo.A"/>
+        </componentInstance>
+        <componentInstance name="s" category="subprogram">
+          <subcomponent xsi:type="aadl2:SubprogramSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedSubprogramSubcomponent.0"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:SubprogramType" href="../StopAndGo.aadl#StopAndGo.ShareMe"/>
+        </componentInstance>
+        <connectionInstance name="abs.output -> abs2.input" complete="true" kind="portConnection" destination="/0/@componentInstance.0/@componentInstance.0/@componentInstance.1/@featureInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@componentInstance.0/@featureInstance.1">
+          <connectionReference context="/0/@componentInstance.0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@componentInstance.0/@featureInstance.1" destination="/0/@componentInstance.0/@componentInstance.0/@componentInstance.1/@featureInstance.0">
+            <connection xsi:type="aadl2:PortConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedPortConnection.0"/>
+          </connectionReference>
+        </connectionInstance>
+        <subcomponent xsi:type="aadl2:ThreadSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedThreadSubcomponent.0"/>
+        <index>0</index>
+        <classifier xsi:type="aadl2:ThreadImplementation" href="../StopAndGo.aadl#StopAndGo.T1.i"/>
+      </componentInstance>
+      <componentInstance name="t2" category="thread">
+        <featureInstance name="input" type="/1">
+          <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedDataPort.0"/>
+        </featureInstance>
+        <featureInstance name="provided_sub" category="subprogramAccess" type="/2">
+          <feature xsi:type="aadl2:SubprogramAccess" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.6/@ownedSubprogramAccess.0"/>
+        </featureInstance>
+        <componentInstance name="abs20">
+          <featureInstance name="input" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+          </featureInstance>
+          <featureInstance name="output" direction="out" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+          </featureInstance>
+          <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedAbstractSubcomponent.0"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:AbstractType" href="../StopAndGo.aadl#StopAndGo.A"/>
+        </componentInstance>
+        <componentInstance name="abs22">
+          <featureInstance name="input" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+          </featureInstance>
+          <featureInstance name="output" direction="out" type="/1">
+            <feature xsi:type="aadl2:DataPort" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+          </featureInstance>
+          <subcomponent xsi:type="aadl2:AbstractSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedAbstractSubcomponent.1"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:AbstractType" href="../StopAndGo.aadl#StopAndGo.A"/>
+        </componentInstance>
+        <componentInstance name="s" category="subprogram">
+          <featureInstance name="p" category="parameter" type="/1">
+            <feature xsi:type="aadl2:Parameter" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedParameter.0"/>
+          </featureInstance>
+          <subcomponent xsi:type="aadl2:SubprogramSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedSubprogramSubcomponent.0"/>
+          <index>0</index>
+          <classifier xsi:type="aadl2:SubprogramType" href="../StopAndGo.aadl#StopAndGo.Sub"/>
+        </componentInstance>
+        <connectionInstance name="abs20.output -> abs22.input" complete="true" kind="portConnection" destination="/0/@componentInstance.0/@componentInstance.1/@componentInstance.1/@featureInstance.0" source="/0/@componentInstance.0/@componentInstance.1/@componentInstance.0/@featureInstance.1">
+          <connectionReference context="/0/@componentInstance.0/@componentInstance.1" source="/0/@componentInstance.0/@componentInstance.1/@componentInstance.0/@featureInstance.1" destination="/0/@componentInstance.0/@componentInstance.1/@componentInstance.1/@featureInstance.0">
+            <connection xsi:type="aadl2:PortConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.7/@ownedPortConnection.0"/>
+          </connectionReference>
+        </connectionInstance>
+        <subcomponent xsi:type="aadl2:ThreadSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedThreadSubcomponent.1"/>
+        <index>0</index>
+        <classifier xsi:type="aadl2:ThreadImplementation" href="../StopAndGo.aadl#StopAndGo.T2.i"/>
+      </componentInstance>
+      <connectionInstance name="t1.output -> t2.input" complete="true" kind="portConnection" destination="/0/@componentInstance.0/@componentInstance.1/@featureInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@featureInstance.0">
+        <connectionReference context="/0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@featureInstance.0" destination="/0/@componentInstance.0/@componentInstance.1/@featureInstance.0">
+          <connection xsi:type="aadl2:PortConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedPortConnection.0"/>
+        </connectionReference>
+      </connectionInstance>
+      <connectionInstance name="t1.s -> t2.provided_sub" complete="true" kind="accessConnection" destination="/0/@componentInstance.0/@componentInstance.1/@featureInstance.1" source="/0/@componentInstance.0/@componentInstance.0/@componentInstance.2">
+        <connectionReference context="/0/@componentInstance.0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@componentInstance.2" destination="/0/@componentInstance.0/@componentInstance.0/@featureInstance.1">
+          <connection xsi:type="aadl2:AccessConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAccessConnection.0"/>
+        </connectionReference>
+        <connectionReference context="/0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@featureInstance.1" destination="/0/@componentInstance.0/@componentInstance.1/@featureInstance.1">
+          <connection xsi:type="aadl2:AccessConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedAccessConnection.0"/>
+        </connectionReference>
+      </connectionInstance>
+      <connectionInstance name="t2.provided_sub -> t1.s" complete="true" kind="accessConnection" destination="/0/@componentInstance.0/@componentInstance.0/@componentInstance.2" source="/0/@componentInstance.0/@componentInstance.1/@featureInstance.1">
+        <connectionReference context="/0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.1/@featureInstance.1" destination="/0/@componentInstance.0/@componentInstance.0/@featureInstance.1" reverse="true">
+          <connection xsi:type="aadl2:AccessConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.9/@ownedAccessConnection.0"/>
+        </connectionReference>
+        <connectionReference context="/0/@componentInstance.0/@componentInstance.0" source="/0/@componentInstance.0/@componentInstance.0/@featureInstance.1" destination="/0/@componentInstance.0/@componentInstance.0/@componentInstance.2" reverse="true">
+          <connection xsi:type="aadl2:AccessConnection" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.5/@ownedAccessConnection.0"/>
+        </connectionReference>
+      </connectionInstance>
+      <subcomponent xsi:type="aadl2:ProcessSubcomponent" href="../StopAndGo.aadl#/0/@ownedPublicSection/@ownedClassifier.11/@ownedProcessSubcomponent.0"/>
+      <index>0</index>
+      <classifier xsi:type="aadl2:ProcessImplementation" href="../StopAndGo.aadl#StopAndGo.p.i"/>
+    </componentInstance>
+    <classifier xsi:type="aadl2:SystemImplementation" href="../StopAndGo.aadl#StopAndGo.Root.impl"/>
+    <systemOperationMode name="No Modes"/>
+    <componentImplementation xsi:type="aadl2:SystemImplementation" href="../StopAndGo.aadl#StopAndGo.Root.impl"/>
+  </instance:SystemInstance>
+  <instance:ComponentInstance name="StopAndGo::D" category="data">
+    <classifier xsi:type="aadl2:DataType" href="../StopAndGo.aadl#StopAndGo.D"/>
+  </instance:ComponentInstance>
+  <instance:ComponentInstance name="StopAndGo::ShareMe" category="subprogram">
+    <classifier xsi:type="aadl2:SubprogramType" href="../StopAndGo.aadl#StopAndGo.ShareMe"/>
+  </instance:ComponentInstance>
+</xmi:XMI>

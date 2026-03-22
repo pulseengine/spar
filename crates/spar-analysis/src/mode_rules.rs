@@ -401,6 +401,63 @@ mod tests {
         );
     }
 
+    // ── Trigger resolves but is non-matching kind (bus access) ─────
+
+    #[test]
+    fn trigger_is_bus_access_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_feature("bus_port", FeatureKind::BusAccess, Direction::In, child);
+        b.add_mode("idle", true, child);
+        b.add_mode("active", false, child);
+        b.add_mode_transition(Some("activate"), "idle", "active", vec!["bus_port"], child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModeRuleAnalysis.analyze(&inst);
+        let warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("bus_port")
+                    && d.message.contains("should be an event port")
+            })
+            .collect();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "bus access trigger should produce a warning: {:?}",
+            diags
+        );
+    }
+
+    // ── Trigger does not match any feature: no warning from mode_rules ──
+
+    #[test]
+    fn trigger_no_matching_feature_no_kind_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let child = b.add_component("ctrl", ComponentCategory::System, Some(root));
+        b.add_mode("idle", true, child);
+        b.add_mode("active", false, child);
+        // Trigger "nonexistent" has no matching feature — mode_check handles this
+        b.add_mode_transition(Some("t"), "idle", "active", vec!["nonexistent"], child);
+        b.set_children(root, vec![child]);
+
+        let inst = b.build(root);
+        let diags = ModeRuleAnalysis.analyze(&inst);
+        let kind_warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("should be an event port"))
+            .collect();
+        assert!(
+            kind_warnings.is_empty(),
+            "unmatched trigger should not produce kind warning: {:?}",
+            kind_warnings
+        );
+    }
+
     // ── No modes: clean ────────────────────────────────────────────
 
     #[test]

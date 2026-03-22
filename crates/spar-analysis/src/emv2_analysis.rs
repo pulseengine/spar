@@ -653,6 +653,130 @@ mod tests {
         );
     }
 
+    // ── And gate with single child -> single cut set of size 1 ──
+
+    #[test]
+    fn cut_sets_and_gate_single_child() {
+        let tree = FaultTree {
+            top_event: "top".to_string(),
+            root: FaultTreeNode::And {
+                description: "single".to_string(),
+                children: vec![FaultTreeNode::BasicEvent {
+                    component: "a".to_string(),
+                    error_type: "Err".to_string(),
+                    description: "a".to_string(),
+                }],
+            },
+        };
+        let cs = tree.minimal_cut_sets();
+        assert_eq!(cs.len(), 1, "single child AND: {:?}", cs);
+        assert_eq!(cs[0].len(), 1, "single event: {:?}", cs[0]);
+    }
+
+    // ── Cut set minimization: exact duplicate removal ───────────
+
+    #[test]
+    fn cut_sets_duplicate_events_in_and_gate() {
+        // AND(a, a) -> should produce a single cut set {a}
+        let tree = FaultTree {
+            top_event: "top".to_string(),
+            root: FaultTreeNode::And {
+                description: "dup".to_string(),
+                children: vec![
+                    FaultTreeNode::BasicEvent {
+                        component: "a".to_string(),
+                        error_type: "Err".to_string(),
+                        description: "a".to_string(),
+                    },
+                    FaultTreeNode::BasicEvent {
+                        component: "a".to_string(),
+                        error_type: "Err".to_string(),
+                        description: "a".to_string(),
+                    },
+                ],
+            },
+        };
+        let cs = tree.minimal_cut_sets();
+        assert_eq!(cs.len(), 1, "AND of same event: {:?}", cs);
+        assert_eq!(cs[0], vec!["a.Err"], "deduped: {:?}", cs[0]);
+    }
+
+    // ── Error handling: system category should NOT be flagged ────
+
+    #[test]
+    fn analyze_system_component_not_flagged() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sub = b.add_component("sub", ComponentCategory::System, Some(root));
+        b.set_children(root, vec![sub]);
+
+        let inst = b.build(root);
+        let diags = Emv2Analysis.analyze(&inst);
+
+        let no_annot: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("no error model annotations"))
+            .collect();
+        assert!(
+            no_annot.is_empty(),
+            "system components should not be flagged for missing annotations: {:?}",
+            no_annot
+        );
+    }
+
+    // ── Processor leaf without error props → flagged ────────────
+
+    #[test]
+    fn analyze_processor_leaf_flagged() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        b.set_children(root, vec![cpu]);
+
+        let inst = b.build(root);
+        let diags = Emv2Analysis.analyze(&inst);
+
+        let no_annot: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("no error model annotations") && d.message.contains("cpu")
+            })
+            .collect();
+        assert_eq!(
+            no_annot.len(),
+            1,
+            "processor leaf should be flagged: {:?}",
+            diags
+        );
+    }
+
+    // ── Non-leaf process (with children) not flagged ────────────
+
+    #[test]
+    fn analyze_non_leaf_process_not_flagged() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![thread]);
+
+        let inst = b.build(root);
+        let diags = Emv2Analysis.analyze(&inst);
+
+        let proc_annot: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("no error model annotations") && d.message.contains("'proc'")
+            })
+            .collect();
+        assert!(
+            proc_annot.is_empty(),
+            "non-leaf process should not be flagged: {:?}",
+            proc_annot
+        );
+    }
+
     #[test]
     fn analyze_leaf_only_system() {
         // Root with no children: just a basic event, single point of failure = itself

@@ -76,9 +76,12 @@ fn make_layout_opts(options: &RenderOptions) -> LayoutOptions {
 fn make_svg_opts(options: &RenderOptions) -> SvgOptions {
     SvgOptions {
         type_colors: category_colors(),
+        type_shapes: aadl_shapes(),
         interactive: options.interactive,
         base_url: options.base_url.clone(),
         highlight: options.highlight.clone(),
+        font_family: "'Inter', 'SF Pro', system-ui, sans-serif".into(),
+        edge_color: "#888".into(),
         ..Default::default()
     }
 }
@@ -288,24 +291,368 @@ fn category_type_name(cat: ComponentCategory) -> &'static str {
 
 fn category_colors() -> HashMap<String, String> {
     [
-        ("system", "#b3d9ff"),
-        ("process", "#d4edda"),
-        ("thread", "#fff3cd"),
-        ("thread-group", "#fff3cd"),
-        ("processor", "#f8d7da"),
-        ("virtual-processor", "#f8d7da"),
-        ("memory", "#e8e8e8"),
-        ("bus", "#e8e8e8"),
-        ("virtual-bus", "#e8e8e8"),
-        ("device", "#e2d5f1"),
-        ("data", "#fce4ec"),
-        ("subprogram", "#e8e8e8"),
-        ("subprogram-group", "#e8e8e8"),
-        ("abstract", "#e8e8e8"),
+        ("system", "#dce8f5"),       // Soft blue
+        ("process", "#d5edd8"),      // Sage green
+        ("thread", "#fef3d0"),       // Warm cream
+        ("thread-group", "#fef3d0"), // Same as thread
+        ("processor", "#fde2e2"),    // Soft rose
+        ("virtual-processor", "#fde2e2"),
+        ("memory", "#e8dff0"), // Lavender
+        ("bus", "#f0ece4"),    // Warm gray
+        ("virtual-bus", "#f0ece4"),
+        ("device", "#ddf0ee"),     // Teal tint
+        ("data", "#fff8e1"),       // Pale gold
+        ("subprogram", "#e8e8ef"), // Cool gray
+        ("subprogram-group", "#e8e8ef"),
+        ("abstract", "#f5f5f5"), // Near white
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect()
+}
+
+// ---------------------------------------------------------------------------
+// AADL-standard shape providers for etch's type_shapes API
+// ---------------------------------------------------------------------------
+
+/// Build AADL-standard shape providers for all 14 component categories.
+///
+/// Each closure receives `(node_type, x, y, width, height, fill, stroke)` and
+/// returns raw SVG element string per AS5506 Appendix A conventions.
+fn aadl_shapes() -> HashMap<String, etch::svg::ShapeProvider> {
+    let mut m = HashMap::new();
+
+    // System: chamfered top-left corner
+    m.insert(
+        "system".into(),
+        Box::new(
+            |_type: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let ch = 12.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
+                     fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + ch,
+                    y,
+                    x + w,
+                    y,
+                    x + w,
+                    y + h,
+                    x,
+                    y + h,
+                    x,
+                    y + ch,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Process: stadium/capsule (rounded ends)
+    m.insert(
+        "process".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let r = h / 2.0;
+                format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" \
+                 rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x, y, w, h, r, r, fill, stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Thread: parallelogram
+    m.insert(
+        "thread".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let skew = 10.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + skew,
+                    y,
+                    x + w,
+                    y,
+                    x + w - skew,
+                    y + h,
+                    x,
+                    y + h,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Thread Group: parallelogram + dashed
+    m.insert(
+        "thread-group".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let skew = 10.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                    x + skew,
+                    y,
+                    x + w,
+                    y,
+                    x + w - skew,
+                    y + h,
+                    x,
+                    y + h,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Processor: parallelogram (same shape, different color distinguishes)
+    m.insert(
+        "processor".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let skew = 10.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + skew,
+                    y,
+                    x + w,
+                    y,
+                    x + w - skew,
+                    y + h,
+                    x,
+                    y + h,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Virtual Processor: parallelogram + dashed
+    m.insert(
+        "virtual-processor".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let skew = 10.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                    x + skew,
+                    y,
+                    x + w,
+                    y,
+                    x + w - skew,
+                    y + h,
+                    x,
+                    y + h,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Memory: trapezoid (wider at top)
+    m.insert(
+        "memory".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let inset = 12.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x,
+                    y,
+                    x + w,
+                    y,
+                    x + w - inset,
+                    y + h,
+                    x + inset,
+                    y + h,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Bus: hexagon/double-arrow
+    m.insert(
+        "bus".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let arrow = 12.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + arrow,
+                    y,
+                    x + w - arrow,
+                    y,
+                    x + w,
+                    y + h / 2.0,
+                    x + w - arrow,
+                    y + h,
+                    x + arrow,
+                    y + h,
+                    x,
+                    y + h / 2.0,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Virtual Bus: hexagon + dashed
+    m.insert(
+        "virtual-bus".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let arrow = 12.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                    x + arrow,
+                    y,
+                    x + w - arrow,
+                    y,
+                    x + w,
+                    y + h / 2.0,
+                    x + w - arrow,
+                    y + h,
+                    x + arrow,
+                    y + h,
+                    x,
+                    y + h / 2.0,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Device: slightly tilted rectangle
+    m.insert(
+        "device".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                let tilt = 4.0;
+                format!(
+                    "<path d=\"M {},{} L {},{} L {},{} L {},{} Z\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + tilt,
+                    y,
+                    x + w,
+                    y + tilt,
+                    x + w - tilt,
+                    y + h,
+                    x,
+                    y + h - tilt,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Data: rectangle with header stripe
+    m.insert(
+        "data".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"2\" ry=\"2\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />\
+                 <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{}\" stroke-width=\"1\" />",
+                    x,
+                    y,
+                    w,
+                    h,
+                    fill,
+                    stroke,
+                    x,
+                    y + 16.0,
+                    x + w,
+                    y + 16.0,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Subprogram: ellipse
+    m.insert(
+        "subprogram".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                format!(
+                    "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />",
+                    x + w / 2.0,
+                    y + h / 2.0,
+                    w / 2.0,
+                    h / 2.0,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Subprogram Group: ellipse + dashed
+    m.insert(
+        "subprogram-group".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                format!(
+                    "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" stroke-dasharray=\"6 3\" />",
+                    x + w / 2.0,
+                    y + h / 2.0,
+                    w / 2.0,
+                    h / 2.0,
+                    fill,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    // Abstract: plain rectangle with double border
+    m.insert(
+        "abstract".into(),
+        Box::new(
+            |_: &str, x: f64, y: f64, w: f64, h: f64, fill: &str, stroke: &str| {
+                format!(
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"3\" ry=\"3\" \
+                 fill=\"{}\" stroke=\"{}\" stroke-width=\"1.5\" />\
+                 <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"2\" ry=\"2\" \
+                 fill=\"none\" stroke=\"{}\" stroke-width=\"0.5\" />",
+                    x,
+                    y,
+                    w,
+                    h,
+                    fill,
+                    stroke,
+                    x + 3.0,
+                    y + 3.0,
+                    w - 6.0,
+                    h - 6.0,
+                    stroke,
+                )
+            },
+        ) as etch::svg::ShapeProvider,
+    );
+
+    m
 }
 
 #[cfg(test)]
@@ -380,5 +727,161 @@ mod tests {
         assert_eq!(p2.port_type, PortType::Event);
         assert_eq!(p2.direction, PortDirection::Out);
         assert_eq!(p2.side, PortSide::Right);
+    }
+
+    // -----------------------------------------------------------------------
+    // Shape provider tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: invoke a shape provider by category name.
+    fn call_shape(category: &str, x: f64, y: f64, w: f64, h: f64) -> String {
+        let shapes = aadl_shapes();
+        let provider = shapes
+            .get(category)
+            .unwrap_or_else(|| panic!("no shape for {category}"));
+        provider(category, x, y, w, h, "#eee", "#555")
+    }
+
+    #[test]
+    fn shape_providers_cover_all_categories() {
+        let shapes = aadl_shapes();
+        let expected = [
+            "system",
+            "process",
+            "thread",
+            "thread-group",
+            "processor",
+            "virtual-processor",
+            "memory",
+            "bus",
+            "virtual-bus",
+            "device",
+            "data",
+            "subprogram",
+            "subprogram-group",
+            "abstract",
+        ];
+        for cat in expected {
+            assert!(shapes.contains_key(cat), "missing shape for {cat}");
+        }
+        assert_eq!(shapes.len(), 14);
+    }
+
+    #[test]
+    fn system_shape_is_chamfered_path() {
+        let shape = call_shape("system", 10.0, 20.0, 200.0, 60.0);
+        assert!(shape.starts_with("<path d=\"M "));
+        assert!(shape.contains(" Z\""));
+        assert!(shape.contains("fill=\"#eee\""));
+        assert!(shape.contains("stroke-width=\"1.5\""));
+        assert!(!shape.contains("stroke-dasharray"));
+    }
+
+    #[test]
+    fn process_shape_is_stadium() {
+        let shape = call_shape("process", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<rect "));
+        assert!(shape.contains("rx=\"30\"")); // h/2 = 30
+    }
+
+    #[test]
+    fn thread_shape_is_parallelogram() {
+        let shape = call_shape("thread", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<path d=\"M "));
+        assert!(shape.contains("M 10,0")); // skew = 10
+    }
+
+    #[test]
+    fn thread_group_has_dashed_border() {
+        let shape = call_shape("thread-group", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.contains("stroke-dasharray=\"6 3\""));
+    }
+
+    #[test]
+    fn bus_shape_is_hexagonal() {
+        let shape = call_shape("bus", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<path d=\"M "));
+        // Hexagon: M + 5 L + Z = 6 points
+        assert_eq!(shape.matches(" L ").count(), 5);
+    }
+
+    #[test]
+    fn memory_shape_is_trapezoid() {
+        let shape = call_shape("memory", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<path d=\"M "));
+        assert!(shape.contains("M 0,0")); // top-left at origin
+    }
+
+    #[test]
+    fn subprogram_shape_is_ellipse() {
+        let shape = call_shape("subprogram", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<ellipse "));
+        assert!(shape.contains("cx=\"100\""));
+        assert!(shape.contains("cy=\"30\""));
+    }
+
+    #[test]
+    fn data_shape_has_header_stripe() {
+        let shape = call_shape("data", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.contains("<rect "));
+        assert!(shape.contains("<line "));
+    }
+
+    #[test]
+    fn abstract_shape_has_double_border() {
+        let shape = call_shape("abstract", 0.0, 0.0, 200.0, 60.0);
+        assert_eq!(shape.matches("<rect ").count(), 2);
+        assert!(shape.contains("fill=\"none\""));
+    }
+
+    #[test]
+    fn device_shape_is_tilted() {
+        let shape = call_shape("device", 0.0, 0.0, 200.0, 60.0);
+        assert!(shape.starts_with("<path d=\"M "));
+    }
+
+    #[test]
+    fn virtual_categories_are_dashed() {
+        for cat in &[
+            "virtual-processor",
+            "virtual-bus",
+            "thread-group",
+            "subprogram-group",
+        ] {
+            let shape = call_shape(cat, 0.0, 0.0, 200.0, 60.0);
+            assert!(
+                shape.contains("stroke-dasharray"),
+                "{cat} should have dashed border"
+            );
+        }
+    }
+
+    #[test]
+    fn solid_categories_not_dashed() {
+        for cat in &[
+            "system",
+            "process",
+            "thread",
+            "processor",
+            "memory",
+            "bus",
+            "device",
+            "data",
+            "subprogram",
+            "abstract",
+        ] {
+            let shape = call_shape(cat, 0.0, 0.0, 200.0, 60.0);
+            assert!(
+                !shape.contains("stroke-dasharray"),
+                "{cat} should NOT have dashed border"
+            );
+        }
+    }
+
+    #[test]
+    fn make_svg_opts_includes_shapes() {
+        let opts = make_svg_opts(&RenderOptions::default());
+        assert_eq!(opts.type_shapes.len(), 14);
+        assert!(opts.type_colors.contains_key("system"));
     }
 }

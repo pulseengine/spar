@@ -225,6 +225,7 @@ impl SystemInstance {
         let root_idx = builder.instantiate_component(
             &root_name,
             root_package,
+            Some(root_package),
             root_type,
             root_impl,
             None,
@@ -476,33 +477,43 @@ impl SystemInstance {
 
                     for &src_component in &src_matches {
                         for &dst_component in &dst_matches {
-                            let mut path = vec![*conn_idx];
+                            let base_path = vec![*conn_idx];
 
-                            // Trace source deeper: look for up connections inside
-                            // the source subcomponent that feed this port.
-                            let ultimate_src = self.trace_source(
+                            // Trace ALL sources (fan-in) and ALL destinations (fan-out).
+                            let all_sources = self.trace_sources(
                                 src_component,
                                 &src.feature,
-                                &mut path,
+                                &base_path,
                                 MAX_TRACE_DEPTH,
                             );
 
-                            // Trace destination deeper: look for down connections inside
-                            // the destination subcomponent that distribute from this port.
-                            let ultimate_dst = self.trace_destination(
+                            let all_destinations = self.trace_destinations(
                                 dst_component,
                                 &dst.feature,
-                                &mut path,
+                                &base_path,
                                 MAX_TRACE_DEPTH,
                             );
 
-                            semantic.push(SemanticConnection {
-                                name: conn_name.clone(),
-                                kind: conn_kind,
-                                ultimate_source: ultimate_src,
-                                ultimate_destination: ultimate_dst,
-                                connection_path: path,
-                            });
+                            // Each source × destination pair produces a semantic connection.
+                            for (src_comp, src_feat, src_path) in &all_sources {
+                                for (dst_comp, dst_feat, dst_path) in &all_destinations {
+                                    let mut path = src_path.clone();
+                                    // Append dst path elements that aren't already in src path.
+                                    for ci in dst_path {
+                                        if !path.contains(ci) {
+                                            path.push(*ci);
+                                        }
+                                    }
+
+                                    semantic.push(SemanticConnection {
+                                        name: conn_name.clone(),
+                                        kind: conn_kind,
+                                        ultimate_source: (*src_comp, src_feat.clone()),
+                                        ultimate_destination: (*dst_comp, dst_feat.clone()),
+                                        connection_path: path,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -529,21 +540,23 @@ impl SystemInstance {
                         }
 
                         for &src_component in &src_matches {
-                            let mut path = vec![*conn_idx];
-                            let ultimate_src = self.trace_source(
+                            let base_path = vec![*conn_idx];
+                            let all_sources = self.trace_sources(
                                 src_component,
                                 &src.feature,
-                                &mut path,
+                                &base_path,
                                 MAX_TRACE_DEPTH,
                             );
 
-                            semantic.push(SemanticConnection {
-                                name: conn_name.clone(),
-                                kind: conn_kind,
-                                ultimate_source: ultimate_src,
-                                ultimate_destination: (conn_owner, dst.feature.clone()),
-                                connection_path: path,
-                            });
+                            for (src_comp, src_feat, path) in all_sources {
+                                semantic.push(SemanticConnection {
+                                    name: conn_name.clone(),
+                                    kind: conn_kind,
+                                    ultimate_source: (src_comp, src_feat),
+                                    ultimate_destination: (conn_owner, dst.feature.clone()),
+                                    connection_path: path,
+                                });
+                            }
                         }
                     }
                     // Otherwise, this up connection will be consumed when the parent
@@ -568,21 +581,23 @@ impl SystemInstance {
                         }
 
                         for &dst_component in &dst_matches {
-                            let mut path = vec![*conn_idx];
-                            let ultimate_dst = self.trace_destination(
+                            let base_path = vec![*conn_idx];
+                            let all_destinations = self.trace_destinations(
                                 dst_component,
                                 &dst.feature,
-                                &mut path,
+                                &base_path,
                                 MAX_TRACE_DEPTH,
                             );
 
-                            semantic.push(SemanticConnection {
-                                name: conn_name.clone(),
-                                kind: conn_kind,
-                                ultimate_source: (conn_owner, src.feature.clone()),
-                                ultimate_destination: ultimate_dst,
-                                connection_path: path,
-                            });
+                            for (dst_comp, dst_feat, path) in all_destinations {
+                                semantic.push(SemanticConnection {
+                                    name: conn_name.clone(),
+                                    kind: conn_kind,
+                                    ultimate_source: (conn_owner, src.feature.clone()),
+                                    ultimate_destination: (dst_comp, dst_feat),
+                                    connection_path: path,
+                                });
+                            }
                         }
                     }
                 }
@@ -808,33 +823,34 @@ impl SystemInstance {
         Vec::new()
     }
 
-    /// Trace the ultimate source of a connection by following up connections
+    /// Trace ALL ultimate sources of a connection by following up connections
     /// inside a subcomponent.
     ///
     /// Given a component instance and a feature name on that component, look for
-    /// an "up" connection inside it of the form `inner_sub.port -> feature_name`.
-    /// If found, recurse into `inner_sub` to find the deepest source.
+    /// all "up" connections inside it of the form `inner_sub.port -> feature_name`.
+    /// For each match, recurse into `inner_sub` to find the deepest source(s).
     ///
-    /// Returns `(component_idx, feature_name)` for the deepest source found.
-    fn trace_source(
+    /// Returns a list of `(component_idx, feature_name, connection_path)` for all
+    /// traced sources. Handles fan-in where multiple internal connections feed
+    /// the same external feature.
+    fn trace_sources(
         &self,
         component: ComponentInstanceIdx,
         feature: &Name,
-        path: &mut Vec<ConnectionInstanceIdx>,
+        base_path: &[ConnectionInstanceIdx],
         depth_remaining: usize,
-    ) -> (ComponentInstanceIdx, Name) {
+    ) -> Vec<(ComponentInstanceIdx, Name, Vec<ConnectionInstanceIdx>)> {
         if depth_remaining == 0 {
-            return (component, feature.clone());
+            return vec![(component, feature.clone(), base_path.to_vec())];
         }
 
-        // Clone the connection indices to avoid borrow conflicts.
         let conn_indices: Vec<ConnectionInstanceIdx> =
             self.components[component].connections.clone();
 
-        // Look through connections owned by this component for an up connection
-        // whose destination feature matches (i.e., `sub.port -> feature`).
-        for conn_idx in conn_indices {
-            let conn = &self.connections[conn_idx];
+        let mut results = Vec::new();
+
+        for conn_idx in &conn_indices {
+            let conn = &self.connections[*conn_idx];
             let (src, dst) = match (&conn.src, &conn.dst) {
                 (Some(s), Some(d)) => (s, d),
                 _ => continue,
@@ -845,54 +861,58 @@ impl SystemInstance {
             if let (Some(src_sub_name), None) = (&src.subcomponent, &dst.subcomponent)
                 && dst.feature.as_str() == feature.as_str()
             {
-                // Found an up connection feeding this port.
-                // Resolve the source subcomponent.
                 let inner_matches = self.find_children_by_name(component, src_sub_name);
 
-                if let Some(&inner_component) = inner_matches.first() {
-                    let src_feature = src.feature.clone();
-                    path.push(conn_idx);
-                    return self.trace_source(
+                for &inner_component in &inner_matches {
+                    let mut path = base_path.to_vec();
+                    path.push(*conn_idx);
+                    let deeper = self.trace_sources(
                         inner_component,
-                        &src_feature,
-                        path,
+                        &src.feature,
+                        &path,
                         depth_remaining - 1,
                     );
+                    results.extend(deeper);
                 }
             }
         }
 
-        // No further up connection found — this is the ultimate source.
-        (component, feature.clone())
+        if results.is_empty() {
+            // No further up connection found — this is the ultimate source.
+            vec![(component, feature.clone(), base_path.to_vec())]
+        } else {
+            results
+        }
     }
 
-    /// Trace the ultimate destination of a connection by following down connections
+    /// Trace ALL ultimate destinations of a connection by following down connections
     /// inside a subcomponent.
     ///
     /// Given a component instance and a feature name on that component, look for
-    /// a "down" connection inside it of the form `feature_name -> inner_sub.port`.
-    /// If found, recurse into `inner_sub` to find the deepest destination.
+    /// all "down" connections inside it of the form `feature_name -> inner_sub.port`.
+    /// For each match, recurse into `inner_sub` to find the deepest destination(s).
     ///
-    /// Returns `(component_idx, feature_name)` for the deepest destination found.
-    fn trace_destination(
+    /// Returns a list of `(component_idx, feature_name, connection_path)` for all
+    /// traced destinations. Handles fan-out where a single feature is connected to
+    /// multiple internal subcomponents.
+    fn trace_destinations(
         &self,
         component: ComponentInstanceIdx,
         feature: &Name,
-        path: &mut Vec<ConnectionInstanceIdx>,
+        base_path: &[ConnectionInstanceIdx],
         depth_remaining: usize,
-    ) -> (ComponentInstanceIdx, Name) {
+    ) -> Vec<(ComponentInstanceIdx, Name, Vec<ConnectionInstanceIdx>)> {
         if depth_remaining == 0 {
-            return (component, feature.clone());
+            return vec![(component, feature.clone(), base_path.to_vec())];
         }
 
-        // Clone the connection indices to avoid borrow conflicts.
         let conn_indices: Vec<ConnectionInstanceIdx> =
             self.components[component].connections.clone();
 
-        // Look through connections owned by this component for a down connection
-        // whose source feature matches (i.e., `feature -> sub.port`).
-        for conn_idx in conn_indices {
-            let conn = &self.connections[conn_idx];
+        let mut results = Vec::new();
+
+        for conn_idx in &conn_indices {
+            let conn = &self.connections[*conn_idx];
             let (src, dst) = match (&conn.src, &conn.dst) {
                 (Some(s), Some(d)) => (s, d),
                 _ => continue,
@@ -903,25 +923,28 @@ impl SystemInstance {
             if let (None, Some(dst_sub_name)) = (&src.subcomponent, &dst.subcomponent)
                 && src.feature.as_str() == feature.as_str()
             {
-                // Found a down connection distributing from this port.
-                // Resolve the destination subcomponent.
                 let inner_matches = self.find_children_by_name(component, dst_sub_name);
 
-                if let Some(&inner_component) = inner_matches.first() {
-                    let dst_feature = dst.feature.clone();
-                    path.push(conn_idx);
-                    return self.trace_destination(
+                for &inner_component in &inner_matches {
+                    let mut path = base_path.to_vec();
+                    path.push(*conn_idx);
+                    let deeper = self.trace_destinations(
                         inner_component,
-                        &dst_feature,
-                        path,
+                        &dst.feature,
+                        &path,
                         depth_remaining - 1,
                     );
+                    results.extend(deeper);
                 }
             }
         }
 
-        // No further down connection found — this is the ultimate destination.
-        (component, feature.clone())
+        if results.is_empty() {
+            // No further down connection found — this is the ultimate destination.
+            vec![(component, feature.clone(), base_path.to_vec())]
+        } else {
+            results
+        }
     }
 
     /// Return a multi-line summary of the instance model.
@@ -1150,41 +1173,50 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn instantiate_component(
         &mut self,
         instance_name: &Name,
-        package: &Name,
+        from_package: &Name,
+        classifier_package: Option<&Name>,
         type_name: &Name,
         impl_name: &Name,
         parent: Option<ComponentInstanceIdx>,
         subcomponent_loc: Option<(usize, crate::item_tree::SubcomponentIdx)>,
     ) -> ComponentInstanceIdx {
-        // Resolve the implementation
+        // Resolve the implementation.
+        // Use the explicit classifier package if provided; otherwise resolve
+        // as unqualified from the containing package so that imports (including
+        // renames) are searched.
         let ref_ = ClassifierRef::implementation(
-            Some(package.clone()),
+            classifier_package.cloned(),
             type_name.clone(),
             impl_name.clone(),
         );
-        let resolved = self.scope.resolve_classifier(package, &ref_);
+        let resolved = self.scope.resolve_classifier(from_package, &ref_);
 
-        let (category, impl_loc) = match &resolved {
-            ResolvedClassifier::ComponentImpl { loc, .. } => {
+        let (category, impl_loc, resolved_package) = match &resolved {
+            ResolvedClassifier::ComponentImpl {
+                loc,
+                package: res_pkg,
+            } => {
                 let ci = self.scope.get_component_impl(*loc);
                 let cat = ci.map(|c| c.category).unwrap_or(ComponentCategory::System);
-                (cat, Some(*loc))
+                (cat, Some(*loc), res_pkg.clone())
             }
             _ => {
                 self.diagnostics.push(InstanceDiagnostic {
                     message: format!("unresolved implementation: {}", ref_),
                     path: vec![instance_name.clone()],
                 });
-                (ComponentCategory::System, None)
+                (ComponentCategory::System, None, from_package.clone())
             }
         };
 
-        // Resolve the type to get features
-        let type_ref = ClassifierRef::qualified(package.clone(), type_name.clone());
-        let type_resolved = self.scope.resolve_classifier(package, &type_ref);
+        // Resolve the type to get features — use the resolved package from the
+        // implementation so cross-package references (via imports/renames) work.
+        let type_ref = ClassifierRef::qualified(resolved_package.clone(), type_name.clone());
+        let type_resolved = self.scope.resolve_classifier(&resolved_package, &type_ref);
         let type_loc = match &type_resolved {
             ResolvedClassifier::ComponentType { loc, .. } => Some(*loc),
             _ => None,
@@ -1196,7 +1228,7 @@ impl<'a> Builder<'a> {
             category,
             type_name: type_name.clone(),
             impl_name: Some(impl_name.clone()),
-            package: package.clone(),
+            package: resolved_package.clone(),
             parent,
             children: Vec::new(),
             features: Vec::new(),
@@ -1211,91 +1243,8 @@ impl<'a> Builder<'a> {
         // Build property map: type → impl → subcomponent layering
         self.build_property_map(idx, type_loc, impl_loc, subcomponent_loc);
 
-        // Instantiate features and flows from the type
-        if let Some(loc) = type_loc
-            && let Some(ct) = self.scope.get_component_type(loc)
-        {
-            let mut feat_indices = Vec::new();
-            for &feat_idx in &ct.features {
-                if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
-                    let feat_count = array_element_count(
-                        &feat.array_dimensions,
-                        &mut self.diagnostics,
-                        &feat.name,
-                    );
-                    let feat_is_array = !feat.array_dimensions.is_empty();
-
-                    for fi_i in 0..feat_count {
-                        let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
-                        let feat_instance_name = if let Some(i) = feat_array_index {
-                            Name::new(&format!("{}[{}]", feat.name, i))
-                        } else {
-                            feat.name.clone()
-                        };
-                        let fi = self.features.alloc(FeatureInstance {
-                            name: feat_instance_name,
-                            kind: feat.kind,
-                            direction: feat.direction,
-                            owner: idx,
-                            classifier: feat.classifier.clone(),
-                            access_kind: feat.access_kind,
-                            array_index: feat_array_index,
-                        });
-                        feat_indices.push(fi);
-                    }
-                }
-            }
-            self.components[idx].features = feat_indices;
-
-            // Instantiate flow specs from the type
-            let mut flow_indices = Vec::new();
-            for &flow_idx in &ct.flow_specs {
-                if let Some(tree) = self.scope.tree(loc.tree) {
-                    let flow_spec = &tree.flow_specs[flow_idx];
-                    let fi = self.flow_instances.alloc(FlowInstance {
-                        name: flow_spec.name.clone(),
-                        kind: flow_spec.kind,
-                        owner: idx,
-                    });
-                    flow_indices.push(fi);
-                }
-            }
-            self.components[idx].flows = flow_indices;
-
-            // Instantiate modes from the type
-            let mut mode_indices = Vec::new();
-            for &mode_idx in &ct.modes {
-                if let Some(tree) = self.scope.tree(loc.tree) {
-                    let mode = &tree.modes[mode_idx];
-                    let mi = self.mode_instances.alloc(ModeInstance {
-                        name: mode.name.clone(),
-                        is_initial: mode.is_initial,
-                        owner: idx,
-                    });
-                    mode_indices.push(mi);
-                }
-            }
-
-            // Instantiate mode transitions from the type
-            let mut mt_indices = Vec::new();
-            for &mt_idx in &ct.mode_transitions {
-                if let Some(tree) = self.scope.tree(loc.tree) {
-                    let mt = &tree.mode_transitions[mt_idx];
-                    let mti = self
-                        .mode_transition_instances
-                        .alloc(ModeTransitionInstance {
-                            name: mt.name.clone(),
-                            source: mt.source.clone(),
-                            destination: mt.destination.clone(),
-                            triggers: mt.triggers.clone(),
-                            owner: idx,
-                        });
-                    mt_indices.push(mti);
-                }
-            }
-            self.components[idx].modes = mode_indices;
-            self.components[idx].mode_transitions = mt_indices;
-        }
+        // Instantiate features, flows, modes, and mode transitions from the type.
+        self.populate_from_type(idx, type_loc);
 
         // Instantiate subcomponents (recursive)
         #[allow(clippy::collapsible_if)]
@@ -1343,6 +1292,40 @@ impl<'a> Builder<'a> {
                                 dst,
                                 conn.in_modes.clone(),
                             ))
+                        })
+                        .collect();
+
+                    // Collect call-to-subcomponent mapping: call_name -> subcomponent_name.
+                    // Used to resolve parameter connection endpoints that reference
+                    // subprogram calls (e.g. `call1.p` → `s.p` when `call1: subprogram s;`).
+                    let call_map: FxHashMap<String, Name> = ci
+                        .call_sequences
+                        .iter()
+                        .flat_map(|&cs_idx| {
+                            let tree = self.scope.tree(loc.tree);
+                            tree.map(|t| {
+                                let cs = &t.call_sequences[cs_idx];
+                                cs.calls
+                                    .iter()
+                                    .filter_map(|&call_idx| {
+                                        let call = &t.subprogram_calls[call_idx];
+                                        let cls_ref = call.called_subprogram.as_ref()?;
+                                        // If the called subprogram is a local subcomponent
+                                        // reference (no package, no impl), map call name
+                                        // to the subprogram subcomponent name.
+                                        if cls_ref.package.is_none() && cls_ref.impl_name.is_none()
+                                        {
+                                            Some((
+                                                call.name.as_str().to_ascii_lowercase(),
+                                                cls_ref.type_name.clone(),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default()
                         })
                         .collect();
 
@@ -1402,11 +1385,11 @@ impl<'a> Builder<'a> {
 
                             if let Some(cls_ref) = &sub_classifier {
                                 // If the classifier has package + type + impl, instantiate recursively
-                                let sub_pkg = cls_ref.package.as_ref().unwrap_or(package);
                                 if let Some(sub_impl) = &cls_ref.impl_name {
                                     let child_idx = self.instantiate_component(
                                         &instance_name,
-                                        sub_pkg,
+                                        &resolved_package,
+                                        cls_ref.package.as_ref(),
                                         &cls_ref.type_name,
                                         sub_impl,
                                         Some(idx),
@@ -1416,13 +1399,36 @@ impl<'a> Builder<'a> {
                                     self.components[child_idx].in_modes = sub_in_modes.clone();
                                     child_indices.push(child_idx);
                                 } else {
-                                    // Type-only reference — leaf subcomponent
+                                    // Type-only reference — leaf subcomponent.
+                                    // Resolve the type so we can copy its features,
+                                    // flows, modes, and mode transitions.
+                                    let type_ref = ClassifierRef {
+                                        package: cls_ref.package.clone(),
+                                        type_name: cls_ref.type_name.clone(),
+                                        impl_name: None,
+                                    };
+                                    let type_resolved =
+                                        self.scope.resolve_classifier(&resolved_package, &type_ref);
+                                    let (leaf_type_loc, leaf_pkg) = match &type_resolved {
+                                        ResolvedClassifier::ComponentType {
+                                            loc,
+                                            package: res_pkg,
+                                        } => (Some(*loc), res_pkg.clone()),
+                                        _ => (
+                                            None,
+                                            cls_ref
+                                                .package
+                                                .clone()
+                                                .unwrap_or_else(|| resolved_package.clone()),
+                                        ),
+                                    };
+
                                     let child_idx = self.components.alloc(ComponentInstance {
                                         name: instance_name,
                                         category: _sub_cat,
                                         type_name: cls_ref.type_name.clone(),
                                         impl_name: None,
-                                        package: sub_pkg.clone(),
+                                        package: leaf_pkg.clone(),
                                         parent: Some(idx),
                                         children: Vec::new(),
                                         features: Vec::new(),
@@ -1433,10 +1439,15 @@ impl<'a> Builder<'a> {
                                         array_index,
                                         in_modes: sub_in_modes.clone(),
                                     });
+
+                                    // Copy features, flows, modes, and mode transitions
+                                    // from the resolved type.
+                                    self.populate_from_type(child_idx, leaf_type_loc);
+
                                     // Build property map for leaf subcomponent (type only)
                                     self.build_leaf_property_map(
                                         child_idx,
-                                        sub_pkg,
+                                        &leaf_pkg,
                                         &cls_ref.type_name,
                                         loc.tree,
                                         sub_idx,
@@ -1450,7 +1461,7 @@ impl<'a> Builder<'a> {
                                     category: _sub_cat,
                                     type_name: Name::default(),
                                     impl_name: None,
-                                    package: package.clone(),
+                                    package: resolved_package.clone(),
                                     parent: Some(idx),
                                     children: Vec::new(),
                                     features: Vec::new(),
@@ -1469,9 +1480,59 @@ impl<'a> Builder<'a> {
                     }
                     self.components[idx].children = child_indices;
 
-                    // Instantiate connections
+                    // Instantiate connections with endpoint fixups:
+                    //
+                    // 1. Access connections: a bare name matching a child
+                    //    subcomponent is a subcomponent reference (the entire
+                    //    subcomponent is the access endpoint).
+                    //
+                    // 2. Parameter connections: resolve call references to their
+                    //    target subprogram subcomponents (e.g. `call1.p` → `s.p`
+                    //    when `call1: subprogram s;`).
+                    let child_names: Vec<Name> = self.components[idx]
+                        .children
+                        .iter()
+                        .map(|&ci| self.components[ci].name.clone())
+                        .collect();
+
                     let mut conn_indices = Vec::new();
-                    for (conn_name, conn_kind, bidi, src, dst, conn_in_modes) in conn_data {
+                    for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes) in conn_data {
+                        // Fix up access connection endpoints.
+                        if conn_kind == ConnectionKind::Access {
+                            if let Some(ref mut s) = src {
+                                if s.subcomponent.is_none()
+                                    && child_names.iter().any(|n| {
+                                        n.as_str().eq_ignore_ascii_case(s.feature.as_str())
+                                    })
+                                {
+                                    s.subcomponent = Some(s.feature.clone());
+                                    s.feature = Name::default();
+                                }
+                            }
+                            if let Some(ref mut d) = dst {
+                                if d.subcomponent.is_none()
+                                    && child_names.iter().any(|n| {
+                                        n.as_str().eq_ignore_ascii_case(d.feature.as_str())
+                                    })
+                                {
+                                    d.subcomponent = Some(d.feature.clone());
+                                    d.feature = Name::default();
+                                }
+                            }
+                        }
+
+                        // Resolve call references in parameter connection endpoints.
+                        if conn_kind == ConnectionKind::Parameter && !call_map.is_empty() {
+                            for endpoint in [&mut src, &mut dst].into_iter().flatten() {
+                                if let Some(sub_name) = &endpoint.subcomponent {
+                                    let key = sub_name.as_str().to_ascii_lowercase();
+                                    if let Some(target_sub) = call_map.get(&key) {
+                                        endpoint.subcomponent = Some(target_sub.clone());
+                                    }
+                                }
+                            }
+                        }
+
                         let ci = self.connections.alloc(ConnectionInstance {
                             name: conn_name,
                             kind: conn_kind,
@@ -1544,6 +1605,140 @@ impl<'a> Builder<'a> {
         }
 
         idx
+    }
+
+    /// Populate features, flows, modes, and mode transitions from a resolved component type.
+    ///
+    /// Used by both `instantiate_component` (for components with implementations) and
+    /// the type-only subcomponent branch (for leaf subcomponents without implementations).
+    fn populate_from_type(
+        &mut self,
+        idx: ComponentInstanceIdx,
+        type_loc: Option<crate::resolver::ItemLoc>,
+    ) {
+        let Some(loc) = type_loc else { return };
+        let Some(ct) = self.scope.get_component_type(loc) else {
+            return;
+        };
+
+        // Clone data we need before mutating self
+        let feat_data: Vec<_> = ct
+            .features
+            .iter()
+            .filter_map(|&feat_idx| {
+                let feat = self.scope.get_feature(loc.tree, feat_idx)?;
+                Some((
+                    feat.name.clone(),
+                    feat.kind,
+                    feat.direction,
+                    feat.classifier.clone(),
+                    feat.access_kind,
+                    feat.array_dimensions.clone(),
+                ))
+            })
+            .collect();
+
+        let flow_data: Vec<_> = ct
+            .flow_specs
+            .iter()
+            .filter_map(|&flow_idx| {
+                let tree = self.scope.tree(loc.tree)?;
+                let flow_spec = &tree.flow_specs[flow_idx];
+                Some((flow_spec.name.clone(), flow_spec.kind))
+            })
+            .collect();
+
+        let mode_data: Vec<_> = ct
+            .modes
+            .iter()
+            .filter_map(|&mode_idx| {
+                let tree = self.scope.tree(loc.tree)?;
+                let mode = &tree.modes[mode_idx];
+                Some((mode.name.clone(), mode.is_initial))
+            })
+            .collect();
+
+        let mt_data: Vec<_> = ct
+            .mode_transitions
+            .iter()
+            .filter_map(|&mt_idx| {
+                let tree = self.scope.tree(loc.tree)?;
+                let mt = &tree.mode_transitions[mt_idx];
+                Some((
+                    mt.name.clone(),
+                    mt.source.clone(),
+                    mt.destination.clone(),
+                    mt.triggers.clone(),
+                ))
+            })
+            .collect();
+
+        // Instantiate features
+        let mut feat_indices = Vec::new();
+        for (name, kind, direction, classifier, access_kind, array_dims) in feat_data {
+            let feat_count = array_element_count(&array_dims, &mut self.diagnostics, &name);
+            let feat_is_array = !array_dims.is_empty();
+
+            for fi_i in 0..feat_count {
+                let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
+                let feat_instance_name = if let Some(i) = feat_array_index {
+                    Name::new(&format!("{}[{}]", name, i))
+                } else {
+                    name.clone()
+                };
+                let fi = self.features.alloc(FeatureInstance {
+                    name: feat_instance_name,
+                    kind,
+                    direction,
+                    owner: idx,
+                    classifier: classifier.clone(),
+                    access_kind,
+                    array_index: feat_array_index,
+                });
+                feat_indices.push(fi);
+            }
+        }
+        self.components[idx].features = feat_indices;
+
+        // Instantiate flow specs
+        let mut flow_indices = Vec::new();
+        for (name, kind) in flow_data {
+            let fi = self.flow_instances.alloc(FlowInstance {
+                name,
+                kind,
+                owner: idx,
+            });
+            flow_indices.push(fi);
+        }
+        self.components[idx].flows = flow_indices;
+
+        // Instantiate modes
+        let mut mode_indices = Vec::new();
+        for (name, is_initial) in mode_data {
+            let mi = self.mode_instances.alloc(ModeInstance {
+                name,
+                is_initial,
+                owner: idx,
+            });
+            mode_indices.push(mi);
+        }
+
+        // Instantiate mode transitions
+        let mut mt_indices = Vec::new();
+        for (name, source, destination, triggers) in mt_data {
+            let mti = self
+                .mode_transition_instances
+                .alloc(ModeTransitionInstance {
+                    name,
+                    source,
+                    destination,
+                    triggers,
+                    owner: idx,
+                });
+            mt_indices.push(mti);
+        }
+        self.components[idx].modes = mode_indices;
+        self.components[idx].mode_transitions = mt_indices;
     }
 
     /// Build a property map for a component instance with type + impl + subcomponent layering.

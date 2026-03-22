@@ -172,6 +172,297 @@ artifacts:
       limitations: closed-source, expensive, heuristic only
       differentiation: spar is open-source, provides exact solutions, WASM-deployable
 
+  - id: COMP-ELLIDISS
+    type: competitive-analysis
+    title: Ellidiss STOOD + AADL Inspector — commercial AADL IDE
+    description: >
+      Commercial AADL development environment with graphical editor, code
+      generation (Ada/C via Ocarina), real-time scheduling simulation
+      (MARZHIN), security rules checker, and AADL v2.3 support. Includes
+      syntax-highlighting VS Code extension.
+    fields:
+      tool-name: STOOD / AADL Inspector
+      tool-url: https://www.ellidiss.fr
+      vendor: Ellidiss Technologies
+      tool-status: commercial
+      approach: IDE with integrated analysis and code generation
+      constraints-handled: [timing, scheduling, security, code-generation]
+      global-optimal: false
+      limitations: >
+        Commercial license, no WASM, no deployment optimization, no
+        incremental computation, VS Code extension is syntax-only
+      differentiation: >
+        spar has incremental computation (salsa), WASM deployment,
+        deployment solver with bin-packing, assertion engine, SARIF CI
+        integration, and rivet lifecycle traceability. Ellidiss has code
+        generation and MARZHIN scheduling simulation that spar lacks.
+
+  - id: COMP-CHEDDAR
+    type: competitive-analysis
+    title: Cheddar — real-time scheduling simulator
+    description: >
+      Open-source real-time scheduling analyzer from Lab-STICC. Supports
+      RM, DM, EDF, LLF, MUF, Round-Robin, ARINC 653, hierarchical, and
+      global multiprocessor scheduling. Generates timeline visualizations.
+      AADL integration via CheddarADL or OSATE plugin.
+    fields:
+      tool-name: Cheddar
+      tool-url: http://beru.univ-brest.fr/cheddar/
+      vendor: Lab-STICC / Univ. Brest
+      tool-status: active
+      approach: scheduling simulation with timeline visualization
+      constraints-handled: [scheduling, timing, arinc653, multiprocessor]
+      global-optimal: false
+      limitations: >
+        Ada/GNAT-based (not Rust), no deployment optimization, no
+        incremental computation, limited to scheduling analysis
+      differentiation: >
+        spar has broader analysis (27 passes beyond scheduling), WASM,
+        deployment solver. Cheddar has richer scheduling simulation with
+        timeline visualization and more scheduling policies. Future:
+        spar could integrate Cheddar-style timeline output.
+
+  - id: COMP-TASTE
+    type: competitive-analysis
+    title: TASTE/Ocarina — ESA AADL toolchain
+    description: >
+      ESA's complete AADL toolchain. Ocarina processes AADL models for
+      code generation (C, Ada), Petri net generation, scheduling analysis
+      (via MAST/Cheddar), WCET analysis, and constraint checking (REAL
+      language). TASTE adds graphical IDE, ASN.1 data modeling, and
+      multi-language behavior (SDL, SCADE, Simulink). Used on real ESA
+      missions (IXV, ERGO).
+    fields:
+      tool-name: TASTE / Ocarina
+      tool-url: https://taste.tuxfamily.org
+      vendor: ESA / Telecom ParisTech
+      tool-status: maintained
+      approach: model-driven code generation + deployment
+      constraints-handled: [timing, scheduling, code-generation, deployment, wcet]
+      global-optimal: false
+      limitations: >
+        Eclipse-based and heavyweight. Ocarina development slowed.
+        No WASM deployment. No incremental computation. Ada codebase.
+        Limited multicore support.
+      differentiation: >
+        spar is modern Rust, WASM-deployable, incrementally computed,
+        lighter weight, easier to qualify under DO-330. TASTE has code
+        generation and mission heritage that spar lacks. SpaceWire
+        protocol in spar's virtual bus library bridges the gap.
+
+  - id: COMP-APP4MC
+    type: competitive-analysis
+    title: Eclipse App4MC — AUTOSAR timing and mapping
+    description: >
+      Eclipse-based tool for AUTOSAR timing analysis and runnable-to-task
+      mapping. Uses AMALTHEA data model. Includes partitioning and mapping
+      algorithms. Used by BMW, Daimler, VW.
+    fields:
+      tool-name: App4MC / Amalthea
+      tool-url: https://eclipse.dev/app4mc/
+      vendor: Eclipse Foundation (Robert Bosch GmbH)
+      tool-status: active
+      approach: heuristic partitioning + timing analysis
+      constraints-handled: [timing, scheduling, autosar-mapping, safety]
+      global-optimal: false
+      limitations: >
+        AUTOSAR-specific (AMALTHEA model, not AADL). Eclipse/Java.
+        Heuristic only — no optimality guarantees.
+      differentiation: >
+        spar uses AADL (cross-domain standard), provides exact solver
+        path, WASM deployment, rivet traceability. App4MC has deeper
+        AUTOSAR integration and industry adoption.
+
+  - id: COMP-AGREE-RESOLUTE
+    type: competitive-analysis
+    title: OSATE AGREE/Resolute — formal property checking
+    description: >
+      OSATE plugins for formal verification. AGREE provides assume-guarantee
+      compositional verification using Lustre/JKind model checker. Resolute
+      provides a claim-based verification language for architecture-level
+      properties. Both operate on AADL instance models.
+    fields:
+      tool-name: AGREE + Resolute
+      tool-url: https://github.com/loonwerks/AGREE
+      vendor: Collins Aerospace / Loonwerks
+      tool-status: maintained
+      approach: model checking (AGREE) + claim language (Resolute)
+      constraints-handled: [formal-verification, safety-properties, architecture-claims]
+      global-optimal: false
+      limitations: >
+        OSATE/Eclipse-only. AGREE requires Lustre specifications.
+        Resolute is AADL-annex-based (not standalone). JKind model
+        checker can be slow on large models.
+      differentiation: >
+        spar's assertion engine provides lightweight Resolute-like
+        checking with rowan CST, usable in CI via spar verify.
+        AGREE's model checking is deeper but heavier. Future: spar
+        could integrate with Lean4 proofs for formal guarantees.
+
+  # ── MBSE Ecosystem ────────────────────────────────────────────────
+
+  - id: COMP-SYSMLV2
+    type: competitive-analysis
+    title: SysML v2 — next-gen systems modeling language
+    description: >
+      OMG SysML v2 replaces UML-based SysML v1 with a textual notation
+      (SysML v2 textual grammar) and programmatic API (SysML v2 API/Services).
+      Constraint definitions are first-class (parametric diagrams evolved
+      into constraint expressions). Solver-agnostic — constraints are
+      declarative, solver is external. OpenMBEE/Jupyter integration for
+      analysis. Tools: Cameo/MagicDraw (Dassault), SysIDE (Eclipse),
+      PlantSysML (text-based).
+    fields:
+      tool-name: SysML v2
+      tool-url: https://www.omg.org/spec/SysML/2.0
+      vendor: OMG (Object Management Group)
+      tool-status: active
+      approach: textual modeling language with constraint expressions
+      constraints-handled: [parametric-constraints, requirements, behavior, structure]
+      global-optimal: false
+      limitations: >
+        No native deployment optimization. Constraint solver is external.
+        Tooling still maturing (SysML v2 spec finalized 2023). No
+        real-time scheduling analysis built in.
+      differentiation: >
+        spar provides domain-specific real-time analysis (27 passes) that
+        SysML v2 doesn't have. SysML v2 is broader (requirements, behavior,
+        parametrics) while AADL/spar is deeper on deployment architecture.
+        Future: spar-transform could import/export SysML v2 textual notation,
+        bridging SysML system models with AADL deployment analysis.
+
+  - id: COMP-CAPELLA
+    type: competitive-analysis
+    title: Capella/ARCADIA — open-source MBSE tool
+    description: >
+      Eclipse-based MBSE tool implementing the ARCADIA method. Four
+      architecture levels: Operational, System, Logical, Physical. Used
+      by Thales, Airbus, naval/defense. N7 Space built a Capella-to-TASTE
+      bridge for ESA. Active open-source community.
+    fields:
+      tool-name: Capella
+      tool-url: https://mbse-capella.org/
+      vendor: Thales / Eclipse Foundation
+      tool-status: active
+      approach: model-based systems engineering with ARCADIA method
+      constraints-handled: [functional-chains, physical-architecture, interfaces]
+      global-optimal: false
+      limitations: >
+        Eclipse/Java heavyweight. No AADL native support. No real-time
+        scheduling analysis. No deployment optimization. Physical
+        architecture level is manual.
+      differentiation: >
+        spar provides formal deployment analysis that Capella lacks.
+        Capella is broader (system-level MBSE) while spar is deeper
+        (deployment verification). The Capella-to-TASTE bridge shows
+        demand for connecting MBSE tools to AADL analysis — spar could
+        fill this role more easily than TASTE.
+
+  - id: COMP-EASTADL
+    type: competitive-analysis
+    title: EAST-ADL — automotive architecture description language
+    description: >
+      Automotive-specific ADL with four abstraction levels: Vehicle,
+      Analysis, Design, Implementation. Design level maps to AUTOSAR.
+      Separate timing constraint model. HiP-HOPS integration for safety.
+      Product line variability built in. Developed by ITEA/MAENAD projects.
+    fields:
+      tool-name: EAST-ADL
+      tool-url: https://www.east-adl.info
+      vendor: ITEA / MAENAD consortium
+      tool-status: maintained
+      approach: automotive architecture description with AUTOSAR mapping
+      constraints-handled: [timing-constraints, safety, variability, autosar-mapping]
+      global-optimal: false
+      limitations: >
+        Automotive-only (not cross-domain). Delegates implementation
+        to AUTOSAR. Limited open tooling. Academic origin with limited
+        industry tool support.
+      differentiation: >
+        AADL is cross-domain (aerospace, automotive, medical, IIoT).
+        EAST-ADL validates spar's multi-level approach: high-level
+        allocation constraints flow down to implementation. spar's
+        virtual bus library + protocol catalog covers EAST-ADL's
+        design-level communication modeling.
+
+  # ── Interoperability Standards ─────────────────────────────────────
+
+  - id: TECH-SYSMLV2-IMPORT
+    type: technology-evaluation
+    title: SysML v2 rowan parser + AADL lowering (spar-sysml2)
+    description: >
+      SysML v2 textual notation (KerML grammar) is parseable with rowan
+      the same way AADL is parsed. No Rust parser exists — pilot impl
+      is Java-only (github.com/Systems-Modeling/SysML-v2-Release).
+      SEI is specifying the SysML v2 → AADL mapping rules
+      (sei.cmu.edu/annual-reviews/2023-year-in-review/extending-sysml-v2-
+      with-aadl-concepts). Three-layer pipeline: SysML v2 (system) →
+      AADL (deployment) → WIT/code (implementation), with rivet tracing
+      through all layers. SysML v2 requirement elements → rivet YAML.
+    fields:
+      technology: SysML v2 Textual Grammar (KerML)
+      category: standard
+      maturity: stable
+      rust-compatible: true
+      wasm-compatible: true
+      license: OMG specification (open)
+      recommendation: adopt
+    tags: [transform, sysml, interop, v050]
+
+  - id: TECH-REQIF
+    type: technology-evaluation
+    title: ReqIF (Requirements Interchange Format) import
+    description: >
+      OMG standard for exchanging requirements between tools (DOORS,
+      Jama, Polarion, Capella). Importing ReqIF into rivet would
+      bridge enterprise ALM tools with spar's architecture verification.
+      XML-based format, Rust XML parsers available.
+    fields:
+      technology: ReqIF (OMG)
+      category: standard
+      maturity: production
+      rust-compatible: true
+      wasm-compatible: true
+      license: OMG specification (open)
+      recommendation: trial
+    tags: [interop, requirements, v040]
+
+  - id: TECH-FMI
+    type: technology-evaluation
+    title: FMI (Functional Mock-up Interface) for co-simulation
+    description: >
+      Standard for exchanging simulation models between tools. FMI 3.0
+      supports co-simulation and model exchange. Could enable spar to
+      connect AADL timing models with Modelica/Simulink physical models
+      for end-to-end system simulation. Rust FMI bindings exist.
+    fields:
+      technology: FMI 3.0
+      category: standard
+      maturity: production
+      rust-compatible: true
+      wasm-compatible: false
+      license: Modelica Association (open)
+      recommendation: assess
+    tags: [interop, simulation, v050]
+
+  - id: TECH-CAPELLA-BRIDGE
+    type: technology-evaluation
+    title: Capella/ARCADIA to AADL bridge
+    description: >
+      N7 Space built a Capella-to-TASTE bridge for ESA. A Capella-to-spar
+      bridge would be lighter (no Eclipse dependency) and provide richer
+      analysis. Capella's Physical Architecture maps to AADL system
+      implementations. Functional Chains map to AADL end-to-end flows.
+    fields:
+      technology: Capella XMI export → AADL
+      category: framework
+      maturity: research
+      rust-compatible: true
+      wasm-compatible: true
+      license: EPL-2.0 (Capella)
+      recommendation: assess
+    tags: [interop, capella, bridge, v050]
+
   # ── Patent Findings ────────────────────────────────────────────────
 
   - id: PAT-COSYN

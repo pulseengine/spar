@@ -259,6 +259,56 @@ artifacts:
     status: implemented
     tags: [integration, serde]
 
+  # ── Rendering (STPA-derived) ──────────────────────────────────────────
+
+  - id: RENDER-REQ-001
+    type: requirement
+    title: Orthogonal edge routing
+    description: >
+      Edges must use orthogonal routing to minimize visual crossings.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-002
+    type: requirement
+    title: Port visibility with directional indicators
+    description: >
+      Ports must be visible with directional indicators and type coloring.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-003
+    type: requirement
+    title: Interactive HTML with zoom/pan/minimap/search
+    description: >
+      Interactive HTML output must support zoom, pan, minimap, and search.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-004
+    type: requirement
+    title: Deterministic layout
+    description: >
+      Layout must be deterministic — same model always produces same layout.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-005
+    type: requirement
+    title: Selection and group highlighting
+    description: >
+      Selection and group highlighting must be supported in interactive mode.
+    status: implemented
+    tags: [rendering, stpa]
+
+  - id: RENDER-REQ-006
+    type: requirement
+    title: Semantic zoom for overview levels
+    description: >
+      Semantic zoom must reduce clutter at overview levels.
+    status: partial
+    tags: [rendering, stpa]
+
   - id: REQ-WASM-001
     type: requirement
     title: WASM component target
@@ -559,7 +609,7 @@ artifacts:
       changes affect the same structural elements (components, connections,
       bindings) or produce incompatible analysis results.
     status: planned
-    tags: [diff, merge, v030]
+    tags: [diff, merge, v040]
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -571,7 +621,7 @@ artifacts:
       exposing AADL analysis passes as MCP tools and instance model
       elements as MCP resources over stdio JSON-RPC transport.
     status: planned
-    tags: [mcp, integration, v030]
+    tags: [mcp, integration, v040]
 
   # ── Query Language ───────────────────────────────────────────────────
 
@@ -584,7 +634,7 @@ artifacts:
       model elements. Supports predicate filtering, property extraction,
       and aggregation.
     status: planned
-    tags: [query, instance, v030]
+    tags: [query, instance, v040]
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -690,5 +740,123 @@ artifacts:
       security overhead (TLS latency, MAC computation) in timing analysis.
     status: planned
     tags: [solver, security, v040]
+
+  # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
+
+  - id: REQ-CODEGEN-001
+    type: requirement
+    title: Code skeleton generation (Ada/C/Rust)
+    description: >
+      Generate deployable code skeletons from AADL component implementations.
+      Thread bodies as task entry points with correct scheduling attributes.
+      Port connections as typed communication stubs. Data types as structs.
+      Targets: Ada (aerospace), C (embedded), Rust (modern). Ellidiss and
+      TASTE both offer this — it's the #1 competitive gap.
+    status: planned
+    tags: [codegen, competitive-gap, v040]
+
+  - id: REQ-TIMELINE-001
+    type: requirement
+    title: Scheduling timeline visualization
+    description: >
+      Generate timeline diagrams showing thread execution over time on each
+      processor. Visualize preemption, blocking, response times, deadline
+      margins. Cheddar and Ellidiss MARZHIN offer this — spar has static
+      RMA/RTA but no temporal visualization. Output as SVG/HTML with
+      interactive zoom.
+    status: planned
+    tags: [visualization, scheduling, competitive-gap, v040]
+
+  - id: REQ-SECURITY-001
+    type: requirement
+    title: Security rules analysis
+    description: >
+      Check security properties on connections and components: encryption
+      requirements on cross-zone connections, authentication on control
+      interfaces, secure boot chain verification, trust boundary validation.
+      Ellidiss has a security rules checker; OSATE has none. Maps to
+      IEC 62443 zones/conduits and ISO 21434 threat analysis.
+    status: planned
+    tags: [security, competitive-gap, v040]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-009
+
+  - id: REQ-RESOLUTE-001
+    type: requirement
+    title: Architecture claim language (Resolute-lite)
+    description: >
+      Extend the assertion engine to support Resolute-style architecture
+      claims: hierarchical claim decomposition, evidence linking, and
+      reusable claim libraries. Currently spar verify has flat assertions;
+      Resolute supports claim trees with sub-claims and computed evidence.
+    status: planned
+    tags: [verification, competitive-gap, v040]
+
+  - id: REQ-BIDIRECTIONAL-001
+    type: requirement
+    title: Bidirectional diagram editing
+    description: >
+      Allow editing the architecture via the diagram (add components,
+      draw connections, change properties) with changes propagated back
+      to AADL source via rowan CST. Currently spar renders read-only
+      diagrams. OSATE graphical editor and Ellidiss STOOD both support
+      bidirectional editing.
+    status: planned
+    tags: [rendering, editing, competitive-gap, v050]
+
+  # ── Interoperability Requirements (v0.5.0+) ────────────────────────
+
+  - id: REQ-INTEROP-001
+    type: requirement
+    title: SysML v2 textual notation parser + AADL lowering
+    description: >
+      New spar-sysml2 crate: rowan-based parser for SysML v2 textual
+      notation (KerML grammar). Same pattern as spar-parser. No Rust
+      parser exists — the pilot implementation is Java-only.
+      Three capabilities:
+      1. Parse .sysml files into rowan CST (like AADL parsing)
+      2. Lower SysML v2 system models to AADL execution platform models
+         where timing/scheduling semantics exist — implementing the
+         SEI mapping rules (sei.cmu.edu/annual-reviews/2023-year-in-review/
+         extending-sysml-v2-with-aadl-concepts)
+      3. Extract SysML v2 requirement elements into rivet YAML artifacts
+      Result: SysML v2 (system-level) → AADL (deployment-level) →
+      WIT/code (implementation-level), with rivet tracing through all
+      three layers and spar analyzing architecture at every level.
+    status: planned
+    tags: [transform, sysml, interop, v050]
+
+  - id: REQ-INTEROP-002
+    type: requirement
+    title: ReqIF import for requirements interchange
+    description: >
+      Import OMG ReqIF XML into rivet artifacts. Bridges enterprise ALM
+      tools (DOORS, Jama, Polarion) with spar's architecture verification.
+      Requirements flow into rivet, trace to AADL components via spar verify.
+    status: planned
+    tags: [interop, requirements, v040]
+
+  - id: REQ-INTEROP-003
+    type: requirement
+    title: Capella/ARCADIA to AADL bridge
+    description: >
+      Import Capella XMI models into AADL. Physical Architecture → system
+      implementations, Functional Chains → end-to-end flows, Components →
+      AADL components. Lighter than the N7 Space Capella-to-TASTE bridge
+      (no Eclipse dependency).
+    status: planned
+    tags: [interop, capella, bridge, v050]
+
+  - id: REQ-INTEROP-004
+    type: requirement
+    title: AUTOSAR ARXML import
+    description: >
+      Import AUTOSAR Adaptive/Classic ARXML into AADL. Execution Manifests
+      → process/thread bindings, Service Instance Manifests → connections,
+      Machine Manifests → processor configurations. Enables spar analysis
+      on existing AUTOSAR models without manual AADL modeling.
+    status: planned
+    tags: [interop, autosar, bridge, v050]
 
   # Research findings tracked separately in research/findings.yaml

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="ASCII"?>
+<instance:SystemInstance xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:aadl2="http://aadl.info/AADL/2.0" xmlns:instance="http://aadl.info/AADL/2.0/instance" name="FlightSystem_tier1_Instance" category="system">
+  <featureInstance name="satelliteSignal" category="abstractFeature">
+    <feature xsi:type="aadl2:AbstractFeature" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedAbstractFeature.0"/>
+  </featureInstance>
+  <featureInstance name="ObservableFailure" category="abstractFeature" direction="out">
+    <feature xsi:type="aadl2:AbstractFeature" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedAbstractFeature.1"/>
+  </featureInstance>
+  <featureInstance name="pilotInput">
+    <feature xsi:type="aadl2:DataPort" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.0"/>
+  </featureInstance>
+  <componentInstance name="FSpowersupply" category="device">
+    <subcomponent xsi:type="aadl2:DeviceSubcomponent" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedDeviceSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../FlightSystem.aadl#|::0.5.9.1.47.0::18::/5"/>
+  </componentInstance>
+  <componentInstance name="GPS" category="system">
+    <featureInstance name="satelliteSignal" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="location" direction="out">
+      <feature xsi:type="aadl2:DataPort" href="../GPSSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.0/@ownedDataPort.0"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedSystemSubcomponent.0"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:SystemType" href="../GPSSystem.aadl#GPSSystem.GPS"/>
+  </componentInstance>
+  <componentInstance name="AutoFlightGuidance" category="system">
+    <featureInstance name="powersupply" category="abstractFeature">
+      <feature xsi:type="aadl2:AbstractFeature" href="../AutomatedFlightGuidance.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedAbstractFeature.0"/>
+    </featureInstance>
+    <featureInstance name="position">
+      <feature xsi:type="aadl2:DataPort" href="../AutomatedFlightGuidance.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.0"/>
+    </featureInstance>
+    <featureInstance name="operatorCommand">
+      <feature xsi:type="aadl2:DataPort" href="../AutomatedFlightGuidance.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.1"/>
+    </featureInstance>
+    <featureInstance name="AFGOutput" direction="out">
+      <feature xsi:type="aadl2:DataPort" href="../AutomatedFlightGuidance.aadl#/0/@ownedPublicSection/@ownedClassifier.3/@ownedDataPort.2"/>
+    </featureInstance>
+    <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedSystemSubcomponent.1"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:SystemType" href="../AutomatedFlightGuidance.aadl#AutomatedFlightGuidance.AutomatedFlightGuidance"/>
+  </componentInstance>
+  <componentInstance name="FlightControl" category="system">
+    <subcomponent xsi:type="aadl2:SystemSubcomponent" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.1/@ownedSystemSubcomponent.2"/>
+    <index>0</index>
+    <classifier xsi:type="aadl2:AbstractType" href="../FlightSystem.aadl#|::0.5.9.1.53.2::18::/5"/>
+  </componentInstance>
+  <connectionInstance name="satelliteSignal -> GPS.satelliteSignal" destination="//@componentInstance.1/@featureInstance.0" source="//@featureInstance.0">
+    <connectionReference context="/" source="//@featureInstance.0" destination="//@componentInstance.1/@featureInstance.0">
+      <connection xsi:type="aadl2:FeatureConnection" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedFeatureConnection.0"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="pilotInput -> AutoFlightGuidance.operatorCommand" kind="portConnection" destination="//@componentInstance.2/@featureInstance.2" source="//@featureInstance.2">
+    <connectionReference context="/" source="//@featureInstance.2" destination="//@componentInstance.2/@featureInstance.2">
+      <connection xsi:type="aadl2:PortConnection" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedPortConnection.2"/>
+    </connectionReference>
+  </connectionInstance>
+  <connectionInstance name="GPS.location -> AutoFlightGuidance.position" complete="true" kind="portConnection" destination="//@componentInstance.2/@featureInstance.1" source="//@componentInstance.1/@featureInstance.1">
+    <connectionReference context="/" source="//@componentInstance.1/@featureInstance.1" destination="//@componentInstance.2/@featureInstance.1">
+      <connection xsi:type="aadl2:PortConnection" href="../FlightSystem.aadl#/0/@ownedPublicSection/@ownedClassifier.2/@ownedPortConnection.0"/>
+    </connectionReference>
+  </connectionInstance>
+  <classifier xsi:type="aadl2:SystemImplementation" href="../FlightSystem.aadl#FlightSystem.FlightSystem.tier1"/>
+  <systemOperationMode name="No Modes"/>
+  <componentImplementation xsi:type="aadl2:SystemImplementation" href="../FlightSystem.aadl#FlightSystem.FlightSystem.tier1"/>
+</instance:SystemInstance>
