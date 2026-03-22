@@ -13,3 +13,4 @@ petgraph.workspace = true
 la-arena.workspace = true
 rustc-hash = "2"
 serde.workspace = true
+good_lp.workspace = true

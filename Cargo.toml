@@ -43,3 +43,4 @@ smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
 proptest = "1"
+good_lp = { version = "1", default-features = false, features = ["highs"] }
