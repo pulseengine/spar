@@ -753,6 +753,9 @@ artifacts:
       data type → struct, port → typed channel / WIT stream.
     status: planned
     tags: [codegen, competitive-gap, v040]
+    links:
+      - type: traces-to
+        target: REQ-TRANSFORM-001
 
   - id: REQ-CODEGEN-WIT
     type: requirement
@@ -966,6 +969,13 @@ artifacts:
       three layers and spar analyzing architecture at every level.
     status: planned
     tags: [transform, sysml, interop, v050]
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-PARSE
+      - type: traces-to
+        target: REQ-SYSML2-LOWER
+      - type: traces-to
+        target: REQ-SYSML2-EXTRACT
 
   - id: REQ-INTEROP-002
     type: requirement

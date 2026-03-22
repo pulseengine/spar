@@ -730,6 +730,8 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-SYSML2-PARSE
+      - type: satisfies
+        target: REQ-INTEROP-001
 
   - id: ARCH-SYSML2-003
     type: design-decision
@@ -756,34 +758,4 @@ artifacts:
 
   # ── SysML v2 Integration (v0.5.0) ───────────────────────────────────
 
-  - id: ARCH-SYSML2-001
-    type: design-decision
-    status: planned
-    title: "SysML v2 rowan-based parser (spar-sysml2 crate)"
-    description: >
-      New spar-sysml2 crate implementing a rowan-based parser for SysML v2
-      textual notation (KerML grammar). Same architecture as spar-parser:
-      hand-written recursive descent, lossless CST, error recovery. No Rust
-      SysML v2 parser exists — the pilot implementation is Java-only.
-      SysML v2 spec: github.com/Systems-Modeling/SysML-v2-Release.
-      Three-layer pipeline: SysML v2 (system-level) → AADL (deployment-level)
-      → WIT/code (implementation-level). Lowering implements the SEI mapping
-      rules from sei.cmu.edu/annual-reviews/2023-year-in-review/extending-
-      sysml-v2-with-aadl-concepts. SysML v2 requirement elements flow
-      directly into rivet artifacts.
-    fields:
-      rationale: >
-        KerML is just another grammar — parseable with rowan the same way
-        AADL is parsed. The SysML v2 → AADL lowering maps system models
-        to execution platform models where timing/scheduling semantics exist.
-        This is exactly what the SEI is specifying. Requirements extraction
-        bridges SysML v2 requirements with rivet traceability. Result: one
-        tool analyzing architecture from system design through deployment
-        through implementation.
-      interfaces:
-        provides: [parse_sysml2, lower_to_aadl, extract_requirements]
-        requires: [spar-parser pattern, spar-transform, rivet YAML]
-    tags: [architecture, sysml, v050]
-    links:
-      - type: satisfies
-        target: REQ-INTEROP-001
+  # ARCH-SYSML2-001 merged into ARCH-SYSML2-002 and ARCH-SYSML2-003 (v0.4.0)
