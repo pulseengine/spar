@@ -14,11 +14,6 @@ members = [
     "crates/spar-solver",
     "crates/spar-sysml2",
     "crates/spar-wasm",
-<<<<<<< HEAD
-    "crates/spar-codegen",
-=======
-    "crates/spar-sysml2",
->>>>>>> feat/sysml2-parser-reqs
 ]
 
 [workspace.package]
