@@ -951,6 +951,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-sysml2"
+version = "0.3.0"
+dependencies = [
+ "expect-test",
+ "rowan",
+]
+
+[[package]]
 name = "spar-transform"
 version = "0.3.0"
 dependencies = [

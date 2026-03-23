@@ -12,6 +12,7 @@ members = [
     "crates/spar-cli",
     "crates/spar-render",
     "crates/spar-solver",
+    "crates/spar-sysml2",
     "crates/spar-wasm",
     "crates/spar-codegen",
 ]
@@ -32,6 +33,7 @@ spar-hir = { path = "crates/spar-hir" }
 spar-analysis = { path = "crates/spar-analysis" }
 spar-render = { path = "crates/spar-render" }
 spar-solver = { path = "crates/spar-solver" }
+spar-sysml2 = { path = "crates/spar-sysml2" }
 spar-transform = { path = "crates/spar-transform" }
 spar-codegen = { path = "crates/spar-codegen" }
 rowan = "0.16"
@@ -45,3 +47,4 @@ smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
 proptest = "1"
+good_lp = { version = "1", default-features = false, features = ["highs"] }
