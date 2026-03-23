@@ -953,10 +953,13 @@ dependencies = [
 [[package]]
 name = "spar-sysml2"
 version = "0.3.0"
+<<<<<<< HEAD
 dependencies = [
  "expect-test",
  "rowan",
 ]
+=======
+>>>>>>> feat/sysml2-parser-reqs
 
 [[package]]
 name = "spar-transform"
