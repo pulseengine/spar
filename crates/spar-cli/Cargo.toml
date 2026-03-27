@@ -20,6 +20,7 @@ spar-annex.workspace = true
 spar-analysis.workspace = true
 spar-solver.workspace = true
 spar-render.workspace = true
+spar-codegen.workspace = true
 etch.workspace = true
 rowan.workspace = true
 salsa.workspace = true
