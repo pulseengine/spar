@@ -32,9 +32,7 @@ pub fn generate_test_harness(
     // Test: component initializes without panic
     code.push_str("#[test]\n");
     code.push_str(&format!("fn {name}_initializes() {{\n"));
-    code.push_str(&format!(
-        "    let mut comp = {struct_name}Default;\n"
-    ));
+    code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
     code.push_str(&format!(
         "    let mut ports = {struct_name}Ports::default();\n"
     ));
@@ -44,9 +42,7 @@ pub fn generate_test_harness(
     // Test: compute dispatch executes
     code.push_str("#[test]\n");
     code.push_str(&format!("fn {name}_compute_dispatches() {{\n"));
-    code.push_str(&format!(
-        "    let mut comp = {struct_name}Default;\n"
-    ));
+    code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
     code.push_str(&format!(
         "    let mut ports = {struct_name}Ports::default();\n"
     ));
@@ -57,9 +53,7 @@ pub fn generate_test_harness(
     // Test: finalize executes
     code.push_str("#[test]\n");
     code.push_str(&format!("fn {name}_finalizes() {{\n"));
-    code.push_str(&format!(
-        "    let mut comp = {struct_name}Default;\n"
-    ));
+    code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
     code.push_str(&format!(
         "    let mut ports = {struct_name}Ports::default();\n"
     ));
@@ -97,12 +91,8 @@ pub fn generate_test_harness(
     code.push_str(&format!(
         "    // AADL model declares {port_count} features\n"
     ));
-    code.push_str(&format!(
-        "    let ports = {struct_name}Ports::default();\n"
-    ));
-    code.push_str(&format!(
-        "    let _ = std::mem::size_of_val(&ports);\n"
-    ));
+    code.push_str(&format!("    let ports = {struct_name}Ports::default();\n"));
+    code.push_str("    let _ = std::mem::size_of_val(&ports);\n");
     code.push_str("}\n");
 
     // Determine parent process for path
@@ -119,7 +109,7 @@ pub fn generate_test_harness(
 
 /// Convert a name to PascalCase (re-uses the logic from rust_gen conceptually).
 fn to_pascal_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c == '.')
+    s.split(['_', '-', '.'])
         .filter(|seg| !seg.is_empty())
         .map(|seg| {
             let mut chars = seg.chars();
@@ -168,8 +158,7 @@ end TestPkg;
 "#;
 
         let db = spar_hir_def::HirDefDatabase::default();
-        let sf =
-            spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
+        let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(

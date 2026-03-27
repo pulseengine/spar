@@ -58,10 +58,7 @@ fn generate_design_markdown(
     md.push_str("---\n\n");
 
     // Title
-    md.push_str(&format!(
-        "# {} -- Generated Architecture\n\n",
-        comp.name
-    ));
+    md.push_str(&format!("# {} -- Generated Architecture\n\n", comp.name));
 
     // Component summary
     md.push_str(&format!(
@@ -134,11 +131,9 @@ fn generate_design_markdown(
             md.push_str(&format!(
                 "| {} | {dispatch} | {} | {} | {} |\n",
                 child.name,
-                period.map(|p| format_time_ps(p)).unwrap_or("--".to_string()),
-                deadline
-                    .map(|d| format_time_ps(d))
-                    .unwrap_or("--".to_string()),
-                wcet.map(|w| format_time_ps(w)).unwrap_or("--".to_string()),
+                period.map(format_time_ps).unwrap_or("--".to_string()),
+                deadline.map(format_time_ps).unwrap_or("--".to_string()),
+                wcet.map(format_time_ps).unwrap_or("--".to_string()),
             ));
         }
         md.push('\n');
@@ -192,10 +187,7 @@ fn generate_verification_yaml(
     // Verdict: code generation succeeded
     yaml.push_str(&format!("- id: VV-GEN-{upper_name}-CODE\n"));
     yaml.push_str("  type: verification-verdict\n");
-    yaml.push_str(&format!(
-        "  title: \"Code generation: {}\"\n",
-        comp.name
-    ));
+    yaml.push_str(&format!("  title: \"Code generation: {}\"\n", comp.name));
     yaml.push_str("  status: pass\n");
     yaml.push_str("  links:\n");
     yaml.push_str("    - type: part-of-execution\n");
@@ -282,8 +274,7 @@ end TestPkg;
 "#;
 
         let db = spar_hir_def::HirDefDatabase::default();
-        let sf =
-            spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
+        let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(
@@ -376,7 +367,9 @@ end TestPkg;
                 "Must have verdict records"
             );
             assert!(
-                verification.content.contains("type: verification-execution"),
+                verification
+                    .content
+                    .contains("type: verification-execution"),
                 "Must have execution record"
             );
             assert!(

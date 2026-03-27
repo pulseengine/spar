@@ -34,7 +34,7 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
         }
 
         let thread_name = sanitize_ident(child.name.as_str());
-        toml.push_str(&format!("[[threads]]\n"));
+        toml.push_str("[[threads]]\n");
         toml.push_str(&format!("name = \"{}\"\n", child.name));
 
         let props = inst.properties_for(child_idx);
@@ -66,10 +66,7 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
         if !thread_features.is_empty() {
             toml.push_str(&format!("\n[threads.{thread_name}.ports]\n"));
             for feat in &thread_features {
-                let dir = feat
-                    .direction
-                    .map(|d| format!("{d}"))
-                    .unwrap_or_default();
+                let dir = feat.direction.map(|d| format!("{d}")).unwrap_or_default();
                 toml.push_str(&format!(
                     "{} = {{ kind = \"{:?}\", direction = \"{dir}\" }}\n",
                     sanitize_ident(feat.name.as_str()),
@@ -126,8 +123,7 @@ end TestPkg;
 "#;
 
         let db = spar_hir_def::HirDefDatabase::default();
-        let sf =
-            spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
+        let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(

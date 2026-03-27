@@ -49,15 +49,11 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
                         wit.push_str(&format!("    {feat_name}: func() -> {type_name};\n"));
                     }
                     Direction::Out => {
-                        wit.push_str(&format!(
-                            "    set-{feat_name}: func(val: {type_name});\n"
-                        ));
+                        wit.push_str(&format!("    set-{feat_name}: func(val: {type_name});\n"));
                     }
                     Direction::InOut => {
                         wit.push_str(&format!("    {feat_name}: func() -> {type_name};\n"));
-                        wit.push_str(&format!(
-                            "    set-{feat_name}: func(val: {type_name});\n"
-                        ));
+                        wit.push_str(&format!("    set-{feat_name}: func(val: {type_name});\n"));
                     }
                 }
             }
@@ -73,17 +69,13 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
                         ));
                     }
                     Direction::Out => {
-                        wit.push_str(&format!(
-                            "    emit-{feat_name}: func(val: {type_name});\n"
-                        ));
+                        wit.push_str(&format!("    emit-{feat_name}: func(val: {type_name});\n"));
                     }
                     Direction::InOut => {
                         wit.push_str(&format!(
                             "    on-{feat_name}: func() -> option<{type_name}>;\n"
                         ));
-                        wit.push_str(&format!(
-                            "    emit-{feat_name}: func(val: {type_name});\n"
-                        ));
+                        wit.push_str(&format!("    emit-{feat_name}: func(val: {type_name});\n"));
                     }
                 }
             }
@@ -152,8 +144,7 @@ end TestPkg;
 "#;
 
         let db = spar_hir_def::HirDefDatabase::default();
-        let sf =
-            spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
+        let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(

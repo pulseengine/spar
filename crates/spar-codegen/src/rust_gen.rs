@@ -36,17 +36,11 @@ pub fn generate_rust_component(
 
     // Timing constants
     if let Some(p) = period {
-        code.push_str(&format!(
-            "/// Thread period: {}\n",
-            format_time_ps(p)
-        ));
+        code.push_str(&format!("/// Thread period: {}\n", format_time_ps(p)));
         code.push_str(&format!("pub const PERIOD_PS: u64 = {p};\n"));
     }
     if let Some(d) = deadline {
-        code.push_str(&format!(
-            "/// Thread deadline: {}\n",
-            format_time_ps(d)
-        ));
+        code.push_str(&format!("/// Thread deadline: {}\n", format_time_ps(d)));
         code.push_str(&format!("pub const DEADLINE_PS: u64 = {d};\n"));
     }
     if let Some(w) = wcet {
@@ -93,9 +87,7 @@ pub fn generate_rust_component(
     code.push_str(&format!(
         "    fn initialize(&mut self, ports: &mut {struct_name}Ports);\n\n"
     ));
-    code.push_str(&format!(
-        "    /// Called on each dispatch ({dispatch}).\n"
-    ));
+    code.push_str(&format!("    /// Called on each dispatch ({dispatch}).\n"));
     code.push_str(&format!(
         "    fn compute(&mut self, ports: &mut {struct_name}Ports);\n\n"
     ));
@@ -106,9 +98,11 @@ pub fn generate_rust_component(
     code.push_str("}\n\n");
 
     // Skeleton implementation
-    code.push_str(&format!("/// Default implementation skeleton.\n"));
+    code.push_str("/// Default implementation skeleton.\n");
     code.push_str(&format!("pub struct {struct_name}Default;\n\n"));
-    code.push_str(&format!("impl {struct_name}Component for {struct_name}Default {{\n"));
+    code.push_str(&format!(
+        "impl {struct_name}Component for {struct_name}Default {{\n"
+    ));
     code.push_str(&format!(
         "    fn initialize(&mut self, _ports: &mut {struct_name}Ports) {{\n"
     ));
@@ -158,15 +152,13 @@ fn feature_to_rust_type(
 
 /// Convert a snake/kebab/dot name to PascalCase.
 fn to_pascal_case(s: &str) -> String {
-    s.split(|c: char| c == '_' || c == '-' || c == '.')
+    s.split(['_', '-', '.'])
         .filter(|seg| !seg.is_empty())
         .map(|seg| {
             let mut chars = seg.chars();
             match chars.next() {
                 None => String::new(),
-                Some(c) => {
-                    c.to_uppercase().to_string() + &chars.as_str().to_lowercase()
-                }
+                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
             }
         })
         .collect()

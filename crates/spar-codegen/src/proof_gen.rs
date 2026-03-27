@@ -13,9 +13,7 @@
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 
-use crate::{
-    GeneratedFile, extract_timing, format_time_ps, sanitize_ident, threads_for_processor,
-};
+use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident, threads_for_processor};
 
 /// Generate a Lean4 scheduling proof file for a processor instance.
 ///
@@ -80,16 +78,12 @@ pub fn generate_lean4_proof(
             lean.push_str("    let hp : List (Nat × Nat) := [\n");
             for (j, (_, hp_period, _, hp_wcet)) in hp_tasks.iter().enumerate() {
                 let comma = if j + 1 < hp_tasks.len() { "," } else { "" };
-                lean.push_str(&format!(
-                    "      ({hp_period}, {hp_wcet}){comma}\n"
-                ));
+                lean.push_str(&format!("      ({hp_period}, {hp_wcet}){comma}\n"));
             }
             lean.push_str("    ]\n");
         }
 
-        lean.push_str(
-            "    match compute_response_time wcet_ps deadline_ps hp with\n",
-        );
+        lean.push_str("    match compute_response_time wcet_ps deadline_ps hp with\n");
         lean.push_str("    | .converged r => r <= deadline_ps\n");
         lean.push_str("    | .diverged => False := by\n");
         lean.push_str("  simp [compute_response_time]; omega\n\n");
@@ -131,15 +125,9 @@ pub fn generate_kani_harness(
     code.push_str("//! DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     // Constants
-    code.push_str(&format!(
-        "/// Period: {}\n",
-        format_time_ps(period_ps)
-    ));
+    code.push_str(&format!("/// Period: {}\n", format_time_ps(period_ps)));
     code.push_str(&format!("const PERIOD_PS: u64 = {period_ps};\n"));
-    code.push_str(&format!(
-        "/// Deadline: {}\n",
-        format_time_ps(deadline_ps)
-    ));
+    code.push_str(&format!("/// Deadline: {}\n", format_time_ps(deadline_ps)));
     code.push_str(&format!("const DEADLINE_PS: u64 = {deadline_ps};\n"));
     code.push_str(&format!(
         "/// Worst-case execution time: {}\n",
@@ -277,8 +265,7 @@ end TestPkg;
 "#;
 
         let db = spar_hir_def::HirDefDatabase::default();
-        let sf =
-            spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
+        let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(

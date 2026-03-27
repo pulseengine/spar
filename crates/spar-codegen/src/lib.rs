@@ -85,17 +85,17 @@ pub fn extract_timing(
     let period = props
         .get("Timing_Properties", "Period")
         .or_else(|| props.get("", "Period"))
-        .and_then(|v| parse_time_to_ps(v));
+        .and_then(parse_time_to_ps);
 
     let deadline = props
         .get("Timing_Properties", "Deadline")
         .or_else(|| props.get("", "Deadline"))
-        .and_then(|v| parse_time_to_ps(v));
+        .and_then(parse_time_to_ps);
 
     let wcet = props
         .get("Timing_Properties", "Compute_Execution_Time")
         .or_else(|| props.get("", "Compute_Execution_Time"))
-        .and_then(|v| parse_time_range_max_to_ps(v));
+        .and_then(parse_time_range_max_to_ps);
 
     (period, deadline, wcet)
 }
@@ -246,29 +246,29 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
     }
 
     // Generate test harnesses
-    if let Some(verify) = config.verify {
-        if verify == VerifyMode::All || verify == VerifyMode::Test {
-            for &(idx, _comp) in &threads {
-                files.push(test_gen::generate_test_harness(inst, idx));
-            }
+    if let Some(verify) = config.verify
+        && (verify == VerifyMode::All || verify == VerifyMode::Test)
+    {
+        for &(idx, _comp) in &threads {
+            files.push(test_gen::generate_test_harness(inst, idx));
         }
     }
 
     // Generate proof artifacts
-    if let Some(verify) = config.verify {
-        if verify == VerifyMode::All || verify == VerifyMode::Proof {
-            for &(proc_idx, _proc_comp) in &processors {
-                files.push(proof_gen::generate_lean4_proof(inst, proc_idx));
-                let thread_idxs = threads_for_processor(inst, proc_idx);
-                for t_idx in &thread_idxs {
-                    files.push(proof_gen::generate_kani_harness(inst, *t_idx));
-                }
+    if let Some(verify) = config.verify
+        && (verify == VerifyMode::All || verify == VerifyMode::Proof)
+    {
+        for &(proc_idx, _proc_comp) in &processors {
+            files.push(proof_gen::generate_lean4_proof(inst, proc_idx));
+            let thread_idxs = threads_for_processor(inst, proc_idx);
+            for t_idx in &thread_idxs {
+                files.push(proof_gen::generate_kani_harness(inst, *t_idx));
             }
-            // If no explicit processors, still generate per-thread Kani harnesses
-            if processors.is_empty() {
-                for &(idx, _comp) in &threads {
-                    files.push(proof_gen::generate_kani_harness(inst, idx));
-                }
+        }
+        // If no explicit processors, still generate per-thread Kani harnesses
+        if processors.is_empty() {
+            for &(idx, _comp) in &threads {
+                files.push(proof_gen::generate_kani_harness(inst, idx));
             }
         }
     }

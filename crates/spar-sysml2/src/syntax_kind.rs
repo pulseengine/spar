@@ -342,7 +342,10 @@ impl SyntaxKind {
     /// Returns true if this is a trivia token (whitespace or comment).
     #[inline]
     pub fn is_trivia(self) -> bool {
-        matches!(self, Self::WHITESPACE | Self::LINE_COMMENT | Self::BLOCK_COMMENT)
+        matches!(
+            self,
+            Self::WHITESPACE | Self::LINE_COMMENT | Self::BLOCK_COMMENT
+        )
     }
 
     /// Returns true if this is a keyword.
@@ -528,11 +531,17 @@ mod tests {
 
     #[test]
     fn keyword_roundtrip() {
-        assert_eq!(SyntaxKind::from_keyword("package"), Some(SyntaxKind::PACKAGE_KW));
+        assert_eq!(
+            SyntaxKind::from_keyword("package"),
+            Some(SyntaxKind::PACKAGE_KW)
+        );
         assert_eq!(SyntaxKind::from_keyword("part"), Some(SyntaxKind::PART_KW));
         assert_eq!(SyntaxKind::from_keyword("port"), Some(SyntaxKind::PORT_KW));
         assert_eq!(SyntaxKind::from_keyword("def"), Some(SyntaxKind::DEF_KW));
-        assert_eq!(SyntaxKind::from_keyword("connect"), Some(SyntaxKind::CONNECT_KW));
+        assert_eq!(
+            SyntaxKind::from_keyword("connect"),
+            Some(SyntaxKind::CONNECT_KW)
+        );
         assert_eq!(SyntaxKind::from_keyword("myIdent"), None);
     }
 

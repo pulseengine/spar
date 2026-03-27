@@ -50,7 +50,7 @@ fn generate_workspace_cargo_toml(_root_name: &str, process_names: &[String]) -> 
     toml.push_str("]\n\n");
 
     toml.push_str("[workspace.package]\n");
-    toml.push_str(&format!("version = \"0.1.0\"\n"));
+    toml.push_str("version = \"0.1.0\"\n");
     toml.push_str("edition = \"2024\"\n\n");
 
     toml.push_str("[workspace.dependencies]\n");
@@ -60,9 +60,7 @@ fn generate_workspace_cargo_toml(_root_name: &str, process_names: &[String]) -> 
     toml.push_str("toml = \"0.8\"\n");
 
     for name in process_names {
-        toml.push_str(&format!(
-            "{name} = {{ path = \"crates/{name}\" }}\n"
-        ));
+        toml.push_str(&format!("{name} = {{ path = \"crates/{name}\" }}\n"));
     }
 
     GeneratedFile {
@@ -78,9 +76,7 @@ fn generate_workspace_build_bazel(root_name: &str) -> GeneratedFile {
     bazel.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     bazel.push_str("load(\"@rules_rust//rust:defs.bzl\", \"rust_binary\", \"rust_library\")\n");
-    bazel.push_str(
-        "load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n",
-    );
+    bazel.push_str("load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n");
 
     bazel.push_str(&format!("# Root package: {root_name}\n"));
     bazel.push_str("package(default_visibility = [\"//visibility:public\"])\n\n");
@@ -130,9 +126,7 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
     bazel.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     bazel.push_str("load(\"@rules_rust//rust:defs.bzl\", \"rust_library\", \"rust_test\")\n");
-    bazel.push_str(
-        "load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n",
-    );
+    bazel.push_str("load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n");
 
     bazel.push_str("package(default_visibility = [\"//visibility:public\"])\n\n");
 
@@ -151,9 +145,7 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
     bazel.push_str("wasm_component(\n");
     bazel.push_str(&format!("    name = \"{name}_component\",\n"));
     bazel.push_str(&format!("    lib = \":{name}\",\n"));
-    bazel.push_str(&format!(
-        "    wit = \"//wit:{name}.wit\",\n"
-    ));
+    bazel.push_str(&format!("    wit = \"//wit:{name}.wit\",\n"));
     bazel.push_str("    target = \"wasm32-wasip2\",\n");
     bazel.push_str(")\n\n");
 
@@ -172,7 +164,9 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
 fn generate_crate_lib_rs(name: &str) -> GeneratedFile {
     let mut code = String::new();
 
-    code.push_str(&format!("//! Generated component crate for AADL process: {name}\n"));
+    code.push_str(&format!(
+        "//! Generated component crate for AADL process: {name}\n"
+    ));
     code.push_str("//! DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
     code.push_str("// Component modules will be generated here by spar codegen.\n");
     code.push_str("// Each thread becomes a submodule with port types and dispatch trait.\n");

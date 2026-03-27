@@ -189,7 +189,11 @@ fn parent_prefix(name: &str) -> &str {
 // ---------------------------------------------------------------------------
 
 /// A solution is feasible iff no processor utilization exceeds 1.0.
-fn is_feasible(constraints: &ModelConstraints, assignment: &[usize], num_processors: usize) -> bool {
+fn is_feasible(
+    constraints: &ModelConstraints,
+    assignment: &[usize],
+    num_processors: usize,
+) -> bool {
     let utils = processor_utilizations(constraints, assignment, num_processors);
     utils.iter().all(|&u| u <= 1.0)
 }
@@ -241,9 +245,7 @@ fn non_dominated_sort(population: &mut [Solution]) {
     }
 
     // Build fronts iteratively.
-    let mut current_front: Vec<usize> = (0..n)
-        .filter(|&i| domination_count[i] == 0)
-        .collect();
+    let mut current_front: Vec<usize> = (0..n).filter(|&i| domination_count[i] == 0).collect();
 
     let mut rank = 0;
     while !current_front.is_empty() {
@@ -419,7 +421,11 @@ pub fn optimize(constraints: &ModelConstraints, config: &Nsga2Config) -> ParetoR
             let p2 = tournament_select(&population, &mut rng);
 
             let mut child_assignment = if rng.next_f64() < config.crossover_rate {
-                crossover(&population[p1].assignment, &population[p2].assignment, &mut rng)
+                crossover(
+                    &population[p1].assignment,
+                    &population[p2].assignment,
+                    &mut rng,
+                )
             } else {
                 population[p1].assignment.clone()
             };

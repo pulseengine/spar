@@ -110,11 +110,7 @@ fn resolve_events(mut events: Vec<Event>) -> Vec<ResolvedEvent> {
 // ---------------------------------------------------------------------------
 
 /// Build a rowan green tree from parser events and the original token list.
-pub(crate) fn build_tree(
-    input: &str,
-    tokens: &[(SyntaxKind, usize)],
-    events: Vec<Event>,
-) -> Parse {
+pub(crate) fn build_tree(input: &str, tokens: &[(SyntaxKind, usize)], events: Vec<Event>) -> Parse {
     let mut builder = GreenNodeBuilder::new();
     let mut errors = Vec::new();
 

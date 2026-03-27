@@ -86,9 +86,7 @@ mod tests {
         let parse = parse("part def Vehicle { }");
         assert!(parse.ok(), "errors: {:?}", parse.errors());
         let root = parse.syntax_node();
-        let part_def = root
-            .children()
-            .find(|n| n.kind() == SyntaxKind::PART_DEF);
+        let part_def = root.children().find(|n| n.kind() == SyntaxKind::PART_DEF);
         assert!(part_def.is_some(), "expected PART_DEF node in tree");
     }
 
@@ -97,9 +95,7 @@ mod tests {
         let parse = parse("part v : Vehicle;");
         assert!(parse.ok(), "errors: {:?}", parse.errors());
         let root = parse.syntax_node();
-        let part_usage = root
-            .children()
-            .find(|n| n.kind() == SyntaxKind::PART_USAGE);
+        let part_usage = root.children().find(|n| n.kind() == SyntaxKind::PART_USAGE);
         assert!(part_usage.is_some(), "expected PART_USAGE node in tree");
     }
 
@@ -108,9 +104,7 @@ mod tests {
         let parse = parse("port def SensorPort { out item data; }");
         assert!(parse.ok(), "errors: {:?}", parse.errors());
         let root = parse.syntax_node();
-        let port_def = root
-            .children()
-            .find(|n| n.kind() == SyntaxKind::PORT_DEF);
+        let port_def = root.children().find(|n| n.kind() == SyntaxKind::PORT_DEF);
         assert!(port_def.is_some(), "expected PORT_DEF node in tree");
     }
 
@@ -160,7 +154,11 @@ package Systems {
             .children()
             .filter(|n| n.kind() == SyntaxKind::PART_DEF)
             .collect();
-        assert_eq!(part_defs.len(), 2, "expected 2 PART_DEF nodes (Engine, Vehicle)");
+        assert_eq!(
+            part_defs.len(),
+            2,
+            "expected 2 PART_DEF nodes (Engine, Vehicle)"
+        );
 
         let imports: Vec<_> = body
             .children()
@@ -214,9 +212,7 @@ package Systems {
             .children()
             .find(|n| n.kind() == SyntaxKind::PORT_USAGE)
             .expect("expected PORT_USAGE");
-        let dir = port
-            .children()
-            .find(|n| n.kind() == SyntaxKind::DIRECTION);
+        let dir = port.children().find(|n| n.kind() == SyntaxKind::DIRECTION);
         assert!(dir.is_some(), "expected DIRECTION node");
     }
 

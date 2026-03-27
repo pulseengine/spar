@@ -15,8 +15,8 @@
 //! Satisfies: REQ-SOLVER-005
 
 use good_lp::{
-    constraint, default_solver, variable, Expression, ProblemVariables, Solution, SolverModel,
-    Variable,
+    Expression, ProblemVariables, Solution, SolverModel, Variable, constraint, default_solver,
+    variable,
 };
 use serde::Serialize;
 
@@ -137,19 +137,18 @@ pub fn solve_milp(constraints: &ModelConstraints) -> Result<MilpResult, String> 
     // Constraint 4: Respect existing bindings.
     //   If thread i is pre-bound to processor j, then bind[i][j] == 1.
     for (vi, &(orig_idx, _)) in valid_threads.iter().enumerate() {
-        if let Some(ref bound_proc) = constraints.threads[orig_idx].current_binding {
-            if let Some(proc_j) = constraints
+        if let Some(ref bound_proc) = constraints.threads[orig_idx].current_binding
+            && let Some(proc_j) = constraints
                 .processors
                 .iter()
                 .position(|p| &p.name == bound_proc)
-            {
-                let var = bind[vi * num_procs + proc_j];
-                problem = problem.with(constraint!(var == 1));
-            }
-            // If bound to an unknown processor, the "exactly one" constraint
-            // still forces assignment to some processor. We let the solver
-            // pick the best available.
+        {
+            let var = bind[vi * num_procs + proc_j];
+            problem = problem.with(constraint!(var == 1));
         }
+        // If bound to an unknown processor, the "exactly one" constraint
+        // still forces assignment to some processor. We let the solver
+        // pick the best available.
     }
 
     // Solve.
@@ -397,10 +396,7 @@ mod tests {
         };
 
         let result = solve_milp(&constraints).expect("should be feasible");
-        assert!(
-            result.is_optimal,
-            "small problem should report optimality"
-        );
+        assert!(result.is_optimal, "small problem should report optimality");
         assert_eq!(result.solver_status, "Optimal");
     }
 
@@ -423,7 +419,7 @@ mod tests {
         let constraints = ModelConstraints {
             threads: vec![
                 make_thread("t_good", 1000, 200, None), // valid
-                make_thread("t_bad", 0, 200, None),      // period = 0, skipped
+                make_thread("t_bad", 0, 200, None),     // period = 0, skipped
             ],
             processors: vec![make_processor("cpu1")],
             warnings: Vec::new(),

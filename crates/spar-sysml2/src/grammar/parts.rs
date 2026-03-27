@@ -282,9 +282,7 @@ fn part_usage(p: &mut Parser) {
     p.bump(SyntaxKind::PART_KW);
 
     // Optional name
-    if super::at_ident_or_kw(p)
-        && !p.at(SyntaxKind::DEF_KW)
-    {
+    if super::at_ident_or_kw(p) && !p.at(SyntaxKind::DEF_KW) {
         super::name(p);
     }
 
@@ -576,10 +574,7 @@ fn feature_decl_with_direction(p: &mut Parser) {
     opt_direction(p);
 
     // Optional keyword: `feature`, `item`, `attribute`, etc.
-    if p.at(SyntaxKind::FEATURE_KW)
-        || p.at(SyntaxKind::ITEM_KW)
-        || p.at(SyntaxKind::ATTRIBUTE_KW)
-    {
+    if p.at(SyntaxKind::FEATURE_KW) || p.at(SyntaxKind::ITEM_KW) || p.at(SyntaxKind::ATTRIBUTE_KW) {
         p.bump_any();
     }
 
