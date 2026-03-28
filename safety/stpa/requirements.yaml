@@ -444,3 +444,319 @@ artifacts:
     tags: [safety, scheduling, contention, stpa]
     traces-to: [CC-10]
     mitigates: [H-1]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SysML v2 Lowering Safety Requirements (from UCA-17 to UCA-20, CC-15 to CC-17)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-032
+    type: requirement
+    title: SysML v2 lowering diagnostic for unhandled constructs
+    description: >
+      The SysML v2 lower_node function must not silently drop unrecognized
+      SyntaxKind variants. The wildcard arm `_ => {}` must be replaced
+      with explicit arms for known non-semantic kinds and a catch-all that
+      emits a warning diagnostic "unhandled SysML v2 construct: {kind}".
+      This mirrors the AADL lowering exhaustiveness (STPA-REQ-004).
+    status: not-implemented
+    tags: [safety, sysml2, lowering, stpa]
+    traces-to: [CC-15]
+    mitigates: [H-7]
+
+  - id: STPA-REQ-033
+    type: requirement
+    title: SysML v2 category inference validation
+    description: >
+      After SysML v2 lowering, the inferred AADL component category must
+      be validated against the features present in the lowered component.
+      If a component has thread-like properties (Period, Dispatch_Protocol)
+      it must not be classified as system. A test suite must cover all
+      category inference paths with at least one test per SysML v2
+      construct type (part def, action def, state def, etc.).
+    status: not-implemented
+    tags: [safety, sysml2, category, stpa]
+    traces-to: [CC-16]
+    mitigates: [H-7, H-1]
+
+  - id: STPA-REQ-034
+    type: requirement
+    title: SysML v2 subcomponent category propagation
+    description: >
+      When lowering SysML v2 part usages and ref usages to AADL
+      subcomponents, the subcomponent category must be inferred from
+      the referenced type definition's category, not hardcoded to
+      ComponentCategory::System. When the referenced type is not
+      available, a warning diagnostic must be emitted.
+    status: not-implemented
+    tags: [safety, sysml2, category, stpa]
+    traces-to: [CC-16]
+    mitigates: [H-7, H-3]
+
+  - id: STPA-REQ-035
+    type: requirement
+    title: SysML v2 typed property lowering for numeric constraints
+    description: >
+      When lowering SysML v2 constraint usages and attribute usages that
+      carry numeric values with units (e.g., "10 ms"), the lowering must
+      produce typed PropertyExpr values (IntegerLit/RealLit with unit
+      annotation), not Opaque strings. Only expressions that genuinely
+      cannot be parsed should use PropertyExpr::Opaque.
+    status: not-implemented
+    tags: [safety, sysml2, properties, stpa]
+    traces-to: [CC-17]
+    mitigates: [H-7, H-6]
+
+  - id: STPA-REQ-036
+    type: requirement
+    title: SysML v2 lowering coverage test suite
+    description: >
+      The SysML v2 lowering test suite must contain at least one test
+      for each of the 14+ lowering rules, verifying that the produced
+      AADL ItemTree has the correct category, features, subcomponents,
+      connections, and property associations. A golden model test must
+      verify end-to-end lowering of a non-trivial SysML v2 model.
+    status: partial
+    tags: [safety, sysml2, testing, stpa]
+    traces-to: [CC-15, CC-16]
+    mitigates: [H-7]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Verification Pipeline Safety Requirements (from UCA-21, UCA-22, CC-18, CC-19)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-REQ-037
+    type: requirement
+    title: Verification tool availability check
+    description: >
+      Bazel verification rules (verus_verify, lean_verify) must perform
+      an explicit tool availability check before running verification.
+      If the tool binary is not found on PATH or at the configured path,
+      the rule must fail with a clear error message, not produce a
+      cached success artifact. The check must use `which` or equivalent
+      and verify the tool version meets minimum requirements.
+    status: not-implemented
+    tags: [safety, codegen, verification, bazel, stpa]
+    traces-to: [CC-18]
+    mitigates: [H-8]
+
+  - id: STPA-REQ-038
+    type: requirement
+    title: Generated BUILD files must include verification targets
+    description: >
+      The workspace_gen.rs code generator must produce verus_verify
+      and/or lean_verify targets in per-crate BUILD.bazel files when
+      generating code that includes verification annotations. An
+      integration test must verify that generated BUILD.bazel files
+      contain at least one verification target per generated crate.
+    status: not-implemented
+    tags: [safety, codegen, verification, bazel, stpa]
+    traces-to: [CC-19]
+    mitigates: [H-8]
+
+  - id: STPA-REQ-039
+    type: requirement
+    title: Verification log content validation
+    description: >
+      Bazel verification rules must validate that the proof log artifact
+      contains actual verification output (not empty or error-only).
+      The verus_verify rule must check that the log contains a
+      "verification results" summary line. The lean_verify rule must
+      check that the log contains "All proofs verified." A log that
+      contains only error messages must cause the rule to fail.
+    status: not-implemented
+    tags: [safety, codegen, verification, bazel, stpa]
+    traces-to: [CC-18]
+    mitigates: [H-8]
+
+  # ══════════════════════════════════════════════════════════════════════
+  # STPA-Sec: Security Requirements (from security.yaml analysis)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: STPA-SEC-REQ-001
+    type: requirement
+    title: Language-specific identifier sanitization for generated code
+    description: >
+      The code generation pipeline must sanitize all model-derived names
+      using language-specific rules before interpolation. Rust: reject
+      names that are Rust keywords (even after r# prefix handling) and
+      validate against Rust identifier grammar. WIT: reject names that
+      collide with WIT built-in types (string, list, option, result,
+      bool, u8-u64, s8-s64, f32, f64, char). Lean4: reject names that
+      collide with Lean4 tactics (simp, omega, exact, apply, intro).
+      TOML: escape quotes and special characters in string values.
+      Starlark: reject Python/Starlark keywords.
+    status: not-implemented
+    tags: [security, codegen, stpa-sec]
+    traces-to: [CC-SEC-1]
+    mitigates: [H-SEC-1]
+
+  - id: STPA-SEC-REQ-002
+    type: requirement
+    title: Property value validation before code generation
+    description: >
+      Before generating code, timing properties must be validated against
+      physical plausibility bounds: Period must be in range [1 us, 1 hr],
+      WCET must be in range [1 ns, Period], Deadline must be in range
+      [WCET, Period]. Properties outside these bounds must produce error
+      diagnostics and halt code generation. Default value substitution
+      (the current 10ms/1ms fallback) must emit a warning diagnostic
+      rather than proceeding silently.
+    status: not-implemented
+    tags: [security, codegen, stpa-sec]
+    traces-to: [CC-SEC-2]
+    mitigates: [H-SEC-2]
+
+  - id: STPA-SEC-REQ-003
+    type: requirement
+    title: Output path confinement for generated files
+    description: >
+      The codegen pipeline must canonicalize all generated file paths
+      and verify that each resolved path is a descendant of the output
+      directory. If any generated path would escape the output directory
+      (via .., symlinks, or absolute paths), codegen must emit an error
+      and skip that file. This check must occur after all path component
+      construction, including process name and thread name interpolation.
+    status: not-implemented
+    tags: [security, codegen, filesystem, stpa-sec]
+    traces-to: [CC-SEC-3]
+    mitigates: [H-SEC-6]
+
+  - id: STPA-SEC-REQ-004
+    type: requirement
+    title: SysML v2 lowering diagnostic for unhandled syntax kinds
+    description: >
+      The wildcard match arm in lower_node (lower.rs) must emit a warning
+      diagnostic for any SyntaxKind that is not whitespace, punctuation,
+      or a known structural wrapper. The diagnostic must include the
+      SyntaxKind name, source offset, and parent context. A golden-file
+      test must verify that all semantic SysML v2 constructs produce
+      either a lowered AADL item or a diagnostic.
+    status: not-implemented
+    tags: [security, sysml2, lowering, stpa-sec]
+    traces-to: [CC-SEC-4]
+    mitigates: [H-SEC-3]
+
+  - id: STPA-SEC-REQ-005
+    type: requirement
+    title: Exact version pins in generated dependency specifications
+    description: >
+      Generated Cargo.toml files must use exact version pins (e.g.,
+      wit-bindgen = "=0.36.0") instead of semver ranges. Generated
+      BUILD.bazel files must reference content-addressed artifacts
+      where possible. A Cargo.lock must be generated alongside the
+      workspace Cargo.toml. Process names must be checked against a
+      reserved list of common crate names (serde, tokio, rand, etc.)
+      and must be prefixed with "aadl_" if they collide.
+    status: not-implemented
+    tags: [security, codegen, supply-chain, stpa-sec]
+    traces-to: [CC-SEC-5]
+    mitigates: [H-SEC-4]
+
+  - id: STPA-SEC-REQ-006
+    type: requirement
+    title: Verification coverage scope annotations
+    description: >
+      Generated Kani harnesses must include a doc comment specifying
+      which properties are verified (e.g., "base case: no interference")
+      and which are not (e.g., "does NOT verify multi-task interference").
+      Generated Lean4 proofs must include a comment block listing
+      assumptions. Harness function names must include scope qualifiers
+      (e.g., verify_{name}_no_deadline_miss_base_case). The codegen
+      must also generate a coverage_manifest.json listing each
+      verification artifact and its scope.
+    status: not-implemented
+    tags: [security, verification, stpa-sec]
+    traces-to: [CC-SEC-6]
+    mitigates: [H-SEC-5]
+
+  - id: STPA-SEC-REQ-007
+    type: requirement
+    title: Bazel rules must use argument lists instead of shell interpolation
+    description: >
+      The verus_verify and wasm_component Bazel rules must be refactored
+      to use ctx.actions.run with explicit argument lists instead of
+      ctx.actions.run_shell with format string interpolation. Source file
+      paths must never be concatenated into shell command strings. If
+      run_shell is unavoidable (e.g., for piping), all interpolated paths
+      must be shell-quoted using shlex or equivalent escaping.
+    status: not-implemented
+    tags: [security, build, bazel, stpa-sec]
+    traces-to: [CC-SEC-7]
+    mitigates: [H-SEC-1, H-SEC-4]
+
+  - id: STPA-SEC-REQ-008
+    type: requirement
+    title: WASM component provenance verification
+    description: >
+      The wasm_component Bazel rule must parse cargo build's
+      --message-format=json output to extract the exact path of the
+      produced .wasm artifact, instead of using find to locate it.
+      The rule must verify that the .wasm file was produced by the
+      current build invocation (via Bazel's action dependency graph,
+      not filesystem timestamps). Content hashing of the core module
+      should be logged for audit.
+    status: not-implemented
+    tags: [security, build, wasm, stpa-sec]
+    traces-to: [CC-SEC-8]
+    mitigates: [H-SEC-1, H-SEC-2]
+
+  - id: STPA-SEC-REQ-009
+    type: requirement
+    title: Resource limits on code generation output
+    description: >
+      The codegen pipeline must enforce configurable limits: maximum
+      number of generated files (default: 10,000), maximum total output
+      size (default: 100 MB), maximum components per model (default:
+      100,000). When a limit is exceeded, codegen must emit an error
+      diagnostic and halt. These limits must be configurable via CLI
+      flags (--max-files, --max-output-size, --max-components).
+    status: not-implemented
+    tags: [security, codegen, resource-limits, stpa-sec]
+    traces-to: [SC-SEC-6]
+    mitigates: [H-SEC-7]
+
+  - id: STPA-SEC-REQ-010
+    type: requirement
+    title: Generated code compilation verification test
+    description: >
+      The CI pipeline must include an integration test that runs
+      spar codegen on a representative AADL model, then compiles
+      all generated Rust code with cargo check (and ideally cargo
+      clippy). This test verifies that generated code is syntactically
+      valid Rust. A second test must verify that generated WIT files
+      pass wasm-tools component wit validation.
+    status: not-implemented
+    tags: [security, codegen, testing, stpa-sec]
+    traces-to: [CC-SEC-1, CC-SEC-2]
+    mitigates: [H-SEC-1, H-SEC-2]
+
+  - id: STPA-SEC-REQ-011
+    type: requirement
+    title: SysML v2 category inference audit logging
+    description: >
+      The infer_category function must emit an info diagnostic for
+      every part def it classifies, stating the inferred category
+      and the evidence used (e.g., "part def 'Monitor' classified
+      as system: no action/state usages found"). Engineers must be
+      able to override the inference via a SysML v2 annotation or
+      comment convention (e.g., `/* @aadl-category: thread */`).
+    status: not-implemented
+    tags: [security, sysml2, lowering, stpa-sec]
+    traces-to: [CC-SEC-4]
+    mitigates: [H-SEC-3]
+
+  - id: STPA-SEC-REQ-012
+    type: requirement
+    title: Cross-reference analysis results with proof inputs
+    description: >
+      When both spar analyze and spar codegen --verify are run on the
+      same model, the timing properties used by the analysis engine
+      must be compared with the timing constants embedded in generated
+      proofs. Any discrepancy (e.g., analysis uses 5ms period but
+      proof uses default 10ms) must be reported as an error. This
+      cross-reference should be implemented as a post-codegen
+      validation step.
+    status: not-implemented
+    tags: [security, verification, consistency, stpa-sec]
+    traces-to: [CC-SEC-2, CC-SEC-6]
+    mitigates: [H-SEC-2, H-SEC-5]
