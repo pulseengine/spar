@@ -750,4 +750,200 @@ part def Controller {
         assert_eq!(ct.name.as_str(), "SensorLink");
         assert_eq!(ct.category, ComponentCategory::Bus);
     }
+
+    #[test]
+    fn empty_part_def_no_body() {
+        let parse = crate::parse("part def Empty;");
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.component_types.len(), 1);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.name.as_str(), "Empty");
+        assert!(ct.features.is_empty());
+        // No impl for a part def with no subcomponents
+        assert!(tree.component_impls.is_empty());
+    }
+
+    #[test]
+    fn port_def_with_in_item() {
+        let parse = crate::parse("port def InputPort { in item cmd; }");
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.component_types.len(), 1);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.name.as_str(), "InputPort");
+        assert_eq!(ct.features.len(), 1);
+        let feat = &tree.features[ct.features[0]];
+        assert_eq!(feat.name.as_str(), "cmd");
+        assert_eq!(feat.direction, Some(Direction::In));
+    }
+
+    #[test]
+    fn part_def_with_state_lowers_to_process() {
+        let source = "part def StateMachine { state idle { } }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.category, ComponentCategory::Process);
+    }
+
+    #[test]
+    fn part_def_with_port_usage_typed() {
+        let source = r#"
+part def Sensor {
+    out port sensorOut : SensorPort;
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.features.len(), 1);
+        let feat = &tree.features[ct.features[0]];
+        assert_eq!(feat.name.as_str(), "sensorOut");
+        assert_eq!(feat.direction, Some(Direction::Out));
+        assert!(feat.classifier.is_some());
+        assert_eq!(
+            feat.classifier.as_ref().unwrap().type_name.as_str(),
+            "SensorPort"
+        );
+    }
+
+    #[test]
+    fn connection_with_local_features() {
+        // A connect statement where endpoints are just single identifiers (no dot)
+        let parse = crate::parse("connect srcPort to dstPort;");
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.connections.len(), 1);
+        let conn = tree.connections.iter().next().unwrap().1;
+        let src = conn.src.as_ref().unwrap();
+        assert!(src.subcomponent.is_none());
+        assert_eq!(src.feature.as_str(), "srcPort");
+        let dst = conn.dst.as_ref().unwrap();
+        assert!(dst.subcomponent.is_none());
+        assert_eq!(dst.feature.as_str(), "dstPort");
+    }
+
+    #[test]
+    fn lower_empty_source() {
+        let parse = crate::parse("");
+        let tree = lower_to_aadl(&parse);
+        assert!(tree.component_types.is_empty());
+        assert!(tree.component_impls.is_empty());
+        assert!(tree.packages.is_empty());
+    }
+
+    #[test]
+    fn item_tree_to_aadl_empty() {
+        let parse = crate::parse("");
+        let tree = lower_to_aadl(&parse);
+        let aadl = item_tree_to_aadl(&tree);
+        assert!(aadl.is_empty());
+    }
+
+    #[test]
+    fn item_tree_to_aadl_standalone_type() {
+        // A part def outside any package should be emitted as a standalone comment
+        let parse = crate::parse("part def StandaloneWidget { }");
+        let tree = lower_to_aadl(&parse);
+        let aadl = item_tree_to_aadl(&tree);
+        assert!(
+            aadl.contains("standalone"),
+            "expected standalone marker: {aadl}"
+        );
+        assert!(
+            aadl.contains("StandaloneWidget"),
+            "expected type name: {aadl}"
+        );
+    }
+
+    #[test]
+    fn package_lowering_collects_items() {
+        let source = r#"
+package Lib {
+    part def Alpha { }
+    part def Beta {
+        part child : Alpha;
+    }
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.packages.len(), 1);
+        let pkg = tree.packages.iter().next().unwrap().1;
+        // Should have at least 2 type refs (Alpha, Beta) + 1 impl ref (Beta.impl)
+        assert!(
+            pkg.public_items.len() >= 3,
+            "expected >= 3 public items, got {}",
+            pkg.public_items.len()
+        );
+    }
+
+    #[test]
+    fn item_tree_to_aadl_with_connections() {
+        let source = r#"
+package Net {
+    part def Hub {
+        part a : NodeA;
+        part b : NodeB;
+        connect a.out to b.in;
+    }
+    part def NodeA { }
+    part def NodeB { }
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        let aadl = item_tree_to_aadl(&tree);
+        assert!(
+            aadl.contains("connections"),
+            "expected connections section: {aadl}"
+        );
+        assert!(
+            aadl.contains("subcomponents"),
+            "expected subcomponents section: {aadl}"
+        );
+        assert!(aadl.contains("->"), "expected arrow in connection: {aadl}");
+    }
+
+    #[test]
+    fn lower_part_def_inout_port() {
+        let source = r#"
+part def Bridge {
+    inout port bidir : DataPort;
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.features.len(), 1);
+        let feat = &tree.features[ct.features[0]];
+        assert_eq!(feat.direction, Some(Direction::InOut));
+    }
+
+    #[test]
+    fn lower_port_def_no_items() {
+        let parse = crate::parse("port def EmptyPort { }");
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.component_types.len(), 1);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        assert_eq!(ct.category, ComponentCategory::Data);
+        assert!(ct.features.is_empty());
+    }
+
+    #[test]
+    fn lower_qualified_type_ref() {
+        let source = r#"
+part def Sys {
+    part cpu : HwLib::Processor;
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        // Should have an impl with the subcomponent
+        assert!(!tree.component_impls.is_empty());
+        let ci = tree.component_impls.iter().next().unwrap().1;
+        let sub = &tree.subcomponents[ci.subcomponents[0]];
+        let cls = sub.classifier.as_ref().unwrap();
+        assert!(cls.package.is_some(), "expected package in classifier ref");
+        assert_eq!(cls.package.as_ref().unwrap().as_str(), "HwLib");
+        assert_eq!(cls.type_name.as_str(), "Processor");
+    }
 }
