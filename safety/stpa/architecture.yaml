@@ -550,3 +550,176 @@ artifacts:
     links:
       - type: satisfies
         target: STPA-REQ-023
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SysML v2 Lowering Safety (STPA-REQ-032 through STPA-REQ-036)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-026
+    type: design-decision
+    title: SysML v2 lowering diagnostic infrastructure (planned)
+    description: >
+      The SysML v2 lower.rs currently has a silent wildcard `_ => {}` in
+      lower_node that drops unrecognized SyntaxKind variants without
+      diagnostic. The planned fix mirrors ARCH-003 (AADL lowering): replace
+      the wildcard with explicit no-op arms for known non-semantic kinds
+      (WHITESPACE, COMMENT, ERROR, SEMICOLON) and a catch-all that emits
+      a warning diagnostic via the LoweringDiagnostic infrastructure.
+    fields:
+      rationale: >
+        The SysML v2 lowering has the same silent-drop risk as the original
+        AADL lowering did before ARCH-003. As SysML v2 evolves and new
+        construct types are added, silent dropping becomes increasingly
+        dangerous. The diagnostic infrastructure already exists in ItemTree.
+      source-files:
+        - crates/spar-sysml2/src/lower.rs  # lower_node wildcard arm
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-032
+
+  - id: ARCH-027
+    type: design-decision
+    title: Category inference validation for SysML v2 lowering (planned)
+    description: >
+      The infer_category heuristic in lower.rs checks for action/state
+      usages to distinguish system vs. process categories. This is
+      insufficient -- a part def with nested part usages typed as threads
+      should be classified as process. The planned fix adds a post-lowering
+      validation pass that cross-checks the inferred category against
+      subcomponent categories and property associations. Additionally,
+      lower_part_usage_to_subcomponent and lower_ref_usage_to_subcomponent
+      should propagate the referenced type's category instead of hardcoding
+      ComponentCategory::System.
+    fields:
+      rationale: >
+        Hardcoding System category for all subcomponents defeats the
+        purpose of category-specific analyses (scheduling requires threads,
+        binding requires processes). The referenced type's category is
+        available after lowering and should be propagated.
+      source-files:
+        - crates/spar-sysml2/src/lower.rs  # infer_category, lower_part_usage_to_subcomponent
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-033
+      - type: satisfies
+        target: STPA-REQ-034
+
+  - id: ARCH-028
+    type: design-decision
+    title: Typed property lowering for SysML v2 constraints (planned)
+    description: >
+      lower_constraint_usage_to_property and lower_attribute_usage_to_property
+      currently produce PropertyExpr::Opaque for all values. The planned
+      fix adds value expression parsing: when the attribute/constraint body
+      contains a numeric literal with a unit (e.g., `10 ms`), produce a
+      typed PropertyExpr::IntegerLit or PropertyExpr::RealLit with unit
+      annotation. Opaque remains the fallback for genuinely unparseable
+      expressions.
+    fields:
+      rationale: >
+        Opaque property values are invisible to typed property accessors
+        (STPA-REQ-015). Scheduling analysis, latency analysis, and resource
+        budget all depend on typed property access. Without typed values,
+        SysML v2-sourced models receive no timing/resource analysis.
+      source-files:
+        - crates/spar-sysml2/src/lower.rs  # lower_constraint_usage_to_property
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-035
+
+  - id: ARCH-029
+    type: design-decision
+    title: SysML v2 lowering golden model tests
+    description: >
+      Added codegen golden model test and SysML v2 validation suite
+      covering the 14 lowering rules. The test suite includes per-rule
+      unit tests and a golden model comparison test that verifies
+      end-to-end lowering of a non-trivial SysML v2 model against
+      expected AADL output.
+    fields:
+      rationale: >
+        Golden model tests catch regressions in lowering semantics that
+        individual unit tests might miss. The test verifies the overall
+        lowering output structure, not just individual constructs.
+      source-files:
+        - crates/spar-sysml2/tests/  # Golden model and validation tests
+    links:
+      - type: satisfies
+        target: STPA-REQ-036
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Verification Pipeline Safety (STPA-REQ-037 through STPA-REQ-039)
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: ARCH-030
+    type: design-decision
+    title: Verification tool availability guard in Bazel rules (planned)
+    description: >
+      The verus_verify and lean_verify rules currently fall back to PATH
+      lookup when the toolchain is not explicitly configured. The planned
+      fix adds an explicit tool availability check at the start of each
+      rule's run_shell command: `which verus || (echo "ERROR: verus not
+      found" >&2; exit 1)`. Additionally, the rule should verify tool
+      version by parsing `verus --version` output.
+    fields:
+      rationale: >
+        Silent fallback to missing tools is the primary mechanism for
+        false assurance (LS-12). An explicit check prevents the shell
+        command from producing ambiguous error messages that Bazel might
+        not propagate clearly.
+      source-files:
+        - tools/bazel/rules_verus/defs.bzl   # _verus_verify_impl
+        - tools/bazel/rules_lean/defs.bzl    # _lean_verify_impl
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-037
+
+  - id: ARCH-031
+    type: design-decision
+    title: Per-crate verification targets in codegen (planned)
+    description: >
+      workspace_gen.rs currently generates rust_library, wasm_component,
+      and rust_test targets per crate. The planned fix adds verus_verify
+      and lean_verify targets when the generated crate contains files
+      matching proof patterns (verus! blocks, #[kani::proof], .lean files).
+      A flag `--verification-targets` on `spar codegen` controls this.
+    fields:
+      rationale: >
+        Without per-crate verification targets, the verification rules
+        loaded in the root BUILD.bazel are never invoked (LS-13). The
+        code generator is the natural place to wire verification because
+        it knows which files contain proof annotations.
+      source-files:
+        - crates/spar-codegen/src/workspace_gen.rs  # generate_crate_build_bazel
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-038
+
+  - id: ARCH-032
+    type: design-decision
+    title: Proof log content validation in Bazel rules (planned)
+    description: >
+      The verus_verify and lean_verify rules produce proof log files but
+      do not validate their content. The planned fix adds a post-verification
+      check in the run_shell command that greps the log for expected
+      success markers ("verification results" for Verus, "All proofs
+      verified." for Lean4). Empty or error-only logs cause the rule
+      to fail with a diagnostic message.
+    fields:
+      rationale: >
+        A proof log that contains only error output or is empty indicates
+        that verification did not complete successfully. Without content
+        validation, a partial failure could produce a non-empty log file
+        that Bazel accepts as a successful output.
+      source-files:
+        - tools/bazel/rules_verus/defs.bzl   # _verus_verify_impl
+        - tools/bazel/rules_lean/defs.bzl    # _lean_verify_impl
+      status: planned
+    links:
+      - type: satisfies
+        target: STPA-REQ-039

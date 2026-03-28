@@ -1042,3 +1042,163 @@ artifacts:
         target: STPA-REQ-030
       - type: satisfies
         target: STPA-REQ-031
+
+  # ══════════════════════════════════════════════════════════════════════
+  # SysML v2 Lowering Validation
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: VAL-058
+    type: feature
+    title: SysML v2 lowering golden model test
+    description: >
+      Verifies end-to-end SysML v2 to AADL lowering against a golden
+      model. The test parses a non-trivial SysML v2 model with part defs,
+      port defs, connections, attributes, states, constraints, and
+      specialization, then compares the produced AADL ItemTree against
+      expected output.
+    status: passing
+    fields:
+      method: integration-test
+      test-location: crates/spar-sysml2/tests/
+      test-name: golden model and validation tests
+    links:
+      - type: satisfies
+        target: STPA-REQ-036
+      - type: satisfies
+        target: ARCH-029
+
+  - id: VAL-059
+    type: feature
+    title: SysML v2 lowering per-rule coverage
+    description: >
+      Verifies that each of the 14 SysML v2 lowering rules (part_def,
+      port_def, connection_def, action_def, state_def, attribute_def,
+      item_def, enum_def, interface_def, requirement_def, constraint_def,
+      calc_def, allocation_def, connection_usage) produces the expected
+      AADL construct with correct category and structure.
+    status: passing
+    fields:
+      method: unit-test
+      test-location: crates/spar-sysml2/src/lower.rs
+      test-name: tests::lower_* (14 rule tests)
+    links:
+      - type: satisfies
+        target: STPA-REQ-036
+      - type: satisfies
+        target: ARCH-029
+
+  - id: VAL-060
+    type: feature
+    title: SysML v2 unhandled construct diagnostic (planned)
+    description: >
+      Will verify that unrecognized SysML v2 SyntaxKind variants
+      produce a warning diagnostic instead of being silently dropped.
+      Blocked on STPA-REQ-032 implementation.
+    status: planned
+    fields:
+      method: unit-test
+      test-location: crates/spar-sysml2/src/lower.rs
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-032
+      - type: satisfies
+        target: ARCH-026
+
+  - id: VAL-061
+    type: feature
+    title: SysML v2 category inference validation (planned)
+    description: >
+      Will verify that part defs with thread-like properties are
+      classified as process/thread (not system), and that subcomponent
+      categories are propagated from referenced type definitions.
+      Blocked on STPA-REQ-033 and STPA-REQ-034 implementation.
+    status: planned
+    fields:
+      method: unit-test
+      test-location: crates/spar-sysml2/src/lower.rs
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-033
+      - type: satisfies
+        target: STPA-REQ-034
+      - type: satisfies
+        target: ARCH-027
+
+  - id: VAL-062
+    type: feature
+    title: SysML v2 typed property lowering (planned)
+    description: >
+      Will verify that constraint usages with numeric values and units
+      produce typed PropertyExpr values (not Opaque), enabling downstream
+      scheduling and timing analysis.
+      Blocked on STPA-REQ-035 implementation.
+    status: planned
+    fields:
+      method: unit-test
+      test-location: crates/spar-sysml2/src/lower.rs
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-035
+      - type: satisfies
+        target: ARCH-028
+
+  # ══════════════════════════════════════════════════════════════════════
+  # Verification Pipeline Validation
+  # ══════════════════════════════════════════════════════════════════════
+
+  - id: VAL-063
+    type: feature
+    title: Verification tool availability guard (planned)
+    description: >
+      Will verify that verus_verify and lean_verify rules fail with
+      a clear error when the tool binary is not found.
+      Blocked on STPA-REQ-037 implementation.
+    status: planned
+    fields:
+      method: integration-test
+      test-location: tools/bazel/rules_verus/defs.bzl
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-037
+      - type: satisfies
+        target: ARCH-030
+
+  - id: VAL-064
+    type: feature
+    title: Generated BUILD includes verification targets (planned)
+    description: >
+      Will verify that workspace_gen.rs produces verus_verify and/or
+      lean_verify targets in per-crate BUILD.bazel files.
+      Blocked on STPA-REQ-038 implementation.
+    status: planned
+    fields:
+      method: unit-test
+      test-location: crates/spar-codegen/src/workspace_gen.rs
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-038
+      - type: satisfies
+        target: ARCH-031
+
+  - id: VAL-065
+    type: feature
+    title: Proof log content validation (planned)
+    description: >
+      Will verify that verus_verify and lean_verify rules validate
+      proof log content and reject empty or error-only logs.
+      Blocked on STPA-REQ-039 implementation.
+    status: planned
+    fields:
+      method: integration-test
+      test-location: tools/bazel/rules_verus/defs.bzl
+      test-name: TBD
+    links:
+      - type: satisfies
+        target: STPA-REQ-039
+      - type: satisfies
+        target: ARCH-032

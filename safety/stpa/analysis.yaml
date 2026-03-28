@@ -109,6 +109,30 @@ artifacts:
     severity: critical
     losses: [L-1]
 
+  - id: H-7
+    type: hazard
+    title: SysML v2 lowering produces semantically incorrect AADL
+    description: >
+      The SysML v2 to AADL lowering transformation produces AADL
+      constructs that are syntactically valid but semantically wrong
+      (e.g., wrong component category, lost property constraints,
+      missing connections). The resulting AADL model passes all 21
+      analysis passes but does not faithfully represent the original
+      SysML v2 design intent.
+    severity: critical
+    losses: [L-1, L-4]
+
+  - id: H-8
+    type: hazard
+    title: Verification pipeline provides false assurance
+    description: >
+      The Bazel-based verification pipeline (Verus, Lean4, WASM component
+      rules) reports success when verification was not actually performed
+      (e.g., tool not installed, fallback to no-op, cached stale result).
+      Engineers believe generated code is formally verified when it is not.
+    severity: critical
+    losses: [L-1, L-3]
+
   # ══════════════════════════════════════════════════════════════════════
   # STEP 1c: System-Level Constraints
   # ══════════════════════════════════════════════════════════════════════
@@ -166,6 +190,27 @@ artifacts:
       defaults, and inheritance chains. Unit conversion factors must match
       the AS5506 standard.
     hazards: [H-6]
+
+  - id: SC-7
+    type: system-constraint
+    title: SysML v2 lowering semantic fidelity
+    description: >
+      The SysML v2 to AADL lowering must faithfully preserve the design
+      intent of the original SysML v2 model. Component categories, port
+      directions, connection topology, property values, and constraint
+      semantics must be correctly mapped. Unhandled SysML v2 constructs
+      must produce diagnostics, not be silently dropped.
+    hazards: [H-7]
+
+  - id: SC-8
+    type: system-constraint
+    title: Verification pipeline integrity
+    description: >
+      The Bazel verification pipeline must fail loudly when verification
+      tools (Verus, Lean4, wasm-tools) are unavailable or produce errors.
+      A green build must mean verification was actually performed, not
+      that verification was skipped.
+    hazards: [H-8]
 
   # ══════════════════════════════════════════════════════════════════════
   # STEP 2: Control Structure
@@ -244,6 +289,29 @@ artifacts:
       - Serialization preserves all fields
       - Format conversion (JSON, SVG, text) is lossless for the domain
 
+  - id: CTRL-SYSML2
+    type: controller
+    title: SysML v2 Lowering Controller (spar-sysml2)
+    controller-type: automated
+    source-file: crates/spar-sysml2/src/lower.rs
+    process-model:
+      - SysML v2 CST is complete (all valid constructs parsed)
+      - SEI mapping rules cover all SysML v2 construct types
+      - Category inference heuristics produce correct AADL categories
+      - Property semantics are preserved across the SysML/AADL boundary
+      - Unhandled SysML v2 constructs are rare and non-safety-relevant
+
+  - id: CTRL-CODEGEN
+    type: controller
+    title: Code Generator (spar-codegen)
+    controller-type: automated
+    source-file: crates/spar-codegen/src/workspace_gen.rs
+    process-model:
+      - AADL instance model is correct and complete
+      - Generated Bazel rules reference valid tool paths
+      - Verification rules (Verus, Lean4) produce definitive pass/fail
+      - WASM component packaging preserves interface contracts
+
   # ── Controlled Processes ───────────────────────────────────────────────
 
   - id: CP-SOURCE
@@ -308,6 +376,22 @@ artifacts:
     title: Review and approve architecture
     action: Evaluate analysis output and decide on architecture approval
     source: CTRL-REVIEWER
+    target: CP-DECISIONS
+
+  - id: CA-SYSML2-LOWER
+    type: control-action
+    title: Lower SysML v2 to AADL
+    action: Transform SysML v2 CST into AADL ItemTree using SEI mapping rules
+    source: CTRL-SYSML2
+    target: CP-MODEL
+
+  - id: CA-CODEGEN
+    type: control-action
+    title: Generate code and verification pipeline
+    action: >
+      Generate Rust crate skeletons, WIT interfaces, and Bazel BUILD files
+      with verification rules from the AADL instance model
+    source: CTRL-CODEGEN
     target: CP-DECISIONS
 
   # ══════════════════════════════════════════════════════════════════════
@@ -538,6 +622,107 @@ artifacts:
     controller: CTRL-OUTPUT
     hazards: [H-1]
 
+  # ── SysML v2 Lowering UCAs ────────────────────────────────────────────
+
+  - id: UCA-17
+    type: uca
+    title: SysML v2 lowering silently drops construct
+    uca-type: not-providing
+    context: >
+      When the SysML v2 source contains a valid construct (e.g., flow
+      definition, view def, analysis case, occurrence def) that the
+      lower_node wildcard arm silently ignores via `_ => {}`.
+    rationale: >
+      The construct is invisible to all downstream AADL processing. No
+      diagnostic is emitted, so the engineer believes the lowered model
+      is complete. If the dropped construct carried safety-critical
+      semantics (e.g., a timing constraint or allocation), the resulting
+      AADL model is incomplete.
+    controller: CTRL-SYSML2
+    hazards: [H-7]
+
+  - id: UCA-18
+    type: uca
+    title: SysML v2 lowering assigns wrong component category
+    uca-type: providing
+    context: >
+      When the infer_category heuristic misclassifies a part def
+      (e.g., a software process as a system, or a thread group as a
+      process) because the heuristic only checks for action/state
+      usages in the body.
+    rationale: >
+      Wrong category causes wrong analysis pass selection. A thread
+      classified as a system is never scheduled. A process classified
+      as a system does not get connectivity checks on internal ports.
+      Scheduling analysis produces no results (false negative).
+    controller: CTRL-SYSML2
+    hazards: [H-7, H-1]
+
+  - id: UCA-19
+    type: uca
+    title: SysML v2 property semantics lost in lowering
+    uca-type: providing
+    context: >
+      When a SysML v2 constraint usage or attribute usage carries timing
+      or resource semantics but is lowered to an Opaque PropertyExpr
+      that downstream AADL analyses cannot interpret.
+    rationale: >
+      The property exists in the AADL model but has no typed value.
+      Scheduling analysis skips it (no typed Period). The engineer
+      believes timing constraints from SysML v2 are being checked
+      when they are not.
+    controller: CTRL-SYSML2
+    hazards: [H-7, H-6]
+
+  - id: UCA-20
+    type: uca
+    title: Subcomponent category hardcoded to System
+    uca-type: providing
+    context: >
+      When lower_part_usage_to_subcomponent and lower_ref_usage_to_subcomponent
+      always set category to ComponentCategory::System regardless of the
+      referenced type's actual category in the SysML v2 model.
+    rationale: >
+      A process subcomponent classified as system will not have its
+      threads scheduled. A bus subcomponent classified as system will
+      not participate in binding analysis. The wrong category propagates
+      through instantiation to all downstream analyses.
+    controller: CTRL-SYSML2
+    hazards: [H-7, H-3]
+
+  # ── Codegen / Verification Pipeline UCAs ────────────────────────────
+
+  - id: UCA-21
+    type: uca
+    title: Verification rule silently passes when tool missing
+    uca-type: not-providing
+    context: >
+      When the Bazel verus_verify or lean_verify rule falls back to a
+      PATH lookup for the tool binary, and the binary is not installed,
+      the shell command may produce a non-zero exit but Bazel caching
+      or error handling could mask the failure in certain configurations.
+    rationale: >
+      Engineers see a cached green build and believe verification was
+      performed. The generated code ships without formal verification.
+      This is a false assurance hazard.
+    controller: CTRL-CODEGEN
+    hazards: [H-8]
+
+  - id: UCA-22
+    type: uca
+    title: Generated BUILD.bazel omits verification targets
+    uca-type: not-providing
+    context: >
+      When workspace_gen.rs generates per-crate BUILD.bazel files that
+      include rust_library and wasm_component targets but do not include
+      verus_verify or lean_verify targets for the generated code.
+    rationale: >
+      The generated project builds and tests pass, but no formal
+      verification is ever invoked. The verification pipeline exists
+      in the workspace root but is not wired to the generated crates.
+    controller: CTRL-CODEGEN
+    hazards: [H-8]
+
   # ══════════════════════════════════════════════════════════════════════
   # STEP 3b: Controller Constraints
   # ══════════════════════════════════════════════════════════════════════
@@ -694,6 +879,68 @@ artifacts:
     ucas: [UCA-16]
     hazards: [H-1]
 
+  - id: CC-15
+    type: controller-constraint
+    title: SysML v2 lowering must emit diagnostic for unhandled constructs
+    constraint: >
+      The lower_node function must not have a silent wildcard arm. Every
+      SysML v2 SyntaxKind not explicitly handled must produce a warning
+      diagnostic "unhandled SysML v2 construct: {kind}". This mirrors
+      the AADL lowering constraint (CC-2).
+    controller: CTRL-SYSML2
+    ucas: [UCA-17]
+    hazards: [H-7]
+
+  - id: CC-16
+    type: controller-constraint
+    title: Category inference must be validated against type definition
+    constraint: >
+      After lowering, the inferred category of a part def should be
+      validated against the features present. If the part has thread-like
+      properties (Period, Dispatch_Protocol) it must not be classified
+      as system. A mapping coverage test must verify all category
+      inference paths.
+    controller: CTRL-SYSML2
+    ucas: [UCA-18, UCA-20]
+    hazards: [H-7]
+
+  - id: CC-17
+    type: controller-constraint
+    title: SysML v2 constraint values must produce typed PropertyExpr
+    constraint: >
+      When lowering SysML v2 attribute or constraint usages that carry
+      numeric values with units (e.g., period = 10 ms), the lowering
+      must produce a typed PropertyExpr (IntegerLit with unit), not an
+      Opaque expression. Opaque is acceptable only for genuinely unparseable
+      expressions.
+    controller: CTRL-SYSML2
+    ucas: [UCA-19]
+    hazards: [H-7, H-6]
+
+  - id: CC-18
+    type: controller-constraint
+    title: Verification rules must fail on missing tools
+    constraint: >
+      Bazel verification rules (verus_verify, lean_verify) must explicitly
+      check for tool availability and produce a clear error message if the
+      tool binary is not found. The rule must not produce a cached success
+      artifact when verification was not performed.
+    controller: CTRL-CODEGEN
+    ucas: [UCA-21]
+    hazards: [H-8]
+
+  - id: CC-19
+    type: controller-constraint
+    title: Generated crates must include verification targets
+    constraint: >
+      The code generator must produce verus_verify and/or lean_verify
+      targets in per-crate BUILD.bazel files when verification source
+      files are present. An integration test must verify that generated
+      BUILD.bazel files contain verification targets.
+    controller: CTRL-CODEGEN
+    ucas: [UCA-22]
+    hazards: [H-8]
+
   # ══════════════════════════════════════════════════════════════════════
   # STEP 4: Loss Scenarios
   # ══════════════════════════════════════════════════════════════════════
@@ -836,3 +1083,103 @@ artifacts:
       - Alert fatigue causes engineer to ignore diagnostics
     uca: [UCA-13]
     hazards: [H-2, H-1]
+
+  - id: LS-9
+    type: loss-scenario
+    title: SysML v2 flow definition silently dropped during lowering
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A SysML v2 model contains a `flow def` that specifies an end-to-end
+      data path between ports. The lower_node function matches against
+      known SyntaxKinds but `FLOW_DEF` is not handled -- it falls through
+      to `_ => {}`. No AADL flow spec or end-to-end flow is created. The
+      lowered AADL model has all the ports and connections but no flow
+      declarations. Latency analysis reports "no flows defined" (info)
+      instead of computing latency bounds. The engineer believes the
+      SysML v2 flows were carried over.
+    causal-factors:
+      - lower_node wildcard silently drops unrecognized SyntaxKinds
+      - No diagnostic emitted for unhandled constructs
+      - Latency analysis treats missing flows as "not applicable"
+    uca: [UCA-17]
+    hazards: [H-7, H-1]
+
+  - id: LS-10
+    type: loss-scenario
+    title: Part def misclassified as system instead of process
+    scenario-type: inadequate-process-model
+    description: >
+      A SysML v2 part def represents a software process containing threads.
+      The infer_category heuristic checks for action/state usages in the
+      body but the threads are expressed as nested part usages (not actions).
+      The part is classified as ComponentCategory::System. The AADL model
+      has a system implementation with system subcomponents where it should
+      have a process implementation with thread subcomponents. Scheduling
+      analysis finds no threads on any processor and reports no issues.
+      The actual thread set is never checked for schedulability.
+    causal-factors:
+      - Category heuristic only checks for action/state, not thread indicators
+      - Subcomponent lowering hardcodes System category
+      - No post-lowering validation of category consistency
+    uca: [UCA-18, UCA-20]
+    hazards: [H-7, H-1]
+
+  - id: LS-11
+    type: loss-scenario
+    title: SysML v2 timing constraint lowered as Opaque property
+    scenario-type: inadequate-control-algorithm
+    description: >
+      A SysML v2 constraint usage `constraint timing : TimingConstraint`
+      with `attribute period = 10 ms` is lowered via
+      lower_constraint_usage_to_property which produces a PropertyExpr::Opaque
+      string "TimingConstraint" instead of a typed IntegerLit with unit.
+      The AADL model has a Timing_Properties::timing property with an
+      opaque value. Scheduling analysis calls get_timing_property() which
+      cannot parse the opaque string and returns None. The thread's period
+      is treated as unspecified. No scheduling check is performed.
+    causal-factors:
+      - lower_constraint_usage_to_property uses type ref as value, not the actual constraint value
+      - PropertyExpr::Opaque skips property validation (by design for AADL)
+      - Scheduling analysis silently skips components without Period
+    uca: [UCA-19]
+    hazards: [H-7, H-6]
+
+  - id: LS-12
+    type: loss-scenario
+    title: Verus not installed but BUILD succeeds from cache
+    scenario-type: inadequate-feedback
+    description: >
+      A developer generates code with `spar codegen`. The generated
+      BUILD.bazel loads verus_verify rules. On first build, Verus is not
+      installed and the rule fails. The developer installs Verus and runs
+      the build -- it succeeds and the proof log is cached. Later, the
+      developer modifies generated source but Bazel's dependency tracking
+      does not detect the change (e.g., the file is outside the sandbox).
+      The stale cached proof log is reused. The modified code is not
+      re-verified but the build reports success.
+    causal-factors:
+      - Bazel caching can serve stale verification results if inputs are not hermetic
+      - verus_verify rule uses run_shell which may not capture all inputs
+      - No verification artifact freshness check
+    uca: [UCA-21]
+    hazards: [H-8]
+
+  - id: LS-13
+    type: loss-scenario
+    title: Generated crate has no verification targets
+    scenario-type: inadequate-control-algorithm
+    description: >
+      The workspace_gen.rs generates per-crate BUILD.bazel files with
+      rust_library, wasm_component, and rust_test targets. However, it does
+      not generate verus_verify or lean_verify targets because the code
+      generator does not know which files contain proof annotations. The
+      workspace root BUILD.bazel loads the verification rules but no
+      per-crate target uses them. Running `bazel test //...` executes
+      all rust_test targets but no formal verification. Engineers believe
+      the full pipeline ran because the workspace imports verification rules.
+    causal-factors:
+      - workspace_gen.rs only generates build/test targets, not verification targets
+      - Root BUILD.bazel imports verification rules but they are unused
+      - No integration test checks that verification targets exist per crate
+    uca: [UCA-22]
+    hazards: [H-8]
