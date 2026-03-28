@@ -1,31 +1,18 @@
-// SysML v2 Validation: Interfaces
-// Based on Systems-Modeling/SysML-v2-Release sysml/src/validation
-
 package InterfacesValidation {
-
-    port def CommandPort {
-        out item command;
+    port def DataOut {
+        out item payload;
     }
-
-    port def StatusPort {
-        in item status;
+    port def DataIn {
+        in item payload;
     }
-
-    interface def ControlInterface {
-        connect source.command to target.status;
+    interface def DataLink {
+        end source : DataOut;
+        end sink : DataIn;
     }
-
-    part def Master {
-        port cmdOut : CommandPort;
+    part def Sender {
+        port txPort : DataOut;
     }
-
-    part def Slave {
-        port statusIn : StatusPort;
-    }
-
-    part def System {
-        part master : Master;
-        part slave : Slave;
-        interface controlLink : ControlInterface;
+    part def Receiver {
+        port rxPort : DataIn;
     }
 }

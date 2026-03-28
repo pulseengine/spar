@@ -37,6 +37,8 @@ const MEMBER_RECOVERY: TokenSet = TokenSet::new(&[
     SyntaxKind::COMMENT_KW,
     SyntaxKind::DOC_KW,
     SyntaxKind::FEATURE_KW,
+    SyntaxKind::END_KW,
+    SyntaxKind::SUBJECT_KW,
 ]);
 
 /// Parse a member of a namespace body.
@@ -225,6 +227,14 @@ pub(crate) fn member(p: &mut Parser) {
         }
         SyntaxKind::FEATURE_KW => {
             feature_decl_with_direction(p);
+        }
+        SyntaxKind::END_KW => {
+            // `end name : Type;` in interface/connection def bodies
+            end_member(p);
+        }
+        SyntaxKind::SUBJECT_KW => {
+            // `subject name : Type;` in requirement def bodies
+            subject_member(p);
         }
         SyntaxKind::IDENT => {
             // Named feature or usage: `name : Type;`
@@ -625,6 +635,67 @@ fn doc_node(p: &mut Parser) {
     }
     p.eat(SyntaxKind::SEMICOLON);
     m.complete(p, SyntaxKind::DOC_NODE);
+}
+
+/// Parse an `end` member: `end [multiplicity] name : Type;`
+///
+/// Used in interface definitions and connection definitions.
+/// ```text
+/// end source : DataOut;
+/// end [1] bead : TireBead;
+/// ```
+fn end_member(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::END_KW);
+
+    // Optional multiplicity before name
+    opt_multiplicity(p);
+
+    // Optional kind keyword (e.g., `part`)
+    if p.at(SyntaxKind::PART_KW) || p.at(SyntaxKind::PORT_KW) {
+        p.bump_any();
+    }
+
+    // Name
+    if super::at_ident_or_kw(p) {
+        super::name(p);
+    }
+
+    // Typing or specialization
+    opt_typing_or_specialization(p);
+
+    // Body or semicolon
+    if p.at(SyntaxKind::L_CURLY) {
+        super::packages::namespace_body(p);
+    } else {
+        p.expect(SyntaxKind::SEMICOLON);
+    }
+
+    m.complete(p, SyntaxKind::FEATURE_DECL);
+}
+
+/// Parse a `subject` member: `subject name : Type;`
+///
+/// Used in requirement definition bodies.
+/// ```text
+/// subject s : Controller;
+/// ```
+fn subject_member(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::SUBJECT_KW);
+
+    // Name
+    if super::at_ident_or_kw(p) {
+        super::name(p);
+    }
+
+    // Typing or specialization
+    opt_typing_or_specialization(p);
+
+    // Semicolon
+    p.expect(SyntaxKind::SEMICOLON);
+
+    m.complete(p, SyntaxKind::SUBJECT_MEMBER);
 }
 
 // ---------------------------------------------------------------------------

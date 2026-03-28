@@ -1,20 +1,9 @@
-// SysML v2 Validation: Imports
-// Based on Systems-Modeling/SysML-v2-Release sysml/src/validation
-
-package ImportBase {
-    part def Alpha { }
-    part def Beta { }
-
-    package Nested {
-        part def Gamma { }
-    }
+package ImportSource {
+    part def Sensor;
 }
-
 package ImportTarget {
-    import ImportBase::*;
-    import ImportBase::Nested::Gamma;
-
-    part myAlpha : Alpha;
-    part myBeta : Beta;
-    part myGamma : Gamma;
+    import ImportSource::*;
+    part def System {
+        part s : Sensor;
+    }
 }

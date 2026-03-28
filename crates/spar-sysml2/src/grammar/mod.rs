@@ -58,6 +58,10 @@ fn is_member_start(kind: SyntaxKind, p: &Parser) -> bool {
         SyntaxKind::COMMENT_KW | SyntaxKind::DOC_KW => true,
         // `feature` keyword
         SyntaxKind::FEATURE_KW => true,
+        // `end` keyword (used in interface def and connection def bodies)
+        SyntaxKind::END_KW => true,
+        // `subject` keyword (used in requirement def bodies)
+        SyntaxKind::SUBJECT_KW => true,
         // Check for `connection` not followed by `def` -- this is still a
         // member start, handled in parts::member
         _ => {

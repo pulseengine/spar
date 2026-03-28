@@ -1,31 +1,19 @@
-// SysML v2 Validation: Connections
-// Based on Systems-Modeling/SysML-v2-Release sysml/src/validation
-
 package ConnectionsValidation {
-
-    port def DataPort {
+    port def OutPort {
         out item data;
     }
-
-    port def ReceiverPort {
+    port def InPort {
         in item data;
     }
-
-    connection def DataLink {
-        connect source.data to target.data;
+    part def Producer {
+        out port pOut : OutPort;
     }
-
-    part def Sender {
-        port outPort : DataPort;
+    part def Consumer {
+        in port cIn : InPort;
     }
-
-    part def Receiver {
-        port inPort : ReceiverPort;
-    }
-
     part def System {
-        part sender : Sender;
-        part receiver : Receiver;
-        connect sender.outPort to receiver.inPort;
+        part producer : Producer;
+        part consumer : Consumer;
+        connect producer.pOut to consumer.cIn;
     }
 }
