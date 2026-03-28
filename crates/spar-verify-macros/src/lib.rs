@@ -29,14 +29,12 @@ pub fn aadl_config(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .as_ref()
         .and_then(|(_, items)| {
             items.iter().find_map(|item| {
-                if let Item::Const(c) = item {
-                    if c.ident == "COMPONENT" {
-                        if let Expr::Lit(lit) = &*c.expr {
-                            if let Lit::Str(s) = &lit.lit {
-                                return Some(s.value());
-                            }
-                        }
-                    }
+                if let Item::Const(c) = item
+                    && c.ident == "COMPONENT"
+                    && let Expr::Lit(lit) = &*c.expr
+                    && let Lit::Str(s) = &lit.lit
+                {
+                    return Some(s.value());
                 }
                 None
             })
