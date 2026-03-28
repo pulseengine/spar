@@ -150,14 +150,14 @@ pub(crate) fn member(p: &mut Parser) {
             if p.nth(1) == SyntaxKind::DEF_KW {
                 definition(p, SyntaxKind::REQUIREMENT_DEF);
             } else {
-                generic_usage(p, SyntaxKind::PART_USAGE);
+                generic_usage(p, SyntaxKind::REQUIREMENT_USAGE);
             }
         }
         SyntaxKind::CONSTRAINT_KW => {
             if p.nth(1) == SyntaxKind::DEF_KW {
                 definition(p, SyntaxKind::CONSTRAINT_DEF);
             } else {
-                generic_usage(p, SyntaxKind::PART_USAGE);
+                generic_usage(p, SyntaxKind::CONSTRAINT_USAGE);
             }
         }
         SyntaxKind::CALC_KW => {
