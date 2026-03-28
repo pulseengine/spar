@@ -3,8 +3,10 @@
 //! Each function corresponds to a grammar production from the SysML v2 spec.
 //! Functions take a `&mut Parser` and build nodes via markers.
 
+mod constraints;
 mod packages;
 mod parts;
+mod requirements;
 
 use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
@@ -13,7 +15,7 @@ use crate::syntax_kind::SyntaxKind;
 ///
 /// ```text
 /// SourceFile = NamespaceMember*
-/// NamespaceMember = Package | ImportDecl | Definition | Usage
+/// NamespaceMember = Package | ImportDecl | Definition | Usage | Relationship
 /// ```
 pub fn source_file(p: &mut Parser) {
     let m = p.start();
@@ -21,6 +23,9 @@ pub fn source_file(p: &mut Parser) {
         match p.current() {
             SyntaxKind::PACKAGE_KW => packages::package(p),
             SyntaxKind::IMPORT_KW => packages::import_decl(p),
+            SyntaxKind::SATISFY_KW => requirements::satisfy_req(p),
+            SyntaxKind::VERIFY_KW => requirements::verify_req(p),
+            SyntaxKind::REFINE_KW => requirements::refine_req(p),
             k if is_member_start(k, p) => parts::member(p),
             SyntaxKind::EOF => break,
             _ => {

@@ -13,6 +13,8 @@ members = [
     "crates/spar-render",
     "crates/spar-solver",
     "crates/spar-sysml2",
+    "crates/spar-verify-macros",
+    "crates/spar-verify",
     "crates/spar-wasm",
 ]
 
@@ -45,5 +47,10 @@ toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
+spar-verify-macros = { path = "crates/spar-verify-macros" }
+spar-verify = { path = "crates/spar-verify" }
+quote = "1"
+syn = { version = "2", features = ["full"] }
+proc-macro2 = "1"
 proptest = "1"
 good_lp = { version = "1", default-features = false, features = ["highs"] }

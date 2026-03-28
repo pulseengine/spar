@@ -1,17 +1,22 @@
-//! SysML v2 parser -- recursive descent with rowan CST.
+//! SysML v2 parser, AADL lowering, and requirements extraction.
 //!
-//! This crate provides a lossless concrete syntax tree parser for SysML v2,
-//! following the same architecture as spar-parser for AADL:
+//! This crate provides:
+//! * A lossless concrete syntax tree parser for SysML v2.
+//! * [`lower`] -- SysML v2 to AADL lowering (SEI mapping rules).
+//! * [`extract`] -- Requirements extraction to rivet YAML artifacts.
 //!
+//! Parser architecture:
 //! * [`syntax_kind`] -- every token and node kind in SysML v2.
 //! * [`lexer`] -- tokenizer producing `(SyntaxKind, &str)` pairs.
 //! * [`parser`] -- marker-based recursive descent parser.
 //! * [`grammar`] -- grammar rules for packages, parts, ports, connections.
 
 pub mod event;
+pub mod extract;
 pub mod grammar;
 pub mod language;
 pub mod lexer;
+pub mod lower;
 pub mod marker;
 pub mod parser;
 pub mod syntax_kind;

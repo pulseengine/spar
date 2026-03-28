@@ -616,36 +616,146 @@ artifacts:
       - type: satisfies
         target: REQ-SOLVER-006
 
-  # ── SysML v2 Integration (v0.5.0) ───────────────────────────────────
+  # ── Code Generation (v0.4.0) ──────────────────────────────────────────
 
-  - id: ARCH-SYSML2-001
+  - id: ARCH-CODEGEN-001
     type: design-decision
     status: planned
-    title: "SysML v2 rowan-based parser (spar-sysml2 crate)"
+    title: "spar-codegen crate with dual output (WIT + native Rust)"
     description: >
-      New spar-sysml2 crate implementing a rowan-based parser for SysML v2
-      textual notation (KerML grammar). Same architecture as spar-parser:
-      hand-written recursive descent, lossless CST, error recovery. No Rust
-      SysML v2 parser exists — the pilot implementation is Java-only.
-      SysML v2 spec: github.com/Systems-Modeling/SysML-v2-Release.
-      Three-layer pipeline: SysML v2 (system-level) → AADL (deployment-level)
-      → WIT/code (implementation-level). Lowering implements the SEI mapping
-      rules from sei.cmu.edu/annual-reviews/2023-year-in-review/extending-
-      sysml-v2-with-aadl-concepts. SysML v2 requirement elements flow
-      directly into rivet artifacts.
+      New spar-codegen crate generates both WIT interfaces and Rust crate
+      skeletons from AADL instance model. Process → crate + WIT world,
+      thread → async fn, data port → typed channel / WIT stream. System
+      generates Cargo workspace + WAC composition.
     fields:
       rationale: >
-        KerML is just another grammar — parseable with rowan the same way
-        AADL is parsed. The SysML v2 → AADL lowering maps system models
-        to execution platform models where timing/scheduling semantics exist.
-        This is exactly what the SEI is specifying. Requirements extraction
-        bridges SysML v2 requirements with rivet traceability. Result: one
-        tool analyzing architecture from system design through deployment
-        through implementation.
+        Dual output serves both WASM component model (WIT path) and
+        traditional embedded (native Rust path). The same crate can be
+        both a native library and a WASM component. WIT defines the
+        contract, Rust implements it.
       interfaces:
-        provides: [parse_sysml2, lower_to_aadl, extract_requirements]
-        requires: [spar-parser pattern, spar-transform, rivet YAML]
-    tags: [architecture, sysml, v050]
+        provides: [spar codegen command, WIT generation, Rust skeleton, Cargo workspace]
+        requires: [spar-hir-def SystemInstance, spar-transform WitTransform]
+    tags: [architecture, codegen, v040]
     links:
       - type: satisfies
+        target: REQ-CODEGEN-001
+      - type: satisfies
+        target: REQ-CODEGEN-WIT
+      - type: satisfies
+        target: REQ-CODEGEN-RUST
+
+  - id: ARCH-CODEGEN-002
+    type: design-decision
+    status: planned
+    title: "Three-layer verification (build + test + proof)"
+    description: >
+      All generated code includes three verification layers: (1) build-time
+      #[aadl(...)] attribute checking against model, (2) test-time contract
+      + timing tests, (3) formal Lean4 scheduling proofs + Kani bounded
+      model checking. Per PulseEngine Verification Guide multi-track approach.
+      Code targets feature intersection of Verus/Kani/Lean4/plain Rust.
+    fields:
+      rationale: >
+        Each layer catches different classes of drift: structural (build),
+        behavioral (test), mathematical (proof). Multiple candidates per
+        the Verification Guide improve success rate from 60% to 91%.
+        Feature intersection ensures all tracks can analyze the same code.
+    tags: [architecture, codegen, verification, v040]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-BUILD
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-TEST
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-PROOF
+
+  - id: ARCH-CODEGEN-003
+    type: design-decision
+    status: planned
+    title: "Dual build system (Cargo dev + Bazel CI)"
+    description: >
+      Generated workspace includes both Cargo.toml (development iteration)
+      and BUILD.bazel (hermetic CI + verification). Bazel runs wit-bindgen
+      as build action (plain .rs output, no proc macro), rules_verus,
+      rules_lean, rules_wasm_component. Cargo uses proc macros for
+      build-time checks and standard cargo test for test-time checks.
+    fields:
+      rationale: >
+        Cargo for fast iteration, Bazel for hermetic verification. wit-bindgen
+        as Bazel action produces readable, diffable, verifiable plain Rust
+        instead of hidden proc macro expansion. Lean4 and Verus need Bazel
+        for hermetic tool management.
+    tags: [architecture, codegen, bazel, v040]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-BAZEL
+
+  - id: ARCH-CODEGEN-004
+    type: design-decision
+    status: planned
+    title: "rivet frontmatter in generated design docs"
+    description: >
+      Each generated crate includes a design document with rivet YAML
+      frontmatter (id, type, links). Verification records generated as
+      rivet verification-verdict artifacts. Link types chosen for SysML v2
+      forward compatibility (satisfies → satisfy, verifies → verify).
+    fields:
+      rationale: >
+        Generated documents participate in rivet's traceability graph
+        automatically. When SysML v2 parser extracts requirements, the
+        existing generated verification artifacts already have compatible
+        link types — no retrofit needed.
+    tags: [architecture, codegen, rivet, v040]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-RIVET
+
+  - id: ARCH-SYSML2-002
+    type: design-decision
+    status: planned
+    title: "Rowan-based KerML parser (spar-sysml2 crate)"
+    description: >
+      New spar-sysml2 crate with hand-written recursive descent parser for
+      KerML/SysML v2 textual notation. Same architecture as spar-parser:
+      rowan lossless CST, error recovery, SyntaxKind enum (~200 variants).
+      Covers core KerML + SysML v2 profile constructs.
+    fields:
+      rationale: >
+        KerML is just another grammar — rowan handles it identically to AADL.
+        No Rust SysML v2 parser exists (pilot is Java-only). Hand-written
+        recursive descent gives fine-grained error recovery needed for IDE
+        integration.
+    tags: [architecture, sysml2, parser, v040]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-PARSE
+      - type: satisfies
         target: REQ-INTEROP-001
+
+  - id: ARCH-SYSML2-003
+    type: design-decision
+    status: planned
+    title: "SysML v2 → AADL lowering via SEI mapping rules"
+    description: >
+      Lowering from SysML v2 CST to AADL ItemTree implementing the SEI 2023
+      mapping specification. part def → system/process type, port def → data
+      port, connection def → connection, constraint def → timing properties,
+      allocate → deployment bindings. Requirements extracted to rivet YAML
+      with satisfy/verify link preservation.
+    fields:
+      rationale: >
+        The SEI is specifying this mapping — implementing it makes spar the
+        reference Rust implementation. SysML v2 requirements flow into rivet,
+        enabling traceability from system requirements through architecture
+        through code through verification evidence.
+    tags: [architecture, sysml2, transform, v040]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-LOWER
+      - type: satisfies
+        target: REQ-SYSML2-EXTRACT
+
+  # ── SysML v2 Integration (v0.5.0) ───────────────────────────────────
+
+  # ARCH-SYSML2-001 merged into ARCH-SYSML2-002 and ARCH-SYSML2-003 (v0.4.0)

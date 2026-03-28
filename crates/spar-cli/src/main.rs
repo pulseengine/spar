@@ -37,6 +37,7 @@ fn main() {
         "render" => cmd_render(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
         "codegen" => cmd_codegen(&args[2..]),
+        "sysml2" => cmd_sysml2(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -1644,4 +1645,198 @@ fn read_file(path: &str) -> String {
         eprintln!("Cannot read {path}: {e}");
         process::exit(1);
     })
+}
+fn cmd_sysml2_parse(args: &[String]) {
+    let mut files = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+    }
+
+    if files.is_empty() {
+        eprintln!("Missing file argument");
+        process::exit(1);
+    }
+
+    let mut has_errors = false;
+    for file_path in &files {
+        let source = read_file(file_path);
+        let parsed = spar_sysml2::parse(&source);
+
+        println!("=== {} ===", file_path);
+        println!("{:#?}", parsed.syntax_node());
+
+        if parsed.ok() {
+            eprintln!("{}: OK", file_path);
+        } else {
+            has_errors = true;
+            for err in parsed.errors() {
+                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+            }
+        }
+    }
+
+    if has_errors {
+        process::exit(1);
+    }
+}
+
+fn cmd_sysml2_lower(args: &[String]) {
+    let mut output_path: Option<String> = None;
+    let mut files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output_path = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires a value");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    if files.is_empty() {
+        eprintln!("Missing file argument");
+        process::exit(1);
+    }
+
+    // Parse and lower all files (concatenate source)
+    let mut all_source = String::new();
+    for file_path in &files {
+        let source = read_file(file_path);
+        if !all_source.is_empty() {
+            all_source.push('\n');
+        }
+        all_source.push_str(&source);
+    }
+
+    let parsed = spar_sysml2::parse(&all_source);
+    if !parsed.ok() {
+        for err in parsed.errors() {
+            eprintln!("parse error at {}: {}", err.offset, err.msg);
+        }
+        process::exit(1);
+    }
+
+    let tree = spar_sysml2::lower::lower_to_aadl(&parsed);
+    let aadl = spar_sysml2::lower::item_tree_to_aadl(&tree);
+
+    match output_path {
+        Some(path) => {
+            fs::write(&path, &aadl).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote AADL output to {path}");
+        }
+        None => {
+            print!("{aadl}");
+        }
+    }
+}
+
+fn cmd_sysml2_extract(args: &[String]) {
+    let mut output_path: Option<String> = None;
+    let mut files = Vec::new();
+    let mut _requirements = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--requirements" => {
+                _requirements = true;
+            }
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output_path = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires a value");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    if files.is_empty() {
+        eprintln!("Missing file argument");
+        process::exit(1);
+    }
+
+    // Parse all files
+    let mut all_source = String::new();
+    for file_path in &files {
+        let source = read_file(file_path);
+        if !all_source.is_empty() {
+            all_source.push('\n');
+        }
+        all_source.push_str(&source);
+    }
+
+    let parsed = spar_sysml2::parse(&all_source);
+    if !parsed.ok() {
+        for err in parsed.errors() {
+            eprintln!("parse error at {}: {}", err.offset, err.msg);
+        }
+        process::exit(1);
+    }
+
+    let yaml = spar_sysml2::extract::extract_requirements(&parsed);
+
+    match output_path {
+        Some(path) => {
+            fs::write(&path, &yaml).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote requirements YAML to {path}");
+        }
+        None => {
+            print!("{yaml}");
+        }
+    }
+}
+
+fn cmd_sysml2(args: &[String]) {
+    if args.is_empty() {
+        eprintln!("Usage: spar sysml2 <subcommand> [options] <file>");
+        eprintln!();
+        eprintln!("Subcommands:");
+        eprintln!("  parse    Parse a SysML v2 file and show the syntax tree");
+        eprintln!("  lower    Lower SysML v2 to AADL");
+        eprintln!("  extract  Extract requirements to rivet YAML");
+        process::exit(1);
+    }
+
+    match args[0].as_str() {
+        "parse" => cmd_sysml2_parse(&args[1..]),
+        "lower" => cmd_sysml2_lower(&args[1..]),
+        "extract" => cmd_sysml2_extract(&args[1..]),
+        other => {
+            eprintln!("Unknown sysml2 subcommand: {other}");
+            process::exit(1);
+        }
+    }
 }

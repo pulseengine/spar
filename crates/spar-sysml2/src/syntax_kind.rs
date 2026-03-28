@@ -148,6 +148,8 @@ pub enum SyntaxKind {
     RENDERING_KW,
     RETURN_KW,
     SATISFY_KW,
+    VERIFY_KW,
+    REFINE_KW,
     SEND_KW,
     SNAPSHOT_KW,
     SPECIALIZES_KW,
@@ -295,6 +297,27 @@ pub enum SyntaxKind {
     /// `enum name { ... }`
     ENUM_USAGE,
 
+    /// `requirement name : Type { ... }`
+    REQUIREMENT_USAGE,
+    /// `constraint name : Type { ... }`
+    CONSTRAINT_USAGE,
+
+    // Relationships
+    /// `satisfy req by impl;`
+    SATISFY_REQ,
+    /// `verify req by test;`
+    VERIFY_REQ,
+    /// `refine req1 by req2;`
+    REFINE_REQ,
+
+    // Requirement body members
+    /// `subject name : Type;`
+    SUBJECT_MEMBER,
+    /// `doc /* text */` inside requirement body
+    DOC_MEMBER,
+    /// Name reference in expression/relationship context
+    NAME_REF,
+
     // Feature declarations
     /// Generic feature declaration: `name : Type;`
     FEATURE_DECL,
@@ -438,6 +461,8 @@ impl SyntaxKind {
             "rendering" => Some(Self::RENDERING_KW),
             "return" => Some(Self::RETURN_KW),
             "satisfy" => Some(Self::SATISFY_KW),
+            "verify" => Some(Self::VERIFY_KW),
+            "refine" => Some(Self::REFINE_KW),
             "send" => Some(Self::SEND_KW),
             "snapshot" => Some(Self::SNAPSHOT_KW),
             "specializes" => Some(Self::SPECIALIZES_KW),

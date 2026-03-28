@@ -745,15 +745,158 @@ artifacts:
 
   - id: REQ-CODEGEN-001
     type: requirement
-    title: Code skeleton generation (Ada/C/Rust)
+    title: Code skeleton generation (Rust + WIT)
     description: >
-      Generate deployable code skeletons from AADL component implementations.
-      Thread bodies as task entry points with correct scheduling attributes.
-      Port connections as typed communication stubs. Data types as structs.
-      Targets: Ada (aerospace), C (embedded), Rust (modern). Ellidiss and
-      TASTE both offer this — it's the #1 competitive gap.
+      Generate deployable code from AADL component implementations.
+      Dual output: WIT interfaces (component contracts) + Rust crate
+      skeletons (implementation). Process → crate, thread → async fn,
+      data type → struct, port → typed channel / WIT stream.
     status: planned
     tags: [codegen, competitive-gap, v040]
+    links:
+      - type: traces-to
+        target: REQ-TRANSFORM-001
+
+  - id: REQ-CODEGEN-WIT
+    type: requirement
+    title: Generate WIT interfaces from AADL processes
+    description: >
+      Each AADL process generates a WIT world with interfaces for its
+      features. Data ports → WIT stream<T>, event ports → WIT future,
+      subprogram access → WIT functions. wit-bindgen runs as Bazel build
+      action (not proc macro) producing plain Rust bindings.
+    status: planned
+    tags: [codegen, wit, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-RUST
+    type: requirement
+    title: Generate Rust crate skeletons from AADL
+    description: >
+      Each AADL process generates a Cargo crate with: lib.rs (trait impl
+      skeleton), ports.rs (typed channels), types.rs (data structs),
+      config.rs (#[aadl(...)] scheduling attributes). System generates
+      Cargo workspace. Both native and WASM component targets.
+    status: planned
+    tags: [codegen, rust, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-BAZEL
+    type: requirement
+    title: Generate Bazel BUILD files for WASM + verification
+    description: >
+      Generated workspace includes BUILD.bazel for hermetic builds:
+      rules_wasm_component (WIT → bindgen → compile → .wasm),
+      rules_verus (SMT checking), rules_lean (proof checking),
+      rules_kani (bounded model checking). Cargo.toml also generated
+      for development iteration.
+    status: planned
+    tags: [codegen, bazel, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-VERIFY-BUILD
+    type: requirement
+    title: Build-time AADL attribute verification
+    description: >
+      Generated #[aadl(period_ps=N, deadline_ps=N, ...)] attributes
+      checked against AADL model at build time. Proc macro (Cargo) or
+      build action (Bazel) reads model and fails compilation if constants
+      diverge. Catches structural drift between design and code.
+    status: planned
+    tags: [codegen, verification, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-VERIFY-TEST
+    type: requirement
+    title: Test-time contract + timing verification
+    description: >
+      Generated tests verify: port types match AADL classifiers, port
+      directions match, all required ports connected, execution time
+      within WCET bounds. Test results feed into rivet as verification
+      evidence artifacts.
+    status: planned
+    tags: [codegen, verification, testing, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-VERIFY-PROOF
+    type: requirement
+    title: Formal proof generation (Lean4 + Kani)
+    description: >
+      Generated Lean4 proofs for scheduling properties (response time
+      within deadline, per existing scheduling_verified.rs pattern).
+      Generated Kani harnesses for bounded model checking (no deadline
+      miss, port type safety). Per Verification Guide multi-track approach.
+    status: planned
+    tags: [codegen, verification, formal, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-RIVET
+    type: requirement
+    title: Generate rivet design docs + verification artifacts
+    description: >
+      Each generated crate includes: design document with rivet frontmatter
+      (links to requirements, architecture decisions), verification.yaml
+      with verification-verdict records for each layer. SysML v2 forward
+      compatible link types (satisfies, verifies match SysML v2 satisfy, verify).
+    status: planned
+    tags: [codegen, rivet, traceability, v040]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-SYSML2-PARSE
+    type: requirement
+    title: Parse SysML v2 textual notation (KerML grammar)
+    description: >
+      New spar-sysml2 crate with rowan-based parser for SysML v2 textual
+      notation. Hand-written recursive descent, lossless CST, error recovery.
+      Same architecture as spar-parser. Covers KerML kernel + SysML v2 profile
+      (part, port, connection, requirement, constraint, action, state).
+    status: planned
+    tags: [sysml2, parser, v040]
+    links:
+      - type: traces-to
+        target: REQ-INTEROP-001
+
+  - id: REQ-SYSML2-LOWER
+    type: requirement
+    title: Lower SysML v2 to AADL per SEI mapping rules
+    description: >
+      SysML v2 → AADL lowering implementing SEI 2023 mapping specification.
+      part def → system/process type, port def → data port, connection def →
+      connection, constraint def → timing properties, allocate → bindings.
+      Enables spar analysis on SysML v2-modeled systems.
+    status: planned
+    tags: [sysml2, transform, v040]
+    links:
+      - type: traces-to
+        target: REQ-INTEROP-001
+
+  - id: REQ-SYSML2-EXTRACT
+    type: requirement
+    title: Extract SysML v2 requirements to rivet YAML
+    description: >
+      Parse .sysml files, find requirement def elements, generate rivet
+      requirement artifacts with satisfy/verify links preserved. Bridges
+      SysML v2 requirement management with rivet traceability. Links map:
+      SysML satisfy → rivet satisfies, SysML verify → rivet verifies.
+    status: planned
+    tags: [sysml2, requirements, rivet, v040]
+    links:
+      - type: traces-to
+        target: REQ-INTEROP-001
 
   - id: REQ-TIMELINE-001
     type: requirement
@@ -826,6 +969,13 @@ artifacts:
       three layers and spar analyzing architecture at every level.
     status: planned
     tags: [transform, sysml, interop, v050]
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-PARSE
+      - type: traces-to
+        target: REQ-SYSML2-LOWER
+      - type: traces-to
+        target: REQ-SYSML2-EXTRACT
 
   - id: REQ-INTEROP-002
     type: requirement

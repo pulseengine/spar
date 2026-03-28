@@ -4,10 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "SysML v2 parser — recursive descent with rowan CST"
+description = "SysML v2 parser, AADL lowering, and requirements extraction"
 
 [dependencies]
 rowan.workspace = true
+spar-hir-def.workspace = true
+la-arena = "0.3"
+smol_str = "0.3"
 
 [dev-dependencies]
 expect-test = "1"
