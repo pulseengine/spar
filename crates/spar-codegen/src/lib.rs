@@ -163,6 +163,20 @@ fn sanitize_ident(name: &str) -> String {
         .to_lowercase()
 }
 
+/// Convert a snake/kebab/dot name to PascalCase.
+fn to_pascal_case(s: &str) -> String {
+    s.split(['_', '-', '.'])
+        .filter(|seg| !seg.is_empty())
+        .map(|seg| {
+            let mut chars = seg.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+            }
+        })
+        .collect()
+}
+
 /// Collect all thread instances bound to a given processor.
 ///
 /// Looks at `Deployment_Properties::Actual_Processor_Binding` on each thread

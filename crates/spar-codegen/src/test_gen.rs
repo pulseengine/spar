@@ -6,7 +6,7 @@
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 
-use crate::{GeneratedFile, extract_timing, sanitize_ident};
+use crate::{GeneratedFile, extract_timing, sanitize_ident, to_pascal_case};
 
 /// Generate a test harness for a thread instance.
 pub fn generate_test_harness(
@@ -105,20 +105,6 @@ pub fn generate_test_harness(
         path: format!("tests/{parent_name}/{name}_test.rs"),
         content: code,
     }
-}
-
-/// Convert a name to PascalCase (re-uses the logic from rust_gen conceptually).
-fn to_pascal_case(s: &str) -> String {
-    s.split(['_', '-', '.'])
-        .filter(|seg| !seg.is_empty())
-        .map(|seg| {
-            let mut chars = seg.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

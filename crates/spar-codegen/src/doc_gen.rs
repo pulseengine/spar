@@ -123,6 +123,7 @@ fn generate_design_markdown(
             let props = inst.properties_for(child_idx);
             let dispatch = props
                 .get("Timing_Properties", "Dispatch_Protocol")
+                .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
                 .or_else(|| props.get("", "Dispatch_Protocol"))
                 .unwrap_or("--");
 

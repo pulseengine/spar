@@ -6,7 +6,7 @@
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{Direction, FeatureKind};
 
-use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident};
+use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident, to_pascal_case};
 
 /// Generate a Rust component skeleton for a thread instance.
 pub fn generate_rust_component(
@@ -22,6 +22,7 @@ pub fn generate_rust_component(
     let props = inst.properties_for(thread_idx);
     let dispatch = props
         .get("Timing_Properties", "Dispatch_Protocol")
+        .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
         .or_else(|| props.get("", "Dispatch_Protocol"))
         .unwrap_or("Periodic");
 
@@ -148,20 +149,6 @@ fn feature_to_rust_type(
         FeatureKind::EventDataPort => format!("Option<{base_type}>"),
         _ => base_type,
     }
-}
-
-/// Convert a snake/kebab/dot name to PascalCase.
-fn to_pascal_case(s: &str) -> String {
-    s.split(['_', '-', '.'])
-        .filter(|seg| !seg.is_empty())
-        .map(|seg| {
-            let mut chars = seg.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
