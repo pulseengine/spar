@@ -43,9 +43,7 @@ pub fn aadl_config(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .unwrap_or_else(|| module.ident.to_string());
 
-    let note = format!(
-        "AADL config for {component_name} — use `spar verify` to check"
-    );
+    let note = format!("AADL config for {component_name} — use `spar verify` to check");
 
     // Pass through unchanged — verification happens via `spar verify`.
     let expanded = quote! {
