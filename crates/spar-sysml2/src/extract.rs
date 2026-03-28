@@ -315,4 +315,109 @@ package Safety {
         assert_eq!(reqs[0].id, "SYSML-REQ-CriticalReq");
         assert_eq!(reqs[0].satisfies.len(), 1);
     }
+
+    #[test]
+    fn extract_requirement_usage() {
+        let source = "requirement latencyReq : LatencySpec { }";
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1, "should extract requirement usage");
+        assert_eq!(reqs[0].id, "SYSML-REQ-latencyReq");
+        assert_eq!(reqs[0].title, "latencyReq");
+    }
+
+    #[test]
+    fn extract_requirement_with_doc_string() {
+        let source = r#"
+requirement def SafetyReq {
+    doc "The system shall remain safe under all conditions"
+}
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(
+            reqs[0].description,
+            "The system shall remain safe under all conditions"
+        );
+    }
+
+    #[test]
+    fn extract_requirement_with_both_satisfy_and_verify() {
+        let source = r#"
+requirement def SafetyReq { }
+satisfy SafetyReq by controller;
+verify SafetyReq by safetyTest;
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_requirements(&parse);
+        assert!(yaml.contains("links:"), "yaml: {yaml}");
+        assert!(yaml.contains("type: satisfies"), "yaml: {yaml}");
+        assert!(yaml.contains("target: controller"), "yaml: {yaml}");
+        assert!(yaml.contains("type: verifies"), "yaml: {yaml}");
+        assert!(yaml.contains("target: safetyTest"), "yaml: {yaml}");
+    }
+
+    #[test]
+    fn extract_multiple_requirements_yaml_format() {
+        let source = r#"
+requirement def SafetyReq { }
+requirement def LatencyReq { }
+requirement def ReliabilityReq { }
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_requirements(&parse);
+        assert!(yaml.starts_with("artifacts:\n"), "yaml: {yaml}");
+        assert!(yaml.contains("SYSML-REQ-SafetyReq"), "yaml: {yaml}");
+        assert!(yaml.contains("SYSML-REQ-LatencyReq"), "yaml: {yaml}");
+        assert!(yaml.contains("SYSML-REQ-ReliabilityReq"), "yaml: {yaml}");
+        // Each should have description fallback
+        assert!(
+            yaml.contains("Extracted from SysML v2 model"),
+            "yaml: {yaml}"
+        );
+    }
+
+    #[test]
+    fn extract_requirement_default_description() {
+        let source = "requirement def EmptyReq { }";
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].description, "Extracted from SysML v2 model");
+    }
+
+    #[test]
+    fn extract_deeply_nested_requirements() {
+        let source = r#"
+package TopLevel {
+    package Safety {
+        requirement def NestedReq { }
+        satisfy NestedReq by safetyController;
+        verify NestedReq by safetyTest;
+    }
+}
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].id, "SYSML-REQ-NestedReq");
+        assert_eq!(reqs[0].satisfies.len(), 1);
+        assert_eq!(reqs[0].verifies.len(), 1);
+    }
+
+    #[test]
+    fn extract_unmatched_satisfy_ignored() {
+        // satisfy references a requirement name that doesn't exist
+        let source = r#"
+requirement def AlphaReq { }
+satisfy BetaReq by controller;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].id, "SYSML-REQ-AlphaReq");
+        // The satisfy for BetaReq should not attach to AlphaReq
+        assert_eq!(reqs[0].satisfies.len(), 0);
+    }
 }

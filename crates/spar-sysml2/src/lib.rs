@@ -303,4 +303,336 @@ package SensorSystem {
             .collect();
         assert_eq!(defs.len(), 2, "expected 2 PART_DEF nodes after recovery");
     }
+
+    // -----------------------------------------------------------------------
+    // grammar/requirements.rs coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_satisfy_req() {
+        let parse = parse("satisfy latencyReq by controller;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let sat = root
+            .children()
+            .find(|n| n.kind() == SyntaxKind::SATISFY_REQ);
+        assert!(sat.is_some(), "expected SATISFY_REQ node");
+    }
+
+    #[test]
+    fn parse_verify_req() {
+        let parse = parse("verify safetyReq by safetyTest;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let ver = root.children().find(|n| n.kind() == SyntaxKind::VERIFY_REQ);
+        assert!(ver.is_some(), "expected VERIFY_REQ node");
+    }
+
+    #[test]
+    fn parse_refine_req() {
+        let parse = parse("refine highLevelReq by detailedReq;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let refn = root.children().find(|n| n.kind() == SyntaxKind::REFINE_REQ);
+        assert!(refn.is_some(), "expected REFINE_REQ node");
+    }
+
+    #[test]
+    fn parse_satisfy_with_dotted_name() {
+        let parse = parse("satisfy latencyReq by ecu.controller;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_verify_with_qualified_name() {
+        let parse = parse("verify safety::req by tests::safetyTest;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_requirement_def_with_body() {
+        let source = r#"
+requirement def LatencyReq {
+    doc "System latency must be below 10ms"
+    attribute maxLatency : Real;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let req_def = root
+            .children()
+            .find(|n| n.kind() == SyntaxKind::REQUIREMENT_DEF);
+        assert!(req_def.is_some(), "expected REQUIREMENT_DEF");
+    }
+
+    #[test]
+    fn parse_requirement_usage() {
+        let source = "requirement safetyReq : SafetySpec;";
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let req_usage = root
+            .children()
+            .find(|n| n.kind() == SyntaxKind::REQUIREMENT_USAGE);
+        assert!(req_usage.is_some(), "expected REQUIREMENT_USAGE");
+    }
+
+    // -----------------------------------------------------------------------
+    // grammar/packages.rs coverage (private import, public/private visibility)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_private_import() {
+        let source = r#"
+package Pkg {
+    private import ScalarValues::*;
+    part def A { }
+}
+"#;
+        let parse = parse(source);
+        // Private keyword may cause a parse error in current grammar, but
+        // the parser should handle it gracefully
+        let root = parse.syntax_node();
+        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
+        assert!(pkg.is_some(), "expected PACKAGE node");
+    }
+
+    #[test]
+    fn parse_public_import() {
+        let source = r#"
+package Pkg {
+    public import Definitions::*;
+    part def B { }
+}
+"#;
+        let parse = parse(source);
+        let root = parse.syntax_node();
+        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
+        assert!(pkg.is_some(), "expected PACKAGE node");
+    }
+
+    #[test]
+    fn parse_package_semicolon_form() {
+        // Package with semicolon instead of body
+        let parse = parse("package EmptyPkg;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
+        assert!(pkg.is_some(), "expected PACKAGE node");
+    }
+
+    // -----------------------------------------------------------------------
+    // grammar/parts.rs coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_calc_def() {
+        let parse = parse("calc def TotalMass { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_allocation_def() {
+        let parse = parse("allocation def TaskAlloc { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_enum_def() {
+        let parse = parse("enum def Color { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_interface_def() {
+        let parse = parse("interface def SensorInterface { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_constraint_def() {
+        let parse = parse("constraint def TimingConstraint { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_action_def_and_usage() {
+        let source = r#"
+package Acts {
+    action def Process { }
+    action doProcess : Process;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_state_def_and_usage() {
+        let source = r#"
+package States {
+    state def Operational { }
+    state running : Operational;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_ref_usage() {
+        let parse = parse("ref part driver : Person;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_abstract_part_def() {
+        let parse = parse("abstract part def AbstractComponent { }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+        let root = parse.syntax_node();
+        let pd = root.children().find(|n| n.kind() == SyntaxKind::PART_DEF);
+        assert!(pd.is_some(), "expected PART_DEF from abstract");
+    }
+
+    #[test]
+    fn parse_feature_kw_decl() {
+        let source = r#"
+part def Sys {
+    feature x : Integer;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_comment_and_doc_nodes() {
+        let source = r#"
+part def Documented {
+    comment "This is a comment"
+    doc "This is documentation"
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_named_connection_usage() {
+        let source = r#"
+package Net {
+    connection def Link { }
+    connection myLink : Link;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_attribute_with_default() {
+        let parse = parse("attribute speed : Real = 100;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_attribute_with_string_default() {
+        let parse = parse(r#"attribute name : String = "hello";"#);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_redefines_specialization() {
+        let source = r#"
+part def V {
+    part eng redefines baseEng;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_subsets_specialization() {
+        let source = r#"
+part def V {
+    part wheel subsets baseWheel;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    // -----------------------------------------------------------------------
+    // grammar/mod.rs coverage (fallback error path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_unrecognized_top_level_token() {
+        // A bare semicolon at top level should trigger the error fallback
+        let parse = parse("; part def A { }");
+        // Should not panic; parser should recover
+        let root = parse.syntax_node();
+        // The parser may or may not recover to parse A, but it should not crash
+        assert_eq!(root.kind(), SyntaxKind::SOURCE_FILE);
+        // There should be errors from the bare semicolon
+        assert!(!parse.ok(), "expected parse errors");
+    }
+
+    #[test]
+    fn parse_unrecognized_token_in_body() {
+        // A bare token inside a namespace body should trigger err_and_bump
+        let source = "package P { 99999 part def X { } }";
+        let parse = parse(source);
+        let root = parse.syntax_node();
+        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
+        assert!(pkg.is_some(), "expected PACKAGE node after recovery");
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration-level grammar tests for edge cases
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_satisfy_verify_refine_in_package() {
+        let source = r#"
+package SafetyModel {
+    requirement def SafetyReq { }
+    requirement def DetailedReq { }
+    satisfy SafetyReq by controller;
+    verify SafetyReq by safetyTest;
+    refine SafetyReq by DetailedReq;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_item_usage_with_direction() {
+        let source = r#"
+port def DataPort {
+    in item request;
+    out item response;
+    inout item bidir;
+}
+"#;
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_colon_gt_gt_redefine() {
+        let source = "part eng :>> baseEng;";
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn parse_specializes_keyword() {
+        let source = "part def Truck specializes Vehicle { }";
+        let parse = parse(source);
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
 }

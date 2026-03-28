@@ -1,0 +1,4 @@
+# Bazel rules for Lean4 proof compilation and verification.
+# These rules are loaded by generated BUILD.bazel files from `spar codegen`.
+
+exports_files(["defs.bzl"])

@@ -76,7 +76,11 @@ fn generate_workspace_build_bazel(root_name: &str) -> GeneratedFile {
     bazel.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     bazel.push_str("load(\"@rules_rust//rust:defs.bzl\", \"rust_binary\", \"rust_library\")\n");
-    bazel.push_str("load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n");
+    bazel.push_str("load(\"//tools/bazel/rules_wasm_component:defs.bzl\", \"wasm_component\")\n");
+    bazel.push_str("load(\"//tools/bazel/rules_verus:defs.bzl\", \"verus_verify\")\n");
+    bazel.push_str(
+        "load(\"//tools/bazel/rules_lean:defs.bzl\", \"lean_library\", \"lean_verify\")\n\n",
+    );
 
     bazel.push_str(&format!("# Root package: {root_name}\n"));
     bazel.push_str("package(default_visibility = [\"//visibility:public\"])\n\n");
@@ -126,7 +130,7 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
     bazel.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     bazel.push_str("load(\"@rules_rust//rust:defs.bzl\", \"rust_library\", \"rust_test\")\n");
-    bazel.push_str("load(\"@rules_rust//wasm_bindgen:defs.bzl\", \"wasm_component\")\n\n");
+    bazel.push_str("load(\"//tools/bazel/rules_wasm_component:defs.bzl\", \"wasm_component\")\n\n");
 
     bazel.push_str("package(default_visibility = [\"//visibility:public\"])\n\n");
 
@@ -227,6 +231,31 @@ mod tests {
     }
 
     #[test]
+    fn workspace_build_bazel_loads_verification_rules() {
+        let files = generate_workspace("test_system", &["controller".to_string()]);
+
+        let build_bazel = files.iter().find(|f| f.path == "BUILD.bazel").unwrap();
+        assert!(
+            build_bazel
+                .content
+                .contains("//tools/bazel/rules_wasm_component:defs.bzl"),
+            "Must load wasm_component from tools/bazel"
+        );
+        assert!(
+            build_bazel
+                .content
+                .contains("//tools/bazel/rules_verus:defs.bzl"),
+            "Must load verus rules from tools/bazel"
+        );
+        assert!(
+            build_bazel
+                .content
+                .contains("//tools/bazel/rules_lean:defs.bzl"),
+            "Must load lean rules from tools/bazel"
+        );
+    }
+
+    #[test]
     fn crate_cargo_toml_has_deps() {
         let files = generate_workspace("test_system", &["controller".to_string()]);
 
@@ -279,6 +308,12 @@ mod tests {
         assert!(
             build.content.contains("wasm32-wasip2"),
             "Must target wasm32-wasip2"
+        );
+        assert!(
+            build
+                .content
+                .contains("//tools/bazel/rules_wasm_component:defs.bzl"),
+            "Must load wasm_component from tools/bazel, not @rules_rust//wasm_bindgen"
         );
     }
 

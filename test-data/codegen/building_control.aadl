@@ -1,0 +1,53 @@
+package BuildingControl
+public
+  with Deployment_Properties;
+  with Timing_Properties;
+
+  data SensorReading
+  end SensorReading;
+
+  data ActuatorCommand
+  end ActuatorCommand;
+
+  processor CPU
+  end CPU;
+
+  process Controller
+    features
+      sensor_in: in data port SensorReading;
+      command_out: out data port ActuatorCommand;
+  end Controller;
+
+  thread ControlLoop
+    features
+      sensor_data: in data port SensorReading;
+      command: out data port ActuatorCommand;
+    properties
+      Timing_Properties::Period => 10 ms;
+      Timing_Properties::Deadline => 8 ms;
+      Timing_Properties::Compute_Execution_Time => 1 ms .. 2 ms;
+      Deployment_Properties::Dispatch_Protocol => Periodic;
+  end ControlLoop;
+
+  thread implementation ControlLoop.impl
+  end ControlLoop.impl;
+
+  process implementation Controller.impl
+    subcomponents
+      ctrl: thread ControlLoop.impl;
+    connections
+      c1: port sensor_in -> ctrl.sensor_data;
+      c2: port ctrl.command -> command_out;
+  end Controller.impl;
+
+  system BuildingSystem
+  end BuildingSystem;
+
+  system implementation BuildingSystem.impl
+    subcomponents
+      cpu: processor CPU;
+      controller: process Controller.impl;
+    properties
+      Deployment_Properties::Actual_Processor_Binding => (reference(cpu)) applies to controller;
+  end BuildingSystem.impl;
+end BuildingControl;
