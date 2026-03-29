@@ -3,7 +3,7 @@
   "displayName": "AADL (spar)",
   "description": "AADL v2.2 language support with live architecture visualization",
   "publisher": "pulseengine",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "MIT",
   "repository": {
     "type": "git",
