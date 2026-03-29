@@ -1,4 +1,22 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.inventory]]
+who = "Ralf Anton Beier <ralf_beier@me.com>"
+criteria = "safe-to-deploy"
+version = "0.3.23"
+
+[[audits.rustc-hash]]
+who = "Ralf Anton Beier <ralf_beier@me.com>"
+criteria = "safe-to-deploy"
+version = "2.1.2"
+
+[[audits.zerocopy]]
+who = "Ralf Anton Beier <ralf_beier@me.com>"
+criteria = "safe-to-run"
+version = "0.8.48"
+
+[[audits.zerocopy-derive]]
+who = "Ralf Anton Beier <ralf_beier@me.com>"
+criteria = "safe-to-run"
+version = "0.8.48"

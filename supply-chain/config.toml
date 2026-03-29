@@ -208,10 +208,6 @@ criteria = "safe-to-deploy"
 version = "0.9.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.inventory]]
-version = "0.3.22"
-criteria = "safe-to-deploy"
-
 [[exemptions.itertools]]
 version = "0.13.0"
 criteria = "safe-to-deploy"
@@ -382,10 +378,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rustc-hash]]
 version = "1.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.rustc-hash]]
-version = "2.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustix]]
@@ -607,14 +599,6 @@ criteria = "safe-to-run"
 [[exemptions.wit-parser]]
 version = "0.245.1"
 criteria = "safe-to-deploy"
-
-[[exemptions.zerocopy]]
-version = "0.8.47"
-criteria = "safe-to-run"
-
-[[exemptions.zerocopy-derive]]
-version = "0.8.47"
-criteria = "safe-to-run"
 
 [[exemptions.zmij]]
 version = "1.0.21"

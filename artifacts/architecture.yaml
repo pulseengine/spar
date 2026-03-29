@@ -1,4 +1,4 @@
-# Spar toolchain architecture — 10-crate Rust workspace
+# Spar toolchain architecture — 16-crate Rust workspace
 
 artifacts:
 
@@ -8,9 +8,11 @@ artifacts:
     type: feature
     title: Spar AADL Toolchain
     description: >
-      10-crate Rust workspace implementing an AADL v2.2 toolchain
+      16-crate Rust workspace implementing an AADL v2.2 toolchain
       with incremental computation (salsa), lossless syntax (rowan),
-      and arena allocation (la-arena).
+      and arena allocation (la-arena). Crates: parser, syntax, annex,
+      base-db, hir-def, hir, analysis, transform, cli, wasm, render,
+      solver, sysml2, verify-macros, verify, codegen.
 
   # ── Crate Components ──────────────────────────────────────────────────
 
@@ -131,7 +133,7 @@ artifacts:
     type: design-decision
     title: spar-analysis
     description: >
-      22 analysis passes implementing connectivity, scheduling, latency,
+      27 analysis passes implementing connectivity, scheduling, latency,
       resource budget, EMV2, ARINC 653, legality rules, mode reachability,
       and more. Trait-based Analysis framework with AnalysisRunner.
     fields:
@@ -343,7 +345,7 @@ artifacts:
       RTA, bus bandwidth, memory budget, and weight/power analysis passes
       are each independent modules implementing the existing Analysis trait.
       They register with AnalysisRunner and produce AnalysisDiagnostic
-      results, consistent with the 22 existing passes.
+      results, consistent with the existing passes.
     fields:
       rationale: >
         Reusing the established Analysis trait + AnalysisRunner pattern keeps
@@ -620,7 +622,7 @@ artifacts:
 
   - id: ARCH-CODEGEN-001
     type: design-decision
-    status: planned
+    status: implemented
     title: "spar-codegen crate with dual output (WIT + native Rust)"
     description: >
       New spar-codegen crate generates both WIT interfaces and Rust crate
@@ -647,7 +649,7 @@ artifacts:
 
   - id: ARCH-CODEGEN-002
     type: design-decision
-    status: planned
+    status: implemented
     title: "Three-layer verification (build + test + proof)"
     description: >
       All generated code includes three verification layers: (1) build-time
@@ -672,7 +674,7 @@ artifacts:
 
   - id: ARCH-CODEGEN-003
     type: design-decision
-    status: planned
+    status: implemented
     title: "Dual build system (Cargo dev + Bazel CI)"
     description: >
       Generated workspace includes both Cargo.toml (development iteration)
@@ -693,7 +695,7 @@ artifacts:
 
   - id: ARCH-CODEGEN-004
     type: design-decision
-    status: planned
+    status: implemented
     title: "rivet frontmatter in generated design docs"
     description: >
       Each generated crate includes a design document with rivet YAML
@@ -713,7 +715,7 @@ artifacts:
 
   - id: ARCH-SYSML2-002
     type: design-decision
-    status: planned
+    status: implemented
     title: "Rowan-based KerML parser (spar-sysml2 crate)"
     description: >
       New spar-sysml2 crate with hand-written recursive descent parser for
@@ -735,7 +737,7 @@ artifacts:
 
   - id: ARCH-SYSML2-003
     type: design-decision
-    status: planned
+    status: implemented
     title: "SysML v2 → AADL lowering via SEI mapping rules"
     description: >
       Lowering from SysML v2 CST to AADL ItemTree implementing the SEI 2023

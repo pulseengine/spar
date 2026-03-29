@@ -585,7 +585,7 @@ artifacts:
       collide with Lean4 tactics (simp, omega, exact, apply, intro).
       TOML: escape quotes and special characters in string values.
       Starlark: reject Python/Starlark keywords.
-    status: not-implemented
+    status: implemented
     tags: [security, codegen, stpa-sec]
     traces-to: [CC-SEC-1]
     mitigates: [H-SEC-1]
@@ -631,7 +631,7 @@ artifacts:
       SyntaxKind name, source offset, and parent context. A golden-file
       test must verify that all semantic SysML v2 constructs produce
       either a lowered AADL item or a diagnostic.
-    status: not-implemented
+    status: partial
     tags: [security, sysml2, lowering, stpa-sec]
     traces-to: [CC-SEC-4]
     mitigates: [H-SEC-3]
@@ -725,7 +725,7 @@ artifacts:
       clippy). This test verifies that generated code is syntactically
       valid Rust. A second test must verify that generated WIT files
       pass wasm-tools component wit validation.
-    status: not-implemented
+    status: partial
     tags: [security, codegen, testing, stpa-sec]
     traces-to: [CC-SEC-1, CC-SEC-2]
     mitigates: [H-SEC-1, H-SEC-2]
