@@ -37,21 +37,44 @@ use spar_hir_def::name::{Name, PropertyRef};
 use crate::SyntaxNode;
 use crate::syntax_kind::SyntaxKind;
 
+/// Diagnostic emitted when the SysML v2→AADL lowering encounters a construct
+/// it cannot translate.
+#[derive(Debug, Clone)]
+pub struct LowerDiagnostic {
+    /// Byte offset into the source where the unrecognized construct starts.
+    pub offset: usize,
+    /// Human-readable description of what was skipped.
+    pub msg: String,
+}
+
 /// Lower a parsed SysML v2 source file to an AADL [`ItemTree`].
 ///
 /// Walks the rowan CST produced by [`crate::parse`] and maps SysML v2
 /// constructs to their AADL equivalents following SEI guidelines.
+///
+/// Diagnostics about unrecognized constructs are silently discarded.
+/// Use [`lower_to_aadl_with_diagnostics`] to collect them.
 pub fn lower_to_aadl(parse: &crate::Parse) -> ItemTree {
+    let (tree, _diagnostics) = lower_to_aadl_with_diagnostics(parse);
+    tree
+}
+
+/// Lower a parsed SysML v2 source file to an AADL [`ItemTree`], also
+/// returning any diagnostics about constructs that could not be translated.
+pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<LowerDiagnostic>) {
     let root = parse.syntax_node();
     let mut ctx = LowerCtx::default();
     lower_node(&root, &mut ctx);
-    ctx.tree
+    resolve_subcomponent_categories(&mut ctx.tree);
+    let diagnostics = std::mem::take(&mut ctx.diagnostics);
+    (ctx.tree, diagnostics)
 }
 
 /// Internal lowering context accumulating the AADL item tree.
 #[derive(Default)]
 struct LowerCtx {
     tree: ItemTree,
+    diagnostics: Vec<LowerDiagnostic>,
 }
 
 /// Walk a SysML v2 CST node and lower children to AADL items.
@@ -113,8 +136,62 @@ fn lower_node(node: &SyntaxNode, ctx: &mut LowerCtx) {
         SyntaxKind::ALLOCATION_DEF => {
             lower_allocation_def(node, ctx);
         }
-        _ => {}
+        other => {
+            // Nodes that are internal structure (trivia, tokens, etc.) are
+            // expected and should not produce diagnostics.
+            if !is_ignorable_kind(other) {
+                let offset = node.text_range().start().into();
+                ctx.diagnostics.push(LowerDiagnostic {
+                    offset,
+                    msg: format!("unsupported SysML v2 construct: {other:?}"),
+                });
+            }
+        }
     }
+}
+
+/// Returns `true` for `SyntaxKind`s that are expected to appear in the CST
+/// but have no AADL equivalent and should not trigger a diagnostic.
+fn is_ignorable_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        // Trivia / structural
+        SyntaxKind::WHITESPACE
+            | SyntaxKind::LINE_COMMENT
+            | SyntaxKind::BLOCK_COMMENT
+            | SyntaxKind::ERROR
+            // Sub-node kinds (children of definitions/usages, not stand-alone)
+            | SyntaxKind::NAME
+            | SyntaxKind::QUALIFIED_NAME
+            | SyntaxKind::TYPING
+            | SyntaxKind::SPECIALIZATION
+            | SyntaxKind::DIRECTION
+            | SyntaxKind::MULTIPLICITY
+            | SyntaxKind::CONNECT_ENDPOINT
+            | SyntaxKind::FEATURE_CHAIN
+            // Usages (lowered when encountered inside their parent)
+            | SyntaxKind::IMPORT_DECL
+            | SyntaxKind::PART_USAGE
+            | SyntaxKind::PORT_USAGE
+            | SyntaxKind::ATTRIBUTE_USAGE
+            | SyntaxKind::ITEM_USAGE
+            | SyntaxKind::ACTION_USAGE
+            | SyntaxKind::STATE_USAGE
+            | SyntaxKind::REF_USAGE
+            | SyntaxKind::CONSTRAINT_USAGE
+            | SyntaxKind::REQUIREMENT_USAGE
+            | SyntaxKind::CONNECTION_USAGE
+            // Requirement linkage
+            | SyntaxKind::SATISFY_REQ
+            | SyntaxKind::VERIFY_REQ
+            | SyntaxKind::REFINE_REQ
+            // Documentation
+            | SyntaxKind::DOC_NODE
+            | SyntaxKind::DOC_MEMBER
+            | SyntaxKind::COMMENT_NODE
+            // Declarations handled elsewhere
+            | SyntaxKind::FEATURE_DECL
+    )
 }
 
 /// Lower a SysML v2 `package` to an AADL package.
@@ -256,6 +333,13 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         features.push(idx);
                     }
                 }
+                other if !is_ignorable_kind(other) => {
+                    let offset: usize = child.text_range().start().into();
+                    ctx.diagnostics.push(LowerDiagnostic {
+                        offset,
+                        msg: format!("unsupported construct inside part def body: {other:?}"),
+                    });
+                }
                 _ => {}
             }
         }
@@ -326,6 +410,13 @@ fn lower_port_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         let idx = ctx.tree.features.alloc(feat);
                         features.push(idx);
                     }
+                }
+                other if !is_ignorable_kind(other) => {
+                    let offset: usize = child.text_range().start().into();
+                    ctx.diagnostics.push(LowerDiagnostic {
+                        offset,
+                        msg: format!("unsupported construct inside port def body: {other:?}"),
+                    });
                 }
                 _ => {}
             }
@@ -559,6 +650,13 @@ fn lower_interface_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         let idx = ctx.tree.features.alloc(feat);
                         features.push(idx);
                     }
+                }
+                other if !is_ignorable_kind(other) => {
+                    let offset: usize = child.text_range().start().into();
+                    ctx.diagnostics.push(LowerDiagnostic {
+                        offset,
+                        msg: format!("unsupported construct inside interface def body: {other:?}"),
+                    });
                 }
                 _ => {}
             }
@@ -806,27 +904,36 @@ fn lower_ref_usage_to_subcomponent(node: &SyntaxNode) -> Option<SubcomponentItem
     })
 }
 
-/// Convert an `attribute name : Type;` usage to a property association.
+/// Convert an `attribute name : Type;` or `attribute name : Type = 10 ms;`
+/// usage to a property association.
 fn lower_attribute_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssociationItem> {
     let name = extract_name(node)?;
     let type_ref = extract_type_ref(node);
 
-    let value_str = type_ref
-        .as_ref()
-        .map(|c| c.type_name.as_str().to_string())
-        .unwrap_or_default();
+    // First, try to extract an explicit default value (after `=`).
+    let (value_str, typed_value) = if let Some((v_str, v_expr)) = extract_default_value(node) {
+        (v_str, Some(v_expr))
+    } else {
+        // Fallback: use the type reference text as an opaque value.
+        let vs = type_ref
+            .as_ref()
+            .map(|c| c.type_name.as_str().to_string())
+            .unwrap_or_default();
+        let tv = if vs.is_empty() {
+            None
+        } else {
+            Some(PropertyExpr::Opaque(vs.clone()))
+        };
+        (vs, tv)
+    };
 
     Some(PropertyAssociationItem {
         name: PropertyRef {
             property_set: None,
             property_name: name,
         },
-        value: value_str.clone(),
-        typed_value: if value_str.is_empty() {
-            None
-        } else {
-            Some(PropertyExpr::Opaque(value_str))
-        },
+        value: value_str,
+        typed_value,
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
@@ -842,27 +949,36 @@ fn lower_state_usage_to_mode(node: &SyntaxNode) -> Option<spar_hir_def::item_tre
     })
 }
 
-/// Convert a `constraint name : ConstraintDef;` usage to a property association.
+/// Convert a `constraint name : ConstraintDef;` or one with an explicit
+/// value (e.g. `constraint period = 10 ms;`) to a property association.
 fn lower_constraint_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssociationItem> {
     let name = extract_name(node)?;
     let type_ref = extract_type_ref(node);
 
-    let value_str = type_ref
-        .as_ref()
-        .map(|c| c.type_name.as_str().to_string())
-        .unwrap_or_default();
+    // First, try to extract an explicit default value (after `=`).
+    let (value_str, typed_value) = if let Some((v_str, v_expr)) = extract_default_value(node) {
+        (v_str, Some(v_expr))
+    } else {
+        // Fallback: use the type reference text as an opaque value.
+        let vs = type_ref
+            .as_ref()
+            .map(|c| c.type_name.as_str().to_string())
+            .unwrap_or_default();
+        let tv = if vs.is_empty() {
+            None
+        } else {
+            Some(PropertyExpr::Opaque(vs.clone()))
+        };
+        (vs, tv)
+    };
 
     Some(PropertyAssociationItem {
         name: PropertyRef {
             property_set: Some(Name::new("Timing_Properties")),
             property_name: name,
         },
-        value: value_str.clone(),
-        typed_value: if value_str.is_empty() {
-            None
-        } else {
-            Some(PropertyExpr::Opaque(value_str))
-        },
+        value: value_str,
+        typed_value,
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
@@ -965,6 +1081,33 @@ fn infer_category(node: &SyntaxNode) -> ComponentCategory {
     ComponentCategory::System
 }
 
+/// Second pass: walk every component implementation and propagate the
+/// category from the referenced component type to its subcomponents.
+///
+/// During the first pass, `lower_part_usage_to_subcomponent` and
+/// `lower_ref_usage_to_subcomponent` default the category to `System`
+/// because the type may not have been lowered yet.  This function
+/// fixes that by looking up each subcomponent's classifier in the
+/// already-lowered component types.
+fn resolve_subcomponent_categories(tree: &mut ItemTree) {
+    // Build a map: type_name -> category from all known component types.
+    let type_categories: std::collections::HashMap<String, ComponentCategory> = tree
+        .component_types
+        .iter()
+        .map(|(_, ct)| (ct.name.as_str().to_string(), ct.category))
+        .collect();
+
+    // Walk every subcomponent and propagate the category.
+    for (_idx, sub) in tree.subcomponents.iter_mut() {
+        if let Some(cls) = &sub.classifier {
+            let type_name = cls.type_name.as_str();
+            if let Some(&cat) = type_categories.get(type_name) {
+                sub.category = cat;
+            }
+        }
+    }
+}
+
 /// Check whether a node was prefixed with `abstract` keyword.
 ///
 /// The `abstract` keyword is consumed during parsing and appears as an
@@ -979,6 +1122,117 @@ fn node_has_abstract_prefix(node: &SyntaxNode) -> bool {
 // ---------------------------------------------------------------------------
 // CST extraction helpers
 // ---------------------------------------------------------------------------
+
+/// Extract a default value expression from a node that may contain `= <expr>`.
+///
+/// Recognises the following patterns produced by the grammar:
+///   - `= <integer>`        → `PropertyExpr::Integer(n, None)`
+///   - `= <integer> <unit>` → `PropertyExpr::Integer(n, Some(unit))`
+///   - `= <real>`           → `PropertyExpr::Real(s, None)`
+///   - `= <real> <unit>`    → `PropertyExpr::Real(s, Some(unit))`
+///   - `= <string>`         → `PropertyExpr::StringLit(s)`
+///   - `= <ident>`          → `PropertyExpr::Opaque(s)` (fallback)
+///
+/// Returns `(display_string, PropertyExpr)` or `None` if no `=` is found.
+fn extract_default_value(node: &SyntaxNode) -> Option<(String, PropertyExpr)> {
+    let mut tokens = node.children_with_tokens().peekable();
+
+    // Advance past `=`
+    let mut found_eq = false;
+    for elem in tokens.by_ref() {
+        if let Some(tok) = elem.as_token()
+            && tok.kind() == SyntaxKind::EQ
+        {
+            found_eq = true;
+            break;
+        }
+    }
+    if !found_eq {
+        return None;
+    }
+
+    // Skip whitespace after `=`
+    while tokens
+        .peek()
+        .and_then(|e| e.as_token())
+        .is_some_and(|t| t.kind() == SyntaxKind::WHITESPACE)
+    {
+        tokens.next();
+    }
+
+    // Read the value token
+    let val_tok = tokens.next()?;
+    let val_token = val_tok.as_token()?;
+    let val_kind = val_token.kind();
+    let val_text = val_token.text().to_string();
+
+    match val_kind {
+        SyntaxKind::INTEGER_LIT => {
+            let n: i64 = val_text.parse().ok()?;
+            // Check for optional unit identifier
+            let unit = extract_following_unit(&mut tokens);
+            let display = match &unit {
+                Some(u) => format!("{n} {u}"),
+                None => val_text,
+            };
+            Some((
+                display,
+                PropertyExpr::Integer(n, unit.as_deref().map(Name::new)),
+            ))
+        }
+        SyntaxKind::REAL_LIT => {
+            let unit = extract_following_unit(&mut tokens);
+            let display = match &unit {
+                Some(u) => format!("{val_text} {u}"),
+                None => val_text.clone(),
+            };
+            Some((
+                display,
+                PropertyExpr::Real(val_text, unit.as_deref().map(Name::new)),
+            ))
+        }
+        SyntaxKind::STRING_LIT => {
+            let unquoted = val_text
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+                .to_string();
+            let display = unquoted.clone();
+            Some((display, PropertyExpr::StringLit(unquoted)))
+        }
+        SyntaxKind::TRUE_KW => Some(("true".to_string(), PropertyExpr::Boolean(true))),
+        SyntaxKind::FALSE_KW => Some(("false".to_string(), PropertyExpr::Boolean(false))),
+        SyntaxKind::IDENT => Some((val_text.clone(), PropertyExpr::Opaque(val_text))),
+        _ => None,
+    }
+}
+
+/// After a numeric literal token, skip whitespace and check if the next
+/// token is an identifier (unit name).  Returns the unit string if found.
+fn extract_following_unit<I>(tokens: &mut std::iter::Peekable<I>) -> Option<String>
+where
+    I: Iterator<Item = rowan::NodeOrToken<SyntaxNode, crate::SyntaxToken>>,
+{
+    // Skip whitespace
+    while tokens
+        .peek()
+        .and_then(|e| e.as_token())
+        .is_some_and(|t| t.kind() == SyntaxKind::WHITESPACE)
+    {
+        tokens.next();
+    }
+    // Check for IDENT or keyword used as unit (ms, us, ns, s, etc.)
+    if let Some(elem) = tokens.peek()
+        && let Some(tok) = elem.as_token()
+        && (tok.kind() == SyntaxKind::IDENT || tok.kind().is_keyword())
+    {
+        let unit_text = tok.text().to_string();
+        if !unit_text.is_empty() {
+            tokens.next(); // consume the unit token
+            return Some(unit_text);
+        }
+    }
+    None
+}
 
 /// Extract the first NAME child's text from a node.
 fn extract_name(node: &SyntaxNode) -> Option<Name> {
@@ -2379,5 +2633,293 @@ package Net {
         assert!(cls.package.is_some(), "expected package in classifier ref");
         assert_eq!(cls.package.as_ref().unwrap().as_str(), "HwLib");
         assert_eq!(cls.type_name.as_str(), "Processor");
+    }
+
+    // -- Bug 1: Diagnostics for unrecognized constructs --
+
+    #[test]
+    fn diagnostics_for_known_constructs_are_empty() {
+        let source = r#"
+package Pkg {
+    part def A { }
+    part def B { part a : A; }
+}
+"#;
+        let parse = crate::parse(source);
+        let (_tree, diags) = lower_to_aadl_with_diagnostics(&parse);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics for well-known constructs, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_for_empty_source() {
+        let parse = crate::parse("");
+        let (_tree, diags) = lower_to_aadl_with_diagnostics(&parse);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn lower_to_aadl_still_works_after_refactor() {
+        // Ensure the non-diagnostic entry point returns the same tree.
+        let source = "part def X { }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+        assert_eq!(tree.component_types.len(), 1);
+        assert_eq!(
+            tree.component_types.iter().next().unwrap().1.name.as_str(),
+            "X"
+        );
+    }
+
+    // -- Bug 2: Subcomponent category propagation --
+
+    #[test]
+    fn subcomponent_category_propagated_from_process_type() {
+        let source = r#"
+package CatTest {
+    part def Controller {
+        action processData { }
+    }
+    part def System {
+        part ctrl : Controller;
+    }
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        // Controller should be Process (has action)
+        let ctrl_type = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Controller");
+        assert_eq!(
+            ctrl_type.unwrap().1.category,
+            ComponentCategory::Process,
+            "Controller type should be Process"
+        );
+
+        // The subcomponent `ctrl` in System's impl should also be Process
+        let sys_impl = tree
+            .component_impls
+            .iter()
+            .find(|(_, ci)| ci.type_name.as_str() == "System");
+        assert!(sys_impl.is_some(), "expected System impl");
+        let (_, si) = sys_impl.unwrap();
+        let sub = &tree.subcomponents[si.subcomponents[0]];
+        assert_eq!(sub.name.as_str(), "ctrl");
+        assert_eq!(
+            sub.category,
+            ComponentCategory::Process,
+            "subcomponent ctrl should inherit Process category from Controller type"
+        );
+    }
+
+    #[test]
+    fn subcomponent_category_propagated_data_type() {
+        let source = r#"
+package DataCatTest {
+    attribute def Mass;
+    part def Sensor {
+        part mass_data : Mass;
+    }
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor_impl = tree
+            .component_impls
+            .iter()
+            .find(|(_, ci)| ci.type_name.as_str() == "Sensor");
+        assert!(sensor_impl.is_some());
+        let (_, si) = sensor_impl.unwrap();
+        let sub = &tree.subcomponents[si.subcomponents[0]];
+        assert_eq!(sub.name.as_str(), "mass_data");
+        assert_eq!(
+            sub.category,
+            ComponentCategory::Data,
+            "subcomponent should inherit Data category from attribute def"
+        );
+    }
+
+    #[test]
+    fn subcomponent_unknown_type_stays_system() {
+        // When the referenced type is not defined locally, category stays System.
+        let source = "part def Outer { part inner : UnknownType; }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let ci = tree.component_impls.iter().next().unwrap().1;
+        let sub = &tree.subcomponents[ci.subcomponents[0]];
+        assert_eq!(
+            sub.category,
+            ComponentCategory::System,
+            "unknown type reference should default to System"
+        );
+    }
+
+    #[test]
+    fn ref_usage_category_propagated() {
+        let source = r#"
+package RefCatTest {
+    part def Controller {
+        action doWork { }
+    }
+    part def System {
+        ref part ctrl : Controller;
+    }
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sys_impl = tree
+            .component_impls
+            .iter()
+            .find(|(_, ci)| ci.type_name.as_str() == "System");
+        let (_, si) = sys_impl.unwrap();
+        let sub = &tree.subcomponents[si.subcomponents[0]];
+        assert_eq!(
+            sub.category,
+            ComponentCategory::Process,
+            "ref part subcomponent should inherit Process from Controller"
+        );
+    }
+
+    // -- Bug 3: Property value parsing --
+
+    #[test]
+    fn attribute_usage_integer_value() {
+        let source = "part def Sensor { attribute period = 10; }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Sensor")
+            .unwrap()
+            .1;
+        assert_eq!(sensor.property_associations.len(), 1);
+        let pa = &tree.property_associations[sensor.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Integer(10, None)),
+            "expected Integer(10, None)"
+        );
+    }
+
+    #[test]
+    fn attribute_usage_integer_with_unit() {
+        let source = "part def Sensor { attribute period = 10 ms; }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Sensor")
+            .unwrap()
+            .1;
+        let pa = &tree.property_associations[sensor.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Integer(10, Some(Name::new("ms")))),
+            "expected Integer(10, Some(ms))"
+        );
+        assert_eq!(pa.value, "10 ms");
+    }
+
+    #[test]
+    fn attribute_usage_real_value() {
+        let source = "part def Sensor { attribute rate = 1.5; }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Sensor")
+            .unwrap()
+            .1;
+        let pa = &tree.property_associations[sensor.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Real("1.5".to_string(), None)),
+            "expected Real(1.5, None)"
+        );
+    }
+
+    #[test]
+    fn attribute_usage_string_value() {
+        let source = r#"part def Sensor { attribute label = "hello"; }"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Sensor")
+            .unwrap()
+            .1;
+        let pa = &tree.property_associations[sensor.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::StringLit("hello".to_string())),
+            "expected StringLit"
+        );
+    }
+
+    #[test]
+    fn constraint_usage_integer_with_unit() {
+        let source = r#"
+part def Controller {
+    constraint period = 500 us;
+}
+"#;
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let ctrl = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Controller")
+            .unwrap()
+            .1;
+        assert!(!ctrl.property_associations.is_empty());
+        let pa = &tree.property_associations[ctrl.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Integer(500, Some(Name::new("us")))),
+            "constraint should parse 500 us"
+        );
+        assert_eq!(
+            pa.name.property_set.as_ref().unwrap().as_str(),
+            "Timing_Properties"
+        );
+    }
+
+    #[test]
+    fn attribute_usage_without_default_falls_back_to_opaque() {
+        // No `= value`, so the type reference becomes the opaque value.
+        let source = "part def Sensor { attribute mass : Mass; }";
+        let parse = crate::parse(source);
+        let tree = lower_to_aadl(&parse);
+
+        let sensor = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == "Sensor")
+            .unwrap()
+            .1;
+        let pa = &tree.property_associations[sensor.property_associations[0]];
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Opaque("Mass".to_string())),
+            "without default value, should fall back to Opaque(type_name)"
+        );
     }
 }
