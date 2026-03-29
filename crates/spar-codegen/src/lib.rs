@@ -156,16 +156,75 @@ fn format_time_ps(ps: u64) -> String {
     }
 }
 
-/// Sanitize a name for use as a Rust/Lean identifier.
+/// Maximum length for generated identifiers.
+///
+/// Prevents excessively long identifiers from propagating into generated
+/// Rust, WIT, Lean4, TOML, and Bazel files.
+const MAX_IDENT_LEN: usize = 64;
+
+/// Rust keywords (2021 edition + `async`/`await`/`dyn`).
+///
+/// If a sanitized identifier matches one of these, we suffix it with `_`
+/// so the generated code remains valid Rust.
+const RUST_KEYWORDS: &[&str] = &[
+    "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern",
+    "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
+    "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+    "unsafe", "use", "where", "while",
+];
+
+/// Sanitize a name for use as a Rust/WIT/Lean identifier.
+///
+/// Applies the following safety checks in order:
+/// 1. Replace non-alphanumeric/underscore characters with `_`
+/// 2. Lowercase the result
+/// 3. Trim leading/trailing underscores
+/// 4. If the result is empty, return `"unnamed"`
+/// 5. If the result starts with a digit, prefix with `_`
+/// 6. If the result is a Rust keyword, suffix with `_`
+/// 7. Truncate to [`MAX_IDENT_LEN`] characters
 fn sanitize_ident(name: &str) -> String {
-    name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+    let mut s = name
+        .replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
         .trim_matches('_')
-        .to_lowercase()
+        .to_lowercase();
+
+    // Empty after sanitization (e.g. input was "..." or "")
+    if s.is_empty() {
+        return "unnamed".to_string();
+    }
+
+    // Identifiers must not start with a digit
+    if s.starts_with(|c: char| c.is_ascii_digit()) {
+        s.insert(0, '_');
+    }
+
+    // Escape Rust keywords by appending `_`
+    if RUST_KEYWORDS.contains(&s.as_str()) {
+        s.push('_');
+    }
+
+    // Truncate to maximum length
+    if s.len() > MAX_IDENT_LEN {
+        s.truncate(MAX_IDENT_LEN);
+        // Ensure we don't end mid-character (all chars are ASCII after lowercasing,
+        // but guard anyway)
+        while !s.is_char_boundary(s.len()) {
+            s.pop();
+        }
+    }
+
+    s
 }
 
 /// Convert a snake/kebab/dot name to PascalCase.
+///
+/// Applies the same safety invariants as [`sanitize_ident`]: empty names
+/// become `Unnamed`, digit-leading names are prefixed with `_`, Rust
+/// keywords are suffixed with `_`, and length is capped at [`MAX_IDENT_LEN`].
 fn to_pascal_case(s: &str) -> String {
-    s.split(['_', '-', '.'])
+    let mut result: String = s
+        .split(['_', '-', '.'])
         .filter(|seg| !seg.is_empty())
         .map(|seg| {
             let mut chars = seg.chars();
@@ -174,7 +233,32 @@ fn to_pascal_case(s: &str) -> String {
                 Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
             }
         })
-        .collect()
+        .collect();
+
+    // Empty after conversion
+    if result.is_empty() {
+        return "Unnamed".to_string();
+    }
+
+    // PascalCase identifiers must not start with a digit
+    if result.starts_with(|c: char| c.is_ascii_digit()) {
+        result.insert(0, '_');
+    }
+
+    // Keyword check (PascalCase rarely collides, but `Self` is a keyword)
+    if RUST_KEYWORDS.contains(&result.as_str()) {
+        result.push('_');
+    }
+
+    // Truncate to maximum length
+    if result.len() > MAX_IDENT_LEN {
+        result.truncate(MAX_IDENT_LEN);
+        while !result.is_char_boundary(result.len()) {
+            result.pop();
+        }
+    }
+
+    result
 }
 
 /// Collect all thread instances bound to a given processor.
@@ -338,8 +422,111 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_ident_works() {
+    fn sanitize_ident_basic() {
         assert_eq!(sanitize_ident("Ctrl.Impl"), "ctrl_impl");
         assert_eq!(sanitize_ident("My-Thread"), "my_thread");
+        assert_eq!(sanitize_ident("simple"), "simple");
+    }
+
+    #[test]
+    fn sanitize_ident_empty_result() {
+        assert_eq!(sanitize_ident(""), "unnamed");
+        assert_eq!(sanitize_ident("..."), "unnamed");
+        assert_eq!(sanitize_ident("___"), "unnamed");
+        assert_eq!(sanitize_ident("---"), "unnamed");
+        assert_eq!(sanitize_ident("@#$"), "unnamed");
+    }
+
+    #[test]
+    fn sanitize_ident_digit_prefix() {
+        assert_eq!(sanitize_ident("123thread"), "_123thread");
+        assert_eq!(sanitize_ident("0start"), "_0start");
+        assert_eq!(sanitize_ident("9x"), "_9x");
+        // Embedded digits are fine
+        assert_eq!(sanitize_ident("thread1"), "thread1");
+        assert_eq!(sanitize_ident("a2b"), "a2b");
+    }
+
+    #[test]
+    fn sanitize_ident_rust_keywords() {
+        assert_eq!(sanitize_ident("type"), "type_");
+        assert_eq!(sanitize_ident("fn"), "fn_");
+        assert_eq!(sanitize_ident("struct"), "struct_");
+        assert_eq!(sanitize_ident("mod"), "mod_");
+        assert_eq!(sanitize_ident("impl"), "impl_");
+        assert_eq!(sanitize_ident("self"), "self_");
+        assert_eq!(sanitize_ident("async"), "async_");
+        assert_eq!(sanitize_ident("await"), "await_");
+        assert_eq!(sanitize_ident("dyn"), "dyn_");
+        assert_eq!(sanitize_ident("pub"), "pub_");
+        assert_eq!(sanitize_ident("use"), "use_");
+        assert_eq!(sanitize_ident("let"), "let_");
+        assert_eq!(sanitize_ident("match"), "match_");
+        assert_eq!(sanitize_ident("return"), "return_");
+        // Non-keyword similar names should be unaffected
+        assert_eq!(sanitize_ident("types"), "types");
+        assert_eq!(sanitize_ident("module"), "module");
+    }
+
+    #[test]
+    fn sanitize_ident_truncation() {
+        let long = "a".repeat(100);
+        let result = sanitize_ident(&long);
+        assert_eq!(result.len(), MAX_IDENT_LEN);
+        assert_eq!(result, "a".repeat(MAX_IDENT_LEN));
+    }
+
+    #[test]
+    fn sanitize_ident_keyword_after_sanitization() {
+        // "TYPE" lowercases to "type" which is a keyword
+        assert_eq!(sanitize_ident("TYPE"), "type_");
+        // "FN" lowercases to "fn"
+        assert_eq!(sanitize_ident("FN"), "fn_");
+        // "Struct" lowercases to "struct"
+        assert_eq!(sanitize_ident("Struct"), "struct_");
+    }
+
+    #[test]
+    fn to_pascal_case_basic() {
+        assert_eq!(to_pascal_case("ctrl_thread"), "CtrlThread");
+        assert_eq!(to_pascal_case("my-component.impl"), "MyComponentImpl");
+        assert_eq!(to_pascal_case("Sensor"), "Sensor");
+    }
+
+    #[test]
+    fn to_pascal_case_empty_result() {
+        assert_eq!(to_pascal_case(""), "Unnamed");
+        assert_eq!(to_pascal_case("___"), "Unnamed");
+        assert_eq!(to_pascal_case("..."), "Unnamed");
+        assert_eq!(to_pascal_case("-_-."), "Unnamed");
+    }
+
+    #[test]
+    fn to_pascal_case_digit_prefix() {
+        assert_eq!(to_pascal_case("123_thread"), "_123Thread");
+        assert_eq!(to_pascal_case("0start"), "_0start");
+    }
+
+    #[test]
+    fn to_pascal_case_self_keyword() {
+        // "Self" is a Rust keyword
+        assert_eq!(to_pascal_case("Self"), "Self_");
+        // Other PascalCase results that aren't keywords pass through
+        assert_eq!(to_pascal_case("my_type"), "MyType");
+    }
+
+    #[test]
+    fn to_pascal_case_truncation() {
+        let long = (0..40)
+            .map(|i| format!("seg{i}"))
+            .collect::<Vec<_>>()
+            .join("_");
+        let result = to_pascal_case(&long);
+        assert!(
+            result.len() <= MAX_IDENT_LEN,
+            "PascalCase result length {} exceeds max {}",
+            result.len(),
+            MAX_IDENT_LEN,
+        );
     }
 }
