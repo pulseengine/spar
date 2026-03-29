@@ -438,6 +438,10 @@ fn attribute_usage(p: &mut Parser) {
             || p.at(SyntaxKind::FALSE_KW)
         {
             p.bump_any();
+            // Optional unit identifier after numeric literal (e.g. `10 ms`)
+            if super::at_ident_or_kw(p) {
+                super::bump_as_ident(p);
+            }
         } else if super::at_ident_or_kw(p) {
             super::bump_as_ident(p);
         }
@@ -539,6 +543,25 @@ fn generic_usage(p: &mut Parser, node_kind: SyntaxKind) {
 
     // Typing or specialization
     opt_typing_or_specialization(p);
+
+    // Optional default value: `= expr [unit]`
+    if p.at(SyntaxKind::EQ) {
+        p.bump(SyntaxKind::EQ);
+        if p.at(SyntaxKind::INTEGER_LIT)
+            || p.at(SyntaxKind::REAL_LIT)
+            || p.at(SyntaxKind::STRING_LIT)
+            || p.at(SyntaxKind::TRUE_KW)
+            || p.at(SyntaxKind::FALSE_KW)
+        {
+            p.bump_any();
+            // Optional unit identifier after numeric literal (e.g. `500 us`)
+            if super::at_ident_or_kw(p) {
+                super::bump_as_ident(p);
+            }
+        } else if super::at_ident_or_kw(p) {
+            super::bump_as_ident(p);
+        }
+    }
 
     // Body or semicolon
     if p.at(SyntaxKind::L_CURLY) {
