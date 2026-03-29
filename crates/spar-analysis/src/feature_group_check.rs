@@ -1095,6 +1095,139 @@ mod tests {
     }
 
     #[test]
+    fn analyze_feature_name_matches_but_wrong_kind_warns() {
+        // Feature named "sensors" exists but is a DataPort, not a FeatureGroup.
+        // This kills the `&&` to `||` mutant in the `any()` closure: with `||`
+        // the name match alone would make `is_fg = true`, suppressing the warning.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        // "a" has a feature named "sensors" but it's a DataPort, not a FeatureGroup
+        b.add_feature("sensors", FeatureKind::DataPort, Some(Direction::Out), a);
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, bb);
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected warning for wrong-kind feature: {diags:?}"
+        );
+        assert!(diags[0].message.contains("source feature"));
+        assert!(diags[0].message.contains("sensors"));
+        assert!(diags[0].message.contains("not a feature group"));
+    }
+
+    #[test]
+    fn analyze_dst_feature_name_matches_but_wrong_kind_warns() {
+        // Same as above but for the destination side.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::System, Some(root));
+        let bb = b.add_component("b", ComponentCategory::System, Some(root));
+        b.add_feature("sensors", FeatureKind::FeatureGroup, None, a);
+        // "b" has "sensors" as EventDataPort, not FeatureGroup
+        b.add_feature(
+            "sensors",
+            FeatureKind::EventDataPort,
+            Some(Direction::In),
+            bb,
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::FeatureGroup,
+            root,
+            Some(end(Some("a"), "sensors")),
+            Some(end(Some("b"), "sensors")),
+        );
+        b.set_children(root, vec![a, bb]);
+        let inst = b.build(root);
+
+        let diags = FeatureGroupCheckAnalysis.analyze(&inst);
+        assert_eq!(
+            diags.len(),
+            1,
+            "expected warning for wrong-kind dst feature: {diags:?}"
+        );
+        assert!(diags[0].message.contains("destination feature"));
+    }
+
+    #[test]
+    fn inverse_of_without_features_is_valid() {
+        // FGT with inverse_of but empty features list — should be valid.
+        // Kills `&&` to `||` mutant on line 181: with `||`, this would fire
+        // because `is_some()` is true even though features is empty.
+        let mut tree = ItemTree::default();
+
+        tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("SensorOutput"),
+            is_public: true,
+            extends: None,
+            inverse_of: None,
+            features: Vec::new(),
+            prototypes: Vec::new(),
+        });
+
+        tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("SensorInput"),
+            is_public: true,
+            extends: None,
+            inverse_of: Some(ClassifierRef::type_only(Name::new("SensorOutput"))),
+            features: Vec::new(), // No explicit features — valid for inverse_of
+            prototypes: Vec::new(),
+        });
+
+        let diags = check_inverse_of_rules(&tree);
+        assert!(
+            diags.is_empty(),
+            "inverse_of with empty features should be valid: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn no_inverse_of_with_features_is_valid() {
+        // FGT without inverse_of but with features — should be valid.
+        // Kills `&&` to `||` mutant: with `||`, `!features.is_empty()` alone
+        // would trigger the error even without `inverse_of`.
+        let mut tree = ItemTree::default();
+
+        let f = tree.features.alloc(Feature {
+            name: Name::new("temp"),
+            kind: FeatureKind::DataPort,
+            direction: Some(Direction::Out),
+            access_kind: None,
+            classifier: None,
+            is_refined: false,
+            array_dimensions: Vec::new(),
+            property_associations: Vec::new(),
+        });
+
+        tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("SensorOutput"),
+            is_public: true,
+            extends: None,
+            inverse_of: None,  // No inverse_of
+            features: vec![f], // Has features — valid without inverse_of
+            prototypes: Vec::new(),
+        });
+
+        let diags = check_inverse_of_rules(&tree);
+        assert!(
+            diags.is_empty(),
+            "features without inverse_of should be valid: {diags:?}"
+        );
+    }
+
+    #[test]
     fn analyze_feature_name_not_found_but_other_features_exist() {
         // Component has features, but not the one referenced by the connection.
         // The feature check iterates features looking for a name+kind match.

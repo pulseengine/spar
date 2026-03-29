@@ -1350,4 +1350,260 @@ mod tests {
         assert!(parse_numeric_value("abc").is_err());
         assert!(parse_numeric_value("").is_err());
     }
+
+    // ── Mutation-killing boundary tests ──────────────────────────────
+
+    // Mutant: line 81, `non_append_count > 1` → `>= 1`
+    // With one non-append + two appends, non_append_count == 1.
+    // Original `> 1` → false (no warning). Mutant `>= 1` → true (false warning).
+    #[test]
+    fn one_non_append_two_appends_no_duplicate() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property_ext(root, "Custom", "Items", "base", false);
+        b.set_property_ext(root, "Custom", "Items", "extra1", true);
+        b.set_property_ext(root, "Custom", "Items", "extra2", true);
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "one non-append + two appends should not flag duplicate: {:?}",
+            dups
+        );
+    }
+
+    // Mutant: line 81, `non_append_count > 1` → `< 1`
+    // With zero non-appends (three appends), non_append_count == 0.
+    // Original `> 1` → false. Mutant `< 1` → true (false warning).
+    #[test]
+    fn three_appends_zero_non_append_no_duplicate() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property_ext(root, "Custom", "Items", "a", true);
+        b.set_property_ext(root, "Custom", "Items", "b", true);
+        b.set_property_ext(root, "Custom", "Items", "c", true);
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "three appends with zero non-append should not flag duplicate: {:?}",
+            dups
+        );
+    }
+
+    // Mutant: line 81, `non_append_count > 1` → `== 1`
+    // Reaffirm: non_append_count == 0 → no warning (kills `== 1` if it fired for 0).
+    // But `== 1` would not fire for 0; it fires for exactly 1.
+    // So the test with non_append_count == 1 (above) kills `== 1`.
+    // Also verify non_append_count == 0 does not fire (kills `< 1`).
+    #[test]
+    fn two_appends_only_non_append_count_zero_no_duplicate() {
+        // Ensure values.len() > 1 (passes outer guard) but non_append_count == 0
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property_ext(root, "Custom", "Vals", "x", true);
+        b.set_property_ext(root, "Custom", "Vals", "y", true);
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let dups: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("non-append"))
+            .collect();
+        assert!(
+            dups.is_empty(),
+            "zero non-append count must not produce duplicate warning: {:?}",
+            dups
+        );
+    }
+
+    // Mutant: line 115, `low > high` → `>= high`
+    // Equal range (50 .. 50): low == high.
+    // Original `>` → false (no error). Mutant `>=` → true (false error).
+    // Existing equal_range_no_error covers this, but add a fractional case.
+    #[test]
+    fn equal_range_fractional_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Latency", "3.14 .. 3.14");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .collect();
+        assert!(
+            range_errs.is_empty(),
+            "equal fractional range (3.14..3.14) must not error: {:?}",
+            range_errs
+        );
+    }
+
+    // Mutant: line 115, `low > high` boundary — confirm low == high is clean
+    // but low == high + epsilon produces error.
+    #[test]
+    fn range_barely_inverted_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // 50.001 > 50.0 → error
+        b.set_property(root, "", "Weight", "50.001 .. 50.0");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("lower bound"))
+            .collect();
+        assert_eq!(
+            range_errs.len(),
+            1,
+            "barely inverted range (50.001..50.0) should error: {:?}",
+            diags
+        );
+    }
+
+    // Mutant: line 115, `low > high` → `>=` — range with units where low == high
+    #[test]
+    fn equal_range_with_units_no_error() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "CET", "100ms .. 100ms");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let range_errs: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .collect();
+        assert!(
+            range_errs.is_empty(),
+            "equal range with units (100ms..100ms) must not error: {:?}",
+            range_errs
+        );
+    }
+
+    // Mutant: line 164, `elements.len() > 1` → `>= 1`
+    // Single element list with a classifiable type.
+    // With `>= 1`, check_element_type_consistency is called, but since the
+    // loop skips element 0 and there's no element 1, no diagnostic.
+    // To kill this mutant we need to ensure the function itself doesn't
+    // produce spurious diagnostics for len==1. Test with a classifiable type.
+    #[test]
+    fn single_numeric_element_list_no_consistency_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(42)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "single numeric element list must not warn about mixed types: {:?}",
+            list_warns
+        );
+    }
+
+    // Mutant: line 164, `elements.len() > 1` → `>= 1`
+    // Test single string-literal element.
+    #[test]
+    fn single_string_element_list_no_consistency_warning() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", "(\"hello\")");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "single string element list must not warn: {:?}",
+            list_warns
+        );
+    }
+
+    // Mutant: line 161, `starts_with('(') && ends_with(')')` → `||`
+    // Value ends with ')' but doesn't start with '(', contains mixed types.
+    // With `&&` → not a list, no check. With `||` → enters list check,
+    // inner parsing would slice val[1..val.len()-1] and might detect mixed types.
+    #[test]
+    fn value_ends_with_paren_only_no_list_check() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // Ends with ')' but doesn't start with '(' — mixed types inside
+        b.set_property(root, "", "Items", "42, true)");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "value ending with ) but not starting with ( must not trigger list check: {:?}",
+            list_warns
+        );
+    }
+
+    // Mutant: line 161, `starts_with('(') && ends_with(')')` → `||`
+    // Value starts with '(' but doesn't end with ')', contains mixed types.
+    // With `&&` → not a list, no check. With `||` → enters list check.
+    #[test]
+    fn value_starts_with_paren_only_mixed_no_list_check() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        // Starts with '(' but doesn't end with ')' — mixed types inside
+        b.set_property(root, "", "Items", "(42, true, \"str\"");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "value starting with ( but not ending with ) must not trigger list check: {:?}",
+            list_warns
+        );
+    }
+
+    // Additional: value with ')' at start and '(' at end — neither condition
+    // properly satisfied for a list.
+    #[test]
+    fn reversed_parens_no_list_check() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_property(root, "", "Items", ")42, \"hello\"(");
+
+        let inst = b.build(root);
+        let diags = PropertyRuleAnalysis.analyze(&inst);
+        let list_warns: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("mixed element"))
+            .collect();
+        assert!(
+            list_warns.is_empty(),
+            "reversed parens must not trigger list check: {:?}",
+            list_warns
+        );
+    }
 }
