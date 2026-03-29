@@ -1859,6 +1859,594 @@ mod tests {
             rma_warns
         );
     }
+
+    // ── Mutant-killing boundary tests ─────────────────────────────
+
+    #[test]
+    fn exec_time_max_equals_period_no_error() {
+        // Line ~97: `max_ps > period` — when max_ps == period exactly,
+        // no "exceeds period" error should fire.  Kills `>` → `>=` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // max exec time == period (both 10 ms)
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t1,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms .. 10 ms",
+        );
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let exceeds_period: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("exceeds period"))
+            .collect();
+        assert!(
+            exceeds_period.is_empty(),
+            "max_ps == period should NOT produce 'exceeds period' error: {:?}",
+            exceeds_period
+        );
+    }
+
+    #[test]
+    fn sensitivity_perturbed_exactly_at_rma_bound_no_warning() {
+        // Line ~265: `perturbed_util > rma_bound` — when perturbed == rma_bound
+        // exactly, the sensitivity warning should NOT fire.
+        // Kills `>` → `>=` mutant on perturbed_util > rma_bound.
+        //
+        // For n=1, RMA bound = 1.0.  We need nominal_util <= 1.0 and
+        // perturbed_util (nominal * 1.1) == 1.0 exactly.
+        // nominal_util = 1.0 / 1.1 = 10/11.
+        // Use period = 1100, exec = 1000 → U = 1000/1100 = 10/11 ≈ 0.90909...
+        // perturbed = 10/11 * 1.1 = 10/11 * 11/10 = 1.0 exactly.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "1100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1000 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        // The RMA sensitivity warning should NOT fire because perturbed == bound exactly
+        let rma_sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("RMA bound")
+            })
+            .collect();
+        assert!(
+            rma_sensitivity.is_empty(),
+            "perturbed_util == rma_bound should NOT trigger RMA sensitivity: {:?}",
+            rma_sensitivity
+        );
+
+        // The EDF sensitivity warning should also NOT fire because perturbed == 1.0 exactly
+        let edf_sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("100% utilization")
+            })
+            .collect();
+        assert!(
+            edf_sensitivity.is_empty(),
+            "perturbed_util == 1.0 should NOT trigger EDF sensitivity: {:?}",
+            edf_sensitivity
+        );
+    }
+
+    #[test]
+    fn clock_drift_exactly_at_80_percent_no_advisory() {
+        // Line ~302: `nominal_util > 0.8` — when U == 0.8 exactly,
+        // clock drift advisory should NOT fire.  Kills `>` → `>=` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 80/100 = 0.8 exactly
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "80 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let drift: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("clock drift"))
+            .collect();
+        assert!(
+            drift.is_empty(),
+            "U == 0.8 exactly should NOT trigger clock drift advisory: {:?}",
+            drift
+        );
+    }
+
+    #[test]
+    fn clock_drift_just_above_80_percent_fires() {
+        // Companion to the above: U = 0.801 should fire the advisory.
+        // Ensures the boundary is strict `>`.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 801/1000 = 0.801
+        b.set_property(t1, "Timing_Properties", "Period", "1000 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "801 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let drift: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("clock drift"))
+            .collect();
+        assert_eq!(
+            drift.len(),
+            1,
+            "U = 0.801 should trigger clock drift advisory: {:?}",
+            diags
+        );
+    }
+
+    // ── OR-branch coverage for overhead property check (lines 323-328) ──
+
+    #[test]
+    fn overhead_suppressed_by_bare_context_switch_time() {
+        // Line 326: `props.get("", "Context_Switch_Time")` — exercises the second
+        // OR branch independently.  Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        // Set bare (no property-set) Context_Switch_Time
+        b.set_property(t1, "", "Context_Switch_Time", "50 us");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let overhead: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Context_Switch_Time")
+                    && d.message.contains("overhead")
+                    && d.message.contains("not")
+            })
+            .collect();
+        assert!(
+            overhead.is_empty(),
+            "bare Context_Switch_Time should suppress overhead advisory: {:?}",
+            overhead
+        );
+    }
+
+    #[test]
+    fn overhead_suppressed_by_spar_interrupt_overhead() {
+        // Line 327: `props.get("SPAR_Properties", "Interrupt_Overhead")` — exercises
+        // the third OR branch independently.  Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        // Set SPAR_Properties::Interrupt_Overhead
+        b.set_property(t1, "SPAR_Properties", "Interrupt_Overhead", "10 us");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let overhead: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Context_Switch_Time")
+                    && d.message.contains("overhead")
+                    && d.message.contains("not")
+            })
+            .collect();
+        assert!(
+            overhead.is_empty(),
+            "SPAR_Properties::Interrupt_Overhead should suppress overhead advisory: {:?}",
+            overhead
+        );
+    }
+
+    #[test]
+    fn overhead_suppressed_by_bare_interrupt_overhead() {
+        // Line 328: `props.get("", "Interrupt_Overhead")` — exercises the fourth
+        // OR branch independently.  Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        // Set bare Interrupt_Overhead
+        b.set_property(t1, "", "Interrupt_Overhead", "10 us");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let overhead: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.message.contains("Context_Switch_Time")
+                    && d.message.contains("overhead")
+                    && d.message.contains("not")
+            })
+            .collect();
+        assert!(
+            overhead.is_empty(),
+            "bare Interrupt_Overhead should suppress overhead advisory: {:?}",
+            overhead
+        );
+    }
+
+    // ── OR-branch coverage for priority/protocol check (lines 353-358) ──
+
+    #[test]
+    fn priority_inversion_suppressed_by_bare_priority() {
+        // Line 354: `props.get("", "Priority")` — exercises the second OR branch.
+        // Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for t in [t1, t2] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+        // Set bare Priority (no property set qualifier) on one thread
+        b.set_property(t1, "", "Priority", "1");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert!(
+            pi_diags.is_empty(),
+            "bare Priority should suppress priority inversion advisory: {:?}",
+            pi_diags
+        );
+    }
+
+    #[test]
+    fn priority_inversion_suppressed_by_qualified_concurrency_protocol() {
+        // Line 355-357: `props.get("Deployment_Properties", "Concurrency_Control_Protocol")`
+        // Exercises the third OR branch.  Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for t in [t1, t2] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+        // Set Deployment_Properties::Concurrency_Control_Protocol on one thread
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Concurrency_Control_Protocol",
+            "Priority_Ceiling",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert!(
+            pi_diags.is_empty(),
+            "Deployment_Properties::Concurrency_Control_Protocol should suppress advisory: {:?}",
+            pi_diags
+        );
+    }
+
+    #[test]
+    fn priority_inversion_suppressed_by_bare_concurrency_protocol() {
+        // Line 358: `props.get("", "Concurrency_Control_Protocol")` — exercises
+        // the fourth OR branch.  Kills `||` → `&&` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for t in [t1, t2] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+        // Set bare Concurrency_Control_Protocol on one thread
+        b.set_property(t1, "", "Concurrency_Control_Protocol", "Priority_Ceiling");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert!(
+            pi_diags.is_empty(),
+            "bare Concurrency_Control_Protocol should suppress advisory: {:?}",
+            pi_diags
+        );
+    }
+
+    // ── OR-branch coverage for `proc_name == "__unbound__" || threads.is_empty()` (line 250) ──
+
+    #[test]
+    fn sensitivity_skips_unbound_threads() {
+        // Line 250: `proc_name == "__unbound__"` branch of the OR.
+        // Unbound threads should not trigger sensitivity warnings.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![t1]);
+
+        // Thread with high utilization but no binding => goes to __unbound__
+        b.set_property(t1, "Timing_Properties", "Period", "100 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "95 ms");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("sensitivity"))
+            .collect();
+        assert!(
+            sensitivity.is_empty(),
+            "unbound threads should not trigger sensitivity: {:?}",
+            sensitivity
+        );
+    }
+
+    // ── Sensitivity: nominal already exceeds RMA, perturbed still does ──
+
+    #[test]
+    fn sensitivity_no_rma_warning_when_nominal_exceeds_rma() {
+        // Line ~265: `nominal_util <= rma_bound && perturbed_util > rma_bound`
+        // When nominal already exceeds RMA bound, the first conjunct is false,
+        // so no RMA sensitivity warning fires.  Kills `&&` → `||` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        let t3 = b.add_component("t3", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2, t3]);
+
+        // n=3, RMA bound ≈ 0.780.  U = 3 * (3/10) = 0.9 > 0.780.
+        // Both nominal and perturbed exceed RMA; sensitivity should NOT fire.
+        for t in [t1, t2, t3] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "3 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let rma_sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("RMA bound")
+            })
+            .collect();
+        assert!(
+            rma_sensitivity.is_empty(),
+            "nominal already exceeds RMA so sensitivity should NOT fire: {:?}",
+            rma_sensitivity
+        );
+    }
+
+    #[test]
+    fn sensitivity_no_edf_warning_when_nominal_exceeds_100() {
+        // Line ~283: `nominal_util <= 1.0 && perturbed_util > 1.0`
+        // When nominal already > 1.0, the first conjunct is false,
+        // so no EDF sensitivity warning fires.  Kills `&&` → `||` mutant.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 11/10 = 1.1 > 1.0.  Perturbed = 1.21 > 1.0.
+        // nominal already exceeds 1.0, so EDF sensitivity should NOT fire.
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "11 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let edf_sensitivity: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("sensitivity")
+                    && d.message.contains("100% utilization")
+            })
+            .collect();
+        assert!(
+            edf_sensitivity.is_empty(),
+            "nominal > 1.0, so EDF sensitivity should NOT fire: {:?}",
+            edf_sensitivity
+        );
+    }
+
+    #[test]
+    fn clock_drift_not_above_100_percent() {
+        // Line ~302: `nominal_util > 0.8 && nominal_util <= 1.0`
+        // When U > 1.0, the second conjunct is false, so no clock drift.
+        // Kills `&&` → `||` mutant on the upper bound.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1]);
+
+        // U = 11/10 = 1.1 > 1.0 — overloaded, clock drift should NOT fire
+        b.set_property(t1, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t1, "Timing_Properties", "Compute_Execution_Time", "11 ms");
+        b.set_property(
+            t1,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let drift: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("clock drift"))
+            .collect();
+        assert!(
+            drift.is_empty(),
+            "U > 1.0 should NOT trigger clock drift advisory: {:?}",
+            drift
+        );
+    }
 }
 
 /// Conformance tests: verify that the inlined scheduling math in
