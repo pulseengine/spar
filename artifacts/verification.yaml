@@ -13,6 +13,10 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-PARSER
+      - type: satisfies
+        target: REQ-PARSER-001
+      - type: satisfies
+        target: REQ-PARSE-002
 
   - id: TEST-SYNTAX
     type: feature
@@ -38,6 +42,22 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-HIR-DEF
+      - type: satisfies
+        target: REQ-MODEL-002
+      - type: satisfies
+        target: REQ-MODEL-003
+      - type: satisfies
+        target: REQ-MODEL-004
+      - type: satisfies
+        target: REQ-INST-002
+      - type: satisfies
+        target: REQ-PROP-001
+      - type: satisfies
+        target: REQ-PROP-003
+      - type: satisfies
+        target: REQ-RESOLVE-001
+      - type: satisfies
+        target: REQ-RESOLVE-002
 
   - id: TEST-HIR
     type: feature
@@ -64,6 +84,26 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-ANALYSIS
+      - type: satisfies
+        target: REQ-ANALYSIS-002
+      - type: satisfies
+        target: REQ-ANALYSIS-003
+      - type: satisfies
+        target: REQ-ANALYSIS-004
+      - type: satisfies
+        target: REQ-ANALYSIS-005
+      - type: satisfies
+        target: REQ-ANALYSIS-006
+      - type: satisfies
+        target: REQ-ANALYSIS-008
+      - type: satisfies
+        target: REQ-SOLVER-001
+      - type: satisfies
+        target: REQ-SOLVER-002
+      - type: satisfies
+        target: REQ-SOLVER-003
+      - type: satisfies
+        target: REQ-SOLVER-007
 
   - id: TEST-TRANSFORM
     type: feature
@@ -76,6 +116,8 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-TRANSFORM
+      - type: satisfies
+        target: REQ-TRANSFORM-001
 
   - id: TEST-CLI
     type: feature
@@ -90,6 +132,10 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-CLI
+      - type: satisfies
+        target: REQ-LSP-001
+      - type: satisfies
+        target: STPA-REQ-020
 
   - id: TEST-WASM
     type: feature
@@ -117,13 +163,77 @@ artifacts:
       - type: satisfies
         target: REQ-PARSE-001
       - type: satisfies
+        target: REQ-PARSE-002
+      - type: satisfies
         target: REQ-MODEL-001
+      - type: satisfies
+        target: REQ-MODEL-002
+      - type: satisfies
+        target: REQ-MODEL-003
+      - type: satisfies
+        target: REQ-MODEL-004
       - type: satisfies
         target: REQ-INST-001
       - type: satisfies
+        target: REQ-INST-002
+      - type: satisfies
         target: REQ-ANALYSIS-001
       - type: satisfies
+        target: REQ-ANALYSIS-002
+      - type: satisfies
+        target: REQ-ANALYSIS-003
+      - type: satisfies
+        target: REQ-ANALYSIS-004
+      - type: satisfies
+        target: REQ-ANALYSIS-005
+      - type: satisfies
+        target: REQ-ANALYSIS-006
+      - type: satisfies
+        target: REQ-ANALYSIS-008
+      - type: satisfies
         target: REQ-SERDE-001
+      - type: satisfies
+        target: REQ-PROP-001
+      - type: satisfies
+        target: REQ-PROP-003
+      - type: satisfies
+        target: REQ-RESOLVE-001
+      - type: satisfies
+        target: REQ-RESOLVE-002
+      - type: satisfies
+        target: REQ-SOLVER-001
+      - type: satisfies
+        target: REQ-SOLVER-002
+      - type: satisfies
+        target: REQ-SOLVER-003
+      - type: satisfies
+        target: REQ-SOLVER-007
+      - type: satisfies
+        target: REQ-TRANSFORM-001
+      - type: satisfies
+        target: REQ-LSP-001
+      - type: satisfies
+        target: REQ-PARSER-001
+      - type: satisfies
+        target: STPA-REQ-020
+      - type: satisfies
+        target: STPA-SEC-REQ-001
+      - type: satisfies
+        target: COVERAGE-CH4
+      - type: satisfies
+        target: COVERAGE-CH5
+      - type: satisfies
+        target: COVERAGE-CH8
+      - type: satisfies
+        target: COVERAGE-CH9
+      - type: satisfies
+        target: COVERAGE-CH10
+      - type: satisfies
+        target: COVERAGE-CH11
+      - type: satisfies
+        target: COVERAGE-CH13
+      - type: satisfies
+        target: COVERAGE-CH14
 
   - id: TEST-WASM-BUILD
     type: feature
@@ -531,6 +641,8 @@ artifacts:
         target: REQ-CODEGEN-001
       - type: satisfies
         target: ARCH-CODEGEN-001
+      - type: satisfies
+        target: STPA-SEC-REQ-001
 
   - id: VAL-CODEGEN-002
     type: feature
