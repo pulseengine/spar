@@ -34,6 +34,8 @@ artifacts:
         target: REQ-PARSE-001
       - type: satisfies
         target: REQ-PARSE-002
+      - type: satisfies
+        target: REQ-PARSER-001
 
   - id: ARCH-SYNTAX
     type: design-decision
@@ -105,9 +107,29 @@ artifacts:
       - type: satisfies
         target: REQ-MODEL-002
       - type: satisfies
+        target: REQ-MODEL-003
+      - type: satisfies
+        target: REQ-MODEL-004
+      - type: satisfies
         target: REQ-INST-001
       - type: satisfies
+        target: REQ-INST-002
+      - type: satisfies
         target: REQ-PROP-001
+      - type: satisfies
+        target: REQ-PROP-003
+      - type: satisfies
+        target: REQ-RESOLVE-001
+      - type: satisfies
+        target: REQ-RESOLVE-002
+      - type: satisfies
+        target: COVERAGE-CH4
+      - type: satisfies
+        target: COVERAGE-CH8
+      - type: satisfies
+        target: COVERAGE-CH11
+      - type: satisfies
+        target: COVERAGE-CH14
 
   - id: ARCH-HIR
     type: design-decision
@@ -163,6 +185,42 @@ artifacts:
         target: REQ-ANALYSIS-008
       - type: satisfies
         target: REQ-ANALYSIS-009
+      - type: satisfies
+        target: REQ-SOLVER-003
+      - type: satisfies
+        target: COVERAGE-CH4
+      - type: satisfies
+        target: COVERAGE-CH5
+      - type: satisfies
+        target: COVERAGE-CH8
+      - type: satisfies
+        target: COVERAGE-CH9
+      - type: satisfies
+        target: COVERAGE-CH10
+      - type: satisfies
+        target: COVERAGE-CH11
+      - type: satisfies
+        target: COVERAGE-CH13
+      - type: satisfies
+        target: COVERAGE-CH14
+      - type: satisfies
+        target: STPA-REQ-020
+      - type: satisfies
+        target: STPA-REQ-024
+      - type: satisfies
+        target: STPA-REQ-025
+      - type: satisfies
+        target: STPA-REQ-026
+      - type: satisfies
+        target: STPA-REQ-027
+      - type: satisfies
+        target: STPA-REQ-028
+      - type: satisfies
+        target: STPA-REQ-029
+      - type: satisfies
+        target: STPA-REQ-030
+      - type: satisfies
+        target: STPA-REQ-031
 
   - id: ARCH-TRANSFORM
     type: design-decision
@@ -199,6 +257,8 @@ artifacts:
         target: REQ-LSP-001
       - type: satisfies
         target: REQ-SERDE-001
+      - type: satisfies
+        target: STPA-REQ-020
 
   - id: ARCH-WASM
     type: design-decision
@@ -646,6 +706,8 @@ artifacts:
         target: REQ-CODEGEN-WIT
       - type: satisfies
         target: REQ-CODEGEN-RUST
+      - type: satisfies
+        target: STPA-SEC-REQ-001
 
   - id: ARCH-CODEGEN-002
     type: design-decision
