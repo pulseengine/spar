@@ -1581,8 +1581,8 @@ fn test_register_all_count() {
     runner.register_all();
     assert_eq!(
         runner.count(),
-        27,
-        "register_all should register all 27 instance-level analyses"
+        28,
+        "register_all should register all 28 instance-level analyses"
     );
 }
 
@@ -1604,6 +1604,7 @@ fn analysis_diagnostics_carry_correct_pass_name() {
     use crate::connection_rules::ConnectionRuleAnalysis;
     use crate::direction_rules::DirectionRuleAnalysis;
     use crate::emv2_analysis::Emv2Analysis;
+    use crate::emv2_stpa_bridge::Emv2StpaBridgeAnalysis;
     use crate::feature_group_check::FeatureGroupCheckAnalysis;
     use crate::flow_check::FlowCheckAnalysis;
     use crate::flow_rules::FlowRuleAnalysis;
@@ -1710,6 +1711,7 @@ fn analysis_diagnostics_carry_correct_pass_name() {
         Box::new(MemoryBudgetAnalysis),
         Box::new(ResourceBudgetAnalysis),
         Box::new(Emv2Analysis),
+        Box::new(Emv2StpaBridgeAnalysis),
         Box::new(Arinc653Analysis),
         Box::new(WrpcBindingAnalysis),
         Box::new(ModeReachabilityAnalysis),
