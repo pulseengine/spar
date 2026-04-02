@@ -2934,24 +2934,25 @@ fn resolve_path_to_range(
                     for dt in a.children_with_tokens() {
                         if let Some(t) = dt.as_token()
                             && t.kind() == SyntaxKind::IDENT
-                                && t.text().eq_ignore_ascii_case(parent_name)
-                            {
-                                found = true;
-                                break;
-                            }
+                            && t.text().eq_ignore_ascii_case(parent_name)
+                        {
+                            found = true;
+                            break;
+                        }
                         // Also check inside NAME nodes (e.g., package name).
                         if let Some(n) = dt.as_node()
-                            && n.kind() == SyntaxKind::NAME {
-                                for child in n.children_with_tokens() {
-                                    if let Some(t) = child.as_token()
-                                        && t.kind() == SyntaxKind::IDENT
-                                            && t.text().eq_ignore_ascii_case(parent_name)
-                                        {
-                                            found = true;
-                                            break;
-                                        }
+                            && n.kind() == SyntaxKind::NAME
+                        {
+                            for child in n.children_with_tokens() {
+                                if let Some(t) = child.as_token()
+                                    && t.kind() == SyntaxKind::IDENT
+                                    && t.text().eq_ignore_ascii_case(parent_name)
+                                {
+                                    found = true;
+                                    break;
                                 }
                             }
+                        }
                         if found {
                             break;
                         }
@@ -2996,13 +2997,10 @@ fn completion_context_from_cst(
 
     // Find the token at (or just before) the cursor.
     let text_offset = TextSize::new(offset as u32);
-    let token = root
-        .token_at_offset(text_offset)
-        .left_biased()
-        .or_else(|| {
-            // If we're at the end of the file or after whitespace, try right-biased.
-            root.token_at_offset(text_offset).right_biased()
-        });
+    let token = root.token_at_offset(text_offset).left_biased().or_else(|| {
+        // If we're at the end of the file or after whitespace, try right-biased.
+        root.token_at_offset(text_offset).right_biased()
+    });
 
     let token = match token {
         Some(t) => t,
@@ -3017,22 +3015,28 @@ fn completion_context_from_cst(
         return CompletionContext::AfterColon;
     }
     if let Some(ref prev) = prev_token
-        && (prev.kind() == SyntaxKind::COLON || prev.kind() == SyntaxKind::COLON_COLON) {
-            return CompletionContext::AfterColon;
-        }
+        && (prev.kind() == SyntaxKind::COLON || prev.kind() == SyntaxKind::COLON_COLON)
+    {
+        return CompletionContext::AfterColon;
+    }
 
     // After `with` keyword — package names expected.
     if token.kind() == SyntaxKind::WITH_KW {
         return CompletionContext::AfterWith;
     }
     if let Some(ref prev) = prev_token
-        && prev.kind() == SyntaxKind::WITH_KW {
-            return CompletionContext::AfterWith;
-        }
+        && prev.kind() == SyntaxKind::WITH_KW
+    {
+        return CompletionContext::AfterWith;
+    }
 
     // After `data port` or `event data port` — check if the token or its
     // predecessor is PORT_KW and grandparent parsing context suggests a feature.
-    if token.kind() == SyntaxKind::PORT_KW || prev_token.as_ref().is_some_and(|t| t.kind() == SyntaxKind::PORT_KW) {
+    if token.kind() == SyntaxKind::PORT_KW
+        || prev_token
+            .as_ref()
+            .is_some_and(|t| t.kind() == SyntaxKind::PORT_KW)
+    {
         // Check if DATA_KW precedes PORT_KW
         let port_tok = if token.kind() == SyntaxKind::PORT_KW {
             &token
@@ -3041,14 +3045,18 @@ fn completion_context_from_cst(
         };
         let before_port = port_tok.prev_token();
         if let Some(ref bt) = before_port
-            && bt.kind() == SyntaxKind::DATA_KW {
-                // Check for event data port
-                let before_data = bt.prev_token();
-                if before_data.as_ref().is_some_and(|t| t.kind() == SyntaxKind::EVENT_KW) {
-                    return CompletionContext::AfterEventDataPort;
-                }
-                return CompletionContext::AfterDataPort;
+            && bt.kind() == SyntaxKind::DATA_KW
+        {
+            // Check for event data port
+            let before_data = bt.prev_token();
+            if before_data
+                .as_ref()
+                .is_some_and(|t| t.kind() == SyntaxKind::EVENT_KW)
+            {
+                return CompletionContext::AfterEventDataPort;
             }
+            return CompletionContext::AfterDataPort;
+        }
     }
 
     // Walk up ancestors to check which section we're in.
