@@ -134,7 +134,9 @@ const AI_ML: &str = "AI_ML";
 ///
 /// Handles range format "20 ms .. 60 ms" and single values.
 pub fn get_inference_latency_range(props: &PropertyMap) -> Option<(u64, u64)> {
-    let raw = props.get(AI_ML, "Inference_Latency").or_else(|| props.get("", "Inference_Latency"))?;
+    let raw = props
+        .get(AI_ML, "Inference_Latency")
+        .or_else(|| props.get("", "Inference_Latency"))?;
     if let Some((min_str, max_str)) = raw.split_once("..") {
         let min_ps = parse_time_value(min_str.trim())?;
         let max_ps = parse_time_value(max_str.trim())?;
@@ -147,19 +149,26 @@ pub fn get_inference_latency_range(props: &PropertyMap) -> Option<(u64, u64)> {
 
 /// Get `AI_ML::Fallback_Latency` in picoseconds.
 pub fn get_fallback_latency(props: &PropertyMap) -> Option<u64> {
-    let raw = props.get(AI_ML, "Fallback_Latency").or_else(|| props.get("", "Fallback_Latency"))?;
+    let raw = props
+        .get(AI_ML, "Fallback_Latency")
+        .or_else(|| props.get("", "Fallback_Latency"))?;
     parse_time_value(raw)
 }
 
 /// Get `AI_ML::Confidence_Threshold` as f64 (0.0–1.0).
 pub fn get_confidence_threshold(props: &PropertyMap) -> Option<f64> {
-    let raw = props.get(AI_ML, "Confidence_Threshold").or_else(|| props.get("", "Confidence_Threshold"))?;
+    let raw = props
+        .get(AI_ML, "Confidence_Threshold")
+        .or_else(|| props.get("", "Confidence_Threshold"))?;
     raw.trim().parse::<f64>().ok()
 }
 
 /// Get a string AI_ML property (Inference_Mode, Fallback_Strategy, OOD_Detection_Method, etc.).
 pub fn get_ai_ml_string(props: &PropertyMap, name: &str) -> Option<String> {
-    props.get(AI_ML, name).or_else(|| props.get("", name)).map(|s| s.to_string())
+    props
+        .get(AI_ML, name)
+        .or_else(|| props.get("", name))
+        .map(|s| s.to_string())
 }
 
 /// Get `AI_ML::OOD_Detection_Enabled` as bool.

@@ -31,10 +31,7 @@ fn make_props(entries: &[(&str, &str, &str)]) -> PropertyMap {
 }
 
 /// Build a minimal SystemInstance with a single thread (or process) and given properties.
-fn single_component_instance(
-    category: ComponentCategory,
-    props: PropertyMap,
-) -> SystemInstance {
+fn single_component_instance(category: ComponentCategory, props: PropertyMap) -> SystemInstance {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
 
@@ -123,8 +120,9 @@ fn inference_exceeds_deadline_error() {
     let inst = single_component_instance(ComponentCategory::Thread, props);
     let diags = AiMlAnalysis.analyze(&inst);
     assert!(
-        diags.iter().any(|d| d.severity == Severity::Error
-            && d.message.contains("exceeds")),
+        diags
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("exceeds")),
         "expected deadline error: {:?}",
         diags
     );
@@ -136,8 +134,9 @@ fn inference_without_deadline_warns() {
     let inst = single_component_instance(ComponentCategory::Thread, props);
     let diags = AiMlAnalysis.analyze(&inst);
     assert!(
-        diags.iter().any(|d| d.severity == Severity::Warning
-            && d.message.contains("no Deadline")),
+        diags
+            .iter()
+            .any(|d| d.severity == Severity::Warning && d.message.contains("no Deadline")),
         "expected missing deadline warning: {:?}",
         diags
     );
@@ -191,8 +190,9 @@ fn fallback_timing_exceeds_deadline() {
     let inst = single_component_instance(ComponentCategory::Thread, props);
     let diags = AiMlAnalysis.analyze(&inst);
     assert!(
-        diags.iter().any(|d| d.severity == Severity::Error
-            && d.message.contains("fallback")),
+        diags
+            .iter()
+            .any(|d| d.severity == Severity::Error && d.message.contains("fallback")),
         "expected fallback timing error: {:?}",
         diags
     );
@@ -266,8 +266,9 @@ fn model_format_without_binding_errors() {
     let inst = single_component_instance(ComponentCategory::Process, props);
     let diags = AiMlAnalysis.analyze(&inst);
     assert!(
-        diags.iter().any(|d| d.severity == Severity::Error
-            && d.message.contains("Actual_Processor_Binding")),
+        diags.iter().any(
+            |d| d.severity == Severity::Error && d.message.contains("Actual_Processor_Binding")
+        ),
         "expected deployment error: {:?}",
         diags
     );

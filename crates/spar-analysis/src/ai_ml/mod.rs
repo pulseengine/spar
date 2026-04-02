@@ -21,8 +21,7 @@ use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::property_accessors::{
     get_ai_ml_bool, get_ai_ml_string, get_confidence_threshold, get_fallback_latency,
-    get_inference_latency_range, get_processor_binding, get_timing_property,
-    is_ai_ml_component,
+    get_inference_latency_range, get_processor_binding, get_timing_property, is_ai_ml_component,
 };
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
