@@ -150,6 +150,8 @@ pub enum SyntaxKind {
     SATISFY_KW,
     VERIFY_KW,
     REFINE_KW,
+    ALLOCATE_KW,
+    DERIVE_KW,
     SEND_KW,
     SNAPSHOT_KW,
     SPECIALIZES_KW,
@@ -309,6 +311,10 @@ pub enum SyntaxKind {
     VERIFY_REQ,
     /// `refine req1 by req2;`
     REFINE_REQ,
+    /// `allocate task to processor;`
+    ALLOCATE_REQ,
+    /// `derive req1 from req2;`
+    DERIVE_REQ,
 
     // Requirement body members
     /// `subject name : Type;`
@@ -463,6 +469,8 @@ impl SyntaxKind {
             "satisfy" => Some(Self::SATISFY_KW),
             "verify" => Some(Self::VERIFY_KW),
             "refine" => Some(Self::REFINE_KW),
+            "allocate" => Some(Self::ALLOCATE_KW),
+            "derive" => Some(Self::DERIVE_KW),
             "send" => Some(Self::SEND_KW),
             "snapshot" => Some(Self::SNAPSHOT_KW),
             "specializes" => Some(Self::SPECIALIZES_KW),

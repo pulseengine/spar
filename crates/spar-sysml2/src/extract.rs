@@ -21,6 +21,12 @@ pub struct ExtractedRequirement {
     pub satisfies: Vec<(String, String)>,
     /// Verify relationships: (requirement_name, verifier_name).
     pub verifies: Vec<(String, String)>,
+    /// Refine relationships: (source_name, refined_by_name).
+    pub refines: Vec<(String, String)>,
+    /// Allocate relationships: (source_name, target_name).
+    pub allocates: Vec<(String, String)>,
+    /// Derive relationships: (source_name, derived_from_name).
+    pub derives: Vec<(String, String)>,
 }
 
 /// Extract requirements from a parsed SysML v2 source file.
@@ -29,25 +35,49 @@ pub struct ExtractedRequirement {
 pub fn extract_requirements_list(parse: &crate::Parse) -> Vec<ExtractedRequirement> {
     let root = parse.syntax_node();
     let mut reqs = Vec::new();
-    let mut satisfies = Vec::new();
-    let mut verifies = Vec::new();
-    collect_requirements(&root, &mut reqs, &mut satisfies, &mut verifies);
+    let mut relationships = RelationshipCollector::default();
+    collect_requirements(&root, &mut reqs, &mut relationships);
 
     // Attach relationships to requirements
     for req in &mut reqs {
-        for (req_name, by_name) in &satisfies {
+        for (req_name, by_name) in &relationships.satisfies {
             if req_name == &req.title {
                 req.satisfies.push((req_name.clone(), by_name.clone()));
             }
         }
-        for (req_name, by_name) in &verifies {
+        for (req_name, by_name) in &relationships.verifies {
             if req_name == &req.title {
                 req.verifies.push((req_name.clone(), by_name.clone()));
+            }
+        }
+        for (req_name, by_name) in &relationships.refines {
+            if req_name == &req.title {
+                req.refines.push((req_name.clone(), by_name.clone()));
+            }
+        }
+        for (source, target) in &relationships.allocates {
+            if source == &req.title {
+                req.allocates.push((source.clone(), target.clone()));
+            }
+        }
+        for (source, from_name) in &relationships.derives {
+            if source == &req.title {
+                req.derives.push((source.clone(), from_name.clone()));
             }
         }
     }
 
     reqs
+}
+
+/// Collected relationships from CST walk.
+#[derive(Default)]
+struct RelationshipCollector {
+    satisfies: Vec<(String, String)>,
+    verifies: Vec<(String, String)>,
+    refines: Vec<(String, String)>,
+    allocates: Vec<(String, String)>,
+    derives: Vec<(String, String)>,
 }
 
 /// Extract requirements from a parsed SysML v2 source file as rivet YAML.
@@ -70,7 +100,13 @@ pub fn extract_requirements(parse: &crate::Parse) -> String {
         yaml.push_str(&format!("    description: >\n      {}\n", req.description));
         yaml.push_str("    tags: [sysml2, extracted]\n");
 
-        if !req.satisfies.is_empty() || !req.verifies.is_empty() {
+        let has_links = !req.satisfies.is_empty()
+            || !req.verifies.is_empty()
+            || !req.refines.is_empty()
+            || !req.allocates.is_empty()
+            || !req.derives.is_empty();
+
+        if has_links {
             yaml.push_str("    links:\n");
             for (_, target) in &req.satisfies {
                 yaml.push_str("      - type: satisfies\n");
@@ -78,6 +114,18 @@ pub fn extract_requirements(parse: &crate::Parse) -> String {
             }
             for (_, target) in &req.verifies {
                 yaml.push_str("      - type: verifies\n");
+                yaml.push_str(&format!("        target: {}\n", target));
+            }
+            for (_, target) in &req.refines {
+                yaml.push_str("      - type: refines\n");
+                yaml.push_str(&format!("        target: {}\n", target));
+            }
+            for (_, target) in &req.allocates {
+                yaml.push_str("      - type: allocated-to\n");
+                yaml.push_str(&format!("        target: {}\n", target));
+            }
+            for (_, target) in &req.derives {
+                yaml.push_str("      - type: derives-from\n");
                 yaml.push_str(&format!("        target: {}\n", target));
             }
         }
@@ -90,35 +138,44 @@ pub fn extract_requirements(parse: &crate::Parse) -> String {
 fn collect_requirements(
     node: &SyntaxNode,
     reqs: &mut Vec<ExtractedRequirement>,
-    satisfies: &mut Vec<(String, String)>,
-    verifies: &mut Vec<(String, String)>,
+    rels: &mut RelationshipCollector,
 ) {
     match node.kind() {
-        SyntaxKind::REQUIREMENT_DEF => {
-            if let Some(req) = extract_requirement_node(node) {
-                reqs.push(req);
-            }
-        }
-        SyntaxKind::REQUIREMENT_USAGE => {
+        SyntaxKind::REQUIREMENT_DEF | SyntaxKind::REQUIREMENT_USAGE => {
             if let Some(req) = extract_requirement_node(node) {
                 reqs.push(req);
             }
         }
         SyntaxKind::SATISFY_REQ => {
-            if let Some((req_name, by_name)) = extract_relationship(node) {
-                satisfies.push((req_name, by_name));
+            if let Some(pair) = extract_relationship(node) {
+                rels.satisfies.push(pair);
             }
         }
         SyntaxKind::VERIFY_REQ => {
-            if let Some((req_name, by_name)) = extract_relationship(node) {
-                verifies.push((req_name, by_name));
+            if let Some(pair) = extract_relationship(node) {
+                rels.verifies.push(pair);
+            }
+        }
+        SyntaxKind::REFINE_REQ => {
+            if let Some(pair) = extract_relationship(node) {
+                rels.refines.push(pair);
+            }
+        }
+        SyntaxKind::ALLOCATE_REQ => {
+            if let Some(pair) = extract_relationship(node) {
+                rels.allocates.push(pair);
+            }
+        }
+        SyntaxKind::DERIVE_REQ => {
+            if let Some(pair) = extract_relationship(node) {
+                rels.derives.push(pair);
             }
         }
         _ => {}
     }
 
     for child in node.children() {
-        collect_requirements(&child, reqs, satisfies, verifies);
+        collect_requirements(&child, reqs, rels);
     }
 }
 
@@ -139,6 +196,9 @@ fn extract_requirement_node(node: &SyntaxNode) -> Option<ExtractedRequirement> {
         tags: vec!["sysml2".to_string(), "extracted".to_string()],
         satisfies: Vec::new(),
         verifies: Vec::new(),
+        refines: Vec::new(),
+        allocates: Vec::new(),
+        derives: Vec::new(),
     })
 }
 
@@ -419,5 +479,118 @@ satisfy BetaReq by controller;
         assert_eq!(reqs[0].id, "SYSML-REQ-AlphaReq");
         // The satisfy for BetaReq should not attach to AlphaReq
         assert_eq!(reqs[0].satisfies.len(), 0);
+    }
+
+    #[test]
+    fn extract_refine_relationship() {
+        let source = r#"
+requirement def HighLevelReq { }
+refine HighLevelReq by DetailedReq;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].refines.len(), 1);
+        assert_eq!(reqs[0].refines[0].1, "DetailedReq");
+    }
+
+    #[test]
+    fn extract_refine_in_yaml() {
+        let source = r#"
+requirement def SafetyReq { }
+refine SafetyReq by DetailedSafetyReq;
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_requirements(&parse);
+        assert!(yaml.contains("type: refines"), "yaml: {yaml}");
+        assert!(yaml.contains("target: DetailedSafetyReq"), "yaml: {yaml}");
+    }
+
+    #[test]
+    fn extract_allocate_relationship() {
+        let source = r#"
+requirement def ProcessingReq { }
+allocate ProcessingReq to ecu;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].allocates.len(), 1);
+        assert_eq!(reqs[0].allocates[0].1, "ecu");
+    }
+
+    #[test]
+    fn extract_allocate_in_yaml() {
+        let source = r#"
+requirement def ProcessingReq { }
+allocate ProcessingReq to ecu;
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_requirements(&parse);
+        assert!(yaml.contains("type: allocated-to"), "yaml: {yaml}");
+        assert!(yaml.contains("target: ecu"), "yaml: {yaml}");
+    }
+
+    #[test]
+    fn extract_derive_relationship() {
+        let source = r#"
+requirement def DetailedReq { }
+derive DetailedReq from SystemReq;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].derives.len(), 1);
+        assert_eq!(reqs[0].derives[0].1, "SystemReq");
+    }
+
+    #[test]
+    fn extract_derive_in_yaml() {
+        let source = r#"
+requirement def DetailedReq { }
+derive DetailedReq from SystemReq;
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_requirements(&parse);
+        assert!(yaml.contains("type: derives-from"), "yaml: {yaml}");
+        assert!(yaml.contains("target: SystemReq"), "yaml: {yaml}");
+    }
+
+    #[test]
+    fn extract_all_relationship_types() {
+        let source = r#"
+requirement def MainReq { }
+satisfy MainReq by controller;
+verify MainReq by testSuite;
+refine MainReq by DetailedReq;
+allocate MainReq to ecu;
+derive MainReq from SystemReq;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].satisfies.len(), 1);
+        assert_eq!(reqs[0].verifies.len(), 1);
+        assert_eq!(reqs[0].refines.len(), 1);
+        assert_eq!(reqs[0].allocates.len(), 1);
+        assert_eq!(reqs[0].derives.len(), 1);
+    }
+
+    #[test]
+    fn extract_relationships_inside_package() {
+        let source = r#"
+package Safety {
+    requirement def CriticalReq { }
+    satisfy CriticalReq by safetyController;
+    refine CriticalReq by DetailedCriticalReq;
+    allocate CriticalReq to safetyCpu;
+}
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].satisfies.len(), 1);
+        assert_eq!(reqs[0].refines.len(), 1);
+        assert_eq!(reqs[0].allocates.len(), 1);
     }
 }
