@@ -1,0 +1,93 @@
+-- AI/ML perception system example (Issue #91).
+-- Demonstrates the AI_ML property set for architecture-level AI safety analysis.
+--
+-- Expected diagnostics from `spar analyze`:
+--   OK:  PedestrianDetector inference (20-60ms) fits deadline (80ms)
+--   OK:  PedestrianDetector fallback timing (60+5=65ms < 80ms)
+--   OK:  PedestrianDetector OOD detection enabled
+--   WARN: LaneDetector has no Fallback_Strategy
+--   WARN: LaneDetector confidence threshold without OOD
+--   INFO: LaneDetector drift detection not enabled
+--   INFO: PerceptionPipeline no Training_Data_Ref
+--   ERROR: SlowModel inference (120ms) exceeds deadline (100ms)
+
+property set AI_ML is
+  Inference_Latency: Time_Range applies to (thread);
+  Inference_Mode: enumeration (Synchronous, Batched, Streaming) applies to (thread);
+  Max_Batch_Size: aadlinteger applies to (thread);
+  Model_Version: aadlstring applies to (process);
+  Model_Format: enumeration (ONNX, TFLite, PyTorch, TensorRT, WASM_Component) applies to (process);
+  Model_Hash: aadlstring applies to (process);
+  Training_Data_Ref: aadlstring applies to (process);
+  Confidence_Threshold: aadlreal applies to (thread);
+  OOD_Detection_Enabled: aadlboolean applies to (thread);
+  OOD_Detection_Method: enumeration (Mahalanobis, Softmax_Entropy, Ensemble_Disagreement, Monitor_Network) applies to (thread);
+  Fallback_Strategy: enumeration (Safe_Stop, Degraded_Mode, Previous_Output, Human_Takeover, Redundant_Model) applies to (thread);
+  Fallback_Latency: Time applies to (thread);
+  Drift_Detection_Enabled: aadlboolean applies to (thread);
+  Drift_Detection_Window: Time applies to (thread);
+  Retraining_Trigger: aadlstring applies to (process);
+  Fusion_Strategy: enumeration (Early, Late, Decision_Level) applies to (process);
+  Input_Modalities: list of aadlstring applies to (thread);
+end AI_ML;
+
+package PerceptionSystem
+public
+  with AI_ML;
+
+  -- Well-configured AI thread: all safety properties present
+  thread PedestrianDetector
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 100ms;
+      Deadline => 80ms;
+      AI_ML::Inference_Latency => 20ms .. 60ms;
+      AI_ML::Confidence_Threshold => 0.85;
+      AI_ML::OOD_Detection_Enabled => true;
+      AI_ML::OOD_Detection_Method => Ensemble_Disagreement;
+      AI_ML::Fallback_Strategy => Previous_Output;
+      AI_ML::Fallback_Latency => 5ms;
+      AI_ML::Drift_Detection_Enabled => true;
+      AI_ML::Drift_Detection_Window => 7 days;
+  end PedestrianDetector;
+
+  -- Missing fallback, missing OOD, no drift detection
+  thread LaneDetector
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 50ms;
+      Deadline => 40ms;
+      AI_ML::Inference_Latency => 10ms .. 25ms;
+      AI_ML::Confidence_Threshold => 0.90;
+  end LaneDetector;
+
+  -- Inference latency exceeds deadline
+  thread SlowModel
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 200ms;
+      Deadline => 100ms;
+      AI_ML::Inference_Latency => 50ms .. 120ms;
+      AI_ML::Fallback_Strategy => Safe_Stop;
+  end SlowModel;
+
+  process PerceptionPipeline
+    properties
+      AI_ML::Model_Version => "yolov8-pedestrian-v3.2";
+      AI_ML::Model_Format => ONNX;
+      AI_ML::Model_Hash => "sha256:abc123def456";
+      AI_ML::Fusion_Strategy => Late;
+  end PerceptionPipeline;
+
+  system PerceptionSys
+  end PerceptionSys;
+
+  system implementation PerceptionSys.Impl
+    subcomponents
+      detector: thread PedestrianDetector;
+      lane: thread LaneDetector;
+      slow: thread SlowModel;
+      pipeline: process PerceptionPipeline;
+  end PerceptionSys.Impl;
+
+end PerceptionSystem;

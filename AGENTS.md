@@ -9,8 +9,8 @@
 This project uses **Rivet** for SDLC artifact traceability.
 - Config: `rivet.yaml`
 - Schemas: common, dev, aspice, stpa, aadl
-- Artifacts: 221 across 3 types
-- Validation: `rivet validate` (current status: 21 errors)
+- Artifacts: 342 across 3 types
+- Validation: `rivet validate` (current status: pass)
 
 ## Available Commands
 
@@ -31,9 +31,9 @@ This project uses **Rivet** for SDLC artifact traceability.
 
 | Type | Count | Description |
 |------|------:|-------------|
-| `design-decision` | 46 | An architectural or design decision with rationale |
-| `feature` | 90 | A user-visible capability or feature |
-| `requirement` | 85 | A functional or non-functional requirement |
+| `design-decision` | 65 | An architectural or design decision with rationale |
+| `feature` | 103 | A user-visible capability or feature |
+| `requirement` | 174 | A functional or non-functional requirement |
 | `aadl-analysis-result` | 0 | Output of a spar analysis pass |
 | `aadl-component` | 0 | AADL component type or implementation imported from spar |
 | `aadl-flow` | 0 | End-to-end flow with latency bounds |
@@ -65,7 +65,7 @@ This project uses **Rivet** for SDLC artifact traceability.
 ## Working with Artifacts
 
 ### File Structure
-- Artifacts are stored as YAML files in: `artifacts`, `safety/stpa`, `safety/stpa/requirements.yaml`, `safety/stpa/architecture.yaml`, `safety/stpa/validation.yaml`
+- Artifacts are stored as YAML files in: `artifacts`, `safety/stpa`, `safety/stpa/requirements.yaml`, `safety/stpa/architecture.yaml`, `safety/stpa/validation.yaml`, `safety/stpa/solver-requirements.yaml`
 - Schema definitions: `schemas/` directory
 - Documents: `docs`
 
@@ -87,6 +87,7 @@ Use `rivet validate --format json` for machine-readable output.
 | `caused-by-uca` | Loss scenario is caused by an unsafe control action | `causes-scenario` |
 | `constrained-by` | Source is constrained by the target | `constrains` |
 | `constrains-controller` | Constraint applies to a specific controller | `controller-constrained-by` |
+| `contains` | Parent AADL component contains a child sub-component | `contained-by` |
 | `depends-on` | Source depends on target being completed first | `depended-on-by` |
 | `derives-from` | Source is derived from the target | `derived-into` |
 | `implements` | Source implements the target | `implemented-by` |
@@ -104,63 +105,9 @@ Use `rivet validate --format json` for machine-readable output.
 | `traces-to` | General traceability link between any two artifacts | `traced-from` |
 | `verifies` | Source verifies or validates the target | `verified-by` |
 
-## Verification Guide
-
-This project follows the PulseEngine Verification Guide for formal verification
-of generated code. See: https://pulseengine.eu/guides/VERIFICATION-GUIDE.md
-
-Key principles for agents:
-1. **Specification First** — get the `requires`/`ensures` right before proofs
-2. **Multiple Candidates** — generate 3-5 proof candidates before declaring intractable
-3. **Error Classification** — classify verifier errors explicitly before applying fixes
-4. **Feature Intersection** — code must compile as plain Rust AND pass Verus/Kani/Lean4
-5. **Multi-Track** — Verus (SMT/Z3), Lean4 (tactic proofs), Kani (bounded model checking)
-
-Verification tracks available:
-- **Verus**: `verus! { }` blocks with `requires`/`ensures`, 6-tier proof strategy
-- **Lean4**: Existing `proofs/` directory, `scheduling_verified.rs` extraction pattern
-- **Kani**: `#[kani::proof]` harnesses with `kani::any()` + `kani::assume()`
-- **Build-time**: `#[aadl(...)]` proc macros checking constants against AADL model
-
-Build systems:
-- **Cargo**: Development iteration (`cargo test`, `cargo kani`)
-- **Bazel**: CI/release with hermetic verification (`rules_verus`, `rules_lean`, `rules_wasm_component`)
-
-## Code Generation
-
-spar generates code from AADL models via `spar codegen`:
-
-```bash
-spar codegen --root Pkg::Sys.Impl --output ./generated --rivet *.aadl
-```
-
-Generated output includes:
-- WIT interfaces (component contracts)
-- Rust crate skeletons (implementation)
-- Bazel BUILD files (hermetic build + verification)
-- Three verification layers (build-time, test-time, formal proof)
-- rivet design documents with frontmatter
-- rivet verification artifacts
-
-The generated code targets the feature intersection of all verification
-tracks per the Verification Guide.
-
-## SysML v2 Integration
-
-SysML v2 requirements can be parsed and extracted into rivet:
-
-```bash
-spar sysml2 extract --requirements model.sysml --output reqs.yaml
-spar sysml2 lower model.sysml --output model.aadl
-```
-
-The full roundtrip: SysML v2 (requirements) → AADL (architecture) →
-Rust/WIT (code) → Tests/Proofs (evidence) → rivet (traceability).
-
 ## Conventions
 
 - Artifact IDs follow the pattern: PREFIX-NNN (e.g., REQ-001, FEAT-042)
 - Use `rivet add` to create artifacts (auto-generates next ID)
 - Always include traceability links when creating artifacts
 - Run `rivet validate` before committing
-- Reference the Verification Guide when generating or reviewing verified code
