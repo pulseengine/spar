@@ -26,6 +26,8 @@ pub fn source_file(p: &mut Parser) {
             SyntaxKind::SATISFY_KW => requirements::satisfy_req(p),
             SyntaxKind::VERIFY_KW => requirements::verify_req(p),
             SyntaxKind::REFINE_KW => requirements::refine_req(p),
+            SyntaxKind::ALLOCATE_KW => requirements::allocate_req(p),
+            SyntaxKind::DERIVE_KW => requirements::derive_req(p),
             k if is_member_start(k, p) => parts::member(p),
             SyntaxKind::EOF => break,
             _ => {

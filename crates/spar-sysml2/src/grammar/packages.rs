@@ -57,6 +57,8 @@ pub(crate) fn namespace_body(p: &mut Parser) {
             SyntaxKind::SATISFY_KW => super::requirements::satisfy_req(p),
             SyntaxKind::VERIFY_KW => super::requirements::verify_req(p),
             SyntaxKind::REFINE_KW => super::requirements::refine_req(p),
+            SyntaxKind::ALLOCATE_KW => super::requirements::allocate_req(p),
+            SyntaxKind::DERIVE_KW => super::requirements::derive_req(p),
             k if super::is_member_start(k, p) => super::parts::member(p),
             _ => {
                 p.err_and_bump("expected member declaration");

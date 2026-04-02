@@ -1,10 +1,12 @@
-//! Requirement relationship grammar rules: satisfy, verify, refine.
+//! Requirement relationship grammar rules: satisfy, verify, refine, allocate, derive.
 //!
 //! SysML v2 relationship syntax:
 //! ```sysml
 //! satisfy sensorLatency by ecu.controller;
 //! verify sensorLatency by latencyTest;
 //! refine sensorLatency by detailedLatencyReq;
+//! allocate sensorProcessing to ecu;
+//! derive detailedReq from highLevelReq;
 //! ```
 
 use crate::parser::Parser;
@@ -65,6 +67,44 @@ pub(crate) fn refine_req(p: &mut Parser) {
 
     p.expect(SyntaxKind::SEMICOLON);
     m.complete(p, SyntaxKind::REFINE_REQ);
+}
+
+/// Parse an `allocate source to target;` relationship.
+pub(crate) fn allocate_req(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::ALLOCATE_KW);
+
+    // Source reference
+    name_ref(p);
+
+    // `to` target
+    if p.eat(SyntaxKind::TO_KW) {
+        name_ref(p);
+    } else {
+        p.error("expected `to`");
+    }
+
+    p.expect(SyntaxKind::SEMICOLON);
+    m.complete(p, SyntaxKind::ALLOCATE_REQ);
+}
+
+/// Parse a `derive source from target;` relationship.
+pub(crate) fn derive_req(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::DERIVE_KW);
+
+    // Source reference
+    name_ref(p);
+
+    // `from` target
+    if p.eat(SyntaxKind::FROM_KW) {
+        name_ref(p);
+    } else {
+        p.error("expected `from`");
+    }
+
+    p.expect(SyntaxKind::SEMICOLON);
+    m.complete(p, SyntaxKind::DERIVE_REQ);
 }
 
 /// Parse a dotted name reference: `name` or `name.name.name`.

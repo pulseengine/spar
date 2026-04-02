@@ -38,6 +38,7 @@ fn main() {
         "verify" => cmd_verify(&args[2..]),
         "codegen" => cmd_codegen(&args[2..]),
         "sysml2" => cmd_sysml2(&args[2..]),
+        "extract" => cmd_sysml2_extract(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
