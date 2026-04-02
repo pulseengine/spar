@@ -14,6 +14,7 @@
 //! let diagnostics = runner.run_all(&instance);
 //! ```
 
+pub mod ai_ml;
 pub mod arinc653;
 pub mod binding_check;
 pub mod binding_rules;
@@ -109,6 +110,7 @@ impl AnalysisRunner {
     /// latency, memory budget, resource budget, EMV2 fault-tree,
     /// ARINC 653, wRPC binding, weight/power aggregation, and bus bandwidth.
     pub fn register_all(&mut self) {
+        use ai_ml::AiMlAnalysis;
         use arinc653::Arinc653Analysis;
         use binding_check::BindingCheckAnalysis;
         use binding_rules::BindingRuleAnalysis;
@@ -137,6 +139,7 @@ impl AnalysisRunner {
         use weight_power::WeightPowerAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
 
+        self.register(Box::new(AiMlAnalysis));
         self.register(Box::new(ConnectivityAnalysis));
         self.register(Box::new(HierarchyAnalysis));
         self.register(Box::new(CompletenessAnalysis));

@@ -1581,8 +1581,8 @@ fn test_register_all_count() {
     runner.register_all();
     assert_eq!(
         runner.count(),
-        27,
-        "register_all should register all 27 instance-level analyses"
+        28,
+        "register_all should register all 28 instance-level analyses"
     );
 }
 
@@ -1596,6 +1596,7 @@ fn test_register_all_count() {
 /// each diagnostic's `.analysis` field matches the pass's `.name()`.
 #[test]
 fn analysis_diagnostics_carry_correct_pass_name() {
+    use crate::ai_ml::AiMlAnalysis;
     use crate::arinc653::Arinc653Analysis;
     use crate::binding_check::BindingCheckAnalysis;
     use crate::binding_rules::BindingRuleAnalysis;
@@ -1716,6 +1717,7 @@ fn analysis_diagnostics_carry_correct_pass_name() {
         Box::new(WeightPowerAnalysis),
         Box::new(BusBandwidthAnalysis),
         Box::new(FeatureGroupCheckAnalysis),
+        Box::new(AiMlAnalysis),
     ];
 
     let mut verified_count = 0;
