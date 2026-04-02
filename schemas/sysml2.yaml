@@ -1,0 +1,123 @@
+# SysML v2 schema for rivet
+#
+# Maps SysML v2 constructs (requirements, parts, interfaces, actions)
+# into the rivet artifact model for traceability.
+#
+# SysML v2 (OMG, June 2025) provides a textual modeling language for
+# systems engineering. This schema captures the core constructs that
+# spar's spar-sysml2 crate extracts from .sysml files.
+#
+# Traceability mapping:
+#   sysml-requirement --satisfies--> requirement | sysml-requirement
+#   sysml-requirement --derives-from--> sysml-requirement
+#   sysml-requirement --refines--> sysml-requirement
+#   sysml-requirement --verifies--> sysml-requirement
+#   sysml-component   --allocated-from--> sysml-requirement
+
+schema:
+  name: sysml2
+  version: "0.1.0"
+  namespace: "http://pulseengine.dev/ns/sysml2#"
+  extends: [common]
+  description: >
+    SysML v2 artifact types for spar integration. Covers requirement
+    definitions/usages, part definitions/usages (components), interface/port
+    definitions, and action definitions extracted from SysML v2 models.
+
+artifact-types:
+
+  - name: sysml-requirement
+    description: SysML v2 requirement (def or usage)
+    fields:
+      - name: sysml-id
+        type: string
+        required: false
+        description: Original SysML v2 qualified name
+      - name: requirement-kind
+        type: string
+        required: false
+        allowed-values:
+          - functional
+          - performance
+          - interface
+          - constraint
+          - concern
+    link-fields:
+      - name: satisfies
+        link-type: satisfies
+        cardinality: zero-or-many
+        required: false
+      - name: derives-from
+        link-type: derives-from
+        cardinality: zero-or-many
+        required: false
+      - name: refines
+        link-type: refines
+        cardinality: zero-or-many
+        required: false
+      - name: verifies
+        link-type: verifies
+        cardinality: zero-or-many
+        required: false
+
+  - name: sysml-component
+    description: SysML v2 part definition or usage
+    fields:
+      - name: sysml-id
+        type: string
+        required: true
+        description: Original SysML v2 qualified name
+      - name: component-kind
+        type: string
+        required: false
+        allowed-values:
+          - system
+          - subsystem
+          - component
+          - hardware
+          - software
+    link-fields:
+      - name: allocated-from
+        link-type: allocated-from
+        target-types: [sysml-requirement]
+        cardinality: zero-or-many
+        required: false
+
+  - name: sysml-interface
+    description: SysML v2 interface or port definition
+    fields:
+      - name: sysml-id
+        type: string
+        required: true
+        description: Original SysML v2 qualified name
+      - name: direction
+        type: string
+        required: false
+        allowed-values:
+          - in
+          - out
+          - inout
+
+  - name: sysml-action
+    description: SysML v2 action definition (behavioral)
+    fields:
+      - name: sysml-id
+        type: string
+        required: true
+        description: Original SysML v2 qualified name
+
+# Traceability rules
+traceability-rules:
+  - name: sysml-requirement-has-traceability
+    description: Every SysML requirement should have at least one traceability link
+    source-type: sysml-requirement
+    required-backlink: satisfies
+    from-types: [sysml-requirement, sysml-component]
+    severity: warning
+
+  - name: sysml-component-has-allocation
+    description: Every SysML component should trace to a requirement
+    source-type: sysml-component
+    required-backlink: allocated-from
+    from-types: [sysml-requirement]
+    severity: warning
