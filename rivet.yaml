@@ -13,6 +13,7 @@ project:
     - aspice
     - stpa
     - aadl
+    - sysml2
 
 sources:
   - path: artifacts
