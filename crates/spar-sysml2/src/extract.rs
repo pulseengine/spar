@@ -1,7 +1,8 @@
-//! Requirements extraction from SysML v2 CST.
+//! Requirements and architecture extraction from SysML v2 CST.
 //!
-//! Walks the parsed SysML v2 CST, finds `REQUIREMENT_DEF` and `REQUIREMENT_USAGE`
-//! nodes, and extracts them as rivet YAML artifacts.
+//! Walks the parsed SysML v2 CST, finds `REQUIREMENT_DEF`, `REQUIREMENT_USAGE`,
+//! `PART_DEF`, `CONNECTION_USAGE`, `ACTION_DEF`, and `STATE_DEF` nodes, and
+//! extracts them as rivet YAML artifacts.
 
 use crate::SyntaxNode;
 use crate::syntax_kind::SyntaxKind;
@@ -27,6 +28,75 @@ pub struct ExtractedRequirement {
     pub allocates: Vec<(String, String)>,
     /// Derive relationships: (source_name, derived_from_name).
     pub derives: Vec<(String, String)>,
+}
+
+/// An extracted architecture element (part, action, state).
+#[derive(Debug, Clone)]
+pub struct ExtractedComponent {
+    /// Artifact identifier.
+    pub id: String,
+    /// Display title.
+    pub title: String,
+    /// Description text.
+    pub description: String,
+    /// Component kind: system, action, state.
+    pub kind: ComponentKind,
+    /// Child part names (subcomponents).
+    pub children: Vec<String>,
+    /// Port names.
+    pub ports: Vec<String>,
+}
+
+/// Kind of architecture component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentKind {
+    /// `part def` — structural component.
+    Part,
+    /// `action def` — behavioral element.
+    Action,
+    /// `state def` — mode/state.
+    State,
+    /// `connection def` — bus/interface.
+    Connection,
+}
+
+impl ComponentKind {
+    fn rivet_type(self) -> &'static str {
+        match self {
+            Self::Part | Self::Connection => "design-decision",
+            Self::Action => "feature",
+            Self::State => "design-decision",
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            Self::Part => "sysml-part",
+            Self::Action => "sysml-action",
+            Self::State => "sysml-state",
+            Self::Connection => "sysml-connection",
+        }
+    }
+}
+
+/// An extracted connection between two components.
+#[derive(Debug, Clone)]
+pub struct ExtractedConnection {
+    /// Source component or port.
+    pub source: String,
+    /// Target component or port.
+    pub target: String,
+}
+
+/// Full extraction result: requirements + architecture.
+#[derive(Debug, Clone, Default)]
+pub struct ExtractionResult {
+    /// Extracted requirements.
+    pub requirements: Vec<ExtractedRequirement>,
+    /// Extracted architecture components (when `include_architecture` is set).
+    pub components: Vec<ExtractedComponent>,
+    /// Extracted connections (when `include_architecture` is set).
+    pub connections: Vec<ExtractedConnection>,
 }
 
 /// Extract requirements from a parsed SysML v2 source file.
@@ -70,6 +140,158 @@ pub fn extract_requirements_list(parse: &crate::Parse) -> Vec<ExtractedRequireme
     reqs
 }
 
+/// Extract requirements and optionally architecture context from a SysML v2 file.
+///
+/// When `include_architecture` is true, also extracts `part def`, `action def`,
+/// `state def`, `connection def`, and `connection usage` nodes as rivet artifacts.
+pub fn extract_all(parse: &crate::Parse, include_architecture: bool) -> ExtractionResult {
+    let reqs = extract_requirements_list(parse);
+
+    let mut components = Vec::new();
+    let mut connections = Vec::new();
+
+    if include_architecture {
+        let root = parse.syntax_node();
+        collect_architecture(&root, &mut components, &mut connections);
+    }
+
+    ExtractionResult {
+        requirements: reqs,
+        components,
+        connections,
+    }
+}
+
+/// Extract all artifacts (requirements + architecture) as rivet YAML.
+pub fn extract_all_yaml(parse: &crate::Parse, include_architecture: bool) -> String {
+    let result = extract_all(parse, include_architecture);
+
+    if result.requirements.is_empty() && result.components.is_empty() {
+        return "artifacts: []\n".to_string();
+    }
+
+    let mut yaml = String::from("artifacts:\n");
+
+    // Requirements
+    for req in &result.requirements {
+        write_requirement_yaml(req, &mut yaml);
+    }
+
+    // Architecture components
+    for comp in &result.components {
+        yaml.push_str(&format!("  - id: SYSML-{}\n", comp.id));
+        yaml.push_str(&format!("    type: {}\n", comp.kind.rivet_type()));
+        yaml.push_str(&format!("    title: \"{}\"\n", comp.title));
+        yaml.push_str(&format!("    description: >\n      {}\n", comp.description));
+        yaml.push_str(&format!(
+            "    tags: [sysml2, extracted, {}]\n",
+            comp.kind.tag()
+        ));
+    }
+
+    yaml
+}
+
+/// Recursively collect architecture elements from the CST.
+fn collect_architecture(
+    node: &SyntaxNode,
+    components: &mut Vec<ExtractedComponent>,
+    connections: &mut Vec<ExtractedConnection>,
+) {
+    match node.kind() {
+        SyntaxKind::PART_DEF => {
+            if let Some(comp) = extract_component_node(node, ComponentKind::Part) {
+                components.push(comp);
+            }
+        }
+        SyntaxKind::ACTION_DEF => {
+            if let Some(comp) = extract_component_node(node, ComponentKind::Action) {
+                components.push(comp);
+            }
+        }
+        SyntaxKind::STATE_DEF => {
+            if let Some(comp) = extract_component_node(node, ComponentKind::State) {
+                components.push(comp);
+            }
+        }
+        SyntaxKind::CONNECTION_DEF => {
+            if let Some(comp) = extract_component_node(node, ComponentKind::Connection) {
+                components.push(comp);
+            }
+        }
+        SyntaxKind::CONNECTION_USAGE => {
+            if let Some(conn) = extract_connection_usage(node) {
+                connections.push(conn);
+            }
+        }
+        _ => {}
+    }
+
+    for child in node.children() {
+        collect_architecture(&child, components, connections);
+    }
+}
+
+/// Extract a component from PART_DEF, ACTION_DEF, STATE_DEF, or CONNECTION_DEF.
+fn extract_component_node(node: &SyntaxNode, kind: ComponentKind) -> Option<ExtractedComponent> {
+    let name = extract_name(node)?;
+    let description =
+        extract_doc_comment(node).unwrap_or_else(|| format!("SysML v2 {} definition", kind.tag()));
+
+    // Collect child part usages and port usages
+    let mut children = Vec::new();
+    let mut ports = Vec::new();
+    for child in node.descendants() {
+        match child.kind() {
+            SyntaxKind::PART_USAGE => {
+                if let Some(n) = extract_name(&child) {
+                    children.push(n);
+                }
+            }
+            SyntaxKind::PORT_USAGE => {
+                if let Some(n) = extract_name(&child) {
+                    ports.push(n);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let prefix = match kind {
+        ComponentKind::Part => "PART",
+        ComponentKind::Action => "ACTION",
+        ComponentKind::State => "STATE",
+        ComponentKind::Connection => "CONN",
+    };
+
+    Some(ExtractedComponent {
+        id: format!("{prefix}-{name}"),
+        title: name,
+        description,
+        kind,
+        children,
+        ports,
+    })
+}
+
+/// Extract a connection usage: `connect a.p to b.p;`
+fn extract_connection_usage(node: &SyntaxNode) -> Option<ExtractedConnection> {
+    let name_refs: Vec<String> = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::NAME_REF)
+        .map(|c| c.text().to_string().trim().to_string())
+        .collect();
+
+    if name_refs.len() >= 2 {
+        Some(ExtractedConnection {
+            source: name_refs[0].clone(),
+            target: name_refs[1].clone(),
+        })
+    } else {
+        None
+    }
+}
+
 /// Collected relationships from CST walk.
 #[derive(Default)]
 struct RelationshipCollector {
@@ -92,46 +314,49 @@ pub fn extract_requirements(parse: &crate::Parse) -> String {
     }
 
     let mut yaml = String::from("artifacts:\n");
-
     for req in &reqs {
-        yaml.push_str(&format!("  - id: {}\n", req.id));
-        yaml.push_str("    type: requirement\n");
-        yaml.push_str(&format!("    title: \"{}\"\n", req.title));
-        yaml.push_str(&format!("    description: >\n      {}\n", req.description));
-        yaml.push_str("    tags: [sysml2, extracted]\n");
+        write_requirement_yaml(req, &mut yaml);
+    }
+    yaml
+}
 
-        let has_links = !req.satisfies.is_empty()
-            || !req.verifies.is_empty()
-            || !req.refines.is_empty()
-            || !req.allocates.is_empty()
-            || !req.derives.is_empty();
+/// Write a single requirement as YAML.
+fn write_requirement_yaml(req: &ExtractedRequirement, yaml: &mut String) {
+    yaml.push_str(&format!("  - id: {}\n", req.id));
+    yaml.push_str("    type: requirement\n");
+    yaml.push_str(&format!("    title: \"{}\"\n", req.title));
+    yaml.push_str(&format!("    description: >\n      {}\n", req.description));
+    yaml.push_str("    tags: [sysml2, extracted]\n");
 
-        if has_links {
-            yaml.push_str("    links:\n");
-            for (_, target) in &req.satisfies {
-                yaml.push_str("      - type: satisfies\n");
-                yaml.push_str(&format!("        target: {}\n", target));
-            }
-            for (_, target) in &req.verifies {
-                yaml.push_str("      - type: verifies\n");
-                yaml.push_str(&format!("        target: {}\n", target));
-            }
-            for (_, target) in &req.refines {
-                yaml.push_str("      - type: refines\n");
-                yaml.push_str(&format!("        target: {}\n", target));
-            }
-            for (_, target) in &req.allocates {
-                yaml.push_str("      - type: allocated-to\n");
-                yaml.push_str(&format!("        target: {}\n", target));
-            }
-            for (_, target) in &req.derives {
-                yaml.push_str("      - type: derives-from\n");
-                yaml.push_str(&format!("        target: {}\n", target));
-            }
+    let has_links = !req.satisfies.is_empty()
+        || !req.verifies.is_empty()
+        || !req.refines.is_empty()
+        || !req.allocates.is_empty()
+        || !req.derives.is_empty();
+
+    if has_links {
+        yaml.push_str("    links:\n");
+        for (_, target) in &req.satisfies {
+            yaml.push_str("      - type: satisfies\n");
+            yaml.push_str(&format!("        target: {}\n", target));
+        }
+        for (_, target) in &req.verifies {
+            yaml.push_str("      - type: verifies\n");
+            yaml.push_str(&format!("        target: {}\n", target));
+        }
+        for (_, target) in &req.refines {
+            yaml.push_str("      - type: refines\n");
+            yaml.push_str(&format!("        target: {}\n", target));
+        }
+        for (_, target) in &req.allocates {
+            yaml.push_str("      - type: allocated-to\n");
+            yaml.push_str(&format!("        target: {}\n", target));
+        }
+        for (_, target) in &req.derives {
+            yaml.push_str("      - type: derives-from\n");
+            yaml.push_str(&format!("        target: {}\n", target));
         }
     }
-
-    yaml
 }
 
 /// Recursively collect requirement nodes from the CST.
@@ -592,5 +817,119 @@ package Safety {
         assert_eq!(reqs[0].satisfies.len(), 1);
         assert_eq!(reqs[0].refines.len(), 1);
         assert_eq!(reqs[0].allocates.len(), 1);
+    }
+
+    // ── Architecture extraction tests ──────────────────────────────
+
+    #[test]
+    fn extract_part_def_as_component() {
+        let source = "part def Vehicle { }";
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].title, "Vehicle");
+        assert_eq!(result.components[0].kind, ComponentKind::Part);
+        assert_eq!(result.components[0].id, "PART-Vehicle");
+    }
+
+    #[test]
+    fn extract_action_def_as_component() {
+        let source = "action def ProcessData { }";
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].kind, ComponentKind::Action);
+        assert_eq!(result.components[0].id, "ACTION-ProcessData");
+    }
+
+    #[test]
+    fn extract_state_def_as_component() {
+        let source = "state def OperatingMode { }";
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].kind, ComponentKind::State);
+        assert_eq!(result.components[0].id, "STATE-OperatingMode");
+    }
+
+    #[test]
+    fn extract_architecture_disabled_by_default() {
+        let source = "part def Vehicle { }";
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, false);
+        assert!(
+            result.components.is_empty(),
+            "architecture should not be extracted when disabled"
+        );
+    }
+
+    #[test]
+    fn extract_part_with_children() {
+        let source = r#"
+part def Vehicle {
+    part engine : Engine;
+    part transmission : Transmission;
+}
+"#;
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].children.len(), 2);
+    }
+
+    #[test]
+    fn extract_part_with_ports() {
+        let source = r#"
+part def ECU {
+    port sensorIn : SensorPort;
+    port actuatorOut : ActuatorPort;
+}
+"#;
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].ports.len(), 2);
+    }
+
+    #[test]
+    fn extract_mixed_requirements_and_architecture() {
+        let source = r#"
+requirement def SafetyReq { }
+part def Controller { }
+action def ProcessSensor { }
+satisfy SafetyReq by Controller;
+"#;
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.requirements.len(), 1);
+        assert_eq!(result.components.len(), 2); // Controller + ProcessSensor
+        assert_eq!(result.requirements[0].satisfies.len(), 1);
+    }
+
+    #[test]
+    fn extract_all_yaml_includes_architecture() {
+        let source = r#"
+requirement def SafetyReq { }
+part def Controller { }
+"#;
+        let parse = crate::parse(source);
+        let yaml = extract_all_yaml(&parse, true);
+        assert!(yaml.contains("SYSML-REQ-SafetyReq"), "yaml: {yaml}");
+        assert!(yaml.contains("SYSML-PART-Controller"), "yaml: {yaml}");
+        assert!(yaml.contains("sysml-part"), "yaml: {yaml}");
+    }
+
+    #[test]
+    fn extract_architecture_in_package() {
+        let source = r#"
+package Automotive {
+    part def Vehicle { }
+    part def Engine { }
+    action def StartEngine { }
+}
+"#;
+        let parse = crate::parse(source);
+        let result = extract_all(&parse, true);
+        assert_eq!(result.components.len(), 3);
     }
 }

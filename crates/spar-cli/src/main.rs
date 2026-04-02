@@ -1755,13 +1755,14 @@ fn cmd_sysml2_lower(args: &[String]) {
 fn cmd_sysml2_extract(args: &[String]) {
     let mut output_path: Option<String> = None;
     let mut files = Vec::new();
-    let mut _requirements = false;
+    let mut include_architecture = false;
 
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--requirements" => {
-                _requirements = true;
+            "--requirements" => { /* default, kept for backwards compat */ }
+            "--include-architecture" | "--arch" => {
+                include_architecture = true;
             }
             "-o" | "--output" => {
                 i += 1;
@@ -1804,7 +1805,11 @@ fn cmd_sysml2_extract(args: &[String]) {
         process::exit(1);
     }
 
-    let yaml = spar_sysml2::extract::extract_requirements(&parsed);
+    let yaml = if include_architecture {
+        spar_sysml2::extract::extract_all_yaml(&parsed, true)
+    } else {
+        spar_sysml2::extract::extract_requirements(&parsed)
+    };
 
     match output_path {
         Some(path) => {
@@ -1812,7 +1817,12 @@ fn cmd_sysml2_extract(args: &[String]) {
                 eprintln!("Cannot write {path}: {e}");
                 process::exit(1);
             });
-            eprintln!("Wrote requirements YAML to {path}");
+            let kind = if include_architecture {
+                "requirements + architecture"
+            } else {
+                "requirements"
+            };
+            eprintln!("Wrote {kind} YAML to {path}");
         }
         None => {
             print!("{yaml}");
