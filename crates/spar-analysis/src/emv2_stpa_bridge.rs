@@ -162,10 +162,7 @@ fn bridge_node(
                      a single component failure propagates upward.",
                     child_desc, description,
                 ),
-                tags: vec![
-                    "emv2-generated".to_string(),
-                    "propagation-path".to_string(),
-                ],
+                tags: vec!["emv2-generated".to_string(), "propagation-path".to_string()],
                 links: vec![StpaLink {
                     link_type: "leads-to-hazard".to_string(),
                     targets: vec![parent_hazard_id.to_string()],
@@ -247,7 +244,10 @@ pub fn generate_stpa_yaml(result: &BridgeResult) -> String {
     for artifact in &result.artifacts {
         out.push_str(&format!("\n  - id: {}\n", artifact.id));
         out.push_str(&format!("    type: {}\n", artifact.artifact_type));
-        out.push_str(&format!("    title: \"{}\"\n", yaml_escape(&artifact.title)));
+        out.push_str(&format!(
+            "    title: \"{}\"\n",
+            yaml_escape(&artifact.title)
+        ));
         out.push_str("    description: >\n");
         for line in artifact.description.lines() {
             out.push_str(&format!("      {}\n", line));
@@ -327,8 +327,7 @@ fn sanitize_title(s: &str) -> String {
     let mut chars = trimmed.chars();
     match chars.next() {
         Some(c) => {
-            let title: String =
-                c.to_uppercase().chain(chars).collect();
+            let title: String = c.to_uppercase().chain(chars).collect();
             if title.len() > 120 {
                 format!("{}...", &title[..117])
             } else {
@@ -410,10 +409,7 @@ impl Analysis for Emv2StpaBridgeAnalysis {
 /// Build a fault tree from the component hierarchy.
 /// Reuses the structural approach from `emv2_analysis`:
 /// composite components are OR gates, leaves are basic events.
-fn build_hierarchy_fault_tree(
-    instance: &SystemInstance,
-    idx: ComponentInstanceIdx,
-) -> FaultTree {
+fn build_hierarchy_fault_tree(instance: &SystemInstance, idx: ComponentInstanceIdx) -> FaultTree {
     let path = dotted_path(instance, idx);
     let node = build_subtree(instance, idx);
 
@@ -555,7 +551,12 @@ mod tests {
         let result = bridge_fault_tree_to_stpa(&tree);
 
         // Should produce: 1 hazard (top event) + 1 sub-hazard (basic event)
-        assert_eq!(result.artifacts.len(), 2, "artifacts: {:?}", result.artifacts);
+        assert_eq!(
+            result.artifacts.len(),
+            2,
+            "artifacts: {:?}",
+            result.artifacts
+        );
 
         let hazard = &result.artifacts[0];
         assert_eq!(hazard.artifact_type, "hazard");
@@ -598,7 +599,12 @@ mod tests {
             .iter()
             .filter(|a| a.artifact_type == "loss-scenario")
             .collect();
-        assert_eq!(scenarios.len(), 1, "should have 1 loss scenario: {:?}", scenarios);
+        assert_eq!(
+            scenarios.len(),
+            1,
+            "should have 1 loss scenario: {:?}",
+            scenarios
+        );
         assert!(
             scenarios[0].tags.contains(&"propagation-path".to_string()),
             "OR gate scenario should be tagged as propagation-path"
@@ -638,7 +644,12 @@ mod tests {
             .iter()
             .filter(|a| a.artifact_type == "loss-scenario")
             .collect();
-        assert_eq!(scenarios.len(), 1, "should have 1 loss scenario: {:?}", scenarios);
+        assert_eq!(
+            scenarios.len(),
+            1,
+            "should have 1 loss scenario: {:?}",
+            scenarios
+        );
         assert!(
             scenarios[0]
                 .tags
@@ -749,8 +760,14 @@ mod tests {
         assert!(yaml.contains("artifacts:"), "must have artifacts key");
         assert!(yaml.contains("id: H-EMV2-001"), "must have hazard ID");
         assert!(yaml.contains("type: hazard"), "must have hazard type");
-        assert!(yaml.contains("type: sub-hazard"), "must have sub-hazard type");
-        assert!(yaml.contains("emv2-generated"), "must have emv2-generated tag");
+        assert!(
+            yaml.contains("type: sub-hazard"),
+            "must have sub-hazard type"
+        );
+        assert!(
+            yaml.contains("emv2-generated"),
+            "must have emv2-generated tag"
+        );
         assert!(yaml.contains("title:"), "must have title field");
         assert!(yaml.contains("description:"), "must have description field");
     }
@@ -851,7 +868,12 @@ mod tests {
         let inst = b.build(root);
         let diags = Emv2StpaBridgeAnalysis.analyze(&inst);
 
-        assert_eq!(diags.len(), 1, "should have one summary diagnostic: {:?}", diags);
+        assert_eq!(
+            diags.len(),
+            1,
+            "should have one summary diagnostic: {:?}",
+            diags
+        );
         assert_eq!(diags[0].severity, Severity::Info);
         assert!(
             diags[0].message.contains("EMV2-STPA bridge"),
