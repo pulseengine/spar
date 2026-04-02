@@ -452,6 +452,7 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
     let naming_diags = spar_analysis::naming_rules::check_naming_rules(&tree);
     let category_diags = spar_analysis::category_check::check_category_rules(&tree);
 
+    let root = parse_result.syntax_node();
     for diag in naming_diags.iter().chain(category_diags.iter()) {
         let severity = match diag.severity {
             spar_analysis::Severity::Error => DiagnosticSeverity::ERROR,
@@ -459,14 +460,16 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
             spar_analysis::Severity::Info => DiagnosticSeverity::INFORMATION,
         };
 
-        // Analysis diagnostics don't have byte offsets (they use path-based
-        // locations), so we place them at the beginning of the file. In a
-        // future version we can resolve the path to an actual source range.
+        // Resolve the path-based location to a source range by searching
+        // the CST for the named element.
+        let range = resolve_path_to_range(&root, &source, &diag.path)
+            .unwrap_or_else(|| Range::new(Position::new(0, 0), Position::new(0, 0)));
+
         diagnostics.push(Diagnostic {
-            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
+            range,
             severity: Some(severity),
             source: Some(format!("spar-{}", diag.analysis)),
-            message: format!("{} (at {})", diag.message, diag.path.join("/")),
+            message: diag.message.clone(),
             ..Default::default()
         });
     }
@@ -1034,8 +1037,11 @@ fn handle_completion(state: &ServerState, params: CompletionParams) -> Option<Co
 
     let offset = position_to_offset(&source, pos)?;
 
-    // Determine context by examining the text before the cursor.
-    let context = completion_context(&source, offset);
+    // Determine context using CST ancestor walk (falls back to text heuristics
+    // when the parse tree is unavailable).
+    let parse_result = parse_file(&state.db, *file);
+    let root = parse_result.syntax_node();
+    let context = completion_context_from_cst(&root, &source, offset);
 
     let mut items = Vec::new();
 
@@ -1094,84 +1100,10 @@ enum CompletionContext {
     General,
 }
 
-fn completion_context(source: &str, offset: usize) -> CompletionContext {
-    // Get text before cursor, trimming trailing partial identifier.
-    let before = &source[..offset.min(source.len())];
-    let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
-    let trimmed = trimmed.trim_end();
-
-    if trimmed.ends_with(':') {
-        // Check if this is `::` (qualified name) vs `:` (type annotation).
-        if trimmed.ends_with("::") {
-            // Inside a qualified name -- offer classifier completions.
-            return CompletionContext::AfterColon;
-        }
-        return CompletionContext::AfterColon;
-    }
-
-    // Check for `data port` or `event data port` before cursor.
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.ends_with("event data port") {
-        return CompletionContext::AfterEventDataPort;
-    }
-    if lower.ends_with("data port") {
-        return CompletionContext::AfterDataPort;
-    }
-
-    // Check if we're after `with`.
-    if lower.ends_with("with") {
-        return CompletionContext::AfterWith;
-    }
-
-    // Check if we're in a properties section by scanning backward for `properties` keyword.
-    if is_in_section(source, offset, "properties") {
-        return CompletionContext::InPropertiesSection;
-    }
-
-    CompletionContext::General
-}
-
-/// Heuristic: check if the cursor position is within a particular section.
-///
-/// Scans backward for the section keyword and checks that we haven't
-/// exited the section (by seeing another section keyword or `end`).
-fn is_in_section(source: &str, offset: usize, section: &str) -> bool {
-    let before = &source[..offset.min(source.len())];
-    let lower = before.to_ascii_lowercase();
-
-    // Find the last occurrence of the section keyword.
-    let section_pos = match lower.rfind(section) {
-        Some(p) => p,
-        None => return false,
-    };
-
-    // Check that no other section keyword appears after it.
-    let after_section = &lower[section_pos + section.len()..];
-    let other_sections = [
-        "features",
-        "subcomponents",
-        "connections",
-        "flows",
-        "modes",
-        "calls",
-        "prototypes",
-    ];
-    for other in &other_sections {
-        if *other != section && after_section.contains(other) {
-            // Could be inside a different section now. Simple heuristic.
-            // Only return false if the other section keyword appears on its own line.
-            if let Some(pos) = after_section.rfind(other) {
-                let before_other = &after_section[..pos];
-                // Check if this looks like a section header (preceded by newline).
-                if before_other.ends_with('\n') || before_other.trim_end().is_empty() {
-                    return false;
-                }
-            }
-        }
-    }
-
-    true
-}
+// NOTE: completion_context() and is_in_section() text heuristics removed.
+// Replaced by completion_context_from_cst() which uses rowan CST ancestor
+// walking. See resolve_path_to_range() and completion_context_from_cst()
+// near the end of this file.
 
 /// Add AADL keyword completions.
 fn add_keyword_completions(items: &mut Vec<CompletionItem>) {
@@ -2948,6 +2880,244 @@ fn token_range(token: &spar_syntax::SyntaxToken) -> Range {
     )
 }
 
+// ── Diagnostic path resolution ─────────────────────────────────────
+
+/// Resolve an analysis diagnostic path (e.g., `["PkgName", "TypeName"]`) to
+/// a source `Range` by searching the CST for IDENT tokens matching the last
+/// path element within the scope of parent path elements.
+fn resolve_path_to_range(
+    root: &spar_syntax::SyntaxNode,
+    source: &str,
+    path: &[String],
+) -> Option<Range> {
+    let target_name = path.last()?;
+
+    // Walk all descendants looking for IDENT tokens matching the target name.
+    // For each match, verify that its ancestry matches the path by checking
+    // that parent IDENT tokens match earlier path elements.
+    for token in root.descendants_with_tokens() {
+        let token = match token.into_token() {
+            Some(t) => t,
+            None => continue,
+        };
+        if token.kind() != SyntaxKind::IDENT {
+            continue;
+        }
+        if !token.text().eq_ignore_ascii_case(target_name) {
+            continue;
+        }
+
+        // Check if this token is inside a definition node (COMPONENT_TYPE,
+        // COMPONENT_IMPL, AADL_PACKAGE, FEATURE_GROUP_TYPE, PROPERTY_SET).
+        let is_definition_context = token.parent().is_some_and(|parent| {
+            matches!(
+                parent.kind(),
+                SyntaxKind::COMPONENT_TYPE
+                    | SyntaxKind::COMPONENT_IMPL
+                    | SyntaxKind::AADL_PACKAGE
+                    | SyntaxKind::FEATURE_GROUP_TYPE
+            )
+        });
+
+        // For multi-segment paths, verify parent names match by walking
+        // up the ancestor chain looking for an IDENT matching the parent
+        // name (which may be inside a NAME node).
+        if path.len() >= 2 && is_definition_context {
+            let parent_name = &path[path.len() - 2];
+            let matches_parent = {
+                let mut found = false;
+                let mut ancestor = token.parent().and_then(|n| n.parent());
+                while let Some(a) = ancestor {
+                    // Check all descendant tokens of this ancestor for the
+                    // parent name. Stop at component/package boundaries to
+                    // avoid false matches in sibling definitions.
+                    for dt in a.children_with_tokens() {
+                        if let Some(t) = dt.as_token()
+                            && t.kind() == SyntaxKind::IDENT
+                                && t.text().eq_ignore_ascii_case(parent_name)
+                            {
+                                found = true;
+                                break;
+                            }
+                        // Also check inside NAME nodes (e.g., package name).
+                        if let Some(n) = dt.as_node()
+                            && n.kind() == SyntaxKind::NAME {
+                                for child in n.children_with_tokens() {
+                                    if let Some(t) = child.as_token()
+                                        && t.kind() == SyntaxKind::IDENT
+                                            && t.text().eq_ignore_ascii_case(parent_name)
+                                        {
+                                            found = true;
+                                            break;
+                                        }
+                                }
+                            }
+                        if found {
+                            break;
+                        }
+                    }
+                    if found {
+                        break;
+                    }
+                    ancestor = a.parent();
+                }
+                found
+            };
+
+            if !matches_parent {
+                continue;
+            }
+        }
+
+        // Found it — return the range of this token.
+        let start: usize = token.text_range().start().into();
+        let end: usize = token.text_range().end().into();
+        return Some(Range::new(
+            offset_to_position(source, start),
+            offset_to_position(source, end),
+        ));
+    }
+
+    None
+}
+
+// ── AST-aware completion context ──────────────────────────────────
+
+/// Determine completion context by examining the CST at the cursor position.
+///
+/// Walks up the token's ancestors to find section nodes rather than using
+/// text-based heuristics.
+fn completion_context_from_cst(
+    root: &spar_syntax::SyntaxNode,
+    source: &str,
+    offset: usize,
+) -> CompletionContext {
+    use rowan::TextSize;
+
+    // Find the token at (or just before) the cursor.
+    let text_offset = TextSize::new(offset as u32);
+    let token = root
+        .token_at_offset(text_offset)
+        .left_biased()
+        .or_else(|| {
+            // If we're at the end of the file or after whitespace, try right-biased.
+            root.token_at_offset(text_offset).right_biased()
+        });
+
+    let token = match token {
+        Some(t) => t,
+        None => return text_fallback_context(source, offset),
+    };
+
+    // Check the token itself and its immediate predecessor for context clues.
+    let prev_token = token.prev_token();
+
+    // After `:` or `::` — classifier expected.
+    if token.kind() == SyntaxKind::COLON || token.kind() == SyntaxKind::COLON_COLON {
+        return CompletionContext::AfterColon;
+    }
+    if let Some(ref prev) = prev_token
+        && (prev.kind() == SyntaxKind::COLON || prev.kind() == SyntaxKind::COLON_COLON) {
+            return CompletionContext::AfterColon;
+        }
+
+    // After `with` keyword — package names expected.
+    if token.kind() == SyntaxKind::WITH_KW {
+        return CompletionContext::AfterWith;
+    }
+    if let Some(ref prev) = prev_token
+        && prev.kind() == SyntaxKind::WITH_KW {
+            return CompletionContext::AfterWith;
+        }
+
+    // After `data port` or `event data port` — check if the token or its
+    // predecessor is PORT_KW and grandparent parsing context suggests a feature.
+    if token.kind() == SyntaxKind::PORT_KW || prev_token.as_ref().is_some_and(|t| t.kind() == SyntaxKind::PORT_KW) {
+        // Check if DATA_KW precedes PORT_KW
+        let port_tok = if token.kind() == SyntaxKind::PORT_KW {
+            &token
+        } else {
+            prev_token.as_ref().unwrap()
+        };
+        let before_port = port_tok.prev_token();
+        if let Some(ref bt) = before_port
+            && bt.kind() == SyntaxKind::DATA_KW {
+                // Check for event data port
+                let before_data = bt.prev_token();
+                if before_data.as_ref().is_some_and(|t| t.kind() == SyntaxKind::EVENT_KW) {
+                    return CompletionContext::AfterEventDataPort;
+                }
+                return CompletionContext::AfterDataPort;
+            }
+    }
+
+    // Walk up ancestors to check which section we're in.
+    // Also check previous siblings — when the cursor is on whitespace between
+    // the last property and `end`, the token may be a direct child of
+    // COMPONENT_TYPE rather than inside PROPERTY_SECTION.
+    let mut node = token.parent();
+    while let Some(n) = node {
+        match n.kind() {
+            SyntaxKind::PROPERTY_SECTION | SyntaxKind::PACKAGE_PROPERTIES => {
+                return CompletionContext::InPropertiesSection;
+            }
+            // At component boundaries, check if the previous sibling is a section.
+            SyntaxKind::COMPONENT_TYPE | SyntaxKind::COMPONENT_IMPL => {
+                // Find the last non-trivia section node before our offset.
+                let mut last_section = None;
+                for child in n.children() {
+                    let end: usize = child.text_range().end().into();
+                    if end <= offset {
+                        match child.kind() {
+                            SyntaxKind::PROPERTY_SECTION | SyntaxKind::PACKAGE_PROPERTIES => {
+                                last_section = Some(CompletionContext::InPropertiesSection);
+                            }
+                            SyntaxKind::FEATURE_SECTION
+                            | SyntaxKind::SUBCOMPONENT_SECTION
+                            | SyntaxKind::CONNECTION_SECTION
+                            | SyntaxKind::FLOW_SPEC_SECTION
+                            | SyntaxKind::FLOW_IMPL_SECTION
+                            | SyntaxKind::MODE_SECTION => {
+                                last_section = Some(CompletionContext::General);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if let Some(ctx) = last_section {
+                    return ctx;
+                }
+                break;
+            }
+            SyntaxKind::AADL_PACKAGE | SyntaxKind::SOURCE_FILE => {
+                break;
+            }
+            _ => {}
+        }
+        node = n.parent();
+    }
+
+    CompletionContext::General
+}
+
+/// Fallback to simple text heuristics when CST is unavailable or empty.
+fn text_fallback_context(source: &str, offset: usize) -> CompletionContext {
+    let before = &source[..offset.min(source.len())];
+    let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
+    let trimmed = trimmed.trim_end();
+
+    if trimmed.ends_with(':') {
+        return CompletionContext::AfterColon;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with("with") {
+        return CompletionContext::AfterWith;
+    }
+
+    CompletionContext::General
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3343,5 +3513,120 @@ mod tests {
                 .contains_key(&CiName::from_str("systype2")),
             "PkgB scope should contain SysType2"
         );
+    }
+
+    // ── Completion context (CST-aware) tests ───────────────────────
+
+    fn parse_and_context(source: &str, cursor_marker: &str) -> CompletionContext {
+        let offset = source.find(cursor_marker).expect("cursor marker not found");
+        let clean = source.replace(cursor_marker, "");
+        let parse = spar_syntax::parse(&clean);
+        let root = parse.syntax_node();
+        completion_context_from_cst(&root, &clean, offset)
+    }
+
+    #[test]
+    fn context_in_properties_section() {
+        // Include a partial property so the parser creates a PROPERTY_SECTION node.
+        let src = "package Pkg\npublic\n  system T\n    properties\n      Period => 10 ms;\n      «»\n  end T;\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            matches!(ctx, CompletionContext::InPropertiesSection),
+            "expected InPropertiesSection, got {:?}",
+            ctx
+        );
+    }
+
+    #[test]
+    fn context_in_features_section_is_general() {
+        // Inside features, not properties — should be General
+        let src = "package Pkg\npublic\n  system T\n    features\n      «»\n  end T;\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            matches!(ctx, CompletionContext::General),
+            "expected General in features section, got {:?}",
+            ctx
+        );
+    }
+
+    #[test]
+    fn context_after_colon() {
+        let src = "package Pkg\npublic\n  system T\n    subcomponents\n      sub1 : «»\n  end T;\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            matches!(ctx, CompletionContext::AfterColon),
+            "expected AfterColon, got {:?}",
+            ctx
+        );
+    }
+
+    #[test]
+    fn context_after_with_keyword() {
+        let src = "package Pkg\npublic\n  with «»\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            matches!(ctx, CompletionContext::AfterWith),
+            "expected AfterWith, got {:?}",
+            ctx
+        );
+    }
+
+    #[test]
+    fn context_properties_keyword_in_comment_not_detected() {
+        // "properties" in a comment should NOT trigger InPropertiesSection
+        let src = "package Pkg\npublic\n  system T\n    features\n      -- properties are here\n      «»\n  end T;\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            !matches!(ctx, CompletionContext::InPropertiesSection),
+            "properties in comment should not trigger InPropertiesSection, got {:?}",
+            ctx
+        );
+    }
+
+    #[test]
+    fn context_general_at_top_level() {
+        let src = "package Pkg\npublic\n  «»\nend Pkg;\n";
+        let ctx = parse_and_context(src, "«»");
+        assert!(
+            matches!(ctx, CompletionContext::General),
+            "expected General at top level, got {:?}",
+            ctx
+        );
+    }
+
+    // ── Diagnostic path resolution tests ───────────────────────────
+
+    #[test]
+    fn resolve_path_finds_component_type() {
+        let src = "package Pkg\npublic\n  system MyType\n  end MyType;\nend Pkg;\n";
+        let parse = spar_syntax::parse(src);
+        let root = parse.syntax_node();
+        let range = resolve_path_to_range(&root, src, &["Pkg".into(), "MyType".into()]);
+        assert!(range.is_some(), "should find MyType in CST");
+        let r = range.unwrap();
+        // MyType should not be at (0,0)
+        assert!(
+            r.start.line > 0 || r.start.character > 0,
+            "resolved range should not be (0,0): {:?}",
+            r
+        );
+    }
+
+    #[test]
+    fn resolve_path_returns_none_for_missing() {
+        let src = "package Pkg\npublic\nend Pkg;\n";
+        let parse = spar_syntax::parse(src);
+        let root = parse.syntax_node();
+        let range = resolve_path_to_range(&root, src, &["Pkg".into(), "NoSuchType".into()]);
+        assert!(range.is_none(), "should not find missing type");
+    }
+
+    #[test]
+    fn resolve_single_path_element() {
+        let src = "package Pkg\npublic\nend Pkg;\n";
+        let parse = spar_syntax::parse(src);
+        let root = parse.syntax_node();
+        let range = resolve_path_to_range(&root, src, &["Pkg".into()]);
+        assert!(range.is_some(), "should find package name");
     }
 }
