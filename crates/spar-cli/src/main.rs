@@ -39,6 +39,7 @@ fn main() {
         "codegen" => cmd_codegen(&args[2..]),
         "sysml2" => cmd_sysml2(&args[2..]),
         "extract" => cmd_sysml2_extract(&args[2..]),
+        "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
         other => {
             eprintln!("Unknown command: {other}");
@@ -1830,6 +1831,78 @@ fn cmd_sysml2_extract(args: &[String]) {
     }
 }
 
+fn cmd_sysml2_generate(args: &[String]) {
+    let mut output_path: Option<String> = None;
+    let mut files = Vec::new();
+    let mut from_rivet = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--from-rivet" => {
+                from_rivet = true;
+            }
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output_path = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires a value");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    if !from_rivet {
+        eprintln!("Usage: spar sysml2 generate --from-rivet <rivet-yaml-file> [-o output.sysml]");
+        process::exit(1);
+    }
+
+    if files.is_empty() {
+        eprintln!("Missing rivet YAML file argument");
+        process::exit(1);
+    }
+
+    // Read and parse rivet YAML
+    let mut all_yaml = String::new();
+    for file_path in &files {
+        let source = read_file(file_path);
+        all_yaml.push_str(&source);
+        all_yaml.push('\n');
+    }
+
+    let artifacts = spar_sysml2::generate::parse_rivet_yaml(&all_yaml);
+    if artifacts.is_empty() {
+        eprintln!("No artifacts found in rivet YAML");
+        process::exit(1);
+    }
+
+    let sysml = spar_sysml2::generate::generate_sysml2(&artifacts);
+
+    match output_path {
+        Some(path) => {
+            fs::write(&path, &sysml).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!(
+                "Generated SysML v2 from {} artifacts → {path}",
+                artifacts.len()
+            );
+        }
+        None => {
+            print!("{sysml}");
+        }
+    }
+}
+
 fn cmd_sysml2(args: &[String]) {
     if args.is_empty() {
         eprintln!("Usage: spar sysml2 <subcommand> [options] <file>");
@@ -1838,6 +1911,7 @@ fn cmd_sysml2(args: &[String]) {
         eprintln!("  parse    Parse a SysML v2 file and show the syntax tree");
         eprintln!("  lower    Lower SysML v2 to AADL");
         eprintln!("  extract  Extract requirements to rivet YAML");
+        eprintln!("  generate Generate SysML v2 from rivet YAML (--from-rivet)");
         process::exit(1);
     }
 
@@ -1845,6 +1919,7 @@ fn cmd_sysml2(args: &[String]) {
         "parse" => cmd_sysml2_parse(&args[1..]),
         "lower" => cmd_sysml2_lower(&args[1..]),
         "extract" => cmd_sysml2_extract(&args[1..]),
+        "generate" => cmd_sysml2_generate(&args[1..]),
         other => {
             eprintln!("Unknown sysml2 subcommand: {other}");
             process::exit(1);

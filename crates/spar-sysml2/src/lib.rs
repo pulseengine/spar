@@ -13,6 +13,7 @@
 
 pub mod event;
 pub mod extract;
+pub mod generate;
 pub mod grammar;
 pub mod language;
 pub mod lexer;
