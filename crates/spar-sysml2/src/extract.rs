@@ -194,6 +194,23 @@ pub fn extract_all_yaml(parse: &crate::Parse, include_architecture: bool) -> Str
             "    tags: [sysml2, extracted, {}]\n",
             comp.kind.tag()
         ));
+
+        // Write connections as traces-to links
+        let conn_links: Vec<&ExtractedConnection> = result
+            .connections
+            .iter()
+            .filter(|c| c.source.eq_ignore_ascii_case(&comp.title))
+            .collect();
+        if !conn_links.is_empty() {
+            yaml.push_str("    links:\n");
+            for conn in conn_links {
+                yaml.push_str("      - type: traces-to\n");
+                yaml.push_str(&format!(
+                    "        target: {}\n",
+                    yaml_escape_str(&conn.target)
+                ));
+            }
+        }
     }
 
     yaml
@@ -242,8 +259,15 @@ fn collect_architecture(
 /// Extract a component from PART_DEF, ACTION_DEF, STATE_DEF, or CONNECTION_DEF.
 fn extract_component_node(node: &SyntaxNode, kind: ComponentKind) -> Option<ExtractedComponent> {
     let name = extract_name(node)?;
-    let description =
-        extract_doc_comment(node).unwrap_or_else(|| format!("SysML v2 {} definition", kind.tag()));
+    let description = extract_doc_comment(node).unwrap_or_else(|| {
+        let label = match kind {
+            ComponentKind::Part => "part",
+            ComponentKind::Action => "action",
+            ComponentKind::State => "state",
+            ComponentKind::Connection => "connection",
+        };
+        format!("SysML v2 {label} definition")
+    });
 
     // Collect child part usages and port usages
     let mut children = Vec::new();
@@ -431,7 +455,12 @@ fn extract_requirement_node(node: &SyntaxNode) -> Option<ExtractedRequirement> {
     let description =
         extract_doc_comment(node).unwrap_or_else(|| "Extracted from SysML v2 model".to_string());
 
-    let id = format!("SYSML-REQ-{name}");
+    // Qualify ID with enclosing package name to prevent duplicates
+    // across packages (e.g., package A { req R } package B { req R }).
+    let pkg_prefix = find_enclosing_package(node)
+        .map(|p| format!("{p}-"))
+        .unwrap_or_default();
+    let id = format!("SYSML-REQ-{pkg_prefix}{name}");
 
     Some(ExtractedRequirement {
         id,
@@ -459,6 +488,18 @@ fn extract_relationship(node: &SyntaxNode) -> Option<(String, String)> {
     } else {
         None
     }
+}
+
+/// Walk up ancestors to find the enclosing PACKAGE node's name.
+fn find_enclosing_package(node: &SyntaxNode) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.kind() == SyntaxKind::PACKAGE {
+            return extract_name(&n);
+        }
+        current = n.parent();
+    }
+    None
 }
 
 /// Extract the name from a requirement node.
