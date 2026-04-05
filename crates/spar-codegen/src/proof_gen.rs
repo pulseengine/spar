@@ -53,6 +53,11 @@ pub fn generate_lean4_proof(
         thread_data.push((t_name, period, deadline, wcet));
     }
 
+    // Sort by period ascending (rate-monotonic: shorter period = higher priority).
+    // The Lean4 proof treats threads with index < i as higher-priority, so the
+    // ordering must match rate-monotonic assignment.
+    thread_data.sort_by_key(|(_, period, _, _)| *period);
+
     // Generate namespace
     lean.push_str(&format!("namespace {}\n\n", capitalize(&proc_name)));
 
@@ -123,6 +128,20 @@ pub fn generate_kani_harness(
         comp.package, comp.name
     ));
     code.push_str("//! DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
+
+    // Emit warnings when defaults are used — the harness may trivially pass
+    if period.is_none() {
+        code.push_str("// WARNING: Period defaulted to 10ms — verify against actual system\n");
+    }
+    if deadline.is_none() {
+        code.push_str("// WARNING: Deadline defaulted to period — verify against actual system\n");
+    }
+    if wcet.is_none() {
+        code.push_str("// WARNING: WCET defaulted to 1ms — verify against actual system\n");
+    }
+    if period.is_none() || deadline.is_none() || wcet.is_none() {
+        code.push('\n');
+    }
 
     // Constants
     code.push_str(&format!("/// Period: {}\n", format_time_ps(period_ps)));
@@ -376,6 +395,124 @@ end TestPkg;
             assert!(
                 file.content.contains("verify_") && file.content.contains("_utilization_bound"),
                 "Kani harness must include utilization bound check"
+            );
+        }
+    }
+
+    #[test]
+    fn lean4_proof_sorted_by_period_rate_monotonic() {
+        let inst = build_test_instance();
+        let proc_idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Processor)
+            .map(|(idx, _)| idx);
+
+        if let Some(idx) = proc_idx {
+            let file = generate_lean4_proof(&inst, idx);
+            // ctrl has period 10ms, sensor has period 20ms.
+            // Rate-monotonic ordering: ctrl (10ms) should appear before
+            // sensor (20ms). The first theorem must be for the
+            // shorter-period thread.
+            let ctrl_pos = file.content.find("ctrl_meets_deadline");
+            let sensor_pos = file.content.find("sensor_meets_deadline");
+            assert!(
+                ctrl_pos.is_some() && sensor_pos.is_some(),
+                "Both theorems must exist in generated proof"
+            );
+            assert!(
+                ctrl_pos.unwrap() < sensor_pos.unwrap(),
+                "ctrl (10ms) must appear before sensor (20ms) in rate-monotonic order"
+            );
+
+            // sensor's higher-priority set should include ctrl's
+            // period and WCET values.
+            let sensor_section_start = sensor_pos.unwrap();
+            let sensor_section = &file.content[sensor_section_start..];
+            assert!(
+                sensor_section.contains("10000000000"),
+                "sensor's hp set must include ctrl's period (10ms in ps)"
+            );
+        }
+    }
+
+    #[test]
+    fn kani_harness_warns_on_default_values() {
+        // Build an instance with a thread that has NO timing properties,
+        // so all defaults are used.
+        let aadl = r#"
+package DefaultPkg
+public
+    thread BareThread
+    end BareThread;
+
+    thread implementation BareThread.Impl
+    end BareThread.Impl;
+
+    process Proc
+    end Proc;
+
+    process implementation Proc.Impl
+        subcomponents
+            bare: thread BareThread.Impl;
+    end Proc.Impl;
+
+    system Sys
+    end Sys;
+
+    system implementation Sys.Impl
+        subcomponents
+            p: process Proc.Impl;
+    end Sys.Impl;
+end DefaultPkg;
+"#;
+
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "default.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("DefaultPkg"),
+            &Name::new("Sys"),
+            &Name::new("Impl"),
+        );
+
+        let thread_idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Thread)
+            .map(|(idx, _)| idx);
+
+        if let Some(idx) = thread_idx {
+            let file = generate_kani_harness(&inst, idx);
+            assert!(
+                file.content.contains("WARNING: Period defaulted"),
+                "Kani harness must warn when period is defaulted"
+            );
+            assert!(
+                file.content.contains("WARNING: Deadline defaulted"),
+                "Kani harness must warn when deadline is defaulted"
+            );
+            assert!(
+                file.content.contains("WARNING: WCET defaulted"),
+                "Kani harness must warn when WCET is defaulted"
+            );
+        }
+    }
+
+    #[test]
+    fn kani_harness_no_warnings_with_explicit_timing() {
+        // The standard test instance has explicit timing properties
+        let inst = build_test_instance();
+        let thread_idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Thread)
+            .map(|(idx, _)| idx);
+
+        if let Some(idx) = thread_idx {
+            let file = generate_kani_harness(&inst, idx);
+            assert!(
+                !file.content.contains("WARNING:"),
+                "Kani harness must not warn when timing properties are explicit"
             );
         }
     }

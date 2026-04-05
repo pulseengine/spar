@@ -47,7 +47,17 @@ impl PropertyMap {
     ///
     /// If `is_append` is true, the value is appended to any existing values.
     /// Otherwise, all existing values for that key are replaced.
+    ///
+    /// Properties whose value is empty (or whitespace-only) are silently
+    /// skipped so that downstream analysis passes do not have to guard
+    /// against blank strings.
     pub fn add(&mut self, prop: PropertyValue) {
+        let value = prop.value.trim().to_string();
+        if value.is_empty() {
+            return; // Skip empty property values
+        }
+        let prop = PropertyValue { value, ..prop };
+
         let set_key = match &prop.name.property_set {
             Some(ps) => CiName::new(ps),
             None => CiName::from_str(""),
@@ -180,5 +190,59 @@ impl PropertyMap {
             });
         }
         map
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::name::PropertyRef;
+
+    fn make_prop(set: Option<&str>, name: &str, value: &str, is_append: bool) -> PropertyValue {
+        PropertyValue {
+            name: PropertyRef {
+                property_set: set.map(|s| s.into()),
+                property_name: name.into(),
+            },
+            value: value.to_string(),
+            is_append,
+        }
+    }
+
+    #[test]
+    fn add_skips_empty_value() {
+        let mut map = PropertyMap::new();
+        map.add(make_prop(None, "Period", "", false));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn add_skips_whitespace_only_value() {
+        let mut map = PropertyMap::new();
+        map.add(make_prop(Some("Timing"), "Period", "   ", false));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn add_trims_whitespace() {
+        let mut map = PropertyMap::new();
+        map.add(make_prop(Some("Timing"), "Period", "  10 ms  ", false));
+        assert_eq!(map.get("Timing", "Period"), Some("10 ms"));
+    }
+
+    #[test]
+    fn add_skips_empty_append() {
+        let mut map = PropertyMap::new();
+        map.add(make_prop(None, "Ports", "p1", false));
+        map.add(make_prop(None, "Ports", "", true));
+        assert_eq!(map.get_all("", "Ports"), vec!["p1"]);
+    }
+
+    #[test]
+    fn add_normal_value_works() {
+        let mut map = PropertyMap::new();
+        map.add(make_prop(Some("Timing"), "Period", "10 ms", false));
+        assert_eq!(map.get("Timing", "Period"), Some("10 ms"));
+        assert_eq!(map.len(), 1);
     }
 }

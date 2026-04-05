@@ -271,7 +271,14 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     };
 
     // Check for specialization (extends)
+    // NOTE: known limitation — specialization cycles (e.g., `A specializes A`)
+    // are not detected here.  A full cycle check would require a post-lowering
+    // graph walk across all ComponentTypeItems; for now the AADL backend will
+    // emit the `extends` clause as-is and downstream validation should catch it.
     let extends = extract_specialization(node);
+
+    // Guard against trivial self-specialization (A specializes A).
+    let extends = extends.filter(|r| r.type_name.as_str() != name.as_str());
 
     // Collect features from port usages inside the part def body
     let mut features = Vec::new();

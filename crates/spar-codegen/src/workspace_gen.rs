@@ -8,6 +8,23 @@
 
 use crate::GeneratedFile;
 
+/// Sanitize a name for safe use as a path component.
+///
+/// Strips any characters that are not alphanumeric, `_`, or `-`.
+/// This prevents path traversal attacks (e.g., `../` in a process name)
+/// and ensures names are safe for use in file paths.
+fn sanitize_path_component(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    if s.is_empty() {
+        "unnamed".to_string()
+    } else {
+        s
+    }
+}
+
 /// Generate all workspace files.
 ///
 /// Returns a list of generated files including:
@@ -44,7 +61,8 @@ fn generate_workspace_cargo_toml(_root_name: &str, process_names: &[String]) -> 
     toml.push_str("members = [\n");
 
     for name in process_names {
-        toml.push_str(&format!("    \"crates/{name}\",\n"));
+        let safe = sanitize_path_component(name);
+        toml.push_str(&format!("    \"crates/{safe}\",\n"));
     }
 
     toml.push_str("]\n\n");
@@ -60,7 +78,8 @@ fn generate_workspace_cargo_toml(_root_name: &str, process_names: &[String]) -> 
     toml.push_str("toml = \"0.8\"\n");
 
     for name in process_names {
-        toml.push_str(&format!("{name} = {{ path = \"crates/{name}\" }}\n"));
+        let safe = sanitize_path_component(name);
+        toml.push_str(&format!("{safe} = {{ path = \"crates/{safe}\" }}\n"));
     }
 
     GeneratedFile {
@@ -97,13 +116,14 @@ fn generate_workspace_build_bazel(root_name: &str) -> GeneratedFile {
 }
 
 fn generate_crate_cargo_toml(name: &str) -> GeneratedFile {
+    let safe = sanitize_path_component(name);
     let mut toml = String::new();
 
-    toml.push_str(&format!("# Generated crate for AADL process: {name}\n"));
+    toml.push_str(&format!("# Generated crate for AADL process: {safe}\n"));
     toml.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     toml.push_str("[package]\n");
-    toml.push_str(&format!("name = \"{name}\"\n"));
+    toml.push_str(&format!("name = \"{safe}\"\n"));
     toml.push_str("version.workspace = true\n");
     toml.push_str("edition.workspace = true\n\n");
 
@@ -118,15 +138,16 @@ fn generate_crate_cargo_toml(name: &str) -> GeneratedFile {
     toml.push_str("[dev-dependencies]\n");
 
     GeneratedFile {
-        path: format!("crates/{name}/Cargo.toml"),
+        path: format!("crates/{safe}/Cargo.toml"),
         content: toml,
     }
 }
 
 fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
+    let safe = sanitize_path_component(name);
     let mut bazel = String::new();
 
-    bazel.push_str(&format!("# Generated BUILD.bazel for process: {name}\n"));
+    bazel.push_str(&format!("# Generated BUILD.bazel for process: {safe}\n"));
     bazel.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     bazel.push_str("load(\"@rules_rust//rust:defs.bzl\", \"rust_library\", \"rust_test\")\n");
@@ -136,7 +157,7 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
 
     // rust_library target
     bazel.push_str("rust_library(\n");
-    bazel.push_str(&format!("    name = \"{name}\",\n"));
+    bazel.push_str(&format!("    name = \"{safe}\",\n"));
     bazel.push_str("    srcs = glob([\"src/**/*.rs\"]),\n");
     bazel.push_str("    deps = [\n");
     bazel.push_str("        \"@crates//:wit-bindgen\",\n");
@@ -147,36 +168,37 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
 
     // wasm_component target
     bazel.push_str("wasm_component(\n");
-    bazel.push_str(&format!("    name = \"{name}_component\",\n"));
-    bazel.push_str(&format!("    lib = \":{name}\",\n"));
-    bazel.push_str(&format!("    wit = \"//wit:{name}.wit\",\n"));
+    bazel.push_str(&format!("    name = \"{safe}_component\",\n"));
+    bazel.push_str(&format!("    lib = \":{safe}\",\n"));
+    bazel.push_str(&format!("    wit = \"//wit:{safe}.wit\",\n"));
     bazel.push_str("    target = \"wasm32-wasip2\",\n");
     bazel.push_str(")\n\n");
 
     // rust_test target
     bazel.push_str("rust_test(\n");
-    bazel.push_str(&format!("    name = \"{name}_test\",\n"));
-    bazel.push_str(&format!("    crate = \":{name}\",\n"));
+    bazel.push_str(&format!("    name = \"{safe}_test\",\n"));
+    bazel.push_str(&format!("    crate = \":{safe}\",\n"));
     bazel.push_str(")\n");
 
     GeneratedFile {
-        path: format!("crates/{name}/BUILD.bazel"),
+        path: format!("crates/{safe}/BUILD.bazel"),
         content: bazel,
     }
 }
 
 fn generate_crate_lib_rs(name: &str) -> GeneratedFile {
+    let safe = sanitize_path_component(name);
     let mut code = String::new();
 
     code.push_str(&format!(
-        "//! Generated component crate for AADL process: {name}\n"
+        "//! Generated component crate for AADL process: {safe}\n"
     ));
     code.push_str("//! DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
     code.push_str("// Component modules will be generated here by spar codegen.\n");
     code.push_str("// Each thread becomes a submodule with port types and dispatch trait.\n");
 
     GeneratedFile {
-        path: format!("crates/{name}/src/lib.rs"),
+        path: format!("crates/{safe}/src/lib.rs"),
         content: code,
     }
 }
@@ -337,5 +359,58 @@ mod tests {
         // Should still have workspace Cargo.toml and BUILD.bazel
         assert!(files.iter().any(|f| f.path == "Cargo.toml"));
         assert!(files.iter().any(|f| f.path == "BUILD.bazel"));
+    }
+
+    #[test]
+    fn sanitize_path_component_strips_traversal() {
+        assert_eq!(sanitize_path_component("../etc/passwd"), "etcpasswd");
+        assert_eq!(sanitize_path_component(".."), "unnamed");
+        assert_eq!(sanitize_path_component("foo/../bar"), "foobar");
+        assert_eq!(sanitize_path_component("a/b"), "ab");
+        assert_eq!(sanitize_path_component("a\\b"), "ab");
+    }
+
+    #[test]
+    fn sanitize_path_component_preserves_safe_chars() {
+        assert_eq!(sanitize_path_component("controller"), "controller");
+        assert_eq!(sanitize_path_component("my-process"), "my-process");
+        assert_eq!(sanitize_path_component("my_process"), "my_process");
+        assert_eq!(sanitize_path_component("ctrl123"), "ctrl123");
+    }
+
+    #[test]
+    fn sanitize_path_component_empty_input() {
+        assert_eq!(sanitize_path_component(""), "unnamed");
+        assert_eq!(sanitize_path_component("..."), "unnamed");
+        assert_eq!(sanitize_path_component("///"), "unnamed");
+    }
+
+    #[test]
+    fn path_traversal_name_produces_safe_paths() {
+        let files = generate_workspace("test_system", &["../../../etc/passwd".to_string()]);
+
+        // No generated file path should contain ".." or "/"
+        // (other than the expected directory separators in the template)
+        for file in &files {
+            assert!(
+                !file.path.contains(".."),
+                "Path must not contain '..': {}",
+                file.path
+            );
+            // The original slash-separated traversal path must not survive
+            assert!(
+                !file.path.contains("etc/passwd"),
+                "Raw traversal path must not appear: {}",
+                file.path
+            );
+        }
+
+        // The sanitized name "etcpasswd" (dots and slashes stripped) should be used
+        assert!(
+            files
+                .iter()
+                .any(|f| f.path == "crates/etcpasswd/Cargo.toml"),
+            "Sanitized crate path expected"
+        );
     }
 }

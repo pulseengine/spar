@@ -13,6 +13,18 @@ use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident};
 
+/// Escape a string for safe interpolation into a YAML double-quoted string value.
+///
+/// Handles backslashes, double quotes, and control characters that would
+/// otherwise allow injection of arbitrary YAML structure.
+fn yaml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 /// Generate a design document and verification record for a process instance.
 ///
 /// Returns a tuple of (design_doc, verification_yaml).
@@ -48,7 +60,8 @@ fn generate_design_markdown(
     md.push_str("type: design-decision\n");
     md.push_str(&format!(
         "title: \"Generated: {}::{}\"\n",
-        comp.package, comp.name
+        yaml_escape(comp.package.as_str()),
+        yaml_escape(comp.name.as_str())
     ));
     md.push_str("status: generated\n");
     md.push_str("links:\n");
@@ -180,7 +193,7 @@ fn generate_verification_yaml(
     yaml.push_str("  type: verification-execution\n");
     yaml.push_str(&format!(
         "  title: \"Codegen verification: {}\"\n",
-        comp.name
+        yaml_escape(comp.name.as_str())
     ));
     yaml.push_str("  status: executed\n");
     yaml.push_str("  tags: [generated, codegen]\n\n");
@@ -188,7 +201,10 @@ fn generate_verification_yaml(
     // Verdict: code generation succeeded
     yaml.push_str(&format!("- id: VV-GEN-{upper_name}-CODE\n"));
     yaml.push_str("  type: verification-verdict\n");
-    yaml.push_str(&format!("  title: \"Code generation: {}\"\n", comp.name));
+    yaml.push_str(&format!(
+        "  title: \"Code generation: {}\"\n",
+        yaml_escape(comp.name.as_str())
+    ));
     yaml.push_str("  status: pass\n");
     yaml.push_str("  links:\n");
     yaml.push_str("    - type: part-of-execution\n");
@@ -202,7 +218,7 @@ fn generate_verification_yaml(
     yaml.push_str("  type: verification-verdict\n");
     yaml.push_str(&format!(
         "  title: \"WIT interface generated: {}\"\n",
-        comp.name
+        yaml_escape(comp.name.as_str())
     ));
     yaml.push_str("  status: pass\n");
     yaml.push_str("  links:\n");
@@ -217,7 +233,7 @@ fn generate_verification_yaml(
     yaml.push_str("  type: verification-verdict\n");
     yaml.push_str(&format!(
         "  title: \"Configuration generated: {}\"\n",
-        comp.name
+        yaml_escape(comp.name.as_str())
     ));
     yaml.push_str("  status: pass\n");
     yaml.push_str("  links:\n");
@@ -284,6 +300,17 @@ end TestPkg;
             &Name::new("Top"),
             &Name::new("Impl"),
         )
+    }
+
+    #[test]
+    fn yaml_escape_special_chars() {
+        let escaped = yaml_escape("foo\"bar\nbaz");
+        assert!(!escaped.contains('"') || escaped.contains("\\\""));
+        assert!(!escaped.contains('\n'));
+        assert_eq!(yaml_escape("a\\b"), "a\\\\b");
+        assert_eq!(yaml_escape("a\rb"), "a\\rb");
+        assert_eq!(yaml_escape("a\tb"), "a\\tb");
+        assert_eq!(yaml_escape("clean"), "clean");
     }
 
     #[test]
