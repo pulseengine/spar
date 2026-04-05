@@ -102,6 +102,33 @@ impl TestInstanceBuilder {
         idx
     }
 
+    /// Add a connection with explicit source and destination endpoints.
+    fn add_connection_with_endpoints(
+        &mut self,
+        name: &str,
+        kind: ConnectionKind,
+        is_bidirectional: bool,
+        owner: ComponentInstanceIdx,
+        src: Option<(Option<&str>, &str)>,
+        dst: Option<(Option<&str>, &str)>,
+    ) -> ConnectionInstanceIdx {
+        let make_end = |end: (Option<&str>, &str)| ConnectionEnd {
+            subcomponent: end.0.map(Name::new),
+            feature: Name::new(end.1),
+        };
+        let idx = self.connections.alloc(ConnectionInstance {
+            name: Name::new(name),
+            kind,
+            is_bidirectional,
+            owner,
+            src: src.map(make_end),
+            dst: dst.map(make_end),
+            in_modes: Vec::new(),
+        });
+        self.components[owner].connections.push(idx);
+        idx
+    }
+
     fn set_children(&mut self, parent: ComponentInstanceIdx, children: Vec<ComponentInstanceIdx>) {
         self.components[parent].children = children;
     }
@@ -206,16 +233,22 @@ fn connectivity_valid_model_with_connections() {
     );
     b.add_feature("input", FeatureKind::DataPort, Some(Direction::In), child_b);
 
-    // root has a connection between them
-    b.add_connection("c1", ConnectionKind::Port, false, root);
+    // root has a connection between sensor.reading -> controller.input
+    b.add_connection_with_endpoints(
+        "c1",
+        ConnectionKind::Port,
+        false,
+        root,
+        Some((Some("sensor"), "reading")),
+        Some((Some("controller"), "input")),
+    );
     b.set_children(root, vec![child_a, child_b]);
 
     let instance = b.build(root);
     let analysis = ConnectivityAnalysis;
     let diags = analysis.analyze(&instance);
 
-    // Children's ports are "covered" because parent has connections.
-    // No unconnected port warnings expected.
+    // Both ports are explicitly connected — no warnings expected.
     let port_warnings: Vec<_> = diags
         .iter()
         .filter(|d| {
@@ -1134,9 +1167,33 @@ fn runner_valid_model_minimal_diagnostics() {
         thread,
     );
 
-    // Add connections.
-    b.add_connection("c1", ConnectionKind::Port, false, root);
-    b.add_connection("c2", ConnectionKind::Port, false, proc);
+    // Add connections with proper endpoints.
+    // root: cmd_in -> proc.data_in, proc.data_out -> status_out
+    b.add_connection_with_endpoints(
+        "c1",
+        ConnectionKind::Port,
+        false,
+        root,
+        Some((None, "cmd_in")),
+        Some((Some("proc"), "data_in")),
+    );
+    b.add_connection_with_endpoints(
+        "c2",
+        ConnectionKind::Port,
+        false,
+        root,
+        Some((Some("proc"), "data_out")),
+        Some((None, "status_out")),
+    );
+    // proc: data_in -> worker.work_in
+    b.add_connection_with_endpoints(
+        "c3",
+        ConnectionKind::Port,
+        false,
+        proc,
+        Some((None, "data_in")),
+        Some((Some("worker"), "work_in")),
+    );
 
     b.set_children(root, vec![proc]);
     b.set_children(proc, vec![thread]);
