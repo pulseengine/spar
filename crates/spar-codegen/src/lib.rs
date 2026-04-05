@@ -285,8 +285,21 @@ fn threads_for_processor(
             .get("Deployment_Properties", "Actual_Processor_Binding")
             .or_else(|| props.get("", "Actual_Processor_Binding"))
         {
-            // Check if binding references this processor
-            if binding.contains(proc_name) {
+            // Extract the reference target and compare the last component
+            // against the processor name (case-insensitive). Using
+            // extract_reference_target avoids substring false-positives
+            // (e.g. "CPU" matching "CPU_hot_spare").
+            if let Some(target) =
+                spar_analysis::property_accessors::extract_reference_target(binding)
+            {
+                // The target may be a qualified path like "parent.cpu"; compare
+                // just the last segment against the processor name.
+                let last_segment = target.rsplit('.').next().unwrap_or(target);
+                if last_segment.eq_ignore_ascii_case(proc_name) {
+                    bound_threads.push(idx);
+                }
+            } else if binding.eq_ignore_ascii_case(proc_name) {
+                // Fallback: bare name without reference(...) wrapper
                 bound_threads.push(idx);
             }
         }
@@ -527,6 +540,51 @@ mod tests {
             "PascalCase result length {} exceeds max {}",
             result.len(),
             MAX_IDENT_LEN,
+        );
+    }
+
+    #[test]
+    fn processor_binding_exact_match_not_substring() {
+        // Verify the extract_reference_target + last-segment comparison logic
+        // that threads_for_processor uses to avoid substring false-positives.
+        use spar_analysis::property_accessors::extract_reference_target;
+
+        let proc_name = "CPU";
+
+        // Should match: reference wraps exactly "CPU"
+        let binding = "reference(CPU)";
+        let target = extract_reference_target(binding).unwrap();
+        let last = target.rsplit('.').next().unwrap_or(target);
+        assert!(
+            last.eq_ignore_ascii_case(proc_name),
+            "reference(CPU) should match processor CPU"
+        );
+
+        // Should match: qualified path ending with "cpu"
+        let binding = "reference(Top_impl.cpu)";
+        let target = extract_reference_target(binding).unwrap();
+        let last = target.rsplit('.').next().unwrap_or(target);
+        assert!(
+            last.eq_ignore_ascii_case(proc_name),
+            "reference(Top_impl.cpu) should match processor CPU"
+        );
+
+        // Must NOT match: "CPU_hot_spare" is a different processor
+        let binding = "reference(CPU_hot_spare)";
+        let target = extract_reference_target(binding).unwrap();
+        let last = target.rsplit('.').next().unwrap_or(target);
+        assert!(
+            !last.eq_ignore_ascii_case(proc_name),
+            "reference(CPU_hot_spare) must NOT match processor CPU"
+        );
+
+        // Must NOT match: "MyCPU" is also different
+        let binding = "reference(sys.MyCPU)";
+        let target = extract_reference_target(binding).unwrap();
+        let last = target.rsplit('.').next().unwrap_or(target);
+        assert!(
+            !last.eq_ignore_ascii_case(proc_name),
+            "reference(sys.MyCPU) must NOT match processor CPU"
         );
     }
 }

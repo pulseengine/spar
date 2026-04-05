@@ -160,6 +160,11 @@ pub struct ComponentTypeItem {
     /// Whether this declaration is in the public section of its package.
     /// Defaults to `true` when the section cannot be determined.
     pub is_public: bool,
+    /// Type extension reference (`extends ParentType`).
+    ///
+    /// NOTE: Type inheritance is parsed but not yet followed during
+    /// instantiation or resolution. Properties and features from parent
+    /// types are not inherited. See COMPLIANCE.md for coverage status.
     pub extends: Option<ClassifierRef>,
     pub features: Vec<FeatureIdx>,
     pub flow_specs: Vec<FlowSpecIdx>,
@@ -180,6 +185,12 @@ pub struct ComponentImplItem {
     /// Whether this declaration is in the public section of its package.
     /// Defaults to `true` when the section cannot be determined.
     pub is_public: bool,
+    /// Type extension reference (`extends ParentImpl`).
+    ///
+    /// NOTE: Type inheritance is parsed but not yet followed during
+    /// instantiation or resolution. Properties, subcomponents, and
+    /// connections from parent implementations are not inherited.
+    /// See COMPLIANCE.md for coverage status.
     pub extends: Option<ClassifierRef>,
     pub subcomponents: Vec<SubcomponentIdx>,
     pub connections: Vec<ConnectionIdx>,
@@ -199,6 +210,11 @@ pub struct FeatureGroupTypeItem {
     /// Whether this declaration is in the public section of its package.
     /// Defaults to `true` when the section cannot be determined.
     pub is_public: bool,
+    /// Type extension reference (`extends ParentFeatureGroupType`).
+    ///
+    /// NOTE: Type inheritance is parsed but not yet followed during
+    /// instantiation or resolution. Features from parent feature group
+    /// types are not inherited. See COMPLIANCE.md for coverage status.
     pub extends: Option<ClassifierRef>,
     pub inverse_of: Option<ClassifierRef>,
     pub features: Vec<FeatureIdx>,

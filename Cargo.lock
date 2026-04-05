@@ -1052,6 +1052,7 @@ dependencies = [
  "la-arena",
  "serde",
  "serde_json",
+ "spar-analysis",
  "spar-base-db",
  "spar-hir-def",
  "toml",

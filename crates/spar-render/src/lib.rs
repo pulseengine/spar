@@ -15,6 +15,15 @@ use petgraph::graph::{EdgeIndex, NodeIndex};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, Direction, FeatureKind};
 
+/// Escape user-controlled strings for safe interpolation into SVG/HTML output.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
 /// Render an AADL system instance to SVG.
 pub fn render_instance(instance: &SystemInstance, options: &RenderOptions) -> String {
     let (graph, node_infos, edge_infos) = build_graph(instance, options);
@@ -135,15 +144,19 @@ fn build_graph(
         idx_map.insert(ci_idx, node_idx);
 
         let label = if let Some(arr_idx) = comp.array_index {
-            format!("{}[{}]", comp.name, arr_idx)
+            format!("{}[{}]", html_escape(comp.name.as_str()), arr_idx)
         } else {
-            comp.name.to_string()
+            html_escape(comp.name.as_str())
         };
 
-        let sublabel = comp
-            .impl_name
-            .as_ref()
-            .map(|impl_name| format!("{}::{}.{}", comp.package, comp.type_name, impl_name));
+        let sublabel = comp.impl_name.as_ref().map(|impl_name| {
+            format!(
+                "{}::{}.{}",
+                html_escape(comp.package.as_str()),
+                html_escape(comp.type_name.as_str()),
+                html_escape(impl_name.as_str())
+            )
+        });
 
         let parent = if ci_idx == instance.root {
             None
@@ -189,14 +202,14 @@ fn build_graph(
         };
         if src_node != dst_node {
             // Resolve port IDs from connection ends
-            let source_port = conn.src.as_ref().map(|e| e.feature.to_string());
-            let target_port = conn.dst.as_ref().map(|e| e.feature.to_string());
+            let source_port = conn.src.as_ref().map(|e| html_escape(e.feature.as_str()));
+            let target_port = conn.dst.as_ref().map(|e| html_escape(e.feature.as_str()));
 
             let edge_idx = graph.add_edge(src_node, dst_node, ());
             edge_infos.insert(
                 edge_idx,
                 EdgeInfo {
-                    label: conn.name.to_string(),
+                    label: html_escape(conn.name.as_str()),
                     source_port,
                     target_port,
                 },
@@ -229,8 +242,8 @@ fn feature_to_port(feature: &spar_hir_def::instance::FeatureInstance) -> PortInf
     };
 
     PortInfo {
-        id: feature.name.to_string(),
-        label: feature.name.to_string(),
+        id: html_escape(feature.name.as_str()),
+        label: html_escape(feature.name.as_str()),
         side,
         direction,
         port_type,
@@ -264,9 +277,18 @@ fn resolve_connection_end(
 
 fn node_id(comp: &spar_hir_def::instance::ComponentInstance, _idx: ComponentInstanceIdx) -> String {
     if let Some(arr_idx) = comp.array_index {
-        format!("AADL-{}-{}_{}", comp.package, comp.name, arr_idx)
+        format!(
+            "AADL-{}-{}_{}",
+            html_escape(comp.package.as_str()),
+            html_escape(comp.name.as_str()),
+            arr_idx
+        )
     } else {
-        format!("AADL-{}-{}", comp.package, comp.name)
+        format!(
+            "AADL-{}-{}",
+            html_escape(comp.package.as_str()),
+            html_escape(comp.name.as_str())
+        )
     }
 }
 
@@ -883,5 +905,24 @@ mod tests {
         let opts = make_svg_opts(&RenderOptions::default());
         assert_eq!(opts.type_shapes.len(), 14);
         assert!(opts.type_colors.contains_key("system"));
+    }
+
+    #[test]
+    fn html_escape_prevents_xss() {
+        let escaped = html_escape("<script>alert(1)</script>");
+        assert!(!escaped.contains('<'));
+        assert!(escaped.contains("&lt;"));
+    }
+
+    #[test]
+    fn html_escape_all_special_chars() {
+        let escaped = html_escape("a&b<c>d\"e'f");
+        assert_eq!(escaped, "a&amp;b&lt;c&gt;d&quot;e&#x27;f");
+    }
+
+    #[test]
+    fn html_escape_preserves_safe_strings() {
+        assert_eq!(html_escape("hello_world"), "hello_world");
+        assert_eq!(html_escape("Sensor.impl"), "Sensor.impl");
     }
 }

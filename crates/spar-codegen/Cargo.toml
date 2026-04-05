@@ -8,6 +8,7 @@ description = "Code generation from AADL instance models (Rust, WIT, Lean4, Kani
 
 [dependencies]
 spar-hir-def.workspace = true
+spar-analysis.workspace = true
 la-arena.workspace = true
 serde.workspace = true
 serde_json.workspace = true

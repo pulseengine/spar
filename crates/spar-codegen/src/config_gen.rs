@@ -9,6 +9,18 @@ use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident};
 
+/// Escape a string for safe interpolation into a TOML quoted string value.
+///
+/// Handles backslashes, double quotes, and control characters that would
+/// otherwise allow injection of arbitrary TOML structure.
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 /// Generate a TOML configuration file for a process instance.
 pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> GeneratedFile {
     let comp = inst.component(proc_idx);
@@ -22,9 +34,15 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
     toml.push_str("# DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
 
     toml.push_str("[process]\n");
-    toml.push_str(&format!("name = \"{}\"\n", comp.name));
-    toml.push_str(&format!("package = \"{}\"\n", comp.package));
-    toml.push_str(&format!("category = \"{}\"\n\n", comp.category));
+    toml.push_str(&format!("name = \"{}\"\n", toml_escape(comp.name.as_str())));
+    toml.push_str(&format!(
+        "package = \"{}\"\n",
+        toml_escape(comp.package.as_str())
+    ));
+    toml.push_str(&format!(
+        "category = \"{}\"\n\n",
+        toml_escape(&comp.category.to_string())
+    ));
 
     // Thread configurations
     for &child_idx in &comp.children {
@@ -35,7 +53,10 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
 
         let thread_name = sanitize_ident(child.name.as_str());
         toml.push_str("[[threads]]\n");
-        toml.push_str(&format!("name = \"{}\"\n", child.name));
+        toml.push_str(&format!(
+            "name = \"{}\"\n",
+            toml_escape(child.name.as_str())
+        ));
 
         let props = inst.properties_for(child_idx);
         let dispatch = props
@@ -43,7 +64,7 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
             .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
             .or_else(|| props.get("", "Dispatch_Protocol"))
             .unwrap_or("Periodic");
-        toml.push_str(&format!("dispatch = \"{dispatch}\"\n"));
+        toml.push_str(&format!("dispatch = \"{}\"\n", toml_escape(dispatch)));
 
         let (period, deadline, wcet) = extract_timing(inst, child_idx);
 
@@ -133,6 +154,17 @@ end TestPkg;
             &Name::new("Top"),
             &Name::new("Impl"),
         )
+    }
+
+    #[test]
+    fn toml_escape_special_chars() {
+        let escaped = toml_escape("foo\"bar\nbaz");
+        assert!(!escaped.contains('"') || escaped.contains("\\\""));
+        assert!(!escaped.contains('\n'));
+        assert_eq!(toml_escape("a\\b"), "a\\\\b");
+        assert_eq!(toml_escape("a\rb"), "a\\rb");
+        assert_eq!(toml_escape("a\tb"), "a\\tb");
+        assert_eq!(toml_escape("clean"), "clean");
     }
 
     #[test]

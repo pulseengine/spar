@@ -108,30 +108,31 @@ pub fn extract_requirements_list(parse: &crate::Parse) -> Vec<ExtractedRequireme
     let mut relationships = RelationshipCollector::default();
     collect_requirements(&root, &mut reqs, &mut relationships);
 
-    // Attach relationships to requirements
+    // Attach relationships to requirements (case-insensitive matching,
+    // since SysML names may differ in casing from requirement titles).
     for req in &mut reqs {
         for (req_name, by_name) in &relationships.satisfies {
-            if req_name == &req.title {
+            if req_name.eq_ignore_ascii_case(&req.title) {
                 req.satisfies.push((req_name.clone(), by_name.clone()));
             }
         }
         for (req_name, by_name) in &relationships.verifies {
-            if req_name == &req.title {
+            if req_name.eq_ignore_ascii_case(&req.title) {
                 req.verifies.push((req_name.clone(), by_name.clone()));
             }
         }
         for (req_name, by_name) in &relationships.refines {
-            if req_name == &req.title {
+            if req_name.eq_ignore_ascii_case(&req.title) {
                 req.refines.push((req_name.clone(), by_name.clone()));
             }
         }
         for (source, target) in &relationships.allocates {
-            if source == &req.title {
+            if source.eq_ignore_ascii_case(&req.title) {
                 req.allocates.push((source.clone(), target.clone()));
             }
         }
         for (source, from_name) in &relationships.derives {
-            if source == &req.title {
+            if source.eq_ignore_ascii_case(&req.title) {
                 req.derives.push((source.clone(), from_name.clone()));
             }
         }
@@ -181,8 +182,14 @@ pub fn extract_all_yaml(parse: &crate::Parse, include_architecture: bool) -> Str
     for comp in &result.components {
         yaml.push_str(&format!("  - id: SYSML-{}\n", comp.id));
         yaml.push_str(&format!("    type: {}\n", comp.kind.rivet_type()));
-        yaml.push_str(&format!("    title: \"{}\"\n", comp.title));
-        yaml.push_str(&format!("    description: >\n      {}\n", comp.description));
+        yaml.push_str(&format!(
+            "    title: \"{}\"\n",
+            yaml_escape_str(&comp.title)
+        ));
+        yaml.push_str(&format!(
+            "    description: >\n      {}\n",
+            yaml_escape_str(&comp.description)
+        ));
         yaml.push_str(&format!(
             "    tags: [sysml2, extracted, {}]\n",
             comp.kind.tag()
@@ -320,12 +327,24 @@ pub fn extract_requirements(parse: &crate::Parse) -> String {
     yaml
 }
 
+/// Escape a string for safe embedding in YAML double-quoted values.
+fn yaml_escape_str(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 /// Write a single requirement as YAML.
 fn write_requirement_yaml(req: &ExtractedRequirement, yaml: &mut String) {
     yaml.push_str(&format!("  - id: {}\n", req.id));
     yaml.push_str("    type: requirement\n");
-    yaml.push_str(&format!("    title: \"{}\"\n", req.title));
-    yaml.push_str(&format!("    description: >\n      {}\n", req.description));
+    yaml.push_str(&format!("    title: \"{}\"\n", yaml_escape_str(&req.title)));
+    yaml.push_str(&format!(
+        "    description: >\n      {}\n",
+        yaml_escape_str(&req.description)
+    ));
     yaml.push_str("    tags: [sysml2, extracted]\n");
 
     let has_links = !req.satisfies.is_empty()
@@ -338,23 +357,23 @@ fn write_requirement_yaml(req: &ExtractedRequirement, yaml: &mut String) {
         yaml.push_str("    links:\n");
         for (_, target) in &req.satisfies {
             yaml.push_str("      - type: satisfies\n");
-            yaml.push_str(&format!("        target: {}\n", target));
+            yaml.push_str(&format!("        target: {}\n", yaml_escape_str(target)));
         }
         for (_, target) in &req.verifies {
             yaml.push_str("      - type: verifies\n");
-            yaml.push_str(&format!("        target: {}\n", target));
+            yaml.push_str(&format!("        target: {}\n", yaml_escape_str(target)));
         }
         for (_, target) in &req.refines {
             yaml.push_str("      - type: refines\n");
-            yaml.push_str(&format!("        target: {}\n", target));
+            yaml.push_str(&format!("        target: {}\n", yaml_escape_str(target)));
         }
         for (_, target) in &req.allocates {
             yaml.push_str("      - type: allocated-to\n");
-            yaml.push_str(&format!("        target: {}\n", target));
+            yaml.push_str(&format!("        target: {}\n", yaml_escape_str(target)));
         }
         for (_, target) in &req.derives {
             yaml.push_str("      - type: derives-from\n");
-            yaml.push_str(&format!("        target: {}\n", target));
+            yaml.push_str(&format!("        target: {}\n", yaml_escape_str(target)));
         }
     }
 }
@@ -931,5 +950,70 @@ package Automotive {
         let parse = crate::parse(source);
         let result = extract_all(&parse, true);
         assert_eq!(result.components.len(), 3);
+    }
+
+    // ── YAML escaping tests ──────────────────────────────────────
+
+    #[test]
+    fn yaml_escape_str_double_quote() {
+        assert_eq!(yaml_escape_str(r#"say "hello""#), r#"say \"hello\""#);
+    }
+
+    #[test]
+    fn yaml_escape_str_backslash() {
+        assert_eq!(yaml_escape_str(r"a\b"), r"a\\b");
+    }
+
+    #[test]
+    fn yaml_escape_str_newline_tab() {
+        assert_eq!(yaml_escape_str("a\nb\tc"), r"a\nb\tc");
+    }
+
+    #[test]
+    fn yaml_escape_str_carriage_return() {
+        assert_eq!(yaml_escape_str("a\rb"), r"a\rb");
+    }
+
+    #[test]
+    fn yaml_escape_applied_in_requirement_title() {
+        // Craft a requirement whose name contains a double-quote character.
+        // We can't get the parser to emit such a name, but we can exercise
+        // write_requirement_yaml directly.
+        let req = ExtractedRequirement {
+            id: "SYSML-REQ-X".into(),
+            title: r#"Req "A""#.into(),
+            description: "desc".into(),
+            tags: vec![],
+            satisfies: vec![],
+            verifies: vec![],
+            refines: vec![],
+            allocates: vec![],
+            derives: vec![],
+        };
+        let mut yaml = String::new();
+        write_requirement_yaml(&req, &mut yaml);
+        // The title must be escaped so YAML stays valid
+        assert!(yaml.contains(r#"title: "Req \"A\"""#), "yaml: {yaml}");
+    }
+
+    // ── Case-insensitive relationship matching ───────────────────
+
+    #[test]
+    fn relationship_match_case_insensitive() {
+        let source = r#"
+requirement def latencyReq { }
+satisfy LatencyReq by controller;
+"#;
+        let parse = crate::parse(source);
+        let reqs = extract_requirements_list(&parse);
+        assert_eq!(reqs.len(), 1);
+        // Even though the satisfy uses "LatencyReq" and the def uses
+        // "latencyReq", the relationship should still attach.
+        assert_eq!(
+            reqs[0].satisfies.len(),
+            1,
+            "case-insensitive match should attach satisfy: {:?}",
+            reqs[0]
+        );
     }
 }

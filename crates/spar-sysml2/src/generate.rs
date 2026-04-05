@@ -245,19 +245,20 @@ pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
 /// Sanitize a string to a valid SysML v2 identifier.
 fn sanitize_sysml_name(name: &str) -> String {
     let mut result = String::with_capacity(name.len());
-    for (i, c) in name.chars().enumerate() {
+    for c in name.chars() {
         if c.is_alphanumeric() || c == '_' {
             result.push(c);
         } else if c == ' ' || c == '-' {
             result.push('_');
-        } else if i == 0 && c.is_ascii_digit() {
-            result.push('_');
-            result.push(c);
         }
         // Skip other characters
     }
     if result.is_empty() {
         return "Unnamed".to_string();
+    }
+    // SysML identifiers cannot start with a digit; prefix with underscore.
+    if result.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        result.insert(0, '_');
     }
     result
 }
@@ -489,5 +490,23 @@ satisfy LatencyReq by controller;
             sysml.contains("satisfy LatencyReq by controller;"),
             "sysml: {sysml}"
         );
+    }
+
+    // ── sanitize_sysml_name leading-digit tests ──────────────────
+
+    #[test]
+    fn sanitize_name_leading_digit() {
+        assert_eq!(sanitize_sysml_name("123abc"), "_123abc");
+    }
+
+    #[test]
+    fn sanitize_name_leading_digit_with_spaces() {
+        assert_eq!(sanitize_sysml_name("1st Requirement"), "_1st_Requirement");
+    }
+
+    #[test]
+    fn sanitize_name_no_leading_digit() {
+        // No underscore prefix when the first char is already valid.
+        assert_eq!(sanitize_sysml_name("abc123"), "abc123");
     }
 }

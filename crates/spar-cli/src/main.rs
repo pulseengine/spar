@@ -1608,6 +1608,12 @@ fn cmd_codegen(args: &[String]) {
     } else {
         let mut count = 0;
         for file in &result.files {
+            // Validate that the generated file path does not escape the
+            // output directory via path traversal (e.g., "../" components).
+            if !is_safe_generated_path(&file.path) {
+                eprintln!("Refusing to write file with unsafe path: {}", file.path);
+                process::exit(1);
+            }
             let full_path = format!("{}/{}", output_dir, file.path);
             // Create parent directories
             if let Some(parent) = std::path::Path::new(&full_path).parent() {
@@ -1624,6 +1630,19 @@ fn cmd_codegen(args: &[String]) {
         }
         eprintln!("Generated {count} files in {output_dir}/");
     }
+}
+
+/// Check that a generated file path is safe to write under the output directory.
+///
+/// Rejects paths that could escape the output directory:
+/// - Paths containing `..` components (directory traversal)
+/// - Absolute paths starting with `/` or `\`
+fn is_safe_generated_path(path: &str) -> bool {
+    !std::path::Path::new(path)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+        && !path.starts_with('/')
+        && !path.starts_with('\\')
 }
 
 fn parse_root_ref(s: &str) -> (String, String, String) {
