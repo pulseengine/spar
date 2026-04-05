@@ -463,7 +463,7 @@ fn lower_renames_clause(node: &SyntaxNode, tree: &mut ItemTree) -> Option<Rename
                 }
                 if parts.len() > 1 {
                     // Skip alias and category tokens, take the last part as target
-                    Some(parts.last().unwrap().clone())
+                    parts.last().cloned()
                 } else {
                     None
                 }
@@ -1101,7 +1101,7 @@ fn parse_connected_element(node: &SyntaxNode) -> Option<ConnectedElementRef> {
         _ => {
             // Last ident is the feature, preceding idents form the subcomponent path
             // For now, handle the common case of `subcomponent.feature`
-            let feature = Name::new(idents.last().unwrap());
+            let feature = Name::new(idents.last().expect("idents is non-empty in _ arm"));
             let subcomponent = Name::new(&idents[0]);
             Some(ConnectedElementRef {
                 subcomponent: Some(subcomponent),
@@ -2129,7 +2129,9 @@ fn parse_property_ref_node(node: &SyntaxNode) -> Option<PropertyRef> {
             if !idents.is_empty() {
                 Some(PropertyRef {
                     property_set: None,
-                    property_name: Name::new(idents.last().unwrap()),
+                    property_name: Name::new(
+                        idents.last().expect("idents is non-empty (checked above)"),
+                    ),
                 })
             } else {
                 None

@@ -526,8 +526,9 @@ fn handle_hover(state: &ServerState, params: lsp_types::HoverParams) -> Option<H
     let pos = params.text_document_position_params.position;
     let file = state.files.get(uri.as_str())?;
     let source = file.text(&state.db).clone();
+    let line_index = LineIndex::new(&source);
 
-    let offset = position_to_offset(&source, pos)?;
+    let offset = line_index.position_to_offset(&source, pos)?;
     let parse_result = parse_file(&state.db, *file);
     let root = parse_result.syntax_node();
 
@@ -960,7 +961,7 @@ fn handle_goto_definition(
     let pos = params.text_document_position_params.position;
     let file = state.files.get(uri.as_str())?;
     let source = file.text(&state.db).clone();
-    let offset = position_to_offset(&source, pos)?;
+    let offset = LineIndex::new(&source).position_to_offset(&source, pos)?;
 
     let parse_result = parse_file(&state.db, *file);
     let root = parse_result.syntax_node();
@@ -1053,7 +1054,7 @@ fn handle_completion(state: &ServerState, params: CompletionParams) -> Option<Co
     let file = state.files.get(uri.as_str())?;
     let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(&source, pos)?;
+    let offset = LineIndex::new(&source).position_to_offset(&source, pos)?;
 
     // Determine context using CST ancestor walk (falls back to text heuristics
     // when the parse tree is unavailable).
@@ -2553,7 +2554,7 @@ fn handle_prepare_rename(
     let file = state.files.get(uri.as_str())?;
     let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(&source, pos)?;
+    let offset = LineIndex::new(&source).position_to_offset(&source, pos)?;
     let result = parse_file(&state.db, *file);
     let root = result.syntax_node();
 
@@ -2585,7 +2586,7 @@ fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<Workspace
     let file = state.files.get(uri.as_str())?;
     let source = file.text(&state.db).clone();
 
-    let offset = position_to_offset(&source, pos)?;
+    let offset = LineIndex::new(&source).position_to_offset(&source, pos)?;
     let result = parse_file(&state.db, *file);
     let root = result.syntax_node();
 
@@ -2887,6 +2888,35 @@ impl LineIndex {
         let line_start = self.line_starts[line];
         let col = text[line_start..offset].chars().count();
         Position::new(line as u32, col as u32)
+    }
+
+    /// Convert an LSP `Position` to a byte offset. O(1) with the pre-computed table.
+    fn position_to_offset(&self, text: &str, pos: Position) -> Option<usize> {
+        let line = pos.line as usize;
+        if line >= self.line_starts.len() {
+            return Some(text.len());
+        }
+        let line_start = self.line_starts[line];
+        // Advance by character count (not byte count) to handle UTF-8.
+        let offset = text[line_start..]
+            .char_indices()
+            .nth(pos.character as usize)
+            .map(|(i, _)| line_start + i)
+            .unwrap_or_else(|| {
+                // Past end of line — clamp to line end.
+                let next_line_start = self
+                    .line_starts
+                    .get(line + 1)
+                    .copied()
+                    .unwrap_or(text.len());
+                // Don't include the newline itself.
+                if next_line_start > 0 && text.as_bytes().get(next_line_start - 1) == Some(&b'\n') {
+                    next_line_start - 1
+                } else {
+                    next_line_start
+                }
+            });
+        Some(offset)
     }
 }
 
