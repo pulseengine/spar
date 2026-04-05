@@ -94,6 +94,8 @@ pub struct GlobalScope {
     property_sets: FxHashMap<CiName, PropertySetInfo>,
     /// The underlying item trees, for looking up full item data.
     trees: Vec<std::sync::Arc<ItemTree>>,
+    /// Diagnostics collected during scope construction (e.g. duplicate packages).
+    pub diagnostics: Vec<String>,
 }
 
 impl GlobalScope {
@@ -139,7 +141,14 @@ impl GlobalScope {
                     }
                 }
 
-                scope.packages.insert(CiName::new(&pkg.name), pkg_scope);
+                let key = CiName::new(&pkg.name);
+                if scope.packages.contains_key(&key) {
+                    scope.diagnostics.push(format!(
+                        "package '{}' is defined in multiple files; only the last definition is used",
+                        pkg.name,
+                    ));
+                }
+                scope.packages.insert(key, pkg_scope);
             }
 
             // Top-level property sets (outside packages)
@@ -793,6 +802,95 @@ mod tests {
             warnings.is_empty(),
             "same-package match should not warn: {:?}",
             warnings
+        );
+    }
+
+    #[test]
+    fn duplicate_package_emits_diagnostic() {
+        // Two separate item trees each declare a package named "Foo".
+        let mut tree1 = ItemTree::default();
+        let ct1 = tree1.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Type1"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree1.packages.alloc(Package {
+            name: Name::new("Foo"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct1)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let mut tree2 = ItemTree::default();
+        let ct2 = tree2.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Type2"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree2.packages.alloc(Package {
+            name: Name::new("Foo"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct2)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree1), Arc::new(tree2)]);
+
+        assert!(
+            !scope.diagnostics.is_empty(),
+            "should emit a diagnostic for duplicate package name"
+        );
+        assert!(
+            scope.diagnostics[0].contains("Foo"),
+            "diagnostic should mention the package name: {:?}",
+            scope.diagnostics[0]
+        );
+        assert!(
+            scope.diagnostics[0].contains("multiple files"),
+            "diagnostic should mention multiple files: {:?}",
+            scope.diagnostics[0]
+        );
+    }
+
+    #[test]
+    fn no_diagnostic_for_unique_packages() {
+        let mut tree = ItemTree::default();
+        tree.packages.alloc(Package {
+            name: Name::new("Alpha"),
+            with_clauses: Vec::new(),
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("Beta"),
+            with_clauses: Vec::new(),
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+        assert!(
+            scope.diagnostics.is_empty(),
+            "no diagnostics expected for unique packages: {:?}",
+            scope.diagnostics
         );
     }
 }

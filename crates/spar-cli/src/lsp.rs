@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::notification::{
-    DidChangeTextDocument, DidChangeWatchedFiles, DidOpenTextDocument, DidSaveTextDocument,
-    Notification as LspNotification, PublishDiagnostics,
+    DidChangeTextDocument, DidChangeWatchedFiles, DidCloseTextDocument, DidOpenTextDocument,
+    DidSaveTextDocument, Notification as LspNotification, PublishDiagnostics,
 };
 use lsp_types::request::{
     CodeActionRequest, Completion, DocumentSymbolRequest, Formatting, GotoDefinition, HoverRequest,
@@ -39,10 +39,11 @@ use lsp_types::{
 };
 use salsa::Setter;
 
-use spar_base_db::{RootDatabase, SourceFile, parse_file};
+use spar_base_db::{SourceFile, parse_file};
 use spar_hir_def::ItemTree;
 use spar_hir_def::item_tree::ItemRef;
 use spar_hir_def::resolver::GlobalScope;
+use spar_hir_def::{HirDefDatabase, file_item_tree};
 use spar_syntax::SyntaxKind;
 
 // ── Public entry point ──────────────────────────────────────────────
@@ -53,7 +54,8 @@ pub fn run_lsp_server() {
 
     let (connection, io_threads) = Connection::stdio();
 
-    let server_capabilities = serde_json::to_value(server_capabilities()).unwrap();
+    let server_capabilities =
+        serde_json::to_value(server_capabilities()).expect("ServerCapabilities must serialize");
     let init_params = match connection.initialize(server_capabilities) {
         Ok(params) => params,
         Err(e) => {
@@ -62,7 +64,8 @@ pub fn run_lsp_server() {
         }
     };
 
-    let init_params: InitializeParams = serde_json::from_value(init_params).unwrap();
+    let init_params: InitializeParams =
+        serde_json::from_value(init_params).expect("InitializeParams must deserialize");
 
     // Extract workspace root from initialize params.
     #[allow(deprecated)]
@@ -81,7 +84,9 @@ pub fn run_lsp_server() {
 
     main_loop(&connection, &mut state);
 
-    io_threads.join().unwrap();
+    io_threads
+        .join()
+        .expect("LSP I/O threads must join cleanly");
     eprintln!("spar-lsp: shutdown complete");
 }
 
@@ -122,7 +127,7 @@ fn register_file_watchers(connection: &Connection) {
                     kind: Some(WatchKind::Create | WatchKind::Delete | WatchKind::Change),
                 }],
             })
-            .unwrap(),
+            .expect("file watcher options must serialize"),
         ),
     };
 
@@ -164,7 +169,7 @@ fn main_loop(connection: &Connection, state: &mut ServerState) {
 
 struct ServerState {
     /// Salsa incremental database for parsing and analysis.
-    db: RootDatabase,
+    db: HirDefDatabase,
     /// Map from URI string to salsa SourceFile input.
     files: HashMap<String, SourceFile>,
     /// Workspace root directory (if known).
@@ -178,7 +183,7 @@ struct ServerState {
 impl ServerState {
     fn new(workspace_root: Option<PathBuf>) -> Self {
         Self {
-            db: RootDatabase::default(),
+            db: HirDefDatabase::default(),
             files: HashMap::new(),
             workspace_root,
             global_scope: GlobalScope::default(),
@@ -211,11 +216,7 @@ impl ServerState {
         let trees: Vec<Arc<ItemTree>> = self
             .files
             .values()
-            .map(|file| {
-                let result = parse_file(&self.db, *file);
-                let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
-                Arc::new(tree)
-            })
+            .map(|file| file_item_tree(&self.db, *file))
             .collect();
         self.global_scope = GlobalScope::from_trees(trees);
     }
@@ -255,9 +256,7 @@ impl ServerState {
     /// Get the item tree for a file URI via salsa (parse + lower).
     fn get_item_tree(&self, uri_str: &str) -> Option<Arc<ItemTree>> {
         let file = self.files.get(uri_str)?;
-        let result = parse_file(&self.db, *file);
-        let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
-        Some(Arc::new(tree))
+        Some(file_item_tree(&self.db, *file))
     }
 }
 
@@ -291,34 +290,34 @@ fn handle_request(state: &mut ServerState, connection: &Connection, req: Request
 
     if let Some((_, params)) = cast_request::<HoverRequest>(req.clone()) {
         let result = handle_hover(state, params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<DocumentSymbolRequest>(req.clone()) {
         let result = handle_document_symbols(state, params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<GotoDefinition>(req.clone()) {
         let result = handle_goto_definition(state, params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<Completion>(req.clone()) {
         let result = handle_completion(state, params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<WorkspaceSymbolRequest>(req.clone()) {
         let result = handle_workspace_symbol(state, params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<CodeActionRequest>(req.clone()) {
         let result = handle_code_action(state, &params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<Formatting>(req.clone()) {
         let result = handle_formatting(state, &params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<PrepareRenameRequest>(req.clone()) {
         let result = handle_prepare_rename(state, &params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<Rename>(req.clone()) {
         let result = handle_rename(state, &params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else if let Some((_, params)) = cast_request::<InlayHintRequest>(req.clone()) {
         let result = handle_inlay_hints(state, &params);
-        send_ok(connection, req_id, serde_json::to_value(&result).unwrap());
+        send_result(connection, req_id, &result);
     } else {
         // Unknown request -- respond with method not found.
         let resp = Response::new_err(
@@ -326,12 +325,23 @@ fn handle_request(state: &mut ServerState, connection: &Connection, req: Request
             lsp_server::ErrorCode::MethodNotFound as i32,
             format!("unhandled method: {}", req.method),
         );
-        connection.sender.send(Message::Response(resp)).unwrap();
+        let _ = connection.sender.send(Message::Response(resp));
     }
 }
 
 fn cast_request<R: LspRequest>(req: Request) -> Option<(RequestId, R::Params)> {
     req.extract::<R::Params>(R::METHOD).ok()
+}
+
+fn send_result<T: serde::Serialize>(connection: &Connection, id: RequestId, result: &T) {
+    match serde_json::to_value(result) {
+        Ok(val) => send_ok(connection, id, val),
+        Err(e) => {
+            eprintln!("spar-lsp: serialization error: {e}");
+            let resp = Response::new_err(id, -32603, format!("internal error: {e}"));
+            let _ = connection.sender.send(Message::Response(resp));
+        }
+    }
 }
 
 fn send_ok(connection: &Connection, id: RequestId, result: serde_json::Value) {
@@ -340,7 +350,7 @@ fn send_ok(connection: &Connection, id: RequestId, result: serde_json::Value) {
         result: Some(result),
         error: None,
     };
-    connection.sender.send(Message::Response(resp)).unwrap();
+    let _ = connection.sender.send(Message::Response(resp));
 }
 
 // ── Notification handling ───────────────────────────────────────────
@@ -366,6 +376,9 @@ fn handle_notification(state: &mut ServerState, connection: &Connection, notif: 
     } else if let Some(params) = cast_notification::<DidSaveTextDocument>(&notif) {
         // Re-publish diagnostics on save.
         publish_diagnostics(state, connection, &params.text_document.uri);
+    } else if let Some(params) = cast_notification::<DidCloseTextDocument>(&notif) {
+        let uri_str = params.text_document.uri.as_str().to_string();
+        state.open_files.retain(|u| u != &uri_str);
     } else if let Some(params) = cast_notification::<DidChangeWatchedFiles>(&notif) {
         handle_watched_file_changes(state, connection, params);
     }
@@ -443,11 +456,8 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
         });
     }
 
-    // 2. Lower to item tree via salsa-cached parse result.
-    let tree = {
-        let t = spar_hir_def::item_tree::lower::lower_file(&parse_result.syntax_node());
-        Arc::new(t)
-    };
+    // 2. Lower to item tree via salsa-cached query.
+    let tree = file_item_tree(&state.db, file);
 
     let naming_diags = spar_analysis::naming_rules::check_naming_rules(&tree);
     let category_diags = spar_analysis::category_check::check_category_rules(&tree);
@@ -494,10 +504,7 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
         version: None,
     };
     let notif = lsp_server::Notification::new(PublishDiagnostics::METHOD.to_string(), params);
-    connection
-        .sender
-        .send(Message::Notification(notif))
-        .unwrap();
+    let _ = connection.sender.send(Message::Notification(notif));
 }
 
 // ── Hover ───────────────────────────────────────────────────────────
@@ -532,7 +539,7 @@ fn handle_hover(state: &ServerState, params: lsp_types::HoverParams) -> Option<H
 
     // Identifier hover: look up in the ItemTree.
     if kind == SyntaxKind::IDENT {
-        let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+        let tree = file_item_tree(&state.db, *file);
         if let Some(info) = identifier_hover_info(&tree, text) {
             return Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
@@ -733,8 +740,7 @@ fn handle_document_symbols(
 ) -> Option<DocumentSymbolResponse> {
     let uri = &params.text_document.uri;
     let file = state.files.get(uri.as_str())?;
-    let parse_result = parse_file(&state.db, *file);
-    let tree = spar_hir_def::item_tree::lower::lower_file(&parse_result.syntax_node());
+    let tree = file_item_tree(&state.db, *file);
 
     let mut symbols = Vec::new();
 
@@ -1403,8 +1409,7 @@ fn handle_workspace_symbol(
             Err(_) => continue,
         };
 
-        let result = parse_file(&state.db, *file);
-        let tree = spar_hir_def::item_tree::lower::lower_file(&result.syntax_node());
+        let tree = file_item_tree(&state.db, *file);
 
         let zero_range = Range::new(Position::new(0, 0), Position::new(0, 0));
 
@@ -2551,7 +2556,7 @@ fn handle_prepare_rename(
     let name = token.text();
 
     // Check if this identifier is a renameable symbol
-    let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+    let tree = file_item_tree(&state.db, *file);
     if find_symbol_kind(&tree, name, &state.global_scope).is_some() {
         let range = token_range(&token);
         Some(PrepareRenameResponse::Range(range))
@@ -2581,7 +2586,7 @@ fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<Workspace
     }
 
     let old_name = token.text().to_string();
-    let tree = spar_hir_def::item_tree::lower::lower_file(&root);
+    let tree = file_item_tree(&state.db, *file);
     let symbol_kind = find_symbol_kind(&tree, &old_name, &state.global_scope)?;
 
     // Find all references across all documents
@@ -2870,8 +2875,11 @@ fn hex_val(c: u8) -> Option<u8> {
 
 /// Compute an LSP Range for a rowan SyntaxToken.
 fn token_range(token: &spar_syntax::SyntaxToken) -> Range {
-    let root = token.parent().unwrap();
-    let text = root.text().to_string();
+    let mut node = token.parent().expect("token must have parent");
+    while let Some(p) = node.parent() {
+        node = p;
+    }
+    let text = node.text().to_string();
     let start: usize = token.text_range().start().into();
     let end: usize = token.text_range().end().into();
     Range::new(
@@ -3041,7 +3049,9 @@ fn completion_context_from_cst(
         let port_tok = if token.kind() == SyntaxKind::PORT_KW {
             &token
         } else {
-            prev_token.as_ref().unwrap()
+            prev_token
+                .as_ref()
+                .expect("prev_token is Some (checked by enclosing condition)")
         };
         let before_port = port_tok.prev_token();
         if let Some(ref bt) = before_port
