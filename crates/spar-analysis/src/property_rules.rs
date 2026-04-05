@@ -623,18 +623,20 @@ mod tests {
     // ── PROP-VALUE-TYPE tests ───────────────────────────────────────
 
     #[test]
-    fn empty_value_warning() {
+    fn empty_value_skipped_by_property_map() {
+        // Empty property values are now filtered by PropertyMap::add(),
+        // so they never reach the analysis pass. This test verifies the
+        // defense-at-source behavior.
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
         b.set_property(root, "", "BadProp", "");
 
         let inst = b.build(root);
-        let diags = PropertyRuleAnalysis.analyze(&inst);
-        let empty_warns: Vec<_> = diags
-            .iter()
-            .filter(|d| d.message.contains("empty value"))
-            .collect();
-        assert_eq!(empty_warns.len(), 1, "empty value should warn: {:?}", diags);
+        let props = inst.properties_for(root);
+        assert!(
+            props.get("", "BadProp").is_none(),
+            "empty values should be filtered by PropertyMap::add"
+        );
     }
 
     #[test]
