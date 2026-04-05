@@ -5,7 +5,7 @@
 
 use rustc_hash::FxHashSet;
 
-use spar_hir_def::instance::{FeatureInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, FeatureInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::Direction;
 
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -29,31 +29,14 @@ impl Analysis for ConnectivityAnalysis {
         //   Info    — feature with no direction and no connections
         let mut diags = Vec::new();
 
-        // Collect all feature indices that participate in connections.
-        // In the current instance model, connections are declared at the
-        // component level but don't carry endpoint feature indices. We
-        // use a heuristic: a feature is "connected" if there is at least
-        // one connection on the component or its parent.
-        //
-        // We gather the set of components that *own* connections.
-        let mut components_with_connections: FxHashSet<_> = FxHashSet::default();
-        for (_idx, conn) in instance.connections.iter() {
-            components_with_connections.insert(conn.owner);
-        }
+        // Build a set of (ComponentInstanceIdx, feature_name) pairs that are
+        // referenced by at least one connection. This allows per-port precision
+        // instead of the old heuristic that marked ALL ports as connected when
+        // the component had ANY connection.
+        let connected_features = collect_connected_features(instance);
 
         // For each component, check its features.
         for (comp_idx, comp) in instance.all_components() {
-            // A feature is "covered" if:
-            // - The owning component has connections, OR
-            // - The parent component has connections (connections flow between
-            //   parent and child features in AADL)
-            let owner_has_conns = components_with_connections.contains(&comp_idx);
-            let parent_has_conns = comp
-                .parent
-                .map(|p| components_with_connections.contains(&p))
-                .unwrap_or(false);
-            let has_conns = owner_has_conns || parent_has_conns;
-
             // Only check features that are ports (data, event, event data).
             for &feat_idx in &comp.features {
                 let feat = &instance.features[feat_idx];
@@ -63,14 +46,17 @@ impl Analysis for ConnectivityAnalysis {
                     continue;
                 }
 
-                if !has_conns {
+                let feat_name = feat.name.as_str();
+                let is_connected = connected_features.contains(&(comp_idx, feat_name.to_string()));
+
+                if !is_connected {
                     // Check if this feature is annotated as intentionally unconnected
                     // via the SPAR_Properties::Intentionally_Unconnected property.
-                    if is_intentionally_unconnected(instance, comp_idx, feat.name.as_str()) {
+                    if is_intentionally_unconnected(instance, comp_idx, feat_name) {
                         continue;
                     }
 
-                    // No connections at all on this component or parent.
+                    // This specific port has no connection.
                     let path = component_path(instance, comp_idx);
                     match feat.direction {
                         Some(Direction::In) | Some(Direction::InOut) => {
@@ -202,6 +188,72 @@ fn is_intentionally_unconnected(
     inner.split(',').any(|item| item.trim() == feat_lower)
 }
 
+/// Build a set of `(ComponentInstanceIdx, feature_name)` pairs for every port
+/// that is referenced by at least one connection endpoint.
+///
+/// We collect from two sources:
+/// 1. Raw `ConnectionInstance` endpoints (`src`/`dst`) — resolving the optional
+///    subcomponent name to a child `ComponentInstanceIdx`.
+/// 2. `SemanticConnection` ultimate endpoints which already carry resolved
+///    component indices.
+fn collect_connected_features(
+    instance: &SystemInstance,
+) -> FxHashSet<(ComponentInstanceIdx, String)> {
+    let mut connected: FxHashSet<(ComponentInstanceIdx, String)> = FxHashSet::default();
+
+    // 1. Raw connection endpoints.
+    for (_idx, conn) in instance.connections.iter() {
+        if let Some(ref src) = conn.src
+            && let Some(comp_idx) = resolve_subcomponent(instance, conn.owner, &src.subcomponent)
+        {
+            connected.insert((comp_idx, src.feature.as_str().to_string()));
+        }
+        if let Some(ref dst) = conn.dst
+            && let Some(comp_idx) = resolve_subcomponent(instance, conn.owner, &dst.subcomponent)
+        {
+            connected.insert((comp_idx, dst.feature.as_str().to_string()));
+        }
+    }
+
+    // 2. Semantic (traced end-to-end) connections.
+    for sc in &instance.semantic_connections {
+        connected.insert((
+            sc.ultimate_source.0,
+            sc.ultimate_source.1.as_str().to_string(),
+        ));
+        connected.insert((
+            sc.ultimate_destination.0,
+            sc.ultimate_destination.1.as_str().to_string(),
+        ));
+    }
+
+    connected
+}
+
+/// Resolve a connection endpoint's subcomponent name to a `ComponentInstanceIdx`.
+///
+/// If `subcomponent` is `None`, the endpoint is on the owner itself.
+/// If `Some(name)`, look up the first child of `owner` with that name.
+fn resolve_subcomponent(
+    instance: &SystemInstance,
+    owner: ComponentInstanceIdx,
+    subcomponent: &Option<spar_hir_def::name::Name>,
+) -> Option<ComponentInstanceIdx> {
+    match subcomponent {
+        Some(sub_name) => {
+            let owner_comp = instance.component(owner);
+            owner_comp
+                .children
+                .iter()
+                .find(|&&child_idx| {
+                    instance.component(child_idx).name.as_str() == sub_name.as_str()
+                })
+                .copied()
+        }
+        None => Some(owner),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +329,30 @@ mod tests {
                 owner,
                 src: None,
                 dst: None,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+        }
+
+        /// Add a connection with explicit source and destination endpoints.
+        fn add_connection_with_endpoints(
+            &mut self,
+            name: &str,
+            owner: ComponentInstanceIdx,
+            src: Option<(Option<&str>, &str)>,
+            dst: Option<(Option<&str>, &str)>,
+        ) {
+            let make_end = |end: (Option<&str>, &str)| ConnectionEnd {
+                subcomponent: end.0.map(Name::new),
+                feature: Name::new(end.1),
+            };
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                owner,
+                src: src.map(make_end),
+                dst: dst.map(make_end),
                 in_modes: Vec::new(),
             });
             self.components[owner].connections.push(idx);
@@ -358,8 +434,13 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let comp = b.add_component("comp", ComponentCategory::System, Some(root));
         b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), comp);
-        // Add connection on parent (root) — covers child features
-        b.add_connection("c1", root);
+        // Connection on parent (root) that explicitly references comp.in1
+        b.add_connection_with_endpoints(
+            "c1",
+            root,
+            Some((None, "out1")),        // source: root's own port
+            Some((Some("comp"), "in1")), // destination: comp.in1
+        );
         b.set_children(root, vec![comp]);
 
         let inst = b.build(root);
@@ -464,6 +545,61 @@ mod tests {
             1,
             "connection but no features/children: {:?}",
             diags
+        );
+    }
+
+    #[test]
+    fn partially_connected_component_flags_unconnected_ports() {
+        // Component with 2 ports, only 1 connected — should warn about the unconnected one.
+        // This is the regression test for the false-negative bug where ANY connection
+        // on a component caused ALL its ports to be considered "covered".
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sender = b.add_component("sender", ComponentCategory::System, Some(root));
+        let receiver = b.add_component("receiver", ComponentCategory::System, Some(root));
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), sender);
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), receiver);
+        b.add_feature("in2", FeatureKind::DataPort, Some(Direction::In), receiver);
+        // Only connect sender.out1 -> receiver.in1; receiver.in2 is unconnected.
+        b.add_connection_with_endpoints(
+            "c1",
+            root,
+            Some((Some("sender"), "out1")),
+            Some((Some("receiver"), "in1")),
+        );
+        b.set_children(root, vec![sender, receiver]);
+
+        let inst = b.build(root);
+        let diags = ConnectivityAnalysis.analyze(&inst);
+
+        // receiver.in2 should be flagged as unconnected.
+        let unconnected_in2: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("in2")
+                    && d.message.contains("no incoming")
+            })
+            .collect();
+        assert_eq!(
+            unconnected_in2.len(),
+            1,
+            "unconnected port 'in2' should warn: {:?}",
+            diags
+        );
+
+        // receiver.in1 and sender.out1 should NOT be flagged.
+        let false_positive: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Warning
+                    && (d.message.contains("in1") || d.message.contains("out1"))
+            })
+            .collect();
+        assert!(
+            false_positive.is_empty(),
+            "connected ports should not warn: {:?}",
+            false_positive
         );
     }
 
