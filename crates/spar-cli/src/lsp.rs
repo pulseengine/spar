@@ -221,18 +221,27 @@ impl ServerState {
         self.global_scope = GlobalScope::from_trees(trees);
     }
 
-    /// Update a single file: set text via salsa, rebuild scope.
-    fn update_file(&mut self, uri_str: &str, content: &str) {
+    /// Set the salsa input text for a file without rebuilding the global scope.
+    ///
+    /// Use this when batching multiple file updates — call
+    /// `rebuild_global_scope()` once after all files are set.
+    fn set_file_text(&mut self, uri_str: &str, content: &str) {
         if let Some(file) = self.files.get(uri_str) {
             file.set_text(&mut self.db).to(content.to_string());
         } else {
             let file = SourceFile::new(&self.db, uri_str.to_string(), content.to_string());
             self.files.insert(uri_str.to_string(), file);
         }
+    }
+
+    /// Update a single file: set text via salsa, rebuild scope.
+    fn update_file(&mut self, uri_str: &str, content: &str) {
+        self.set_file_text(uri_str, content);
         self.rebuild_global_scope();
     }
 
     /// Remove a file from the workspace state.
+    #[cfg(test)]
     fn remove_file(&mut self, uri_str: &str) {
         self.files.remove(uri_str);
         self.rebuild_global_scope();
@@ -357,22 +366,24 @@ fn send_ok(connection: &Connection, id: RequestId, result: serde_json::Value) {
 
 fn handle_notification(state: &mut ServerState, connection: &Connection, notif: Notification) {
     if let Some(params) = cast_notification::<DidOpenTextDocument>(&notif) {
-        let uri_str = params.text_document.uri.as_str().to_string();
+        let uri = params.text_document.uri.clone();
+        let uri_str = uri.as_str().to_string();
         // Track as open file.
         if !state.open_files.contains(&uri_str) {
             state.open_files.push(uri_str.clone());
         }
         state.update_file(&uri_str, &params.text_document.text);
-        // Publish diagnostics for all open files (cross-file references may change).
-        state.publish_all_diagnostics(connection);
+        // Publish diagnostics for the opened file only.
+        publish_diagnostics(state, connection, &uri);
     } else if let Some(params) = cast_notification::<DidChangeTextDocument>(&notif) {
-        let uri_str = params.text_document.uri.as_str().to_string();
+        let uri = params.text_document.uri.clone();
+        let uri_str = uri.as_str().to_string();
         // Full sync: the last content change has the full document text.
         if let Some(change) = params.content_changes.into_iter().last() {
             state.update_file(&uri_str, &change.text);
         }
-        // Publish diagnostics for all open files.
-        state.publish_all_diagnostics(connection);
+        // Publish diagnostics for the changed file only.
+        publish_diagnostics(state, connection, &uri);
     } else if let Some(params) = cast_notification::<DidSaveTextDocument>(&notif) {
         // Re-publish diagnostics on save.
         publish_diagnostics(state, connection, &params.text_document.uri);
@@ -413,12 +424,12 @@ fn handle_watched_file_changes(
                 if let Some(path) = uri_to_file_path(&event.uri)
                     && let Ok(content) = std::fs::read_to_string(&path)
                 {
-                    state.update_file(&uri_str, &content);
+                    state.set_file_text(&uri_str, &content);
                     changed = true;
                 }
             }
             lsp_types::FileChangeType::DELETED => {
-                state.remove_file(&uri_str);
+                state.files.remove(&uri_str);
                 changed = true;
             }
             _ => {}
@@ -441,12 +452,13 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
     };
 
     let source = file.text(&state.db).clone();
+    let line_index = LineIndex::new(&source);
     let mut diagnostics = Vec::new();
 
     // 1. Parse the file via salsa (memoized).
     let parse_result = parse_file(&state.db, file);
     for err in parse_result.errors() {
-        let pos = offset_to_position(&source, err.offset);
+        let pos = line_index.offset_to_position(&source, err.offset);
         diagnostics.push(Diagnostic {
             range: Range::new(pos, pos),
             severity: Some(DiagnosticSeverity::ERROR),
@@ -2681,27 +2693,83 @@ fn find_symbol_kind(
     None
 }
 
+/// Returns `true` if the token is inside a property-value or annex context
+/// where renaming a structural symbol would be incorrect.
+fn is_property_or_annex_context(tok: &rowan::SyntaxToken<spar_syntax::AadlLanguage>) -> bool {
+    const EXCLUDED_KINDS: &[SyntaxKind] = &[
+        SyntaxKind::PROPERTY_EXPRESSION,
+        SyntaxKind::PROPERTY_REF,
+        SyntaxKind::PROPERTY_TYPE,
+        SyntaxKind::PROPERTY_DEFINITION,
+        SyntaxKind::PROPERTY_CONSTANT,
+        SyntaxKind::PROPERTY_TYPE_DECL,
+        SyntaxKind::PROPERTY_SET,
+        SyntaxKind::RECORD_FIELD,
+        SyntaxKind::RECORD_VALUE,
+        SyntaxKind::COMPUTED_VALUE,
+        SyntaxKind::INTEGER_VALUE,
+        SyntaxKind::REAL_VALUE,
+        SyntaxKind::UNIT_VALUE,
+        SyntaxKind::ANNEX_TEXT,
+        SyntaxKind::ANNEX_SUBCLAUSE,
+        SyntaxKind::ANNEX_LIBRARY,
+    ];
+
+    if let Some(parent) = tok.parent() {
+        let kind = parent.kind();
+        if EXCLUDED_KINDS.contains(&kind) || kind == SyntaxKind::PROPERTY_ASSOCIATION {
+            return true;
+        }
+    }
+    false
+}
+
 /// Find all references to a name in a document, returning their ranges.
+///
+/// Filters by `symbol_kind` to avoid renaming identifiers in property values,
+/// annex text, or structurally unrelated contexts.
 fn find_references_in_document(
     source: &str,
     name: &str,
-    _symbol_kind: SymbolRenameKind,
+    symbol_kind: SymbolRenameKind,
 ) -> Vec<Range> {
     let parsed = spar_syntax::parse(source);
     let root = parsed.syntax_node();
+    let line_index = LineIndex::new(source);
     let mut ranges = Vec::new();
 
-    // Walk all tokens looking for IDENT tokens matching the name
     for token in root.descendants_with_tokens() {
         if let Some(tok) = token.as_token()
             && tok.kind() == SyntaxKind::IDENT
             && tok.text().eq_ignore_ascii_case(name)
         {
+            // Skip property-value and annex contexts.
+            if is_property_or_annex_context(tok) {
+                continue;
+            }
+
+            // For feature/subcomponent renames, skip top-level declaration names.
+            if matches!(
+                symbol_kind,
+                SymbolRenameKind::Feature | SymbolRenameKind::Subcomponent
+            ) && let Some(parent) = tok.parent()
+                && matches!(
+                    parent.kind(),
+                    SyntaxKind::COMPONENT_TYPE
+                        | SyntaxKind::COMPONENT_IMPL
+                        | SyntaxKind::AADL_PACKAGE
+                        | SyntaxKind::FEATURE_GROUP_TYPE
+                )
+            {
+                continue;
+            }
+
             let start: usize = tok.text_range().start().into();
             let end: usize = tok.text_range().end().into();
-            let start_pos = offset_to_position(source, start);
-            let end_pos = offset_to_position(source, end);
-            ranges.push(Range::new(start_pos, end_pos));
+            ranges.push(Range::new(
+                line_index.offset_to_position(source, start),
+                line_index.offset_to_position(source, end),
+            ));
         }
     }
 
@@ -2787,6 +2855,40 @@ fn find_name_position(source: &str, name: &str) -> Option<Position> {
 }
 
 // ── Utility functions ───────────────────────────────────────────────
+
+/// Pre-computed line-start offsets for O(log n) offset-to-position conversion.
+///
+/// Build once per source text, then call [`LineIndex::offset_to_position`]
+/// for each byte offset.
+struct LineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(text: &str) -> Self {
+        let mut starts = vec![0];
+        for (i, b) in text.bytes().enumerate() {
+            if b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self {
+            line_starts: starts,
+        }
+    }
+
+    /// Convert a byte offset to an LSP `Position`. O(log n) via binary search.
+    fn offset_to_position(&self, text: &str, offset: usize) -> Position {
+        let offset = offset.min(text.len());
+        let line = self
+            .line_starts
+            .partition_point(|&s| s <= offset)
+            .saturating_sub(1);
+        let line_start = self.line_starts[line];
+        let col = text[line_start..offset].chars().count();
+        Position::new(line as u32, col as u32)
+    }
+}
 
 /// Convert a byte offset to an LSP Position (0-based line/character).
 fn offset_to_position(text: &str, offset: usize) -> Position {
