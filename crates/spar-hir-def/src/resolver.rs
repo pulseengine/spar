@@ -893,4 +893,81 @@ mod tests {
             scope.diagnostics
         );
     }
+
+    #[test]
+    fn private_classifier_not_visible_from_other_package() {
+        // Package A has a private type "Secret".
+        // Package B imports A and tries to reference "Secret" — should fail.
+        let mut tree = ItemTree::default();
+
+        let ct_secret = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Secret"),
+            category: ComponentCategory::System,
+            is_public: false,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        // Public type in the same package to verify selective visibility
+        let ct_public = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Visible"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct_public)],
+            private_items: vec![ItemRef::ComponentType(ct_secret)],
+            renames: Vec::new(),
+        });
+
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: vec![Name::new("A")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // From B, resolving A::Secret should fail (private)
+        let ref_secret = ClassifierRef::qualified(Name::new("A"), Name::new("Secret"));
+        let result = scope.resolve_classifier(&Name::new("B"), &ref_secret);
+        assert!(
+            matches!(result, ResolvedClassifier::Unresolved),
+            "private type should not be visible from another package: {:?}",
+            result
+        );
+
+        // From B, resolving A::Visible should succeed (public)
+        let ref_visible = ClassifierRef::qualified(Name::new("A"), Name::new("Visible"));
+        let result = scope.resolve_classifier(&Name::new("B"), &ref_visible);
+        assert!(
+            !matches!(result, ResolvedClassifier::Unresolved),
+            "public type should be visible from another package: {:?}",
+            result
+        );
+
+        // From A itself, resolving Secret should succeed (same package)
+        let ref_secret_unqual = ClassifierRef::type_only(Name::new("Secret"));
+        let result = scope.resolve_classifier(&Name::new("A"), &ref_secret_unqual);
+        assert!(
+            !matches!(result, ResolvedClassifier::Unresolved),
+            "private type should be visible within the same package: {:?}",
+            result
+        );
+    }
 }
