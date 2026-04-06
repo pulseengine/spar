@@ -723,3 +723,131 @@ artifacts:
     links:
       - type: satisfies
         target: ARCH-ANALYSIS
+
+  # ── v0.5.0 Feature Records ─────────────────────────────────────────
+
+  - id: FEAT-EXTENDS-001
+    type: feature
+    title: Type inheritance (extends) resolution
+    description: >
+      Features, subcomponents, connections, and properties are inherited
+      through extends chains with cycle detection and deduplication.
+    status: passing
+    tags: [v0.5.0, instance-model]
+    links:
+      - type: satisfies
+        target: REQ-MODEL-005
+
+  - id: FEAT-LSP-HARDENING
+    type: feature
+    title: LSP salsa incremental + correctness hardening
+    description: >
+      Salsa-memoized file_item_tree, CST-aware completion, rename safety,
+      LineIndex O(1) positions, duplicate package detection, DidClose handler.
+    status: passing
+    tags: [v0.5.0, lsp]
+    links:
+      - type: satisfies
+        target: REQ-LSP-001
+
+  - id: FEAT-AIML-001
+    type: feature
+    title: AI/ML property set and analysis passes
+    description: >
+      6 analysis checks for AI/ML components: inference deadline, fallback
+      coverage/timing, OOD coverage, model deployment, redundancy.
+    status: passing
+    tags: [v0.5.0, analysis, ai-ml]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-001
+
+  - id: FEAT-EMV2-STPA
+    type: feature
+    title: EMV2 to STPA bridge
+    description: >
+      Maps EMV2 fault tree analysis to STPA hazard artifacts. Composite
+      error states to hazards, propagation paths to loss scenarios.
+    status: passing
+    tags: [v0.5.0, safety]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-005
+
+  - id: FEAT-SYSML2-PARSE
+    type: feature
+    title: SysML v2 KerML parser completion
+    description: >
+      Rowan-based SysML v2 parser handles full KerML grammar including
+      part, port, connection, requirement, constraint, action, and state
+      definitions with lossless CST and error recovery.
+    status: passing
+    tags: [v0.5.0, sysml2]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-PARSE
+
+  - id: FEAT-SYSML2-EXTRACT
+    type: feature
+    title: SysML v2 complete extraction pipeline
+    description: >
+      Extract requirements with satisfy/verify/refine/allocate/derive
+      relationships, architecture context, and roundtrip generation.
+    status: passing
+    tags: [v0.5.0, sysml2]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-EXTRACT
+      - type: satisfies
+        target: REQ-INTEROP-001
+
+  - id: FEAT-MODAL-001
+    type: feature
+    title: Modal filtering and requires_modes
+    description: >
+      requires_modes flag stored in ItemTree. Modal filtering utility
+      for connectivity and scheduling analysis passes.
+    status: passing
+    tags: [v0.5.0, modes]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-009
+
+  - id: FEAT-PROP-LOWERING
+    type: feature
+    title: Property CST lowering with text fallback
+    description: >
+      Text-based fallback parser handles booleans, references, classifiers,
+      ranges, lists, numerics with units, and enums when CST lowering fails.
+    status: passing
+    tags: [v0.5.0, properties]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+
+  - id: FEAT-SECURITY-001
+    type: feature
+    title: Security hardening from adversarial scanning
+    description: >
+      XSS prevention in SVG rendering, YAML/TOML injection prevention,
+      path traversal protection, UTF-8 safe percent decoding, arena bounds checks.
+    status: passing
+    tags: [v0.5.0, security]
+    links:
+      - type: satisfies
+        target: STPA-SEC-REQ-001
+
+  - id: FEAT-VSCODE-LIVE
+    type: feature
+    title: VS Code live rendering via WebviewPanel
+    description: >
+      WebviewPanel integration renders architecture diagrams live in
+      VS Code. Automatic refresh on file save, theme-aware styling,
+      pan/zoom controls in the webview.
+    status: passing
+    tags: [v0.5.0, tooling, vscode]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-003
+      - type: satisfies
+        target: REQ-LSP-001

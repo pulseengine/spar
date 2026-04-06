@@ -72,7 +72,7 @@ artifacts:
     description: >
       Support component type extension, implementation extension,
       feature refinement, and subcomponent refinement.
-    status: partial
+    status: implemented
     tags: [model, as5506-ch4]
 
   # ── Name Resolution (AS5506 Ch.4) ──────────────────────────────────────
@@ -152,7 +152,7 @@ artifacts:
       Evaluate all property expression types: integer, real, string,
       boolean, enumeration, list, record, range, classifier, reference,
       computed values, unit literals.
-    status: partial
+    status: implemented
     tags: [properties, as5506-ch11]
 
   - id: REQ-PROP-003
@@ -498,10 +498,9 @@ artifacts:
     type: requirement
     title: Known analysis gaps
     description: >
-      Not yet covered: Ch.6 (type extensions — partial in extends_rules.rs),
-      Ch.7 (prototypes — parsed but not analyzed), property expression
-      evaluation (value(), arithmetic, record field access). See also
-      REQ-PROP-002 (partial).
+      Not yet covered: Ch.7 (prototypes — parsed but not analyzed).
+      Ch.6 type extensions now resolved via extends chain walking (v0.5.0).
+      Property expression evaluation now covered by text fallback parser (v0.5.0).
     status: partial
     links:
       - type: satisfies
@@ -864,7 +863,7 @@ artifacts:
       notation. Hand-written recursive descent, lossless CST, error recovery.
       Same architecture as spar-parser. Covers KerML kernel + SysML v2 profile
       (part, port, connection, requirement, constraint, action, state).
-    status: planned
+    status: implemented
     tags: [sysml2, parser, v040]
     links:
       - type: traces-to
@@ -878,7 +877,7 @@ artifacts:
       part def → system/process type, port def → data port, connection def →
       connection, constraint def → timing properties, allocate → bindings.
       Enables spar analysis on SysML v2-modeled systems.
-    status: planned
+    status: implemented
     tags: [sysml2, transform, v040]
     links:
       - type: traces-to
@@ -892,7 +891,7 @@ artifacts:
       requirement artifacts with satisfy/verify links preserved. Bridges
       SysML v2 requirement management with rivet traceability. Links map:
       SysML satisfy → rivet satisfies, SysML verify → rivet verifies.
-    status: planned
+    status: implemented
     tags: [sysml2, requirements, rivet, v040]
     links:
       - type: traces-to
@@ -967,7 +966,7 @@ artifacts:
       Result: SysML v2 (system-level) → AADL (deployment-level) →
       WIT/code (implementation-level), with rivet tracing through all
       three layers and spar analyzing architecture at every level.
-    status: planned
+    status: implemented
     tags: [transform, sysml, interop, v050]
     links:
       - type: traces-to
