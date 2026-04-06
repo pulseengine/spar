@@ -70,11 +70,17 @@ fn expand_from_ref(
         return expand_from_ref(scope, &pkg_name, inv_ref, !is_inverse, prefix, depth + 1);
     }
 
+    // Handle extends: collect parent features first (grandparent → parent → self).
+    let mut result = Vec::new();
+    if let Some(ext_ref) = &fgt.extends {
+        let parent_features =
+            expand_from_ref(scope, &pkg_name, ext_ref, is_inverse, prefix, depth + 1);
+        result.extend(parent_features);
+    }
+
     // Collect the feature indices we need before accessing them,
     // since we need the tree for feature lookup.
     let feat_indices: Vec<_> = fgt.features.clone();
-
-    let mut result = Vec::new();
     for &feat_idx in &feat_indices {
         let feat = match scope.get_feature(loc.tree, feat_idx) {
             Some(f) => f,
