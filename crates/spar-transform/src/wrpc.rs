@@ -47,6 +47,7 @@ pub fn wrpc_standard_library() -> ItemTree {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         public_items.push(ItemRef::ComponentType(ct_idx));
     }

@@ -324,6 +324,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -377,6 +378,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -501,6 +503,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -548,6 +551,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -593,6 +597,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -826,6 +831,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         // Subcomponents
@@ -875,6 +881,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         // Property set with unique names
@@ -996,6 +1003,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {

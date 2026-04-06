@@ -188,6 +188,9 @@ fn component_impl_sections(p: &mut Parser) {
             SyntaxKind::CALLS_KW => call_section(p),
             SyntaxKind::FLOWS_KW => super::flows::flow_impl_section(p),
             SyntaxKind::MODES_KW => super::modes::mode_section(p),
+            SyntaxKind::REQUIRES_KW if p.nth(1) == SyntaxKind::MODES_KW => {
+                super::modes::mode_section(p);
+            }
             SyntaxKind::PROPERTIES_KW => super::properties::property_section(p),
             SyntaxKind::ANNEX_KW => super::annexes::annex_subclause(p),
             _ => break,
