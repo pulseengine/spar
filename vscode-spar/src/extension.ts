@@ -17,12 +17,22 @@ let statusBarItem: vscode.StatusBarItem;
 let renderTimer: ReturnType<typeof setTimeout> | undefined;
 let wasmRenderer: any = undefined;
 let virtualFs: VirtualFs | undefined;
+let diagramCodeLens: DiagramCodeLensProvider | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
   // --- Commands (register FIRST, before anything that can fail) ---
   context.subscriptions.push(
     vscode.commands.registerCommand('spar.showDiagram', () => showDiagram(context)),
     vscode.commands.registerCommand('spar.selectRoot', () => selectRoot(context)),
+  );
+
+  // --- CodeLens provider for system implementation declarations ---
+  diagramCodeLens = new DiagramCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { language: 'aadl', scheme: 'file' },
+      diagramCodeLens,
+    ),
   );
 
   // --- Status Bar ---
@@ -118,8 +128,16 @@ async function initWasmRenderer(context: vscode.ExtensionContext) {
 
 // --- Binary discovery ---
 
-function findSparBinary(context: vscode.ExtensionContext): string | undefined {
+export function findSparBinary(context: vscode.ExtensionContext): string | undefined {
   const binaryName = process.platform === 'win32' ? 'spar.exe' : 'spar';
+
+  // 1. User-configured path
+  const configPath = vscode.workspace.getConfiguration('spar').get<string>('binaryPath');
+  if (configPath && fs.existsSync(configPath)) {
+    return configPath;
+  }
+
+  // 2. Bundled binary in extension's bin/ directory
   const bundled = path.join(context.extensionPath, 'bin', binaryName);
   if (fs.existsSync(bundled)) {
     // Ensure it's executable on Unix
@@ -128,26 +146,62 @@ function findSparBinary(context: vscode.ExtensionContext): string | undefined {
     }
     return bundled;
   }
-  // No fallback. The binary MUST be bundled.
+
+  // 3. Search PATH
+  const pathOnPath = findOnPath(binaryName);
+  if (pathOnPath) {
+    return pathOnPath;
+  }
+
   vscode.window.showErrorMessage(
-    'spar binary not found. Please reinstall the extension or download from GitHub Releases.'
+    'spar binary not found. Set spar.binaryPath in settings, add spar to PATH, or reinstall the extension.'
   );
+  return undefined;
+}
+
+function findOnPath(binaryName: string): string | undefined {
+  const pathEnv = process.env['PATH'] ?? '';
+  const separator = process.platform === 'win32' ? ';' : ':';
+  for (const dir of pathEnv.split(separator)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, binaryName);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch { /* not found or not executable */ }
+  }
   return undefined;
 }
 
 // --- Diagram ---
 
-function showDiagram(context: vscode.ExtensionContext) {
+async function showDiagram(context: vscode.ExtensionContext) {
   if (diagramPanel) {
     diagramPanel.reveal(vscode.ViewColumn.Beside);
+    // If we already have a root, trigger a fresh render
+    if (rootClassifier) {
+      renderDiagram(context);
+    }
     return;
   }
 
+  // Try to detect root from active file if not already set
   if (!rootClassifier) {
-    selectRoot(context).then(() => {
-      if (rootClassifier) showDiagram(context);
-    });
-    return;
+    const activeDoc = vscode.window.activeTextEditor?.document;
+    if (activeDoc && activeDoc.languageId === 'aadl') {
+      const detected = detectRootFromText(activeDoc.getText());
+      if (detected) {
+        rootClassifier = detected;
+        await context.workspaceState.update('spar.lastRoot', rootClassifier);
+        updateStatusBar();
+      }
+    }
+  }
+
+  // Still no root — ask the user
+  if (!rootClassifier) {
+    await selectRoot(context);
+    if (!rootClassifier) return;
   }
 
   diagramPanel = vscode.window.createWebviewPanel(
@@ -159,6 +213,21 @@ function showDiagram(context: vscode.ExtensionContext) {
 
   diagramPanel.onDidDispose(() => { diagramPanel = undefined; });
   renderDiagram(context);
+}
+
+/**
+ * Detect the first system implementation in the given AADL text.
+ * Returns the qualified name (Package::Type.Impl) or undefined.
+ */
+export function detectRootFromText(text: string): string | undefined {
+  const pkgPattern = /^\s*package\s+([\w:]+)/m;
+  const implPattern = /^\s*system\s+implementation\s+(\w+)\.(\w+)/m;
+  const pkgMatch = pkgPattern.exec(text);
+  const implMatch = implPattern.exec(text);
+  if (pkgMatch && implMatch) {
+    return `${pkgMatch[1]}::${implMatch[1]}.${implMatch[2]}`;
+  }
+  return undefined;
 }
 
 async function renderDiagram(_context: vscode.ExtensionContext) {
@@ -255,13 +324,13 @@ async function selectRoot(context: vscode.ExtensionContext) {
 async function findSystemImplementations(): Promise<string[]> {
   const files = await vscode.workspace.findFiles('**/*.aadl');
   const roots: string[] = [];
-  const implPattern = /^\s*system\s+implementation\s+(\w+)\.(\w+)/gm;
-  const pkgPattern = /^\s*package\s+(\w+)/m;
 
   for (const file of files) {
     try {
       const content = await vscode.workspace.fs.readFile(file);
       const text = Buffer.from(content).toString('utf8');
+      const pkgPattern = /^\s*package\s+([\w:]+)/m;
+      const implPattern = /^\s*system\s+implementation\s+(\w+)\.(\w+)/gm;
       const pkgMatch = pkgPattern.exec(text);
       const pkg = pkgMatch?.[1] ?? 'Unknown';
       let match;
@@ -277,6 +346,30 @@ function updateStatusBar() {
   statusBarItem.text = rootClassifier
     ? `$(circuit-board) ${rootClassifier}`
     : '$(circuit-board) AADL: Select Root';
+}
+
+// --- CodeLens provider ---
+
+class DiagramCodeLensProvider implements vscode.CodeLensProvider {
+  private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+  readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+    const lenses: vscode.CodeLens[] = [];
+    const text = document.getText();
+    const implPattern = /^\s*system\s+implementation\s+(\w+)\.(\w+)/gm;
+    let match;
+    while ((match = implPattern.exec(text)) !== null) {
+      const pos = document.positionAt(match.index);
+      const range = new vscode.Range(pos, pos);
+      lenses.push(new vscode.CodeLens(range, {
+        title: '$(circuit-board) Show Architecture Diagram',
+        command: 'spar.showDiagram',
+        tooltip: 'Open live architecture diagram for this system implementation',
+      }));
+    }
+    return lenses;
+  }
 }
 
 // --- HTML templates ---

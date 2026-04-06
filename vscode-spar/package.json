@@ -53,7 +53,8 @@
       {
         "command": "spar.showDiagram",
         "title": "Show Architecture Diagram",
-        "category": "AADL"
+        "category": "AADL",
+        "icon": "$(circuit-board)"
       },
       {
         "command": "spar.selectRoot",
@@ -61,9 +62,24 @@
         "category": "AADL"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "spar.showDiagram",
+          "when": "editorLangId == aadl",
+          "group": "navigation"
+        }
+      ]
+    },
     "configuration": {
       "title": "AADL (spar)",
-      "properties": {}
+      "properties": {
+        "spar.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the spar binary. Leave empty to use the bundled binary or spar on PATH."
+        }
+      }
     }
   },
   "dependencies": {
