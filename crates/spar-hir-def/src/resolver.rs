@@ -77,6 +77,10 @@ pub struct PackageScope {
     pub private_fgts: rustc_hash::FxHashSet<CiName>,
     /// Package renames: alias (ci_name) → original package name.
     pub package_renames: FxHashMap<CiName, Name>,
+    /// Classifier renames: alias (ci_name) → (package, type_name).
+    pub classifier_renames: FxHashMap<CiName, (Name, Name)>,
+    /// Feature group renames: alias (ci_name) → (package, fgt_name).
+    pub feature_group_renames: FxHashMap<CiName, (Name, Name)>,
 }
 
 /// Stored property set info for resolution.
@@ -134,10 +138,31 @@ impl GlobalScope {
                 // Process renames declarations
                 for &renames_idx in &pkg.renames {
                     let ri = &tree.renames[renames_idx];
-                    if ri.kind == crate::item_tree::RenamesKind::Package {
-                        pkg_scope
-                            .package_renames
-                            .insert(CiName::new(&ri.alias), ri.original.clone());
+                    match ri.kind {
+                        crate::item_tree::RenamesKind::Package => {
+                            pkg_scope
+                                .package_renames
+                                .insert(CiName::new(&ri.alias), ri.original.clone());
+                        }
+                        crate::item_tree::RenamesKind::Classifier
+                        | crate::item_tree::RenamesKind::FeatureGroup => {
+                            // Original is stored as "Pkg::TypeName"; split on "::"
+                            let orig_str = ri.original.as_str();
+                            if let Some((pkg_part, type_part)) = orig_str.split_once("::") {
+                                let pkg_name = Name::new(pkg_part.trim());
+                                let type_name = Name::new(type_part.trim());
+                                let alias_key = CiName::new(&ri.alias);
+                                if ri.kind == crate::item_tree::RenamesKind::Classifier {
+                                    pkg_scope
+                                        .classifier_renames
+                                        .insert(alias_key, (pkg_name, type_name));
+                                } else {
+                                    pkg_scope
+                                        .feature_group_renames
+                                        .insert(alias_key, (pkg_name, type_name));
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -329,6 +354,26 @@ impl GlobalScope {
 
         if let Some(result) = self.resolve_in_package(&target_pkg, reference, is_same_package) {
             return result;
+        }
+
+        // Check classifier and feature group renames in the originating package
+        if reference.package.is_none()
+            && reference.impl_name.is_none()
+            && let Some(from_scope) = self.packages.get(&from_key)
+        {
+            let type_key = CiName::new(&reference.type_name);
+
+            // Classifier renames: alias → (package, type_name)
+            if let Some((orig_pkg, orig_type)) = from_scope.classifier_renames.get(&type_key) {
+                let aliased_ref = ClassifierRef::qualified(orig_pkg.clone(), orig_type.clone());
+                return self.resolve_classifier(from_package, &aliased_ref);
+            }
+
+            // Feature group renames: alias → (package, fgt_name)
+            if let Some((orig_pkg, orig_fgt)) = from_scope.feature_group_renames.get(&type_key) {
+                let aliased_ref = ClassifierRef::qualified(orig_pkg.clone(), orig_fgt.clone());
+                return self.resolve_classifier(from_package, &aliased_ref);
+            }
         }
 
         // If no explicit package, search imports
@@ -977,6 +1022,235 @@ mod tests {
         assert!(
             !matches!(result, ResolvedClassifier::Unresolved),
             "private type should be visible within the same package: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn package_renames_resolves_qualified_reference() {
+        // Package Pkg1 has type "Sensor".
+        // Package Pkg2 has `Pkg1Alias renames package Pkg1;`.
+        // Reference Pkg1Alias::Sensor from Pkg2 should resolve to Pkg1::Sensor.
+        let mut tree = ItemTree::default();
+
+        let ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("Sensor"),
+            category: ComponentCategory::Device,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            requires_modes: false,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg1"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let renames_idx = tree.renames.alloc(RenamesItem {
+            alias: Name::new("Pkg1Alias"),
+            original: Name::new("Pkg1"),
+            kind: RenamesKind::Package,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("Pkg2"),
+            with_clauses: vec![Name::new("Pkg1")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: vec![renames_idx],
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // Pkg1Alias::Sensor from Pkg2 should resolve
+        let reference = ClassifierRef::qualified(Name::new("Pkg1Alias"), Name::new("Sensor"));
+        let result = scope.resolve_classifier(&Name::new("Pkg2"), &reference);
+        assert!(
+            matches!(
+                result,
+                ResolvedClassifier::ComponentType {
+                    ref package,
+                    ..
+                } if package.as_str() == "Pkg1"
+            ),
+            "package rename should resolve Pkg1Alias::Sensor to Pkg1::Sensor: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn classifier_renames_resolves_unqualified_reference() {
+        // Package A has type "OriginalSensor".
+        // Package B has `MySensor renames system A::OriginalSensor;`.
+        // Unqualified reference to "MySensor" from B should resolve to A::OriginalSensor.
+        let mut tree = ItemTree::default();
+
+        let ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("OriginalSensor"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            requires_modes: false,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let renames_idx = tree.renames.alloc(RenamesItem {
+            alias: Name::new("MySensor"),
+            original: Name::new("A::OriginalSensor"),
+            kind: RenamesKind::Classifier,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: vec![Name::new("A")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: vec![renames_idx],
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // Unqualified "MySensor" from B should resolve to A::OriginalSensor
+        let reference = ClassifierRef::type_only(Name::new("MySensor"));
+        let result = scope.resolve_classifier(&Name::new("B"), &reference);
+        assert!(
+            matches!(
+                result,
+                ResolvedClassifier::ComponentType {
+                    ref package,
+                    ..
+                } if package.as_str() == "A"
+            ),
+            "classifier rename should resolve MySensor to A::OriginalSensor: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn feature_group_renames_resolves_unqualified_reference() {
+        // Package A has feature group type "OriginalBusIface".
+        // Package B has `MyBus renames feature group A::OriginalBusIface;`.
+        // Unqualified reference to "MyBus" from B should resolve to A::OriginalBusIface.
+        let mut tree = ItemTree::default();
+
+        let fgt = tree.feature_group_types.alloc(FeatureGroupTypeItem {
+            name: Name::new("OriginalBusIface"),
+            is_public: true,
+            extends: None,
+            inverse_of: None,
+            features: Vec::new(),
+            prototypes: Vec::new(),
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::FeatureGroupType(fgt)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let renames_idx = tree.renames.alloc(RenamesItem {
+            alias: Name::new("MyBus"),
+            original: Name::new("A::OriginalBusIface"),
+            kind: RenamesKind::FeatureGroup,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: vec![Name::new("A")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: vec![renames_idx],
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // Unqualified "MyBus" from B should resolve to A::OriginalBusIface
+        let reference = ClassifierRef::type_only(Name::new("MyBus"));
+        let result = scope.resolve_classifier(&Name::new("B"), &reference);
+        assert!(
+            matches!(
+                result,
+                ResolvedClassifier::FeatureGroupType {
+                    ref package,
+                    ..
+                } if package.as_str() == "A"
+            ),
+            "feature group rename should resolve MyBus to A::OriginalBusIface: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn classifier_renames_case_insensitive() {
+        // Verify that classifier renames work case-insensitively.
+        let mut tree = ItemTree::default();
+
+        let ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("OrigType"),
+            category: ComponentCategory::Data,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            requires_modes: false,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("Lib"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let renames_idx = tree.renames.alloc(RenamesItem {
+            alias: Name::new("MyAlias"),
+            original: Name::new("Lib::OrigType"),
+            kind: RenamesKind::Classifier,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("Consumer"),
+            with_clauses: vec![Name::new("Lib")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: vec![renames_idx],
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // Reference with different casing should still resolve
+        let reference = ClassifierRef::type_only(Name::new("myalias"));
+        let result = scope.resolve_classifier(&Name::new("Consumer"), &reference);
+        assert!(
+            matches!(
+                result,
+                ResolvedClassifier::ComponentType {
+                    ref package,
+                    ..
+                } if package.as_str() == "Lib"
+            ),
+            "case-insensitive classifier rename should resolve: {:?}",
             result
         );
     }
