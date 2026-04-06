@@ -583,6 +583,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         let ci_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -600,6 +601,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -730,6 +732,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -836,6 +839,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -982,6 +986,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("Pkg"),
@@ -1452,6 +1457,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -1535,6 +1541,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         let ci_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -1552,6 +1559,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -1600,6 +1608,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {

@@ -2746,6 +2746,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // Type B
@@ -2760,6 +2761,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // Subcomponent in A.Impl: b : system B.Impl
@@ -2808,6 +2810,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // Impl B.Impl
@@ -2826,6 +2829,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // Package
@@ -2882,6 +2886,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let b_type_idx = tree.component_types.alloc(ComponentTypeItem {
@@ -2895,6 +2900,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let _c_type_idx = tree.component_types.alloc(ComponentTypeItem {
@@ -2908,6 +2914,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // B.Impl has subcomponent c: process C (type-only, no impl -> no recursion)
@@ -2936,6 +2943,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // A.Impl has subcomponent b: system B.Impl
@@ -2968,6 +2976,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -3017,6 +3026,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let b_type_idx = tree.component_types.alloc(ComponentTypeItem {
@@ -3030,6 +3040,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let sub_b = tree.subcomponents.alloc(SubcomponentItem {
@@ -3075,6 +3086,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let b_impl_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -3092,6 +3104,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -3160,6 +3173,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let _b_type_idx = tree.component_types.alloc(ComponentTypeItem {
@@ -3173,6 +3187,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let sub_b = tree.subcomponents.alloc(SubcomponentItem {
@@ -3200,6 +3215,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -3253,6 +3269,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         let a_impl_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -3270,6 +3287,7 @@ mod tests {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {

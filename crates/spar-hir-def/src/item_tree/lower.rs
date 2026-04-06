@@ -232,6 +232,11 @@ fn lower_component_type_with_visibility(
         lower_property_associations(&prop_section, tree, &mut property_associations);
     }
 
+    let requires_modes = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::MODE_SECTION)
+        .is_some_and(|ms| has_requires_modes_prefix(&ms));
+
     let idx = tree.component_types.alloc(ComponentTypeItem {
         name,
         category,
@@ -243,6 +248,7 @@ fn lower_component_type_with_visibility(
         mode_transitions,
         prototypes,
         property_associations,
+        requires_modes,
     });
     Some(ItemRef::ComponentType(idx))
 }
@@ -326,6 +332,11 @@ fn lower_component_impl_with_visibility(
         lower_property_associations(&prop_section, tree, &mut property_associations);
     }
 
+    let requires_modes = node
+        .children()
+        .find(|c| c.kind() == SyntaxKind::MODE_SECTION)
+        .is_some_and(|ms| has_requires_modes_prefix(&ms));
+
     let idx = tree.component_impls.alloc(ComponentImplItem {
         type_name,
         impl_name,
@@ -341,8 +352,19 @@ fn lower_component_impl_with_visibility(
         prototypes,
         call_sequences,
         property_associations,
+        requires_modes,
     });
     Some(ItemRef::ComponentImpl(idx))
+}
+
+/// Check whether a MODE_SECTION CST node starts with a `REQUIRES_KW` token,
+/// indicating `requires modes` (derived mode behaviour) rather than own mode
+/// declarations.
+fn has_requires_modes_prefix(mode_section: &SyntaxNode) -> bool {
+    mode_section
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .any(|tok| tok.kind() == SyntaxKind::REQUIRES_KW)
 }
 
 fn lower_feature_group_type_with_visibility(
@@ -2467,6 +2489,89 @@ end Clean;
             tree.diagnostics.is_empty(),
             "clean package should produce no diagnostics: {:?}",
             tree.diagnostics
+        );
+    }
+
+    #[test]
+    fn requires_modes_flag_set_on_component_type() {
+        let src = r#"
+package Pkg
+public
+  system S
+    requires modes
+      fast : mode ;
+      slow : initial mode ;
+  end S;
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        let ct = &tree.component_types.iter().next().unwrap().1;
+        assert!(
+            ct.requires_modes,
+            "component type with `requires modes` should set requires_modes = true"
+        );
+    }
+
+    #[test]
+    fn regular_modes_flag_not_set() {
+        let src = r#"
+package Pkg
+public
+  system S
+    modes
+      fast : mode ;
+      slow : initial mode ;
+  end S;
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        let ct = &tree.component_types.iter().next().unwrap().1;
+        assert!(
+            !ct.requires_modes,
+            "component type with plain `modes` should have requires_modes = false"
+        );
+    }
+
+    #[test]
+    fn no_modes_section_flag_is_false() {
+        let src = r#"
+package Pkg
+public
+  system S
+  end S;
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        let ct = &tree.component_types.iter().next().unwrap().1;
+        assert!(
+            !ct.requires_modes,
+            "component type without modes section should have requires_modes = false"
+        );
+    }
+
+    #[test]
+    fn requires_modes_on_component_impl() {
+        let src = r#"
+package Pkg
+public
+  system S
+  end S;
+
+  system implementation S.Impl
+    requires modes
+      active : mode ;
+  end S.Impl;
+end Pkg;
+"#;
+        let parsed = parse(src);
+        let tree = lower_file(&parsed.syntax_node());
+        let ci = &tree.component_impls.iter().next().unwrap().1;
+        assert!(
+            ci.requires_modes,
+            "component impl with `requires modes` should set requires_modes = true"
         );
     }
 }

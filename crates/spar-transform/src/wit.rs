@@ -272,6 +272,7 @@ fn lower_interface(iface: &WitInterface, tree: &mut ItemTree) -> Vec<ItemRef> {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         is_public: true,
+        requires_modes: false,
     });
     items.push(ItemRef::ComponentType(sg_idx));
 
@@ -327,6 +328,7 @@ fn lower_function(
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         is_public: true,
+        requires_modes: false,
     })
 }
 
@@ -395,6 +397,7 @@ fn lower_async_function(
         prototypes: Vec::new(),
         property_associations: vec![dispatch_prop_idx],
         is_public: true,
+        requires_modes: false,
     })
 }
 
@@ -542,6 +545,7 @@ fn lower_world(world: &WitWorld, tree: &mut ItemTree) -> ItemRef {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         is_public: true,
+        requires_modes: false,
     });
     ItemRef::ComponentType(ct_idx)
 }
@@ -577,6 +581,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -629,6 +634,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: vec![prop_idx, enum_prop_idx],
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -661,6 +667,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -713,6 +720,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: vec![prop_idx, flags_prop_idx],
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -731,6 +739,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -748,6 +757,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
                 is_public: true,
+                requires_modes: false,
             });
             Some(ItemRef::ComponentType(ct_idx))
         }
@@ -1348,6 +1358,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
@@ -1398,6 +1409,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         // Create a subprogram group type with a feature referencing the subprogram
@@ -1423,6 +1435,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {
