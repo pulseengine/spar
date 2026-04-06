@@ -50,3 +50,67 @@ suite('Extension Test Suite', () => {
     assert.ok(commands.length > 0, 'Extension should have activated');
   });
 });
+
+suite('Root Detection', () => {
+  test('detectRootFromText finds system implementation', () => {
+    // Import the function directly — in VS Code test runner the
+    // extension module is available via require after activation.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ext = require('../../extension');
+    const text = [
+      'package FlightControl',
+      'public',
+      '  system Controller',
+      '  end Controller;',
+      '',
+      '  system implementation Controller.Impl',
+      '    subcomponents',
+      '      nav: device Navigation;',
+      '  end Controller.Impl;',
+      'end FlightControl;',
+    ].join('\n');
+
+    const root = ext.detectRootFromText(text);
+    assert.strictEqual(root, 'FlightControl::Controller.Impl');
+  });
+
+  test('detectRootFromText returns undefined with no implementation', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ext = require('../../extension');
+    const text = [
+      'package Types',
+      'public',
+      '  data SensorData',
+      '  end SensorData;',
+      'end Types;',
+    ].join('\n');
+
+    const root = ext.detectRootFromText(text);
+    assert.strictEqual(root, undefined);
+  });
+
+  test('detectRootFromText returns undefined with no package', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ext = require('../../extension');
+    const text = '  system implementation Foo.Bar\n  end Foo.Bar;';
+
+    // No package declaration — should return undefined
+    const root = ext.detectRootFromText(text);
+    assert.strictEqual(root, undefined);
+  });
+
+  test('detectRootFromText handles colons in package name', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const ext = require('../../extension');
+    const text = [
+      'package PulseEngine::FlightControl',
+      'public',
+      '  system implementation Top.Impl',
+      '  end Top.Impl;',
+      'end PulseEngine::FlightControl;',
+    ].join('\n');
+
+    const root = ext.detectRootFromText(text);
+    assert.strictEqual(root, 'PulseEngine::FlightControl::Top.Impl');
+  });
+});
