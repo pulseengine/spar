@@ -60,6 +60,9 @@ pub struct SystemInstance {
     pub semantic_connections: Vec<SemanticConnection>,
     /// System Operation Modes — the cartesian product of modes across all modal components.
     pub system_operation_modes: Vec<SystemOperationMode>,
+    /// Connection patterns for array subcomponent expansion (AS5506 §9.8).
+    /// Maps a connection instance to its resolved pattern; absent means default (All_To_All).
+    pub connection_patterns: FxHashMap<ConnectionInstanceIdx, ConnectionPattern>,
 }
 
 /// A component instance in the flattened hierarchy.
@@ -181,6 +184,30 @@ pub struct SemanticConnection {
     pub connection_path: Vec<ConnectionInstanceIdx>,
 }
 
+/// Connection pattern for array subcomponent expansion (AS5506 §9.8).
+///
+/// When a connection references array subcomponents, the pattern controls
+/// how source array elements are paired with destination array elements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionPattern {
+    /// Element i connects to element i (requires same array size).
+    OneToOne,
+    /// Every source element connects to every destination element (cartesian product).
+    AllToAll,
+    /// One source (first element) connects to all destinations.
+    OneToAll,
+    /// All sources connect to one destination (first element).
+    AllToOne,
+    /// Element i connects to element i+1 (last element has no connection).
+    Next,
+    /// Element i connects to element i-1 (first element has no connection).
+    Previous,
+    /// Like Next, but last element wraps to first.
+    CyclicNext,
+    /// Like Previous, but first element wraps to last.
+    CyclicPrevious,
+}
+
 /// Diagnostic from instantiation.
 #[derive(Debug, Clone)]
 pub struct InstanceDiagnostic {
@@ -207,6 +234,7 @@ impl SystemInstance {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            connection_patterns: FxHashMap::default(),
             depth: 0,
             max_depth: 100,
         };
@@ -245,6 +273,7 @@ impl SystemInstance {
             property_maps: builder.property_maps,
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
+            connection_patterns: builder.connection_patterns,
         };
         instance.compute_semantic_connections();
         instance.expand_feature_group_connections(scope);
@@ -1157,6 +1186,63 @@ fn base_name_of(name: &str) -> &str {
     }
 }
 
+/// Parse a `Connection_Pattern` value string into a [`ConnectionPattern`].
+///
+/// AADL Connection_Pattern values look like `((One_To_All))` — a list of list
+/// of `Supported_Connection_Patterns` enum literals. The outer list has one
+/// entry per array dimension; for 1-D arrays only the first entry matters.
+///
+/// This function strips parentheses, whitespace, and quotes, then matches
+/// the first enum literal case-insensitively.
+fn parse_connection_pattern(value: &str) -> Option<ConnectionPattern> {
+    // Strip outer whitespace and parentheses: "((One_To_All))" -> "One_To_All"
+    let stripped = value
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .trim();
+
+    match stripped.to_ascii_lowercase().as_str() {
+        "one_to_one" => Some(ConnectionPattern::OneToOne),
+        "all_to_all" => Some(ConnectionPattern::AllToAll),
+        "one_to_all" => Some(ConnectionPattern::OneToAll),
+        "all_to_one" => Some(ConnectionPattern::AllToOne),
+        "next" => Some(ConnectionPattern::Next),
+        "previous" => Some(ConnectionPattern::Previous),
+        "cyclic_next" => Some(ConnectionPattern::CyclicNext),
+        "cyclic_previous" => Some(ConnectionPattern::CyclicPrevious),
+        _ => None,
+    }
+}
+
+/// Resolve the `Connection_Pattern` from a set of connection property associations.
+///
+/// Searches for properties named `Connection_Pattern` (with or without the
+/// `Communication_Properties` qualifier) among the given property association
+/// references.
+fn resolve_connection_pattern(
+    prop_refs: &[(usize, crate::item_tree::PropertyAssociationIdx)],
+    scope: &GlobalScope,
+) -> Option<ConnectionPattern> {
+    for &(tree_idx, pa_idx) in prop_refs.iter().rev() {
+        let tree = scope.tree(tree_idx)?;
+        let pa = &tree.property_associations[pa_idx];
+        let prop_name = pa.name.property_name.as_str();
+        if prop_name.eq_ignore_ascii_case("Connection_Pattern") {
+            let prop_set = pa.name.property_set.as_deref().unwrap_or("");
+            if prop_set.is_empty()
+                || prop_set.eq_ignore_ascii_case("Communication_Properties")
+            {
+                return parse_connection_pattern(&pa.value);
+            }
+        }
+    }
+    None
+}
+
 /// Collected members from walking an implementation's extends chain.
 #[derive(Default)]
 #[allow(clippy::type_complexity)]
@@ -1176,6 +1262,8 @@ struct ImplChainResult {
         Option<ConnectionEnd>,
         Option<ConnectionEnd>,
         Vec<Name>,
+        /// Inline property associations on the connection + impl-level `applies to` props.
+        Vec<(usize, crate::item_tree::PropertyAssociationIdx)>,
     )>,
     e2e_flows: Vec<(Name, Vec<Name>)>,
     modes: Vec<(Name, bool)>,
@@ -1194,6 +1282,7 @@ struct Builder<'a> {
     mode_transition_instances: Arena<ModeTransitionInstance>,
     diagnostics: Vec<InstanceDiagnostic>,
     property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    connection_patterns: FxHashMap<ConnectionInstanceIdx, ConnectionPattern>,
     depth: u32,
     max_depth: u32,
 }
@@ -1417,7 +1506,9 @@ impl<'a> Builder<'a> {
                     .collect();
 
                 let mut conn_indices = Vec::new();
-                for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes) in conn_data {
+                for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes, conn_props) in
+                    conn_data
+                {
                     // Fix up access connection endpoints.
                     if conn_kind == ConnectionKind::Access {
                         if let Some(ref mut s) = src {
@@ -1463,6 +1554,14 @@ impl<'a> Builder<'a> {
                         dst,
                         in_modes: conn_in_modes,
                     });
+
+                    // Resolve Connection_Pattern from connection properties.
+                    if let Some(pattern) =
+                        resolve_connection_pattern(&conn_props, self.scope)
+                    {
+                        self.connection_patterns.insert(ci, pattern);
+                    }
+
                     conn_indices.push(ci);
                 }
                 self.components[idx].connections = conn_indices.clone();
@@ -1592,7 +1691,21 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Collect own connections
+        // Collect own connections (with inline + impl-level `applies to` properties).
+        //
+        // For impl-level properties with `applies to <conn_name>`, we need to
+        // match those to connections by name. Collect them first.
+        let impl_applies_to_props: Vec<_> = ci
+            .property_associations
+            .iter()
+            .filter_map(|&pa_idx| {
+                let tree = self.scope.tree(loc.tree)?;
+                let pa = &tree.property_associations[pa_idx];
+                let target = pa.applies_to.as_deref()?;
+                Some((target.to_ascii_lowercase(), loc.tree, pa_idx))
+            })
+            .collect();
+
         for &conn_idx in &ci.connections {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let conn = &tree.connections[conn_idx];
@@ -1604,6 +1717,22 @@ impl<'a> Builder<'a> {
                     subcomponent: ce.subcomponent.clone(),
                     feature: ce.feature.clone(),
                 });
+
+                // Gather inline property associations from the connection itself.
+                let mut prop_refs: Vec<(usize, crate::item_tree::PropertyAssociationIdx)> = conn
+                    .property_associations
+                    .iter()
+                    .map(|&pa_idx| (loc.tree, pa_idx))
+                    .collect();
+
+                // Add impl-level properties whose `applies to` matches this connection name.
+                let conn_name_lower = conn.name.as_str().to_ascii_lowercase();
+                for (target, tree_idx, pa_idx) in &impl_applies_to_props {
+                    if *target == conn_name_lower {
+                        prop_refs.push((*tree_idx, *pa_idx));
+                    }
+                }
+
                 result.connections.push((
                     conn.name.clone(),
                     conn.kind,
@@ -1611,6 +1740,7 @@ impl<'a> Builder<'a> {
                     src,
                     dst,
                     conn.in_modes.clone(),
+                    prop_refs,
                 ));
             }
         }
