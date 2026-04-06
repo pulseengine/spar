@@ -1157,6 +1157,32 @@ fn base_name_of(name: &str) -> &str {
     }
 }
 
+/// Collected members from walking an implementation's extends chain.
+#[derive(Default)]
+#[allow(clippy::type_complexity)]
+struct ImplChainResult {
+    subcomponents: Vec<(
+        Name,
+        ComponentCategory,
+        Option<crate::name::ClassifierRef>,
+        crate::item_tree::SubcomponentIdx,
+        Vec<crate::item_tree::ArrayDimension>,
+        Vec<Name>,
+    )>,
+    connections: Vec<(
+        Name,
+        ConnectionKind,
+        bool,
+        Option<ConnectionEnd>,
+        Option<ConnectionEnd>,
+        Vec<Name>,
+    )>,
+    e2e_flows: Vec<(Name, Vec<Name>)>,
+    modes: Vec<(Name, bool)>,
+    mode_transitions: Vec<(Option<Name>, Name, Name, Vec<Name>)>,
+    call_map: FxHashMap<String, Name>,
+}
+
 struct Builder<'a> {
     scope: &'a GlobalScope,
     components: Arena<ComponentInstance>,
@@ -1244,7 +1270,7 @@ impl<'a> Builder<'a> {
         self.build_property_map(idx, type_loc, impl_loc, subcomponent_loc);
 
         // Instantiate features, flows, modes, and mode transitions from the type.
-        self.populate_from_type(idx, type_loc);
+        self.populate_from_type(idx, type_loc, &resolved_package);
 
         // Instantiate subcomponents (recursive)
         #[allow(clippy::collapsible_if)]
@@ -1252,216 +1278,78 @@ impl<'a> Builder<'a> {
             if self.depth < self.max_depth {
                 self.depth += 1;
 
-                if let Some(ci) = self.scope.get_component_impl(loc) {
-                    let sub_data: Vec<_> = ci
-                        .subcomponents
-                        .iter()
-                        .filter_map(|&sub_idx| {
-                            let tree = self.scope.tree(loc.tree)?;
-                            let sub = &tree.subcomponents[sub_idx];
-                            Some((
-                                sub.name.clone(),
-                                sub.category,
-                                sub.classifier.clone(),
-                                sub_idx,
-                                sub.array_dimensions.clone(),
-                                sub.in_modes.clone(),
-                            ))
-                        })
-                        .collect();
+                // Walk the impl extends chain to collect inherited subcomponents
+                // and connections (grandparent → parent → self).
+                let impl_chain = self.collect_impl_chain(loc, &resolved_package);
+                let sub_data = impl_chain.subcomponents;
+                let conn_data = impl_chain.connections;
+                let call_map = impl_chain.call_map;
+                let e2e_data = impl_chain.e2e_flows;
+                let impl_mode_data = impl_chain.modes;
+                let impl_mt_data = impl_chain.mode_transitions;
 
-                    let conn_data: Vec<_> = ci
-                        .connections
-                        .iter()
-                        .filter_map(|&conn_idx| {
-                            let tree = self.scope.tree(loc.tree)?;
-                            let conn = &tree.connections[conn_idx];
-                            let src = conn.src.as_ref().map(|ce| ConnectionEnd {
-                                subcomponent: ce.subcomponent.clone(),
-                                feature: ce.feature.clone(),
-                            });
-                            let dst = conn.dst.as_ref().map(|ce| ConnectionEnd {
-                                subcomponent: ce.subcomponent.clone(),
-                                feature: ce.feature.clone(),
-                            });
-                            Some((
-                                conn.name.clone(),
-                                conn.kind,
-                                conn.is_bidirectional,
-                                src,
-                                dst,
-                                conn.in_modes.clone(),
-                            ))
-                        })
-                        .collect();
+                let mut child_indices = Vec::new();
+                for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims, sub_in_modes) in
+                    sub_data
+                {
+                    // Determine how many instances to create for this subcomponent.
+                    let count = array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
+                    let is_array = !array_dims.is_empty();
 
-                    // Collect call-to-subcomponent mapping: call_name -> subcomponent_name.
-                    // Used to resolve parameter connection endpoints that reference
-                    // subprogram calls (e.g. `call1.p` → `s.p` when `call1: subprogram s;`).
-                    let call_map: FxHashMap<String, Name> = ci
-                        .call_sequences
-                        .iter()
-                        .flat_map(|&cs_idx| {
-                            let tree = self.scope.tree(loc.tree);
-                            tree.map(|t| {
-                                let cs = &t.call_sequences[cs_idx];
-                                cs.calls
-                                    .iter()
-                                    .filter_map(|&call_idx| {
-                                        let call = &t.subprogram_calls[call_idx];
-                                        let cls_ref = call.called_subprogram.as_ref()?;
-                                        // If the called subprogram is a local subcomponent
-                                        // reference (no package, no impl), map call name
-                                        // to the subprogram subcomponent name.
-                                        if cls_ref.package.is_none() && cls_ref.impl_name.is_none()
-                                        {
-                                            Some((
-                                                call.name.as_str().to_ascii_lowercase(),
-                                                cls_ref.type_name.clone(),
-                                            ))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default()
-                        })
-                        .collect();
+                    for array_i in 0..count {
+                        let array_index = if is_array { Some(array_i + 1) } else { None };
+                        let instance_name = if let Some(i) = array_index {
+                            Name::new(&format!("{}[{}]", sub_name, i))
+                        } else {
+                            sub_name.clone()
+                        };
 
-                    // Collect end-to-end flow data from the implementation
-                    let e2e_data: Vec<_> = ci
-                        .end_to_end_flows
-                        .iter()
-                        .filter_map(|&e2e_idx| {
-                            let tree = self.scope.tree(loc.tree)?;
-                            let e2e = &tree.end_to_end_flows[e2e_idx];
-                            Some((e2e.name.clone(), e2e.segments.clone()))
-                        })
-                        .collect();
-
-                    // Collect modes from the implementation (supplement type modes)
-                    let impl_mode_data: Vec<_> = ci
-                        .modes
-                        .iter()
-                        .filter_map(|&mode_idx| {
-                            let tree = self.scope.tree(loc.tree)?;
-                            let mode = &tree.modes[mode_idx];
-                            Some((mode.name.clone(), mode.is_initial))
-                        })
-                        .collect();
-
-                    let impl_mt_data: Vec<_> = ci
-                        .mode_transitions
-                        .iter()
-                        .filter_map(|&mt_idx| {
-                            let tree = self.scope.tree(loc.tree)?;
-                            let mt = &tree.mode_transitions[mt_idx];
-                            Some((
-                                mt.name.clone(),
-                                mt.source.clone(),
-                                mt.destination.clone(),
-                                mt.triggers.clone(),
-                            ))
-                        })
-                        .collect();
-
-                    let mut child_indices = Vec::new();
-                    for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims, sub_in_modes) in
-                        sub_data
-                    {
-                        // Determine how many instances to create for this subcomponent.
-                        let count =
-                            array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
-                        let is_array = !array_dims.is_empty();
-
-                        for array_i in 0..count {
-                            let array_index = if is_array { Some(array_i + 1) } else { None };
-                            let instance_name = if let Some(i) = array_index {
-                                Name::new(&format!("{}[{}]", sub_name, i))
+                        if let Some(cls_ref) = &sub_classifier {
+                            // If the classifier has package + type + impl, instantiate recursively
+                            if let Some(sub_impl) = &cls_ref.impl_name {
+                                let child_idx = self.instantiate_component(
+                                    &instance_name,
+                                    &resolved_package,
+                                    cls_ref.package.as_ref(),
+                                    &cls_ref.type_name,
+                                    sub_impl,
+                                    Some(idx),
+                                    Some((loc.tree, sub_idx)),
+                                );
+                                self.components[child_idx].array_index = array_index;
+                                self.components[child_idx].in_modes = sub_in_modes.clone();
+                                child_indices.push(child_idx);
                             } else {
-                                sub_name.clone()
-                            };
+                                // Type-only reference — leaf subcomponent.
+                                // Resolve the type so we can copy its features,
+                                // flows, modes, and mode transitions.
+                                let type_ref = ClassifierRef {
+                                    package: cls_ref.package.clone(),
+                                    type_name: cls_ref.type_name.clone(),
+                                    impl_name: None,
+                                };
+                                let type_resolved =
+                                    self.scope.resolve_classifier(&resolved_package, &type_ref);
+                                let (leaf_type_loc, leaf_pkg) = match &type_resolved {
+                                    ResolvedClassifier::ComponentType {
+                                        loc,
+                                        package: res_pkg,
+                                    } => (Some(*loc), res_pkg.clone()),
+                                    _ => (
+                                        None,
+                                        cls_ref
+                                            .package
+                                            .clone()
+                                            .unwrap_or_else(|| resolved_package.clone()),
+                                    ),
+                                };
 
-                            if let Some(cls_ref) = &sub_classifier {
-                                // If the classifier has package + type + impl, instantiate recursively
-                                if let Some(sub_impl) = &cls_ref.impl_name {
-                                    let child_idx = self.instantiate_component(
-                                        &instance_name,
-                                        &resolved_package,
-                                        cls_ref.package.as_ref(),
-                                        &cls_ref.type_name,
-                                        sub_impl,
-                                        Some(idx),
-                                        Some((loc.tree, sub_idx)),
-                                    );
-                                    self.components[child_idx].array_index = array_index;
-                                    self.components[child_idx].in_modes = sub_in_modes.clone();
-                                    child_indices.push(child_idx);
-                                } else {
-                                    // Type-only reference — leaf subcomponent.
-                                    // Resolve the type so we can copy its features,
-                                    // flows, modes, and mode transitions.
-                                    let type_ref = ClassifierRef {
-                                        package: cls_ref.package.clone(),
-                                        type_name: cls_ref.type_name.clone(),
-                                        impl_name: None,
-                                    };
-                                    let type_resolved =
-                                        self.scope.resolve_classifier(&resolved_package, &type_ref);
-                                    let (leaf_type_loc, leaf_pkg) = match &type_resolved {
-                                        ResolvedClassifier::ComponentType {
-                                            loc,
-                                            package: res_pkg,
-                                        } => (Some(*loc), res_pkg.clone()),
-                                        _ => (
-                                            None,
-                                            cls_ref
-                                                .package
-                                                .clone()
-                                                .unwrap_or_else(|| resolved_package.clone()),
-                                        ),
-                                    };
-
-                                    let child_idx = self.components.alloc(ComponentInstance {
-                                        name: instance_name,
-                                        category: _sub_cat,
-                                        type_name: cls_ref.type_name.clone(),
-                                        impl_name: None,
-                                        package: leaf_pkg.clone(),
-                                        parent: Some(idx),
-                                        children: Vec::new(),
-                                        features: Vec::new(),
-                                        connections: Vec::new(),
-                                        flows: Vec::new(),
-                                        modes: Vec::new(),
-                                        mode_transitions: Vec::new(),
-                                        array_index,
-                                        in_modes: sub_in_modes.clone(),
-                                    });
-
-                                    // Copy features, flows, modes, and mode transitions
-                                    // from the resolved type.
-                                    self.populate_from_type(child_idx, leaf_type_loc);
-
-                                    // Build property map for leaf subcomponent (type only)
-                                    self.build_leaf_property_map(
-                                        child_idx,
-                                        &leaf_pkg,
-                                        &cls_ref.type_name,
-                                        loc.tree,
-                                        sub_idx,
-                                    );
-                                    child_indices.push(child_idx);
-                                }
-                            } else {
-                                // No classifier — anonymous subcomponent
                                 let child_idx = self.components.alloc(ComponentInstance {
                                     name: instance_name,
                                     category: _sub_cat,
-                                    type_name: Name::default(),
+                                    type_name: cls_ref.type_name.clone(),
                                     impl_name: None,
-                                    package: resolved_package.clone(),
+                                    package: leaf_pkg.clone(),
                                     parent: Some(idx),
                                     children: Vec::new(),
                                     features: Vec::new(),
@@ -1472,127 +1360,159 @@ impl<'a> Builder<'a> {
                                     array_index,
                                     in_modes: sub_in_modes.clone(),
                                 });
-                                // Build property map for anonymous subcomponent
-                                self.build_anon_property_map(child_idx, loc.tree, sub_idx);
+
+                                // Copy features, flows, modes, and mode transitions
+                                // from the resolved type.
+                                self.populate_from_type(child_idx, leaf_type_loc, &leaf_pkg);
+
+                                // Build property map for leaf subcomponent (type only)
+                                self.build_leaf_property_map(
+                                    child_idx,
+                                    &leaf_pkg,
+                                    &cls_ref.type_name,
+                                    loc.tree,
+                                    sub_idx,
+                                );
                                 child_indices.push(child_idx);
                             }
-                        }
-                    }
-                    self.components[idx].children = child_indices;
-
-                    // Instantiate connections with endpoint fixups:
-                    //
-                    // 1. Access connections: a bare name matching a child
-                    //    subcomponent is a subcomponent reference (the entire
-                    //    subcomponent is the access endpoint).
-                    //
-                    // 2. Parameter connections: resolve call references to their
-                    //    target subprogram subcomponents (e.g. `call1.p` → `s.p`
-                    //    when `call1: subprogram s;`).
-                    let child_names: Vec<Name> = self.components[idx]
-                        .children
-                        .iter()
-                        .map(|&ci| self.components[ci].name.clone())
-                        .collect();
-
-                    let mut conn_indices = Vec::new();
-                    for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes) in conn_data {
-                        // Fix up access connection endpoints.
-                        if conn_kind == ConnectionKind::Access {
-                            if let Some(ref mut s) = src {
-                                if s.subcomponent.is_none()
-                                    && child_names.iter().any(|n| {
-                                        n.as_str().eq_ignore_ascii_case(s.feature.as_str())
-                                    })
-                                {
-                                    s.subcomponent = Some(s.feature.clone());
-                                    s.feature = Name::default();
-                                }
-                            }
-                            if let Some(ref mut d) = dst {
-                                if d.subcomponent.is_none()
-                                    && child_names.iter().any(|n| {
-                                        n.as_str().eq_ignore_ascii_case(d.feature.as_str())
-                                    })
-                                {
-                                    d.subcomponent = Some(d.feature.clone());
-                                    d.feature = Name::default();
-                                }
-                            }
-                        }
-
-                        // Resolve call references in parameter connection endpoints.
-                        if conn_kind == ConnectionKind::Parameter && !call_map.is_empty() {
-                            for endpoint in [&mut src, &mut dst].into_iter().flatten() {
-                                if let Some(sub_name) = &endpoint.subcomponent {
-                                    let key = sub_name.as_str().to_ascii_lowercase();
-                                    if let Some(target_sub) = call_map.get(&key) {
-                                        endpoint.subcomponent = Some(target_sub.clone());
-                                    }
-                                }
-                            }
-                        }
-
-                        let ci = self.connections.alloc(ConnectionInstance {
-                            name: conn_name,
-                            kind: conn_kind,
-                            is_bidirectional: bidi,
-                            owner: idx,
-                            src,
-                            dst,
-                            in_modes: conn_in_modes,
-                        });
-                        conn_indices.push(ci);
-                    }
-                    self.components[idx].connections = conn_indices.clone();
-
-                    // STPA-REQ-010: Validate array index bounds in connection endpoints.
-                    self.validate_connection_array_indices(idx, &conn_indices);
-
-                    // Instantiate end-to-end flows
-                    for (e2e_name, segments) in e2e_data {
-                        self.end_to_end_flows.alloc(EndToEndFlowInstance {
-                            name: e2e_name,
-                            owner: idx,
-                            segments,
-                        });
-                    }
-
-                    // Instantiate modes from the implementation
-                    // (modes may come from either the type or the impl; collect
-                    // impl modes that are not already present from the type)
-                    let existing_mode_names: Vec<Name> = self.components[idx]
-                        .modes
-                        .iter()
-                        .map(|&mi| self.mode_instances[mi].name.clone())
-                        .collect();
-                    for (mode_name, is_initial) in impl_mode_data {
-                        if !existing_mode_names
-                            .iter()
-                            .any(|n| n.as_str() == mode_name.as_str())
-                        {
-                            let mi = self.mode_instances.alloc(ModeInstance {
-                                name: mode_name,
-                                is_initial,
-                                owner: idx,
+                        } else {
+                            // No classifier — anonymous subcomponent
+                            let child_idx = self.components.alloc(ComponentInstance {
+                                name: instance_name,
+                                category: _sub_cat,
+                                type_name: Name::default(),
+                                impl_name: None,
+                                package: resolved_package.clone(),
+                                parent: Some(idx),
+                                children: Vec::new(),
+                                features: Vec::new(),
+                                connections: Vec::new(),
+                                flows: Vec::new(),
+                                modes: Vec::new(),
+                                mode_transitions: Vec::new(),
+                                array_index,
+                                in_modes: sub_in_modes.clone(),
                             });
-                            self.components[idx].modes.push(mi);
+                            // Build property map for anonymous subcomponent
+                            self.build_anon_property_map(child_idx, loc.tree, sub_idx);
+                            child_indices.push(child_idx);
+                        }
+                    }
+                }
+                self.components[idx].children = child_indices;
+
+                // Instantiate connections with endpoint fixups:
+                //
+                // 1. Access connections: a bare name matching a child
+                //    subcomponent is a subcomponent reference (the entire
+                //    subcomponent is the access endpoint).
+                //
+                // 2. Parameter connections: resolve call references to their
+                //    target subprogram subcomponents (e.g. `call1.p` → `s.p`
+                //    when `call1: subprogram s;`).
+                let child_names: Vec<Name> = self.components[idx]
+                    .children
+                    .iter()
+                    .map(|&ci| self.components[ci].name.clone())
+                    .collect();
+
+                let mut conn_indices = Vec::new();
+                for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes) in conn_data {
+                    // Fix up access connection endpoints.
+                    if conn_kind == ConnectionKind::Access {
+                        if let Some(ref mut s) = src {
+                            if s.subcomponent.is_none()
+                                && child_names
+                                    .iter()
+                                    .any(|n| n.as_str().eq_ignore_ascii_case(s.feature.as_str()))
+                            {
+                                s.subcomponent = Some(s.feature.clone());
+                                s.feature = Name::default();
+                            }
+                        }
+                        if let Some(ref mut d) = dst {
+                            if d.subcomponent.is_none()
+                                && child_names
+                                    .iter()
+                                    .any(|n| n.as_str().eq_ignore_ascii_case(d.feature.as_str()))
+                            {
+                                d.subcomponent = Some(d.feature.clone());
+                                d.feature = Name::default();
+                            }
                         }
                     }
 
-                    // Instantiate mode transitions from the implementation
-                    for (mt_name, mt_source, mt_dest, mt_triggers) in impl_mt_data {
-                        let mti = self
-                            .mode_transition_instances
-                            .alloc(ModeTransitionInstance {
-                                name: mt_name,
-                                source: mt_source,
-                                destination: mt_dest,
-                                triggers: mt_triggers,
-                                owner: idx,
-                            });
-                        self.components[idx].mode_transitions.push(mti);
+                    // Resolve call references in parameter connection endpoints.
+                    if conn_kind == ConnectionKind::Parameter && !call_map.is_empty() {
+                        for endpoint in [&mut src, &mut dst].into_iter().flatten() {
+                            if let Some(sub_name) = &endpoint.subcomponent {
+                                let key = sub_name.as_str().to_ascii_lowercase();
+                                if let Some(target_sub) = call_map.get(&key) {
+                                    endpoint.subcomponent = Some(target_sub.clone());
+                                }
+                            }
+                        }
                     }
+
+                    let ci = self.connections.alloc(ConnectionInstance {
+                        name: conn_name,
+                        kind: conn_kind,
+                        is_bidirectional: bidi,
+                        owner: idx,
+                        src,
+                        dst,
+                        in_modes: conn_in_modes,
+                    });
+                    conn_indices.push(ci);
+                }
+                self.components[idx].connections = conn_indices.clone();
+
+                // STPA-REQ-010: Validate array index bounds in connection endpoints.
+                self.validate_connection_array_indices(idx, &conn_indices);
+
+                // Instantiate end-to-end flows
+                for (e2e_name, segments) in e2e_data {
+                    self.end_to_end_flows.alloc(EndToEndFlowInstance {
+                        name: e2e_name,
+                        owner: idx,
+                        segments,
+                    });
+                }
+
+                // Instantiate modes from the implementation
+                // (modes may come from either the type or the impl; collect
+                // impl modes that are not already present from the type)
+                let existing_mode_names: Vec<Name> = self.components[idx]
+                    .modes
+                    .iter()
+                    .map(|&mi| self.mode_instances[mi].name.clone())
+                    .collect();
+                for (mode_name, is_initial) in impl_mode_data {
+                    if !existing_mode_names
+                        .iter()
+                        .any(|n| n.as_str() == mode_name.as_str())
+                    {
+                        let mi = self.mode_instances.alloc(ModeInstance {
+                            name: mode_name,
+                            is_initial,
+                            owner: idx,
+                        });
+                        self.components[idx].modes.push(mi);
+                    }
+                }
+
+                // Instantiate mode transitions from the implementation
+                for (mt_name, mt_source, mt_dest, mt_triggers) in impl_mt_data {
+                    let mti = self
+                        .mode_transition_instances
+                        .alloc(ModeTransitionInstance {
+                            name: mt_name,
+                            source: mt_source,
+                            destination: mt_dest,
+                            triggers: mt_triggers,
+                            owner: idx,
+                        });
+                    self.components[idx].mode_transitions.push(mti);
                 }
 
                 self.depth -= 1;
@@ -1607,36 +1527,236 @@ impl<'a> Builder<'a> {
         idx
     }
 
-    /// Populate features, flows, modes, and mode transitions from a resolved component type.
+    /// Collect features from a component type's entire extends chain.
     ///
-    /// Used by both `instantiate_component` (for components with implementations) and
-    /// the type-only subcomponent branch (for leaf subcomponents without implementations).
-    fn populate_from_type(
+    /// Returns features in inheritance order: grandparent first, then parent, then self.
+    /// Walk an implementation's extends chain and collect all subcomponents,
+    /// connections, e2e flows, modes, mode transitions, and call maps.
+    #[allow(clippy::type_complexity)]
+    fn collect_impl_chain(
         &mut self,
-        idx: ComponentInstanceIdx,
-        type_loc: Option<crate::resolver::ItemLoc>,
+        loc: crate::resolver::ItemLoc,
+        package: &Name,
+    ) -> ImplChainResult {
+        let mut result = ImplChainResult::default();
+        let mut visited = Vec::new();
+        self.collect_impl_chain_recursive(loc, package, &mut visited, &mut result);
+        result
+    }
+
+    fn collect_impl_chain_recursive(
+        &mut self,
+        loc: crate::resolver::ItemLoc,
+        package: &Name,
+        visited: &mut Vec<String>,
+        result: &mut ImplChainResult,
     ) {
-        let Some(loc) = type_loc else { return };
-        let Some(ct) = self.scope.get_component_type(loc) else {
+        let Some(ci) = self.scope.get_component_impl(loc) else {
             return;
         };
 
-        // Clone data we need before mutating self
-        let feat_data: Vec<_> = ct
-            .features
-            .iter()
-            .filter_map(|&feat_idx| {
-                let feat = self.scope.get_feature(loc.tree, feat_idx)?;
-                Some((
+        let key = format!("{}::{}.{}", package, ci.type_name, ci.impl_name);
+        if visited.contains(&key) {
+            self.diagnostics.push(InstanceDiagnostic {
+                message: format!("circular impl extends chain detected: {key}"),
+                path: Vec::new(),
+            });
+            return;
+        }
+        visited.push(key);
+
+        // Walk parent first (grandparent → parent → self)
+        if let Some(ext_ref) = &ci.extends.clone() {
+            let resolved = self.scope.resolve_classifier(package, ext_ref);
+            if let crate::resolver::ResolvedClassifier::ComponentImpl {
+                loc: parent_loc,
+                package: parent_pkg,
+            } = &resolved
+            {
+                self.collect_impl_chain_recursive(*parent_loc, parent_pkg, visited, result);
+            }
+        }
+
+        // Collect own subcomponents
+        for &sub_idx in &ci.subcomponents {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let sub = &tree.subcomponents[sub_idx];
+                result.subcomponents.push((
+                    sub.name.clone(),
+                    sub.category,
+                    sub.classifier.clone(),
+                    sub_idx,
+                    sub.array_dimensions.clone(),
+                    sub.in_modes.clone(),
+                ));
+            }
+        }
+
+        // Collect own connections
+        for &conn_idx in &ci.connections {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let conn = &tree.connections[conn_idx];
+                let src = conn.src.as_ref().map(|ce| ConnectionEnd {
+                    subcomponent: ce.subcomponent.clone(),
+                    feature: ce.feature.clone(),
+                });
+                let dst = conn.dst.as_ref().map(|ce| ConnectionEnd {
+                    subcomponent: ce.subcomponent.clone(),
+                    feature: ce.feature.clone(),
+                });
+                result.connections.push((
+                    conn.name.clone(),
+                    conn.kind,
+                    conn.is_bidirectional,
+                    src,
+                    dst,
+                    conn.in_modes.clone(),
+                ));
+            }
+        }
+
+        // Collect own e2e flows
+        for &e2e_idx in &ci.end_to_end_flows {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let e2e = &tree.end_to_end_flows[e2e_idx];
+                result
+                    .e2e_flows
+                    .push((e2e.name.clone(), e2e.segments.clone()));
+            }
+        }
+
+        // Collect own modes
+        for &mode_idx in &ci.modes {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let mode = &tree.modes[mode_idx];
+                result.modes.push((mode.name.clone(), mode.is_initial));
+            }
+        }
+
+        // Collect own mode transitions
+        for &mt_idx in &ci.mode_transitions {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let mt = &tree.mode_transitions[mt_idx];
+                result.mode_transitions.push((
+                    mt.name.clone(),
+                    mt.source.clone(),
+                    mt.destination.clone(),
+                    mt.triggers.clone(),
+                ));
+            }
+        }
+
+        // Collect call map
+        for &cs_idx in &ci.call_sequences {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let cs = &tree.call_sequences[cs_idx];
+                for &call_idx in &cs.calls {
+                    let call = &tree.subprogram_calls[call_idx];
+                    if let Some(cls_ref) = &call.called_subprogram
+                        && cls_ref.package.is_none()
+                        && cls_ref.impl_name.is_none()
+                    {
+                        result.call_map.insert(
+                            call.name.as_str().to_ascii_lowercase(),
+                            cls_ref.type_name.clone(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Deduplicates by name (child overrides parent for refined features).
+    #[allow(clippy::type_complexity)]
+    fn collect_type_chain_features(
+        &mut self,
+        loc: crate::resolver::ItemLoc,
+        package: &Name,
+        visited: &mut Vec<String>,
+    ) -> Vec<(
+        Name,
+        crate::item_tree::FeatureKind,
+        Option<crate::item_tree::Direction>,
+        Option<crate::name::ClassifierRef>,
+        Option<crate::item_tree::AccessKind>,
+        Vec<crate::item_tree::ArrayDimension>,
+    )> {
+        let Some(ct) = self.scope.get_component_type(loc) else {
+            return Vec::new();
+        };
+
+        let key = format!("{}::{}", package, ct.name);
+        if visited.contains(&key) {
+            self.diagnostics.push(InstanceDiagnostic {
+                message: format!("circular extends chain detected: {key}"),
+                path: Vec::new(),
+            });
+            return Vec::new();
+        }
+        visited.push(key);
+
+        // Collect parent features first (if extends)
+        let mut all_features = Vec::new();
+        if let Some(ext_ref) = &ct.extends.clone() {
+            let resolved = self.scope.resolve_classifier(package, ext_ref);
+            if let crate::resolver::ResolvedClassifier::ComponentType {
+                loc: parent_loc,
+                package: parent_pkg,
+            } = &resolved
+            {
+                let parent_feats =
+                    self.collect_type_chain_features(*parent_loc, parent_pkg, visited);
+                all_features.extend(parent_feats);
+            }
+        }
+
+        // Then add own features
+        for &feat_idx in &ct.features {
+            if let Some(feat) = self.scope.get_feature(loc.tree, feat_idx) {
+                all_features.push((
                     feat.name.clone(),
                     feat.kind,
                     feat.direction,
                     feat.classifier.clone(),
                     feat.access_kind,
                     feat.array_dimensions.clone(),
-                ))
-            })
-            .collect();
+                ));
+            }
+        }
+
+        // Deduplicate: child overrides parent (keep last occurrence per name)
+        let mut seen = std::collections::HashSet::new();
+        let mut deduped = Vec::new();
+        for feat in all_features.into_iter().rev() {
+            let name_key = feat.0.as_str().to_ascii_lowercase();
+            if seen.insert(name_key) {
+                deduped.push(feat);
+            }
+        }
+        deduped.reverse();
+        deduped
+    }
+
+    /// Populate features, flows, modes, and mode transitions from a resolved component type.
+    ///
+    /// Walks the extends chain to include inherited features from parent types.
+    fn populate_from_type(
+        &mut self,
+        idx: ComponentInstanceIdx,
+        type_loc: Option<crate::resolver::ItemLoc>,
+        type_package: &Name,
+    ) {
+        let Some(loc) = type_loc else {
+            return;
+        };
+
+        // Collect features from the entire extends chain
+        let mut visited = Vec::new();
+        let feat_data = self.collect_type_chain_features(loc, type_package, &mut visited);
+
+        let Some(ct) = self.scope.get_component_type(loc) else {
+            return;
+        };
 
         let flow_data: Vec<_> = ct
             .flow_specs

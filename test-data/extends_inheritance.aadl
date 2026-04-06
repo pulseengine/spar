@@ -1,0 +1,29 @@
+-- Type inheritance test: features should be inherited through extends chain.
+package InheritPkg
+public
+  system Base
+    features
+      p1 : in data port;
+    properties
+      Period => 10 ms;
+  end Base;
+
+  system Extended extends Base
+    features
+      p2 : out data port;
+  end Extended;
+
+  system DoubleExtended extends Extended
+    features
+      p3 : in event port;
+  end DoubleExtended;
+
+  system implementation Base.Impl
+  end Base.Impl;
+
+  system implementation Extended.Impl
+  end Extended.Impl;
+
+  system implementation DoubleExtended.Impl
+  end DoubleExtended.Impl;
+end InheritPkg;
