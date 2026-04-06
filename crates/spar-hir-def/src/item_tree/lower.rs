@@ -2670,7 +2670,9 @@ fn try_parse_range_from_text(text: &str) -> Option<PropertyExpr> {
 
     let min = parse_property_value_from_text(lo_text)?;
     let max = parse_property_value_from_text(hi_text)?;
-    let delta = delta_text.and_then(parse_property_value_from_text).map(Box::new);
+    let delta = delta_text
+        .and_then(parse_property_value_from_text)
+        .map(Box::new);
 
     Some(PropertyExpr::Range {
         min: Box::new(min),
@@ -2755,22 +2757,17 @@ fn try_parse_numeric_from_text(text: &str) -> Option<PropertyExpr> {
 
     // Try real — only if it starts with a digit (so identifiers like "Periodic"
     // are not confused with scientific notation).
-    if num_str
-        .bytes()
-        .next()
-        .is_some_and(|b| b.is_ascii_digit())
+    if num_str.bytes().next().is_some_and(|b| b.is_ascii_digit())
         && (num_str.contains('.') || num_str.contains('E') || num_str.contains('e'))
     {
         // Extra guard: for scientific notation without a dot (e.g. "1E3"),
         // make sure the part before E/e is all digits/underscores.
         let is_real = num_str.contains('.')
-            || num_str
-                .find(['E', 'e'])
-                .is_some_and(|pos| {
-                    num_str[..pos]
-                        .chars()
-                        .all(|c| c.is_ascii_digit() || c == '_')
-                });
+            || num_str.find(['E', 'e']).is_some_and(|pos| {
+                num_str[..pos]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '_')
+            });
         if is_real {
             let display = if sign < 0 {
                 format!("-{}", num_str)
@@ -2805,10 +2802,7 @@ fn parse_classifier_ref_text(text: &str) -> Option<ClassifierRef> {
                 Name::new(impl_name),
             ))
         } else {
-            Some(ClassifierRef::qualified(
-                Name::new(pkg),
-                Name::new(rest),
-            ))
+            Some(ClassifierRef::qualified(Name::new(pkg), Name::new(rest)))
         }
     } else if let Some(dot_pos) = text.find('.') {
         let type_name = &text[..dot_pos];
@@ -3013,18 +3007,12 @@ mod text_fallback_tests {
             PropertyExpr::Record(fields) => {
                 assert_eq!(fields.len(), 2);
                 assert_eq!(fields[0].0.as_str(), "Data_Representation");
-                assert_eq!(
-                    fields[0].1,
-                    PropertyExpr::Enum(Name::new("Integer"))
-                );
+                assert_eq!(fields[0].1, PropertyExpr::Enum(Name::new("Integer")));
                 assert_eq!(fields[1].0.as_str(), "Base_Type");
                 match &fields[1].1 {
                     PropertyExpr::ClassifierValue(cr) => {
                         assert_eq!(cr.type_name.as_str(), "Integer");
-                        assert_eq!(
-                            cr.package.as_ref().unwrap().as_str(),
-                            "Base_Types"
-                        );
+                        assert_eq!(cr.package.as_ref().unwrap().as_str(), "Base_Types");
                     }
                     other => panic!("expected ClassifierValue, got {:?}", other),
                 }
@@ -3062,8 +3050,7 @@ mod text_fallback_tests {
 
     #[test]
     fn list_of_records() {
-        let expr =
-            parse_property_value_from_text("([a => 1;], [a => 2;])").unwrap();
+        let expr = parse_property_value_from_text("([a => 1;], [a => 2;])").unwrap();
         match expr {
             PropertyExpr::List(items) => {
                 assert_eq!(items.len(), 2);
@@ -3120,8 +3107,7 @@ mod text_fallback_tests {
 
     #[test]
     fn classifier_value() {
-        let expr =
-            parse_property_value_from_text("classifier (Pkg::Type)").unwrap();
+        let expr = parse_property_value_from_text("classifier (Pkg::Type)").unwrap();
         match expr {
             PropertyExpr::ClassifierValue(cr) => {
                 assert_eq!(cr.package.as_ref().unwrap().as_str(), "Pkg");
@@ -3133,18 +3119,14 @@ mod text_fallback_tests {
 
     #[test]
     fn reference_value() {
-        let expr =
-            parse_property_value_from_text("reference (cpu1)").unwrap();
+        let expr = parse_property_value_from_text("reference (cpu1)").unwrap();
         assert_eq!(expr, PropertyExpr::ReferenceValue("cpu1".to_string()));
     }
 
     #[test]
     fn string_literal() {
         let expr = parse_property_value_from_text(r#""hello world""#).unwrap();
-        assert_eq!(
-            expr,
-            PropertyExpr::StringLit("hello world".to_string())
-        );
+        assert_eq!(expr, PropertyExpr::StringLit("hello world".to_string()));
     }
 
     #[test]
@@ -3168,12 +3150,8 @@ mod text_fallback_tests {
 
     #[test]
     fn value_ref() {
-        let expr =
-            parse_property_value_from_text("value(Other_Prop)").unwrap();
-        assert_eq!(
-            expr,
-            PropertyExpr::ValueRef(Name::new("Other_Prop"))
-        );
+        let expr = parse_property_value_from_text("value(Other_Prop)").unwrap();
+        assert_eq!(expr, PropertyExpr::ValueRef(Name::new("Other_Prop")));
     }
 
     #[test]
@@ -3193,10 +3171,7 @@ mod text_fallback_tests {
 
     #[test]
     fn record_with_nested_record() {
-        let expr = parse_property_value_from_text(
-            "[outer => [inner => 42;];]",
-        )
-        .unwrap();
+        let expr = parse_property_value_from_text("[outer => [inner => 42;];]").unwrap();
         match expr {
             PropertyExpr::Record(fields) => {
                 assert_eq!(fields.len(), 1);
@@ -3231,8 +3206,7 @@ mod text_fallback_tests {
     #[test]
     fn record_trailing_no_semicolon() {
         // Records where the last field omits the trailing semicolon
-        let expr =
-            parse_property_value_from_text("[x => 1; y => 2]").unwrap();
+        let expr = parse_property_value_from_text("[x => 1; y => 2]").unwrap();
         match expr {
             PropertyExpr::Record(fields) => {
                 assert_eq!(fields.len(), 2);
