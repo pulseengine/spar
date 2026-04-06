@@ -40,10 +40,6 @@ const TIMING_PROPERTIES: &[(&str, &str)] = &[
         "Reference_Time",
         "list of reference (applies to processor, device)",
     ),
-    (
-        "Dispatch_Protocol",
-        "enumeration (Periodic, Sporadic, Aperiodic, Timed, Hybrid, Background)",
-    ),
     ("Startup_Execution_Time", "Time_Range"),
     ("Clock_Jitter", "Time"),
     ("First_Dispatch_Time", "Time"),
@@ -81,11 +77,6 @@ const COMMUNICATION_PROPERTIES: &[(&str, &str)] = &[
     ("Latency", "Time_Range"),
     ("Actual_Latency", "Time_Range"),
     ("Required_Connection", "list of reference (port)"),
-    (
-        "Not_Collocated",
-        "record (Targets: list of reference; Location: classifier)",
-    ),
-    ("Actual_Connection_Binding", "list of reference"),
 ];
 
 // ── Memory_Properties ───────────────────────────────────────────────
@@ -156,6 +147,10 @@ const DEPLOYMENT_PROPERTIES: &[(&str, &str)] = &[
 // ── Thread_Properties ───────────────────────────────────────────────
 
 const THREAD_PROPERTIES: &[(&str, &str)] = &[
+    (
+        "Dispatch_Protocol",
+        "enumeration (Periodic, Sporadic, Aperiodic, Timed, Hybrid, Background)",
+    ),
     ("Dispatch_Trigger", "list of reference (port)"),
     ("Priority", "aadlinteger"),
     ("Criticality", "aadlinteger"),
@@ -405,13 +400,12 @@ mod tests {
     #[test]
     fn test_standard_properties_in_timing() {
         let props = standard_properties_in_set("Timing_Properties");
-        assert_eq!(props.len(), 13);
+        assert_eq!(props.len(), 12);
         assert!(props.contains(&"Period"));
         assert!(props.contains(&"Deadline"));
         assert!(props.contains(&"Compute_Execution_Time"));
         assert!(props.contains(&"Clock_Period"));
         assert!(props.contains(&"Reference_Time"));
-        assert!(props.contains(&"Dispatch_Protocol"));
         assert!(props.contains(&"Startup_Execution_Time"));
         assert!(props.contains(&"Clock_Jitter"));
         assert!(props.contains(&"First_Dispatch_Time"));
@@ -424,7 +418,7 @@ mod tests {
     #[test]
     fn test_standard_properties_in_communication() {
         let props = standard_properties_in_set("Communication_Properties");
-        assert_eq!(props.len(), 15);
+        assert_eq!(props.len(), 13);
         assert!(props.contains(&"Fan_Out_Policy"));
         assert!(props.contains(&"Queue_Size"));
         assert!(props.contains(&"Queue_Processing_Protocol"));
@@ -438,8 +432,6 @@ mod tests {
         assert!(props.contains(&"Latency"));
         assert!(props.contains(&"Actual_Latency"));
         assert!(props.contains(&"Required_Connection"));
-        assert!(props.contains(&"Not_Collocated"));
-        assert!(props.contains(&"Actual_Connection_Binding"));
     }
 
     #[test]
@@ -485,7 +477,8 @@ mod tests {
     #[test]
     fn test_standard_properties_in_thread() {
         let props = standard_properties_in_set("Thread_Properties");
-        assert_eq!(props.len(), 6);
+        assert_eq!(props.len(), 7);
+        assert!(props.contains(&"Dispatch_Protocol"));
         assert!(props.contains(&"Dispatch_Trigger"));
         assert!(props.contains(&"Priority"));
         assert!(props.contains(&"Criticality"));
@@ -563,15 +556,15 @@ mod tests {
     #[test]
     fn test_standard_properties_case_insensitive() {
         let props = standard_properties_in_set("timing_properties");
-        assert_eq!(props.len(), 13);
+        assert_eq!(props.len(), 12);
         assert!(props.contains(&"Period"));
     }
 
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 13 + 15 + 14 + 14 + 6 + 25 + 4 + 13 = 104
-        assert_eq!(all.len(), 104);
+        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 = 102
+        assert_eq!(all.len(), 102);
     }
 
     #[test]
