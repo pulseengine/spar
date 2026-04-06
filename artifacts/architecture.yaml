@@ -155,9 +155,10 @@ artifacts:
     type: design-decision
     title: spar-analysis
     description: >
-      27 analysis passes implementing connectivity, scheduling, latency,
+      33+ analysis passes implementing connectivity, scheduling, latency,
       resource budget, EMV2, ARINC 653, legality rules, mode reachability,
-      and more. Trait-based Analysis framework with AnalysisRunner.
+      AI/ML safety (ISO/PAS 8800), and more. Trait-based Analysis framework
+      with AnalysisRunner.
     fields:
       rationale: >
         Trait-based Analysis framework allows modular registration of
@@ -823,3 +824,136 @@ artifacts:
   # ── SysML v2 Integration (v0.5.0) ───────────────────────────────────
 
   # ARCH-SYSML2-001 merged into ARCH-SYSML2-002 and ARCH-SYSML2-003 (v0.4.0)
+
+  # ── v0.5.0 Architecture Decisions ──────────────────────────────────
+
+  - id: ARCH-EXTENDS
+    type: design-decision
+    title: Type inheritance via extends chain walking
+    description: >
+      collect_type_chain_features and collect_impl_chain walk the extends
+      chain recursively with cycle detection. Features deduplicated by name.
+    status: implemented
+    fields:
+      rationale: >
+        Recursive chain walking mirrors the AADL spec semantics for extends.
+        Cycle detection prevents infinite loops. Name-based deduplication
+        ensures refined features override parent features correctly.
+    tags: [v0.5.0]
+    links:
+      - type: satisfies
+        target: REQ-MODEL-005
+
+  - id: ARCH-SYSML2-SCHEMA
+    type: design-decision
+    title: SysML v2 Rivet schema
+    description: >
+      schemas/sysml2.yaml defines sysml-requirement, sysml-component,
+      sysml-interface, sysml-action artifact types for rivet integration.
+    status: implemented
+    fields:
+      rationale: >
+        Custom rivet artifact types enable SysML v2 elements to participate
+        natively in traceability graphs. Schema-level typing ensures
+        validation and consistent extraction output.
+    tags: [v0.5.0, sysml2]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-EXTRACT
+
+  - id: ARCH-AIML
+    type: design-decision
+    title: AI/ML analysis passes following ISO/PAS 8800
+    description: >
+      Six analysis modules for AI/ML component safety: inference deadline
+      checking, fallback coverage, fallback timing, OOD coverage,
+      model deployment validation, and redundancy verification. Each
+      implements the Analysis trait and integrates with AnalysisRunner.
+    status: implemented
+    fields:
+      rationale: >
+        ISO/PAS 8800 mandates safety analysis for AI/ML components in
+        automotive systems. Implementing as standard Analysis trait modules
+        ensures they integrate with existing AnalysisRunner and benefit
+        from the same reporting infrastructure.
+    tags: [v0.5.0, analysis, ai-ml]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-001
+
+  - id: ARCH-EMV2-STPA
+    type: design-decision
+    title: EMV2 fault tree to STPA hazard mapping
+    description: >
+      Bridge module mapping EMV2 composite error states to STPA hazards
+      and propagation paths to loss scenarios. Enables safety analysis
+      workflows spanning both EMV2 and STPA methodologies.
+    status: implemented
+    fields:
+      rationale: >
+        STPA and EMV2 address overlapping safety concerns from different
+        perspectives. Bridging them avoids duplicate modeling effort and
+        enables cross-methodology traceability in safety cases.
+    tags: [v0.5.0, safety]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-005
+
+  - id: ARCH-MODAL-FILTER
+    type: design-decision
+    title: Modal filtering with requires_modes flag
+    description: >
+      requires_modes flag stored in ItemTree during lowering.
+      is_active_in_mode utility enables modal-aware connectivity
+      and scheduling analysis without re-instantiation.
+    status: implemented
+    fields:
+      rationale: >
+        Storing requires_modes in ItemTree at lowering time avoids
+        re-parsing CST during analysis. The is_active_in_mode utility
+        provides a single filtering point for all modal-aware passes.
+    tags: [v0.5.0, modes]
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-009
+
+  - id: ARCH-PROP-LOWERING
+    type: design-decision
+    title: Property CST lowering with text fallback parser
+    description: >
+      When CST lowering cannot determine property value type, a text-based
+      fallback parser handles booleans, references, classifiers, ranges,
+      lists, numerics with units, and enums. Covers legacy and mixed-version
+      AADL property syntax gracefully.
+    status: implemented
+    fields:
+      rationale: >
+        CST lowering sometimes lacks enough context to determine property
+        value types (especially for user-defined property sets). A text
+        fallback parser provides graceful degradation while maintaining
+        typed values for downstream analysis.
+    tags: [v0.5.0, properties]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+
+  - id: ARCH-SECURITY-HARDEN
+    type: design-decision
+    title: Security hardening across rendering and CLI
+    description: >
+      22 correctness and security fixes from adversarial scanning: XSS
+      prevention via HTML entity escaping in SVG output, YAML/TOML
+      injection prevention via safe serialization, path traversal guards
+      on file operations, UTF-8 safe percent decoding, arena index
+      bounds checks preventing panics on invalid input.
+    status: implemented
+    fields:
+      rationale: >
+        Adversarial scanning revealed input-driven vulnerabilities in
+        rendering and CLI paths. Defense-in-depth approach hardens each
+        layer independently: output escaping, input validation, and
+        bounds checking.
+    tags: [v0.5.0, security]
+    links:
+      - type: satisfies
+        target: STPA-SEC-REQ-001

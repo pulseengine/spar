@@ -9,7 +9,7 @@
 This project uses **Rivet** for SDLC artifact traceability.
 - Config: `rivet.yaml`
 - Schemas: common, dev, aspice, stpa, aadl, sysml2
-- Artifacts: 342 across 3 types
+- Artifacts: 359 across 3 types
 - Validation: `rivet validate` (current status: pass)
 
 ## Available Commands
@@ -31,8 +31,8 @@ This project uses **Rivet** for SDLC artifact traceability.
 
 | Type | Count | Description |
 |------|------:|-------------|
-| `design-decision` | 65 | An architectural or design decision with rationale |
-| `feature` | 103 | A user-visible capability or feature |
+| `design-decision` | 72 | An architectural or design decision with rationale |
+| `feature` | 113 | A user-visible capability or feature |
 | `requirement` | 174 | A functional or non-functional requirement |
 | `aadl-analysis-result` | 0 | Output of a spar analysis pass |
 | `aadl-component` | 0 | AADL component type or implementation imported from spar |
