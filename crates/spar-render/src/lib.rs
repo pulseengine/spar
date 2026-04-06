@@ -125,7 +125,59 @@ impl Default for RenderOptions {
     }
 }
 
+/// Maximum nesting depth for compound (container) graph nodes.
+///
+/// The etch crate's Sugiyama layout uses unbounded recursion for compound
+/// graphs. Hierarchies deeper than this limit are flattened into the deepest
+/// allowed container to prevent stack overflows (observed as SIGABRT in fuzz
+/// testing at 6+ levels).
+const MAX_RENDER_DEPTH: usize = 5;
+
+/// Compute the depth of every component in the hierarchy (root = 0).
+fn compute_depths(instance: &SystemInstance) -> HashMap<ComponentInstanceIdx, usize> {
+    let mut depths = HashMap::new();
+    let mut stack = vec![(instance.root, 0usize)];
+    while let Some((ci_idx, depth)) = stack.pop() {
+        depths.insert(ci_idx, depth);
+        let comp = instance.component(ci_idx);
+        for &child in &comp.children {
+            stack.push((child, depth + 1));
+        }
+    }
+    depths
+}
+
+/// Walk from `ci_idx` toward the root and return the ancestor at exactly
+/// `target_depth`. Returns `None` if the component is the root or has no
+/// ancestor at that depth.
+fn ancestor_at_depth(
+    instance: &SystemInstance,
+    ci_idx: ComponentInstanceIdx,
+    depths: &HashMap<ComponentInstanceIdx, usize>,
+    target_depth: usize,
+) -> Option<ComponentInstanceIdx> {
+    let mut current = ci_idx;
+    loop {
+        let d = depths.get(&current).copied().unwrap_or(0);
+        if d == target_depth {
+            return Some(current);
+        }
+        if d == 0 {
+            return None;
+        }
+        let comp = instance.component(current);
+        match comp.parent {
+            Some(p) => current = p,
+            None => return None,
+        }
+    }
+}
+
 /// Build a petgraph from the AADL instance model with ports.
+///
+/// Hierarchies deeper than [`MAX_RENDER_DEPTH`] are flattened: children beyond
+/// the limit are placed into the deepest allowed container rather than their
+/// true parent, preventing unbounded recursion in the layout algorithm.
 fn build_graph(
     instance: &SystemInstance,
     _options: &RenderOptions,
@@ -139,9 +191,13 @@ fn build_graph(
     let mut node_infos: HashMap<NodeIndex, NodeInfo> = HashMap::new();
     let mut edge_infos: HashMap<EdgeIndex, EdgeInfo> = HashMap::new();
 
+    let depths = compute_depths(instance);
+
     for (ci_idx, comp) in instance.all_components() {
         let node_idx = graph.add_node(ci_idx);
         idx_map.insert(ci_idx, node_idx);
+
+        let depth = depths.get(&ci_idx).copied().unwrap_or(0);
 
         let label = if let Some(arr_idx) = comp.array_index {
             format!("{}[{}]", html_escape(comp.name.as_str()), arr_idx)
@@ -158,8 +214,15 @@ fn build_graph(
             )
         });
 
+        // For components deeper than the limit, reparent to the ancestor at
+        // MAX_RENDER_DEPTH so the layout graph stays shallow.
         let parent = if ci_idx == instance.root {
             None
+        } else if depth > MAX_RENDER_DEPTH {
+            ancestor_at_depth(instance, ci_idx, &depths, MAX_RENDER_DEPTH).map(|anc| {
+                let anc_comp = instance.component(anc);
+                node_id(anc_comp, anc)
+            })
         } else {
             comp.parent.map(|p| {
                 let parent_comp = instance.component(p);
@@ -924,5 +987,181 @@ mod tests {
     fn html_escape_preserves_safe_strings() {
         assert_eq!(html_escape("hello_world"), "hello_world");
         assert_eq!(html_escape("Sensor.impl"), "Sensor.impl");
+    }
+
+    // -----------------------------------------------------------------------
+    // Deep hierarchy flattening tests
+    // -----------------------------------------------------------------------
+
+    /// Build a `SystemInstance` with a linear chain of `depth` nested components.
+    /// Returns the instance and a vec of component indices from root (depth 0)
+    /// to the deepest leaf.
+    fn make_deep_instance(depth: usize) -> (SystemInstance, Vec<ComponentInstanceIdx>) {
+        use la_arena::Arena;
+        use rustc_hash::FxHashMap;
+        use spar_hir_def::Name;
+        use spar_hir_def::instance::{
+            ComponentInstance, ConnectionInstance, EndToEndFlowInstance, FlowInstance,
+            ModeInstance, ModeTransitionInstance, SystemInstance,
+        };
+
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut indices = Vec::new();
+
+        // Allocate root
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("root"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Root"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+        indices.push(root);
+
+        // Allocate nested children: depth 1 through `depth`
+        for d in 1..=depth {
+            let parent_idx = indices[d - 1];
+            let child = components.alloc(ComponentInstance {
+                name: Name::new(&format!("level_{d}")),
+                category: ComponentCategory::System,
+                type_name: Name::new(&format!("L{d}")),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(parent_idx),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            });
+            // Wire parent -> child
+            components[parent_idx].children.push(child);
+            indices.push(child);
+        }
+
+        let instance = SystemInstance {
+            root,
+            components,
+            features: Arena::default(),
+            connections: Arena::<ConnectionInstance>::default(),
+            flow_instances: Arena::<FlowInstance>::default(),
+            end_to_end_flows: Arena::<EndToEndFlowInstance>::default(),
+            mode_instances: Arena::<ModeInstance>::default(),
+            mode_transition_instances: Arena::<ModeTransitionInstance>::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        };
+
+        (instance, indices)
+    }
+
+    #[test]
+    fn compute_depths_linear_chain() {
+        let (instance, indices) = make_deep_instance(8);
+        let depths = compute_depths(&instance);
+        for (i, &idx) in indices.iter().enumerate() {
+            assert_eq!(
+                depths[&idx], i,
+                "component at position {i} should have depth {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn ancestor_at_depth_walks_up_correctly() {
+        let (instance, indices) = make_deep_instance(8);
+        let depths = compute_depths(&instance);
+
+        // The deepest node (depth 8) should have ancestor at depth 5
+        let deep = indices[8];
+        let anc = ancestor_at_depth(&instance, deep, &depths, MAX_RENDER_DEPTH);
+        assert_eq!(anc, Some(indices[MAX_RENDER_DEPTH]));
+
+        // A node at depth 3 has no ancestor at depth 5 (it IS shallower)
+        let shallow = indices[3];
+        let anc = ancestor_at_depth(&instance, shallow, &depths, MAX_RENDER_DEPTH);
+        assert_eq!(anc, None);
+
+        // A node exactly at MAX_RENDER_DEPTH is its own ancestor
+        let exact = indices[MAX_RENDER_DEPTH];
+        let anc = ancestor_at_depth(&instance, exact, &depths, MAX_RENDER_DEPTH);
+        assert_eq!(anc, Some(exact));
+    }
+
+    #[test]
+    fn deep_hierarchy_flattened_in_graph() {
+        let (instance, _indices) = make_deep_instance(8);
+        let (graph, node_infos, _edge_infos) = build_graph(&instance, &RenderOptions::default());
+
+        // The graph should contain all 9 nodes (root + 8 levels)
+        assert_eq!(graph.node_count(), 9);
+
+        // Nodes at depth <= MAX_RENDER_DEPTH should have their true parent.
+        // Nodes deeper than MAX_RENDER_DEPTH should be reparented to the
+        // ancestor at depth MAX_RENDER_DEPTH.
+        let depth_limit_id = format!("AADL-Pkg-level_{MAX_RENDER_DEPTH}");
+
+        for info in node_infos.values() {
+            if info.id.contains(&format!("level_{}", MAX_RENDER_DEPTH + 1))
+                || info.id.contains(&format!("level_{}", MAX_RENDER_DEPTH + 2))
+                || info.id.contains(&format!("level_{}", MAX_RENDER_DEPTH + 3))
+            {
+                assert_eq!(
+                    info.parent.as_deref(),
+                    Some(depth_limit_id.as_str()),
+                    "node {} should be reparented to depth-limit ancestor",
+                    info.id
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deep_hierarchy_renders_svg_without_overflow() {
+        // This test verifies that a hierarchy deeper than MAX_RENDER_DEPTH
+        // renders successfully. Before the fix, this would SIGABRT due to
+        // stack overflow in the etch Sugiyama algorithm.
+        let (instance, _) = make_deep_instance(8);
+        let svg = render_instance(&instance, &RenderOptions::default());
+        assert!(svg.contains("<svg"), "output should be valid SVG");
+        // All 9 nodes should appear in the SVG
+        assert!(svg.contains("root"));
+        assert!(svg.contains("level_1"));
+        assert!(svg.contains("level_8"));
+    }
+
+    #[test]
+    fn shallow_hierarchy_unchanged() {
+        // A hierarchy within the depth limit should keep exact parent references.
+        let (instance, _indices) = make_deep_instance(MAX_RENDER_DEPTH);
+        let (_graph, node_infos, _edge_infos) =
+            build_graph(&instance, &RenderOptions::default());
+
+        // level_4's parent should be level_3 (true parent), not reparented
+        for info in node_infos.values() {
+            if info.id == format!("AADL-Pkg-level_{}", MAX_RENDER_DEPTH) {
+                let expected_parent =
+                    format!("AADL-Pkg-level_{}", MAX_RENDER_DEPTH - 1);
+                assert_eq!(
+                    info.parent.as_deref(),
+                    Some(expected_parent.as_str()),
+                    "node at exactly MAX_RENDER_DEPTH should keep its true parent"
+                );
+            }
+        }
     }
 }

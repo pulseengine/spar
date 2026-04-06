@@ -14,3 +14,4 @@ petgraph = { workspace = true }
 [dev-dependencies]
 spar-hir-def = { workspace = true }
 la-arena = { workspace = true }
+rustc-hash = { workspace = true }
