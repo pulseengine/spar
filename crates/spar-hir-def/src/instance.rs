@@ -1653,12 +1653,14 @@ impl<'a> Builder<'a> {
                 for &call_idx in &cs.calls {
                     let call = &tree.subprogram_calls[call_idx];
                     if let Some(cls_ref) = &call.called_subprogram
-                        && cls_ref.package.is_none() && cls_ref.impl_name.is_none() {
-                            result.call_map.insert(
-                                call.name.as_str().to_ascii_lowercase(),
-                                cls_ref.type_name.clone(),
-                            );
-                        }
+                        && cls_ref.package.is_none()
+                        && cls_ref.impl_name.is_none()
+                    {
+                        result.call_map.insert(
+                            call.name.as_str().to_ascii_lowercase(),
+                            cls_ref.type_name.clone(),
+                        );
+                    }
                 }
             }
         }
