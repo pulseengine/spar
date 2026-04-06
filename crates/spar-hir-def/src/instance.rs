@@ -1241,7 +1241,7 @@ impl<'a> Builder<'a> {
         });
 
         // Build property map: type → impl → subcomponent layering
-        self.build_property_map(idx, type_loc, impl_loc, subcomponent_loc);
+        self.build_property_map(idx, type_loc, impl_loc, subcomponent_loc, &resolved_package);
 
         // Instantiate features, flows, modes, and mode transitions from the type.
         self.populate_from_type(idx, type_loc);
@@ -1741,6 +1741,97 @@ impl<'a> Builder<'a> {
         self.components[idx].mode_transitions = mt_indices;
     }
 
+    /// Collect property associations from a component type's extends chain.
+    ///
+    /// Walks the chain from the root ancestor to the given type, returning
+    /// `(tree_idx, PropertyAssociationIdx)` pairs in inheritance order
+    /// (grandparent first, self last) so that later values override earlier.
+    fn collect_type_chain_properties(
+        &self,
+        loc: crate::resolver::ItemLoc,
+        package: &Name,
+        visited: &mut Vec<String>,
+    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx)> {
+        let mut result = Vec::new();
+
+        let ct = match self.scope.get_component_type(loc) {
+            Some(ct) => ct,
+            None => return result,
+        };
+
+        // Check for extends and recurse into parent first (so parent props come first)
+        if let Some(parent_ref) = &ct.extends {
+            let parent_key = format!("{}", parent_ref);
+            if !visited.contains(&parent_key) {
+                visited.push(parent_key);
+                let resolved = self.scope.resolve_classifier(package, parent_ref);
+                if let ResolvedClassifier::ComponentType {
+                    loc: parent_loc,
+                    package: parent_pkg,
+                } = resolved
+                {
+                    let parent_props =
+                        self.collect_type_chain_properties(parent_loc, &parent_pkg, visited);
+                    result.extend(parent_props);
+                }
+            }
+        }
+
+        // Then append own properties (override parent)
+        // Re-fetch the type since we can't hold the borrow across the recursive call
+        if let Some(ct) = self.scope.get_component_type(loc) {
+            for &pa_idx in &ct.property_associations {
+                result.push((loc.tree, pa_idx));
+            }
+        }
+
+        result
+    }
+
+    /// Collect property associations from a component impl's extends chain.
+    ///
+    /// Same inheritance-order semantics as [`collect_type_chain_properties`].
+    fn collect_impl_chain_properties(
+        &self,
+        loc: crate::resolver::ItemLoc,
+        package: &Name,
+        visited: &mut Vec<String>,
+    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx)> {
+        let mut result = Vec::new();
+
+        let ci = match self.scope.get_component_impl(loc) {
+            Some(ci) => ci,
+            None => return result,
+        };
+
+        // Check for extends and recurse into parent first (so parent props come first)
+        if let Some(parent_ref) = &ci.extends {
+            let parent_key = format!("{}", parent_ref);
+            if !visited.contains(&parent_key) {
+                visited.push(parent_key);
+                let resolved = self.scope.resolve_classifier(package, parent_ref);
+                if let ResolvedClassifier::ComponentImpl {
+                    loc: parent_loc,
+                    package: parent_pkg,
+                } = resolved
+                {
+                    let parent_props =
+                        self.collect_impl_chain_properties(parent_loc, &parent_pkg, visited);
+                    result.extend(parent_props);
+                }
+            }
+        }
+
+        // Then append own properties (override parent)
+        if let Some(ci) = self.scope.get_component_impl(loc) {
+            for &pa_idx in &ci.property_associations {
+                result.push((loc.tree, pa_idx));
+            }
+        }
+
+        result
+    }
+
     /// Build a property map for a component instance with type + impl + subcomponent layering.
     fn build_property_map(
         &mut self,
@@ -1748,42 +1839,41 @@ impl<'a> Builder<'a> {
         type_loc: Option<crate::resolver::ItemLoc>,
         impl_loc: Option<crate::resolver::ItemLoc>,
         subcomponent_loc: Option<(usize, crate::item_tree::SubcomponentIdx)>,
+        resolved_package: &Name,
     ) {
-        use crate::item_tree::{ComponentImplIdx, ComponentTypeIdx};
-
         let mut map = PropertyMap::new();
 
-        // 1. Type-level properties
-        if let Some(loc) = type_loc
-            && let Some(tree) = self.scope.tree(loc.tree)
-        {
-            let ct_idx: ComponentTypeIdx =
-                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-            let ct = &tree.component_types[ct_idx];
-            for &pa_idx in &ct.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    is_append: pa.is_append,
-                });
+        // 1. Type-level properties (walking the extends chain)
+        if let Some(loc) = type_loc {
+            let mut visited = Vec::new();
+            let type_props =
+                self.collect_type_chain_properties(loc, resolved_package, &mut visited);
+            for (tree_idx, pa_idx) in type_props {
+                if let Some(tree) = self.scope.tree(tree_idx) {
+                    let pa = &tree.property_associations[pa_idx];
+                    map.add(crate::properties::PropertyValue {
+                        name: pa.name.clone(),
+                        value: pa.value.clone(),
+                        is_append: pa.is_append,
+                    });
+                }
             }
         }
 
-        // 2. Implementation-level properties (override type)
-        if let Some(loc) = impl_loc
-            && let Some(tree) = self.scope.tree(loc.tree)
-        {
-            let ci_idx: ComponentImplIdx =
-                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-            let ci = &tree.component_impls[ci_idx];
-            for &pa_idx in &ci.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    is_append: pa.is_append,
-                });
+        // 2. Implementation-level properties (walking the extends chain, override type)
+        if let Some(loc) = impl_loc {
+            let mut visited = Vec::new();
+            let impl_props =
+                self.collect_impl_chain_properties(loc, resolved_package, &mut visited);
+            for (tree_idx, pa_idx) in impl_props {
+                if let Some(tree) = self.scope.tree(tree_idx) {
+                    let pa = &tree.property_associations[pa_idx];
+                    map.add(crate::properties::PropertyValue {
+                        name: pa.name.clone(),
+                        value: pa.value.clone(),
+                        is_append: pa.is_append,
+                    });
+                }
             }
         }
 
@@ -1818,22 +1908,21 @@ impl<'a> Builder<'a> {
     ) {
         let mut map = PropertyMap::new();
 
-        // Resolve type to get type-level properties
+        // Resolve type to get type-level properties (walking the extends chain)
         let type_ref = ClassifierRef::qualified(package.clone(), type_name.clone());
         let type_resolved = self.scope.resolve_classifier(package, &type_ref);
-        if let ResolvedClassifier::ComponentType { loc, .. } = &type_resolved
-            && let Some(tree) = self.scope.tree(loc.tree)
-        {
-            let ct_idx: crate::item_tree::ComponentTypeIdx =
-                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
-            let ct = &tree.component_types[ct_idx];
-            for &pa_idx in &ct.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    is_append: pa.is_append,
-                });
+        if let ResolvedClassifier::ComponentType { loc, .. } = &type_resolved {
+            let mut visited = Vec::new();
+            let type_props = self.collect_type_chain_properties(*loc, package, &mut visited);
+            for (tree_idx, pa_idx) in type_props {
+                if let Some(tree) = self.scope.tree(tree_idx) {
+                    let pa = &tree.property_associations[pa_idx];
+                    map.add(crate::properties::PropertyValue {
+                        name: pa.name.clone(),
+                        value: pa.value.clone(),
+                        is_append: pa.is_append,
+                    });
+                }
             }
         }
 

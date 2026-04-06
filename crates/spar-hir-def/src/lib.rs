@@ -796,7 +796,242 @@ end P;
         assert_eq!(props.get("", "Priority"), Some("3"), "props: {:?}", props);
     }
 
-    // ── Flow instance tests ───────────────────────────────────────────
+    // ── Property inheritance through extends chain ─────────────────────
+
+    #[test]
+    fn property_type_extends_chain_inheritance() {
+        // Parent type has Property A, child type extends parent and adds Property B.
+        // Child instance should inherit both A and B.
+        let db = make_db();
+        let src = r#"package P
+public
+  system Base
+    properties
+      Period => 10 ms;
+      Deadline => 5 ms;
+  end Base;
+
+  system Child extends Base
+    properties
+      Priority => 7;
+      Deadline => 15 ms;
+  end Child;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      c : system Child;
+  end Top.impl;
+end P;
+"#;
+        let file = spar_base_db::SourceFile::new(&db, "extends.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("P"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        let root = inst.component(inst.root);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
+
+        let child_idx = root.children[0];
+        let props = inst.properties_for(child_idx);
+
+        // Period: inherited from Base (parent type)
+        assert_eq!(
+            props.get("", "Period"),
+            Some("10 ms"),
+            "Period should be inherited from Base; props: {:?}",
+            props
+        );
+
+        // Deadline: Base says 5ms, Child says 15ms -> Child wins
+        assert_eq!(
+            props.get("", "Deadline"),
+            Some("15 ms"),
+            "Deadline should be overridden by Child; props: {:?}",
+            props
+        );
+
+        // Priority: only on Child -> inherited
+        assert_eq!(
+            props.get("", "Priority"),
+            Some("7"),
+            "Priority should come from Child; props: {:?}",
+            props
+        );
+    }
+
+    #[test]
+    fn property_impl_extends_chain_inheritance() {
+        // Parent impl has a property, child impl extends it and adds another.
+        let db = make_db();
+        let src = r#"package P
+public
+  system S
+  end S;
+
+  system implementation S.base
+    properties
+      Period => 10 ms;
+      Deadline => 5 ms;
+  end S.base;
+
+  system implementation S.child extends S.base
+    properties
+      Priority => 3;
+      Deadline => 20 ms;
+  end S.child;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      s1 : system S.child;
+  end Top.impl;
+end P;
+"#;
+        let file =
+            spar_base_db::SourceFile::new(&db, "impl_extends.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("P"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        let root = inst.component(inst.root);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
+
+        let s1_idx = root.children[0];
+        let props = inst.properties_for(s1_idx);
+
+        // Period: inherited from S.base (parent impl)
+        assert_eq!(
+            props.get("", "Period"),
+            Some("10 ms"),
+            "Period should be inherited from S.base; props: {:?}",
+            props
+        );
+
+        // Deadline: S.base says 5ms, S.child says 20ms -> S.child wins
+        assert_eq!(
+            props.get("", "Deadline"),
+            Some("20 ms"),
+            "Deadline should be overridden by S.child; props: {:?}",
+            props
+        );
+
+        // Priority: only on S.child -> inherited
+        assert_eq!(
+            props.get("", "Priority"),
+            Some("3"),
+            "Priority should come from S.child; props: {:?}",
+            props
+        );
+    }
+
+    #[test]
+    fn property_grandparent_type_chain() {
+        // Three-level chain: Grandparent -> Parent -> Child, each with properties.
+        let db = make_db();
+        let src = r#"package P
+public
+  system Grandparent
+    properties
+      Period => 100 ms;
+      Deadline => 50 ms;
+      Priority => 1;
+  end Grandparent;
+
+  system Parent extends Grandparent
+    properties
+      Deadline => 25 ms;
+  end Parent;
+
+  system Child extends Parent
+    properties
+      Priority => 9;
+  end Child;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      c : system Child;
+  end Top.impl;
+end P;
+"#;
+        let file =
+            spar_base_db::SourceFile::new(&db, "grandparent.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("P"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        let root = inst.component(inst.root);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
+
+        let child_idx = root.children[0];
+        let props = inst.properties_for(child_idx);
+
+        // Period: from Grandparent, never overridden
+        assert_eq!(
+            props.get("", "Period"),
+            Some("100 ms"),
+            "Period should be inherited from Grandparent; props: {:?}",
+            props
+        );
+
+        // Deadline: Grandparent 50ms, Parent 25ms -> Parent wins
+        assert_eq!(
+            props.get("", "Deadline"),
+            Some("25 ms"),
+            "Deadline should be overridden by Parent; props: {:?}",
+            props
+        );
+
+        // Priority: Grandparent 1, Child 9 -> Child wins (skipping Parent)
+        assert_eq!(
+            props.get("", "Priority"),
+            Some("9"),
+            "Priority should be overridden by Child; props: {:?}",
+            props
+        );
+    }
+
+    // ── Flow instance tests ────────────────────────────────────��──────
 
     #[test]
     fn flow_instances_from_type() {

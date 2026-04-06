@@ -21,7 +21,8 @@ pub fn generate_rust_component(
 
     let props = inst.properties_for(thread_idx);
     let dispatch = props
-        .get("Timing_Properties", "Dispatch_Protocol")
+        .get("Thread_Properties", "Dispatch_Protocol")
+        .or_else(|| props.get("Timing_Properties", "Dispatch_Protocol"))
         .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
         .or_else(|| props.get("", "Dispatch_Protocol"))
         .unwrap_or("Periodic");

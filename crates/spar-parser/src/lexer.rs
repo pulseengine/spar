@@ -136,6 +136,12 @@ fn scan_string(c: &mut Cursor<'_>) -> bool {
     c.bump();
     while !c.is_eof() {
         if c.current() == b'"' {
+            // AS5506 §15.5: doubled-quote `""` inside a string is a literal quote
+            if c.peek(1) == b'"' {
+                c.bump(); // skip first "
+                c.bump(); // skip second "
+                continue;
+            }
             c.bump();
             return true;
         }

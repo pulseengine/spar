@@ -314,14 +314,17 @@ fn check_applies_to(
 
     // Well-known properties and their applicable categories
     let thread_only_props = [
-        ("Timing_Properties", "Dispatch_Protocol"),
+        ("Thread_Properties", "Dispatch_Protocol"),
         ("Timing_Properties", "Period"),
         ("Timing_Properties", "Deadline"),
         ("Timing_Properties", "Compute_Execution_Time"),
     ];
 
     for (set, name) in &thread_only_props {
-        let has_prop = prop_map.get(set, name).is_some() || prop_map.get("", name).is_some();
+        let has_prop = prop_map.get(set, name).is_some()
+            || prop_map.get("", name).is_some()
+            // Legacy: Dispatch_Protocol may appear under Timing_Properties in older models
+            || (*name == "Dispatch_Protocol" && prop_map.get("Timing_Properties", name).is_some());
         if has_prop
             && !matches!(
                 category,
@@ -797,7 +800,7 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let dev = b.add_component("d1", ComponentCategory::Device, Some(root));
         b.set_children(root, vec![dev]);
-        b.set_property(dev, "Timing_Properties", "Dispatch_Protocol", "Periodic");
+        b.set_property(dev, "Thread_Properties", "Dispatch_Protocol", "Periodic");
 
         let inst = b.build(root);
         let diags = PropertyRuleAnalysis.analyze(&inst);
@@ -1227,7 +1230,7 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let abs = b.add_component("a1", ComponentCategory::Abstract, Some(root));
         b.set_children(root, vec![abs]);
-        b.set_property(abs, "Timing_Properties", "Dispatch_Protocol", "Periodic");
+        b.set_property(abs, "Thread_Properties", "Dispatch_Protocol", "Periodic");
 
         let inst = b.build(root);
         let diags = PropertyRuleAnalysis.analyze(&inst);

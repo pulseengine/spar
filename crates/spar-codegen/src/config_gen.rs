@@ -60,7 +60,8 @@ pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) ->
 
         let props = inst.properties_for(child_idx);
         let dispatch = props
-            .get("Timing_Properties", "Dispatch_Protocol")
+            .get("Thread_Properties", "Dispatch_Protocol")
+            .or_else(|| props.get("Timing_Properties", "Dispatch_Protocol"))
             .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
             .or_else(|| props.get("", "Dispatch_Protocol"))
             .unwrap_or("Periodic");
