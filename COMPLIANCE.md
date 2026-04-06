@@ -1,8 +1,8 @@
 # AS5506 AADL v2.2 Compliance Gap Analysis
 
-**Updated**: 2026-03-08
+**Updated**: 2026-04-06 (v0.5.0)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (581 tests passing across 10 crates)
+**Toolchain**: spar (1200+ tests passing across 16 crates)
 
 ---
 
@@ -10,15 +10,15 @@
 
 | Layer | Status | Score |
 |-------|--------|-------|
-| **Parser (syntax)** | Excellent | ~95% — all major constructs parsed |
-| **ItemTree (declaration capture)** | Good | ~85% — modes, prototypes, calls, flow impls, array dims, in_modes |
-| **Name Resolution** | Partial | ~50% — cross-file resolution + naming rule validation |
+| **Parser (syntax)** | Excellent | ~95% — all major constructs parsed, doubled-quote strings |
+| **ItemTree (declaration capture)** | Good | ~85% — modes, prototypes, calls, flow impls, array dims, in_modes, requires_modes |
+| **Name Resolution** | Partial | ~55% — cross-file resolution + naming rules + duplicate package detection |
 | **Legality Rules (L-rules)** | Partial | ~15% — engine scaffold with ~20 rules from 6 categories |
 | **Naming Rules (N-rules)** | Partial | ~25% — duplicate detection, with-clause hygiene, scope uniqueness |
-| **Instance Model** | Good | ~65% — hierarchy + modes + semantic connections + features |
-| **Property System** | Partial | ~45% — typed PropertyExpr (13 variants), type checking, unit conversion |
-| **Modes** | Good | ~55% — in ItemTree + instance model, mode check analysis |
-| **Predeclared Property Sets** | Good | ~90% — 8/8 sets, 104 properties |
+| **Instance Model** | Good | ~80% — hierarchy + modes + semantic connections + features + **extends inheritance** |
+| **Property System** | Good | ~65% — typed PropertyExpr (14 variants), text fallback parser, unit conversion |
+| **Modes** | Good | ~65% — in ItemTree + instance model + requires_modes + modal filtering |
+| **Predeclared Property Sets** | Good | ~90% — 8/8 sets, 102 properties (corrected classifications) |
 
 ---
 

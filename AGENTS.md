@@ -8,7 +8,7 @@
 
 This project uses **Rivet** for SDLC artifact traceability.
 - Config: `rivet.yaml`
-- Schemas: common, dev, aspice, stpa, aadl
+- Schemas: common, dev, aspice, stpa, aadl, sysml2
 - Artifacts: 342 across 3 types
 - Validation: `rivet validate` (current status: pass)
 
@@ -54,6 +54,10 @@ This project uses **Rivet** for SDLC artifact traceability.
 | `sw-verification` | 0 | Software verification measure against SW requirements (SWE.6 — Software Verification) |
 | `sys-integration-verification` | 0 | System integration and integration verification measure (SYS.4 — System Integration and Integration Verification) |
 | `sys-verification` | 0 | System verification measure against system requirements (SYS.5 — System Verification) |
+| `sysml-action` | 0 | SysML v2 action definition (behavioral) |
+| `sysml-component` | 0 | SysML v2 part definition or usage |
+| `sysml-interface` | 0 | SysML v2 interface or port definition |
+| `sysml-requirement` | 0 | SysML v2 requirement (def or usage) |
 | `system-arch-component` | 0 | System architectural element (SYS.3) |
 | `system-constraint` | 0 | A condition or behavior that must be satisfied to prevent a hazard. Each constraint is the inversion of a hazard. |
 | `system-req` | 0 | System requirement derived from stakeholder needs (SYS.2) |
