@@ -29,6 +29,7 @@ pub fn mode_names(instance: &SystemInstance) -> Vec<String> {
 /// - If `current_mode` is `None` (no mode context) the element is always active.
 /// - Otherwise the element is active when `current_mode` matches any entry in
 ///   `in_modes` (case-insensitive comparison).
+///
 /// Check whether a component instance is active in a given System Operation Mode (SOM).
 ///
 /// A component is active in a SOM when:

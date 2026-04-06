@@ -153,7 +153,6 @@ impl ModalAnalysis for ConnectivityAnalysis {
         som: &SystemOperationMode,
     ) -> Vec<AnalysisDiagnostic> {
         use crate::modal::is_component_active_in_som;
-        use crate::modal::is_connection_active_in_som;
 
         let mut diags = Vec::new();
 
