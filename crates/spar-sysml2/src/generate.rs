@@ -246,7 +246,7 @@ pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
 fn sanitize_sysml_name(name: &str) -> String {
     let mut result = String::with_capacity(name.len());
     for c in name.chars() {
-        if c.is_alphanumeric() || c == '_' {
+        if c.is_alphanumeric() || c == '_' || c == '.' {
             result.push(c);
         } else if c == ' ' || c == '-' {
             result.push('_');

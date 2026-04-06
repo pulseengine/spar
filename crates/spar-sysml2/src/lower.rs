@@ -185,6 +185,8 @@ fn is_ignorable_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::SATISFY_REQ
             | SyntaxKind::VERIFY_REQ
             | SyntaxKind::REFINE_REQ
+            | SyntaxKind::ALLOCATE_REQ
+            | SyntaxKind::DERIVE_REQ
             // Documentation
             | SyntaxKind::DOC_NODE
             | SyntaxKind::DOC_MEMBER
