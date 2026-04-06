@@ -172,6 +172,9 @@ pub struct ComponentTypeItem {
     pub mode_transitions: Vec<ModeTransitionIdx>,
     pub prototypes: Vec<PrototypeIdx>,
     pub property_associations: Vec<PropertyAssociationIdx>,
+    /// Whether the modes section uses `requires modes` (derived modes)
+    /// rather than declaring its own modes.
+    pub requires_modes: bool,
 }
 
 /// A component implementation declaration.
@@ -201,6 +204,9 @@ pub struct ComponentImplItem {
     pub prototypes: Vec<PrototypeIdx>,
     pub call_sequences: Vec<CallSequenceIdx>,
     pub property_associations: Vec<PropertyAssociationIdx>,
+    /// Whether the modes section uses `requires modes` (derived modes)
+    /// rather than declaring its own modes.
+    pub requires_modes: bool,
 }
 
 /// A feature group type declaration.

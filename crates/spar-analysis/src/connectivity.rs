@@ -191,6 +191,10 @@ fn is_intentionally_unconnected(
 /// Build a set of `(ComponentInstanceIdx, feature_name)` pairs for every port
 /// that is referenced by at least one connection endpoint.
 ///
+/// When `mode_filter` is `Some(name)`, connections whose `in_modes` list is
+/// non-empty and does not contain the given mode are skipped. When
+/// `mode_filter` is `None`, all connections are included (existing behaviour).
+///
 /// We collect from two sources:
 /// 1. Raw `ConnectionInstance` endpoints (`src`/`dst`) — resolving the optional
 ///    subcomponent name to a child `ComponentInstanceIdx`.
@@ -199,10 +203,24 @@ fn is_intentionally_unconnected(
 fn collect_connected_features(
     instance: &SystemInstance,
 ) -> FxHashSet<(ComponentInstanceIdx, String)> {
+    collect_connected_features_with_mode(instance, None)
+}
+
+/// Mode-aware variant of [`collect_connected_features`].
+fn collect_connected_features_with_mode(
+    instance: &SystemInstance,
+    mode_filter: Option<&str>,
+) -> FxHashSet<(ComponentInstanceIdx, String)> {
+    use crate::modal::is_active_in_mode;
+
     let mut connected: FxHashSet<(ComponentInstanceIdx, String)> = FxHashSet::default();
 
     // 1. Raw connection endpoints.
     for (_idx, conn) in instance.connections.iter() {
+        // Skip connections not active in the requested mode.
+        if !is_active_in_mode(&conn.in_modes, mode_filter) {
+            continue;
+        }
         if let Some(ref src) = conn.src
             && let Some(comp_idx) = resolve_subcomponent(instance, conn.owner, &src.subcomponent)
         {
@@ -618,5 +636,58 @@ mod tests {
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
             .collect();
         assert_eq!(warnings.len(), 1, "inout port counts as input: {:?}", diags);
+    }
+
+    #[test]
+    fn modal_connection_filtered_by_mode() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let src = b.add_component("src", ComponentCategory::System, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::System, Some(root));
+        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), src);
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), dst);
+        b.set_children(root, vec![src, dst]);
+
+        // Create a connection that is active only in "fast" mode.
+        let conn_idx = b.connections.alloc(ConnectionInstance {
+            name: Name::new("c1"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("src")),
+                feature: Name::new("out1"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("dst")),
+                feature: Name::new("in1"),
+            }),
+            in_modes: vec![Name::new("fast")],
+        });
+        b.components[root].connections.push(conn_idx);
+
+        let inst = b.build(root);
+
+        // When filtering for "fast" mode, both endpoints should appear.
+        let fast = collect_connected_features_with_mode(&inst, Some("fast"));
+        assert!(
+            fast.contains(&(src, "out1".to_string())),
+            "src.out1 should be connected in fast mode"
+        );
+        assert!(
+            fast.contains(&(dst, "in1".to_string())),
+            "dst.in1 should be connected in fast mode"
+        );
+
+        // When filtering for "slow" mode, the connection is not active.
+        let slow = collect_connected_features_with_mode(&inst, Some("slow"));
+        assert!(
+            !slow.contains(&(src, "out1".to_string())),
+            "src.out1 should NOT be connected in slow mode"
+        );
+        assert!(
+            !slow.contains(&(dst, "in1".to_string())),
+            "dst.in1 should NOT be connected in slow mode"
+        );
     }
 }

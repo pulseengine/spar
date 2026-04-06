@@ -85,6 +85,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
         tree
     }
@@ -118,6 +119,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             is_public: true,
+            requires_modes: false,
         });
         tree
     }

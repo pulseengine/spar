@@ -6,6 +6,7 @@
 //! values despite SOMs being defined.
 
 use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::name::Name;
 
 /// Check if an instance has any system operation modes.
 pub fn has_modes(instance: &SystemInstance) -> bool {
@@ -19,6 +20,28 @@ pub fn mode_names(instance: &SystemInstance) -> Vec<String> {
         .iter()
         .map(|som| som.name.clone())
         .collect()
+}
+
+/// Check whether an element is active in a given mode context.
+///
+/// Rules:
+/// - If `in_modes` is empty the element is active in **all** modes (non-modal).
+/// - If `current_mode` is `None` (no mode context) the element is always active.
+/// - Otherwise the element is active when `current_mode` matches any entry in
+///   `in_modes` (case-insensitive comparison).
+pub fn is_active_in_mode(in_modes: &[Name], current_mode: Option<&str>) -> bool {
+    // Non-modal element: always active.
+    if in_modes.is_empty() {
+        return true;
+    }
+    // No mode context supplied: treat as active.
+    let mode = match current_mode {
+        Some(m) => m,
+        None => return true,
+    };
+    in_modes
+        .iter()
+        .any(|m| m.as_str().eq_ignore_ascii_case(mode))
 }
 
 #[cfg(test)]
@@ -102,5 +125,36 @@ mod tests {
         let inst = make_instance(Vec::new());
         let names = mode_names(&inst);
         assert!(names.is_empty());
+    }
+
+    // ── is_active_in_mode tests ────────────────────────────────────
+
+    #[test]
+    fn no_mode_context_always_active() {
+        let in_modes = vec![Name::new("fast")];
+        assert!(is_active_in_mode(&in_modes, None));
+    }
+
+    #[test]
+    fn empty_in_modes_always_active() {
+        let in_modes: Vec<Name> = Vec::new();
+        assert!(is_active_in_mode(&in_modes, Some("fast")));
+        assert!(is_active_in_mode(&in_modes, None));
+    }
+
+    #[test]
+    fn matching_mode_is_active() {
+        let in_modes = vec![Name::new("fast"), Name::new("slow")];
+        assert!(is_active_in_mode(&in_modes, Some("fast")));
+        assert!(is_active_in_mode(&in_modes, Some("slow")));
+        assert!(!is_active_in_mode(&in_modes, Some("standby")));
+    }
+
+    #[test]
+    fn mode_matching_is_case_insensitive() {
+        let in_modes = vec![Name::new("FastMode")];
+        assert!(is_active_in_mode(&in_modes, Some("fastmode")));
+        assert!(is_active_in_mode(&in_modes, Some("FASTMODE")));
+        assert!(is_active_in_mode(&in_modes, Some("FastMode")));
     }
 }

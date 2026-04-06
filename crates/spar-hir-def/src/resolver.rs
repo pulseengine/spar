@@ -625,6 +625,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -645,6 +646,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("B"),
@@ -693,6 +695,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -713,6 +716,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("B"),
@@ -759,6 +763,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("C"),
@@ -779,6 +784,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -820,6 +826,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree1.packages.alloc(Package {
             name: Name::new("Foo"),
@@ -841,6 +848,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree2.packages.alloc(Package {
             name: Name::new("Foo"),
@@ -911,6 +919,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         // Public type in the same package to verify selective visibility
         let ct_public = tree.component_types.alloc(ComponentTypeItem {
@@ -924,6 +933,7 @@ mod tests {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),

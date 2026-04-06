@@ -149,6 +149,7 @@ fn lower_metadata(metadata: &CargoMetadata) -> ItemTree {
                 mode_transitions: Vec::new(),
                 prototypes: Vec::new(),
                 property_associations: Vec::new(),
+                requires_modes: false,
             });
             public_items.push(ItemRef::ComponentType(ct_idx));
         }
@@ -199,6 +200,7 @@ fn lower_metadata(metadata: &CargoMetadata) -> ItemTree {
             mode_transitions: Vec::new(),
             prototypes: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         // Create subcomponents for each crate in the implementation
@@ -254,6 +256,7 @@ fn lower_metadata(metadata: &CargoMetadata) -> ItemTree {
             prototypes: Vec::new(),
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
+            requires_modes: false,
         });
 
         tree.packages.alloc(Package {

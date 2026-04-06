@@ -46,6 +46,12 @@ impl Analysis for SchedulingAnalysis {
                 continue;
             }
 
+            // Skip threads with non-empty in_modes during default (non-modal)
+            // scheduling so we don't over-estimate utilisation.
+            if !comp.in_modes.is_empty() {
+                continue;
+            }
+
             let path = component_path(instance, comp_idx);
             let props = instance.properties_for(comp_idx);
 
