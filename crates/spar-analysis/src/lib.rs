@@ -52,7 +52,7 @@ pub mod weight_power;
 pub mod wrpc_binding;
 
 use serde::Serialize;
-use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 
 /// A single analysis that can be run on an AADL system instance.
 pub trait Analysis {
@@ -61,6 +61,26 @@ pub trait Analysis {
 
     /// Run the analysis on a system instance. Returns diagnostics.
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic>;
+
+    /// Return this analysis as a `ModalAnalysis` if it supports per-SOM analysis.
+    ///
+    /// The default returns `None`, meaning the analysis is mode-independent.
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        None
+    }
+}
+
+/// A mode-dependent analysis that can be run per System Operation Mode (SOM).
+///
+/// Analyses implementing this trait will be invoked once per SOM by
+/// [`AnalysisRunner::run_all_per_som`], receiving the specific SOM context.
+pub trait ModalAnalysis: Analysis {
+    /// Run the analysis on a system instance within a specific SOM context.
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic>;
 }
 
 /// A diagnostic produced by an analysis pass.
@@ -186,6 +206,33 @@ impl AnalysisRunner {
             all_diagnostics.extend(diags);
         }
         all_diagnostics
+    }
+
+    /// Run mode-independent analyses once, then run mode-dependent analyses
+    /// once per System Operation Mode (SOM).
+    ///
+    /// Diagnostics from per-SOM analyses are prefixed with `[mode: <name>]`.
+    pub fn run_all_per_som(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        let mut all = Vec::new();
+
+        // Run mode-independent analyses once (the normal path).
+        all.extend(self.run_all(instance));
+
+        // Run mode-dependent analyses per SOM.
+        for som in &instance.system_operation_modes {
+            let som_name = &som.name;
+            for analysis in &self.analyses {
+                if let Some(modal) = analysis.as_modal() {
+                    let diags = modal.analyze_in_mode(instance, som);
+                    for mut d in diags {
+                        d.message = format!("[mode: {som_name}] {}", d.message);
+                        all.push(d);
+                    }
+                }
+            }
+        }
+
+        all
     }
 }
 
