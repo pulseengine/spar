@@ -1102,6 +1102,7 @@ dependencies = [
  "etch",
  "la-arena",
  "petgraph 0.7.1",
+ "rustc-hash 2.1.2",
  "spar-hir-def",
 ]
 
