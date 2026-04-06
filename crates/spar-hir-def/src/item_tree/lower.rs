@@ -1518,7 +1518,16 @@ fn lower_single_property_association(node: &SyntaxNode) -> Option<PropertyAssoci
 
     // Try to lower the property value into a typed PropertyExpr.
     // Find the first value-bearing CST node child of the PROPERTY_ASSOCIATION.
-    let typed_value = find_property_value_node(node).and_then(|vn| lower_property_expr(&vn));
+    let typed_value = find_property_value_node(node)
+        .and_then(|vn| lower_property_expr(&vn))
+        .or_else(|| {
+            // Text fallback: parse the raw value string when CST lowering fails.
+            if !value.is_empty() {
+                parse_property_value_from_text(&value)
+            } else {
+                None
+            }
+        });
 
     Some(PropertyAssociationItem {
         name,
@@ -2415,6 +2424,399 @@ fn parse_classifier_ref_node(node: &SyntaxNode) -> Option<ClassifierRef> {
     }
 }
 
+// ── Text fallback parser ──────────────────────────────────────────
+
+/// Parse a property value from its raw text representation.
+///
+/// This is the fallback path used when CST-based lowering does not produce
+/// a typed `PropertyExpr` — for example when the parser did not emit a
+/// value node for a complex expression.  The function recognises:
+///
+/// - Records: `[field => value; field => value; ...]`
+/// - Lists:   `(elem, elem, ...)`  (including nested lists)
+/// - Integers (with optional unit): `42`, `10 ms`
+/// - Reals (with optional unit):    `3.14`, `1.0E-3 Hz`
+/// - Booleans: `true`, `false`
+/// - String literals: `"hello"`
+/// - Classifier values: `classifier (Pkg::Type)`
+/// - Reference values:  `reference (path)`
+/// - Ranges:            `lo .. hi`
+/// - `value(Name)` references
+/// - Enumeration / named values (bare identifiers)
+///
+/// Returns `None` only when the input is empty or entirely whitespace.
+pub(crate) fn parse_property_value_from_text(text: &str) -> Option<PropertyExpr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    // Record: [ field => value; ... ]
+    if text.starts_with('[') && text.ends_with(']') {
+        return parse_record_from_text(text);
+    }
+
+    // List: ( elem, elem, ... )
+    if text.starts_with('(') && text.ends_with(')') {
+        return parse_list_from_text(text);
+    }
+
+    // classifier (...)
+    if let Some(rest) = text.strip_prefix("classifier")
+        && let Some(rest) = rest.trim_start().strip_prefix('(')
+        && let Some(inner) = rest.strip_suffix(')')
+    {
+        let inner = inner.trim();
+        if let Some(cr) = parse_classifier_ref_text(inner) {
+            return Some(PropertyExpr::ClassifierValue(cr));
+        }
+    }
+
+    // reference (...)
+    if let Some(rest) = text.strip_prefix("reference")
+        && let Some(rest) = rest.trim_start().strip_prefix('(')
+        && let Some(inner) = rest.strip_suffix(')')
+    {
+        return Some(PropertyExpr::ReferenceValue(inner.trim().to_string()));
+    }
+
+    // compute (...)
+    if let Some(rest) = text.strip_prefix("compute")
+        && let Some(rest) = rest.trim_start().strip_prefix('(')
+        && let Some(inner) = rest.strip_suffix(')')
+    {
+        return Some(PropertyExpr::ComputedValue(Name::new(inner.trim())));
+    }
+
+    // value(Name)
+    if let Some(rest) = text.strip_prefix("value")
+        && let Some(rest) = rest.trim_start().strip_prefix('(')
+        && let Some(inner) = rest.strip_suffix(')')
+    {
+        return Some(PropertyExpr::ValueRef(Name::new(inner.trim())));
+    }
+
+    // String literal
+    if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
+        let inner = &text[1..text.len() - 1];
+        return Some(PropertyExpr::StringLit(inner.to_string()));
+    }
+
+    // Boolean
+    match text.to_lowercase().as_str() {
+        "true" => return Some(PropertyExpr::Boolean(true)),
+        "false" => return Some(PropertyExpr::Boolean(false)),
+        _ => {}
+    }
+
+    // Range: expr .. expr [delta expr]
+    if let Some(range) = try_parse_range_from_text(text) {
+        return Some(range);
+    }
+
+    // Integer with optional unit (must come after range check)
+    if let Some(expr) = try_parse_numeric_from_text(text) {
+        return Some(expr);
+    }
+
+    // Enumeration / named value: bare identifier(s), possibly qualified
+    if text
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == ':')
+    {
+        return Some(PropertyExpr::Enum(Name::new(text)));
+    }
+
+    // Unable to parse — return Opaque so it is not lost
+    Some(PropertyExpr::Opaque(text.to_string()))
+}
+
+/// Parse a record from text: `[field => value; field => value; ...]`
+fn parse_record_from_text(text: &str) -> Option<PropertyExpr> {
+    let inner = text
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))?
+        .trim();
+
+    if inner.is_empty() {
+        return Some(PropertyExpr::Record(Vec::new()));
+    }
+
+    let mut fields = Vec::new();
+    for entry in split_record_fields(inner) {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        // Each entry is "field => value"
+        if let Some(arrow_pos) = entry.find("=>") {
+            let field_name = entry[..arrow_pos].trim();
+            let field_value_text = entry[arrow_pos + 2..].trim();
+            if !field_name.is_empty() {
+                let value = parse_property_value_from_text(field_value_text)
+                    .unwrap_or_else(|| PropertyExpr::Opaque(field_value_text.to_string()));
+                fields.push((Name::new(field_name), value));
+            }
+        }
+    }
+
+    Some(PropertyExpr::Record(fields))
+}
+
+/// Split record field entries by semicolons, respecting nested brackets and
+/// parentheses so that `[a => [x => 1;]; b => 2;]` splits correctly.
+fn split_record_fields(s: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32; // tracks [ ] and ( ) nesting
+
+    for ch in s.chars() {
+        match ch {
+            '[' | '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ']' | ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ';' if depth == 0 => {
+                entries.push(std::mem::take(&mut current));
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    // Trailing content after last semicolon (if any)
+    let trailing = current.trim().to_string();
+    if !trailing.is_empty() {
+        entries.push(trailing);
+    }
+    entries
+}
+
+/// Parse a list from text: `(elem, elem, ...)`
+///
+/// Handles nested lists by respecting parenthesis depth when splitting
+/// on commas.
+fn parse_list_from_text(text: &str) -> Option<PropertyExpr> {
+    let inner = text
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))?
+        .trim();
+
+    if inner.is_empty() {
+        return Some(PropertyExpr::List(Vec::new()));
+    }
+
+    let parts = split_list_elements(inner);
+    let items: Vec<PropertyExpr> = parts
+        .iter()
+        .map(|part| {
+            let part = part.trim();
+            parse_property_value_from_text(part)
+                .unwrap_or_else(|| PropertyExpr::Opaque(part.to_string()))
+        })
+        .collect();
+    Some(PropertyExpr::List(items))
+}
+
+/// Split list elements by commas, respecting nested parentheses and
+/// brackets so that `(1, 2), (3, 4)` splits into two elements.
+fn split_list_elements(s: &str) -> Vec<String> {
+    let mut elements = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32; // tracks ( ) and [ ] nesting
+
+    for ch in s.chars() {
+        match ch {
+            '(' | '[' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' | ']' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                elements.push(std::mem::take(&mut current));
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        elements.push(current);
+    }
+    elements
+}
+
+/// Try to parse a range expression from text: `lo .. hi [delta d]`
+fn try_parse_range_from_text(text: &str) -> Option<PropertyExpr> {
+    // Find `..` not inside parentheses/brackets
+    let dot_dot_pos = find_top_level(text, "..")?;
+
+    let lo_text = text[..dot_dot_pos].trim();
+    let rest = text[dot_dot_pos + 2..].trim();
+
+    // Check for delta
+    let (hi_text, delta_text) = if let Some(delta_pos) = find_top_level_kw(rest, "delta") {
+        (rest[..delta_pos].trim(), Some(rest[delta_pos + 5..].trim()))
+    } else {
+        (rest, None)
+    };
+
+    let min = parse_property_value_from_text(lo_text)?;
+    let max = parse_property_value_from_text(hi_text)?;
+    let delta = delta_text
+        .and_then(parse_property_value_from_text)
+        .map(Box::new);
+
+    Some(PropertyExpr::Range {
+        min: Box::new(min),
+        max: Box::new(max),
+        delta,
+    })
+}
+
+/// Find the position of a substring at top level (not inside brackets/parens).
+fn find_top_level(s: &str, needle: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let bytes = s.as_bytes();
+    let needle_bytes = needle.as_bytes();
+    if needle_bytes.len() > bytes.len() {
+        return None;
+    }
+    for i in 0..=bytes.len() - needle_bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && &bytes[i..i + needle_bytes.len()] == needle_bytes {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Find a keyword at top level with word boundary checking.
+fn find_top_level_kw(s: &str, kw: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let bytes = s.as_bytes();
+    let kw_bytes = kw.as_bytes();
+    if kw_bytes.len() > bytes.len() {
+        return None;
+    }
+    for i in 0..=bytes.len() - kw_bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0
+            && bytes[i..].starts_with(kw_bytes)
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+            && (i + kw_bytes.len() >= bytes.len()
+                || !bytes[i + kw_bytes.len()].is_ascii_alphanumeric())
+        {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Try to parse a numeric literal (integer or real) with optional unit.
+fn try_parse_numeric_from_text(text: &str) -> Option<PropertyExpr> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    // Handle leading sign
+    let (sign, rest) = if let Some(r) = text.strip_prefix('-') {
+        (-1i64, r.trim_start())
+    } else if let Some(r) = text.strip_prefix('+') {
+        (1i64, r.trim_start())
+    } else {
+        (1i64, text)
+    };
+
+    // Split into number part and optional unit
+    let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
+    let num_str = parts.next()?;
+    let unit_str = parts.next().map(|s| s.trim()).filter(|s| !s.is_empty());
+
+    // Try integer first
+    if let Some(val) = parse_aadl_integer(num_str) {
+        let unit = unit_str.map(Name::new);
+        return Some(PropertyExpr::Integer(val * sign, unit));
+    }
+
+    // Try real — only if it starts with a digit (so identifiers like "Periodic"
+    // are not confused with scientific notation).
+    if num_str.bytes().next().is_some_and(|b| b.is_ascii_digit())
+        && (num_str.contains('.') || num_str.contains('E') || num_str.contains('e'))
+    {
+        // Extra guard: for scientific notation without a dot (e.g. "1E3"),
+        // make sure the part before E/e is all digits/underscores.
+        let is_real = num_str.contains('.')
+            || num_str.find(['E', 'e']).is_some_and(|pos| {
+                num_str[..pos]
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '_')
+            });
+        if is_real {
+            let display = if sign < 0 {
+                format!("-{}", num_str)
+            } else {
+                num_str.to_string()
+            };
+            let unit = unit_str.map(Name::new);
+            return Some(PropertyExpr::Real(display, unit));
+        }
+    }
+
+    None
+}
+
+/// Parse a classifier reference from text: `Pkg::Type`, `Type.Impl`, `Pkg::Type.Impl`, or `Type`
+fn parse_classifier_ref_text(text: &str) -> Option<ClassifierRef> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    // Check for `Pkg::Type.Impl` or `Pkg::Type` or `Type.Impl` or `Type`
+    if let Some(colon_pos) = text.find("::") {
+        let pkg = &text[..colon_pos];
+        let rest = &text[colon_pos + 2..];
+        if let Some(dot_pos) = rest.find('.') {
+            let type_name = &rest[..dot_pos];
+            let impl_name = &rest[dot_pos + 1..];
+            Some(ClassifierRef::implementation(
+                Some(Name::new(pkg)),
+                Name::new(type_name),
+                Name::new(impl_name),
+            ))
+        } else {
+            Some(ClassifierRef::qualified(Name::new(pkg), Name::new(rest)))
+        }
+    } else if let Some(dot_pos) = text.find('.') {
+        let type_name = &text[..dot_pos];
+        let impl_name = &text[dot_pos + 1..];
+        Some(ClassifierRef::implementation(
+            None,
+            Name::new(type_name),
+            Name::new(impl_name),
+        ))
+    } else {
+        Some(ClassifierRef::type_only(Name::new(text)))
+    }
+}
+
 #[cfg(test)]
 mod lowering_diagnostic_tests {
     use super::*;
@@ -2573,5 +2975,245 @@ end Pkg;
             ci.requires_modes,
             "component impl with `requires modes` should set requires_modes = true"
         );
+    }
+}
+
+#[cfg(test)]
+mod text_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn record_simple_fields() {
+        let expr = parse_property_value_from_text("[x => 1; y => 2;]").unwrap();
+        match expr {
+            PropertyExpr::Record(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0.as_str(), "x");
+                assert_eq!(fields[0].1, PropertyExpr::Integer(1, None));
+                assert_eq!(fields[1].0.as_str(), "y");
+                assert_eq!(fields[1].1, PropertyExpr::Integer(2, None));
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn record_with_enum_fields() {
+        let expr = parse_property_value_from_text(
+            "[Data_Representation => Integer; Base_Type => classifier (Base_Types::Integer);]",
+        )
+        .unwrap();
+        match expr {
+            PropertyExpr::Record(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0.as_str(), "Data_Representation");
+                assert_eq!(fields[0].1, PropertyExpr::Enum(Name::new("Integer")));
+                assert_eq!(fields[1].0.as_str(), "Base_Type");
+                match &fields[1].1 {
+                    PropertyExpr::ClassifierValue(cr) => {
+                        assert_eq!(cr.type_name.as_str(), "Integer");
+                        assert_eq!(cr.package.as_ref().unwrap().as_str(), "Base_Types");
+                    }
+                    other => panic!("expected ClassifierValue, got {:?}", other),
+                }
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn nested_list() {
+        let expr = parse_property_value_from_text("((1, 2), (3, 4))").unwrap();
+        match expr {
+            PropertyExpr::List(items) => {
+                assert_eq!(items.len(), 2);
+                match &items[0] {
+                    PropertyExpr::List(inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert_eq!(inner[0], PropertyExpr::Integer(1, None));
+                        assert_eq!(inner[1], PropertyExpr::Integer(2, None));
+                    }
+                    other => panic!("expected inner List, got {:?}", other),
+                }
+                match &items[1] {
+                    PropertyExpr::List(inner) => {
+                        assert_eq!(inner.len(), 2);
+                        assert_eq!(inner[0], PropertyExpr::Integer(3, None));
+                        assert_eq!(inner[1], PropertyExpr::Integer(4, None));
+                    }
+                    other => panic!("expected inner List, got {:?}", other),
+                }
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn list_of_records() {
+        let expr = parse_property_value_from_text("([a => 1;], [a => 2;])").unwrap();
+        match expr {
+            PropertyExpr::List(items) => {
+                assert_eq!(items.len(), 2);
+                match &items[0] {
+                    PropertyExpr::Record(fields) => {
+                        assert_eq!(fields.len(), 1);
+                        assert_eq!(fields[0].0.as_str(), "a");
+                        assert_eq!(fields[0].1, PropertyExpr::Integer(1, None));
+                    }
+                    other => panic!("expected Record, got {:?}", other),
+                }
+                match &items[1] {
+                    PropertyExpr::Record(fields) => {
+                        assert_eq!(fields.len(), 1);
+                        assert_eq!(fields[0].0.as_str(), "a");
+                        assert_eq!(fields[0].1, PropertyExpr::Integer(2, None));
+                    }
+                    other => panic!("expected Record, got {:?}", other),
+                }
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn empty_record() {
+        let expr = parse_property_value_from_text("[]").unwrap();
+        assert_eq!(expr, PropertyExpr::Record(Vec::new()));
+    }
+
+    #[test]
+    fn empty_list() {
+        let expr = parse_property_value_from_text("()").unwrap();
+        assert_eq!(expr, PropertyExpr::List(Vec::new()));
+    }
+
+    #[test]
+    fn integer_with_unit() {
+        let expr = parse_property_value_from_text("10 ms").unwrap();
+        assert_eq!(expr, PropertyExpr::Integer(10, Some(Name::new("ms"))));
+    }
+
+    #[test]
+    fn boolean_value() {
+        assert_eq!(
+            parse_property_value_from_text("true").unwrap(),
+            PropertyExpr::Boolean(true)
+        );
+        assert_eq!(
+            parse_property_value_from_text("false").unwrap(),
+            PropertyExpr::Boolean(false)
+        );
+    }
+
+    #[test]
+    fn classifier_value() {
+        let expr = parse_property_value_from_text("classifier (Pkg::Type)").unwrap();
+        match expr {
+            PropertyExpr::ClassifierValue(cr) => {
+                assert_eq!(cr.package.as_ref().unwrap().as_str(), "Pkg");
+                assert_eq!(cr.type_name.as_str(), "Type");
+            }
+            other => panic!("expected ClassifierValue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn reference_value() {
+        let expr = parse_property_value_from_text("reference (cpu1)").unwrap();
+        assert_eq!(expr, PropertyExpr::ReferenceValue("cpu1".to_string()));
+    }
+
+    #[test]
+    fn string_literal() {
+        let expr = parse_property_value_from_text(r#""hello world""#).unwrap();
+        assert_eq!(expr, PropertyExpr::StringLit("hello world".to_string()));
+    }
+
+    #[test]
+    fn range_value() {
+        let expr = parse_property_value_from_text("1 .. 100").unwrap();
+        match expr {
+            PropertyExpr::Range { min, max, delta } => {
+                assert_eq!(*min, PropertyExpr::Integer(1, None));
+                assert_eq!(*max, PropertyExpr::Integer(100, None));
+                assert!(delta.is_none());
+            }
+            other => panic!("expected Range, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn enum_value() {
+        let expr = parse_property_value_from_text("Periodic").unwrap();
+        assert_eq!(expr, PropertyExpr::Enum(Name::new("Periodic")));
+    }
+
+    #[test]
+    fn value_ref() {
+        let expr = parse_property_value_from_text("value(Other_Prop)").unwrap();
+        assert_eq!(expr, PropertyExpr::ValueRef(Name::new("Other_Prop")));
+    }
+
+    #[test]
+    fn negative_integer() {
+        let expr = parse_property_value_from_text("-42").unwrap();
+        assert_eq!(expr, PropertyExpr::Integer(-42, None));
+    }
+
+    #[test]
+    fn real_with_unit() {
+        let expr = parse_property_value_from_text("3.14 Hz").unwrap();
+        assert_eq!(
+            expr,
+            PropertyExpr::Real("3.14".to_string(), Some(Name::new("Hz")))
+        );
+    }
+
+    #[test]
+    fn record_with_nested_record() {
+        let expr = parse_property_value_from_text("[outer => [inner => 42;];]").unwrap();
+        match expr {
+            PropertyExpr::Record(fields) => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].0.as_str(), "outer");
+                match &fields[0].1 {
+                    PropertyExpr::Record(inner) => {
+                        assert_eq!(inner.len(), 1);
+                        assert_eq!(inner[0].0.as_str(), "inner");
+                        assert_eq!(inner[0].1, PropertyExpr::Integer(42, None));
+                    }
+                    other => panic!("expected inner Record, got {:?}", other),
+                }
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn flat_list_of_integers() {
+        let expr = parse_property_value_from_text("(10, 20, 30)").unwrap();
+        match expr {
+            PropertyExpr::List(items) => {
+                assert_eq!(items.len(), 3);
+                assert_eq!(items[0], PropertyExpr::Integer(10, None));
+                assert_eq!(items[1], PropertyExpr::Integer(20, None));
+                assert_eq!(items[2], PropertyExpr::Integer(30, None));
+            }
+            other => panic!("expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn record_trailing_no_semicolon() {
+        // Records where the last field omits the trailing semicolon
+        let expr = parse_property_value_from_text("[x => 1; y => 2]").unwrap();
+        match expr {
+            PropertyExpr::Record(fields) => {
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0.as_str(), "x");
+                assert_eq!(fields[1].0.as_str(), "y");
+            }
+            other => panic!("expected Record, got {:?}", other),
+        }
     }
 }
