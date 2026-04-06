@@ -1148,14 +1148,12 @@ mod tests {
     fn shallow_hierarchy_unchanged() {
         // A hierarchy within the depth limit should keep exact parent references.
         let (instance, _indices) = make_deep_instance(MAX_RENDER_DEPTH);
-        let (_graph, node_infos, _edge_infos) =
-            build_graph(&instance, &RenderOptions::default());
+        let (_graph, node_infos, _edge_infos) = build_graph(&instance, &RenderOptions::default());
 
         // level_4's parent should be level_3 (true parent), not reparented
         for info in node_infos.values() {
             if info.id == format!("AADL-Pkg-level_{}", MAX_RENDER_DEPTH) {
-                let expected_parent =
-                    format!("AADL-Pkg-level_{}", MAX_RENDER_DEPTH - 1);
+                let expected_parent = format!("AADL-Pkg-level_{}", MAX_RENDER_DEPTH - 1);
                 assert_eq!(
                     info.parent.as_deref(),
                     Some(expected_parent.as_str()),
