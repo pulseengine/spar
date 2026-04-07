@@ -382,6 +382,7 @@ fn cmd_analyze(args: &[String]) {
     let mut root = None;
     let mut files = Vec::new();
     let mut format = None;
+    let mut per_som = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -403,6 +404,9 @@ fn cmd_analyze(args: &[String]) {
                     eprintln!("--format requires a value (text|json)");
                     process::exit(1);
                 }
+            }
+            "--per-som" => {
+                per_som = true;
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
@@ -472,7 +476,11 @@ fn cmd_analyze(args: &[String]) {
     eprintln!();
 
     // Run instance-level analyses
-    diagnostics.extend(run_all_analyses(&inst));
+    if per_som {
+        diagnostics.extend(run_all_analyses_per_som(&inst));
+    } else {
+        diagnostics.extend(run_all_analyses(&inst));
+    }
 
     // JSON output path
     if format.as_deref() == Some("json") {
@@ -1365,6 +1373,16 @@ fn run_all_analyses(
     let mut runner = spar_analysis::AnalysisRunner::new();
     runner.register_all();
     runner.run_all(inst)
+}
+
+/// Create an AnalysisRunner and run mode-independent analyses once plus
+/// mode-dependent analyses per System Operation Mode.
+fn run_all_analyses_per_som(
+    inst: &spar_hir_def::instance::SystemInstance,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all();
+    runner.run_all_per_som(inst)
 }
 
 /// Print diagnostics grouped by severity with colored output.

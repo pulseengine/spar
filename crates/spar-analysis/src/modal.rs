@@ -5,7 +5,7 @@
 //! use these helpers to note when they used default (non-modal) property
 //! values despite SOMs being defined.
 
-use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::name::Name;
 
 /// Check if an instance has any system operation modes.
@@ -29,6 +29,81 @@ pub fn mode_names(instance: &SystemInstance) -> Vec<String> {
 /// - If `current_mode` is `None` (no mode context) the element is always active.
 /// - Otherwise the element is active when `current_mode` matches any entry in
 ///   `in_modes` (case-insensitive comparison).
+///
+/// Check whether a component instance is active in a given System Operation Mode (SOM).
+///
+/// A component is active in a SOM when:
+/// 1. Its `in_modes` list is empty (non-modal — active in all modes), or
+/// 2. The SOM selects a mode on the component's parent, and that mode name
+///    appears in the component's `in_modes` list.
+///
+/// If the component's parent has no mode selection in the SOM (i.e. the parent
+/// is not a modal component), the component is treated as active.
+pub fn is_component_active_in_som(
+    instance: &SystemInstance,
+    comp_idx: ComponentInstanceIdx,
+    som: &SystemOperationMode,
+) -> bool {
+    let comp = instance.component(comp_idx);
+
+    // Non-modal component: always active.
+    if comp.in_modes.is_empty() {
+        return true;
+    }
+
+    // Find the mode that the SOM selects for this component's parent.
+    let parent_idx = match comp.parent {
+        Some(p) => p,
+        // Root component with in_modes set — unusual, treat as active.
+        None => return true,
+    };
+
+    // Look through the SOM's mode selections for one owned by the parent.
+    for &(_sel_comp, mode_inst_idx) in &som.mode_selections {
+        let mode_inst = &instance.mode_instances[mode_inst_idx];
+        if mode_inst.owner == parent_idx {
+            // Found the mode selected on the parent — check if it matches.
+            return comp
+                .in_modes
+                .iter()
+                .any(|m| m.as_str().eq_ignore_ascii_case(mode_inst.name.as_str()));
+        }
+    }
+
+    // Parent has no mode selection in this SOM — component is active.
+    true
+}
+
+/// Check whether a connection is active in a given System Operation Mode (SOM).
+///
+/// A connection is active when its `in_modes` list is empty (non-modal) or
+/// the SOM selects a mode on its owner that matches one of the connection's
+/// mode names.
+pub fn is_connection_active_in_som(
+    instance: &SystemInstance,
+    conn_owner: ComponentInstanceIdx,
+    conn_in_modes: &[Name],
+    som: &SystemOperationMode,
+) -> bool {
+    // Non-modal connection: always active.
+    if conn_in_modes.is_empty() {
+        return true;
+    }
+
+    // Find the mode that the SOM selects for the connection's owner.
+    for &(_sel_comp, mode_inst_idx) in &som.mode_selections {
+        let mode_inst = &instance.mode_instances[mode_inst_idx];
+        if mode_inst.owner == conn_owner {
+            return conn_in_modes
+                .iter()
+                .any(|m| m.as_str().eq_ignore_ascii_case(mode_inst.name.as_str()));
+        }
+    }
+
+    // Owner has no mode selection in this SOM — connection is active.
+    true
+}
+
 pub fn is_active_in_mode(in_modes: &[Name], current_mode: Option<&str>) -> bool {
     // Non-modal element: always active.
     if in_modes.is_empty() {

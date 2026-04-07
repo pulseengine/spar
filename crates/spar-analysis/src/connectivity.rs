@@ -8,7 +8,9 @@ use rustc_hash::FxHashSet;
 use spar_hir_def::instance::{ComponentInstanceIdx, FeatureInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::Direction;
 
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use spar_hir_def::instance::SystemOperationMode;
+
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Analyzes connection completeness across the instance model.
 ///
@@ -21,6 +23,10 @@ pub struct ConnectivityAnalysis;
 impl Analysis for ConnectivityAnalysis {
     fn name(&self) -> &str {
         "connectivity"
+    }
+
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
@@ -138,6 +144,125 @@ impl Analysis for ConnectivityAnalysis {
 
         diags
     }
+}
+
+impl ModalAnalysis for ConnectivityAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        use crate::modal::is_component_active_in_som;
+
+        let mut diags = Vec::new();
+
+        // Build set of connected features considering only connections active in this SOM.
+        let connected_features = collect_connected_features_in_som(instance, som);
+
+        for (comp_idx, comp) in instance.all_components() {
+            // Skip components that are not active in this SOM.
+            if !is_component_active_in_som(instance, comp_idx, som) {
+                continue;
+            }
+
+            for &feat_idx in &comp.features {
+                let feat = &instance.features[feat_idx];
+
+                if !is_port_feature(feat_idx, instance) {
+                    continue;
+                }
+
+                let feat_name = feat.name.as_str();
+                let is_connected = connected_features.contains(&(comp_idx, feat_name.to_string()));
+
+                if !is_connected {
+                    if is_intentionally_unconnected(instance, comp_idx, feat_name) {
+                        continue;
+                    }
+
+                    let path = component_path(instance, comp_idx);
+                    match feat.direction {
+                        Some(Direction::In) | Some(Direction::InOut) => {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "input port '{}' has no incoming connection",
+                                    feat.name
+                                ),
+                                path,
+                                analysis: self.name().to_string(),
+                            });
+                        }
+                        Some(Direction::Out) => {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Warning,
+                                message: format!(
+                                    "output port '{}' has no outgoing connection",
+                                    feat.name
+                                ),
+                                path,
+                                analysis: self.name().to_string(),
+                            });
+                        }
+                        None => {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "feature '{}' has no direction and no connections",
+                                    feat.name
+                                ),
+                                path,
+                                analysis: self.name().to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        diags
+    }
+}
+
+/// Build a set of connected features considering only connections active in a SOM.
+fn collect_connected_features_in_som(
+    instance: &SystemInstance,
+    som: &SystemOperationMode,
+) -> FxHashSet<(ComponentInstanceIdx, String)> {
+    use crate::modal::is_connection_active_in_som;
+
+    let mut connected: FxHashSet<(ComponentInstanceIdx, String)> = FxHashSet::default();
+
+    for (_idx, conn) in instance.connections.iter() {
+        // Skip connections not active in this SOM.
+        if !is_connection_active_in_som(instance, conn.owner, &conn.in_modes, som) {
+            continue;
+        }
+        if let Some(ref src) = conn.src
+            && let Some(comp_idx) = resolve_subcomponent(instance, conn.owner, &src.subcomponent)
+        {
+            connected.insert((comp_idx, src.feature.as_str().to_string()));
+        }
+        if let Some(ref dst) = conn.dst
+            && let Some(comp_idx) = resolve_subcomponent(instance, conn.owner, &dst.subcomponent)
+        {
+            connected.insert((comp_idx, dst.feature.as_str().to_string()));
+        }
+    }
+
+    // Semantic connections are not mode-filtered (they are already traced).
+    for sc in &instance.semantic_connections {
+        connected.insert((
+            sc.ultimate_source.0,
+            sc.ultimate_source.1.as_str().to_string(),
+        ));
+        connected.insert((
+            sc.ultimate_destination.0,
+            sc.ultimate_destination.1.as_str().to_string(),
+        ));
+    }
+
+    connected
 }
 
 /// Check if a feature is a port-like feature (data port, event port, event data port).

@@ -17,10 +17,13 @@ use rustc_hash::FxHashMap;
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use spar_hir_def::instance::SystemOperationMode;
+
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
     get_execution_time, get_execution_time_range, get_processor_binding, get_timing_property,
 };
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Rate Monotonic scheduling analysis.
 pub struct SchedulingAnalysis;
@@ -28,6 +31,10 @@ pub struct SchedulingAnalysis;
 impl Analysis for SchedulingAnalysis {
     fn name(&self) -> &str {
         "scheduling"
+    }
+
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
@@ -391,6 +398,106 @@ impl Analysis for SchedulingAnalysis {
                     instance.system_operation_modes.len()
                 ),
                 path: vec!["root".to_string()],
+                analysis: self.name().to_string(),
+            });
+        }
+
+        diags
+    }
+}
+
+impl ModalAnalysis for SchedulingAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+
+        // Collect threads active in this SOM, grouped by processor binding.
+        let mut processor_threads: FxHashMap<String, Vec<ThreadInfo>> = FxHashMap::default();
+
+        for (comp_idx, comp) in instance.all_components() {
+            if comp.category != ComponentCategory::Thread {
+                continue;
+            }
+
+            // Only include threads that are active in this SOM.
+            if !is_component_active_in_som(instance, comp_idx, som) {
+                continue;
+            }
+
+            let props = instance.properties_for(comp_idx);
+            let period_ps = get_timing_property(props, "Period");
+            let exec_ps = get_execution_time(props);
+            let binding = get_processor_binding(props);
+            let proc_key = binding.unwrap_or_else(|| "__unbound__".to_string());
+
+            if let (Some(period), Some(exec)) = (period_ps, exec_ps) {
+                processor_threads
+                    .entry(proc_key)
+                    .or_default()
+                    .push(ThreadInfo {
+                        name: comp.name.as_str().to_string(),
+                        period_ps: period,
+                        exec_ps: exec,
+                        comp_idx,
+                    });
+            }
+        }
+
+        // Run RMA per processor for the threads active in this SOM.
+        for (proc_name, threads) in &processor_threads {
+            if proc_name == "__unbound__" || threads.is_empty() {
+                continue;
+            }
+
+            let n = threads.len();
+            let utilization: f64 = threads
+                .iter()
+                .map(|t| t.exec_ps as f64 / t.period_ps as f64)
+                .sum();
+            let rma_bound = rma_utilization_bound(n);
+            let proc_path = find_processor_path(instance, proc_name);
+
+            if utilization > 1.0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "processor '{}' is overloaded: utilization {:.1}% ({} threads, bound is 100%)",
+                        proc_name,
+                        utilization * 100.0,
+                        n
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            } else if utilization > rma_bound {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "processor '{}' utilization {:.1}% exceeds RMA bound {:.1}% for {} tasks \
+                         (may miss deadlines under rate monotonic scheduling)",
+                        proc_name,
+                        utilization * 100.0,
+                        rma_bound * 100.0,
+                        n
+                    ),
+                    path: proc_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "processor '{}' utilization: {:.1}% ({} threads, RMA bound: {:.1}%)",
+                    proc_name,
+                    utilization * 100.0,
+                    n,
+                    rma_bound * 100.0
+                ),
+                path: proc_path,
                 analysis: self.name().to_string(),
             });
         }
@@ -831,6 +938,213 @@ mod tests {
             modal_diags.is_empty(),
             "should not emit modal diagnostic without SOMs: {:?}",
             modal_diags
+        );
+    }
+
+    // ── Per-SOM scheduling tests ──────────────────────────────────
+
+    #[test]
+    fn per_som_scheduling_different_utilization_per_mode() {
+        // Two threads bound to the same processor, but each active in a different mode.
+        // In "fast" mode: only t_fast is active -> U = 8/10 = 80%
+        // In "slow" mode: only t_slow is active -> U = 2/10 = 20%
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        let t_slow = b.add_component("t_slow", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t_fast, t_slow]);
+
+        // Mark t_fast as active only in "fast" mode.
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        // Mark t_slow as active only in "slow" mode.
+        b.components[t_slow].in_modes = vec![Name::new("slow")];
+
+        // t_fast: period=10ms, exec=8ms -> U=0.8
+        b.set_property(t_fast, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t_fast,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "8 ms",
+        );
+        b.set_property(
+            t_fast,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        // t_slow: period=10ms, exec=2ms -> U=0.2
+        b.set_property(t_slow, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t_slow,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "2 ms",
+        );
+        b.set_property(
+            t_slow,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        // Create mode instances on `proc` (the parent of the threads).
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode, slow_mode];
+
+        // Create SOMs.
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+        let som_slow = SystemOperationMode {
+            name: "slow".to_string(),
+            mode_selections: vec![(proc, slow_mode)],
+        };
+
+        // In "fast" mode: t_fast is active with U=80%.
+        let diags_fast = SchedulingAnalysis.analyze_in_mode(&inst, &som_fast);
+        let util_fast: Vec<_> = diags_fast
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert!(
+            !util_fast.is_empty(),
+            "should report utilization in fast mode: {:?}",
+            diags_fast
+        );
+        assert!(
+            util_fast[0].message.contains("80.0%"),
+            "fast mode should be 80%: {}",
+            util_fast[0].message
+        );
+
+        // In "slow" mode: t_slow is active with U=20%.
+        let diags_slow = SchedulingAnalysis.analyze_in_mode(&inst, &som_slow);
+        let util_slow: Vec<_> = diags_slow
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert!(
+            !util_slow.is_empty(),
+            "should report utilization in slow mode: {:?}",
+            diags_slow
+        );
+        assert!(
+            util_slow[0].message.contains("20.0%"),
+            "slow mode should be 20%: {}",
+            util_slow[0].message
+        );
+    }
+
+    #[test]
+    fn per_som_non_modal_thread_included_in_all_soms() {
+        // A non-modal thread (empty in_modes) should be included in every SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_always = b.add_component("t_always", ComponentCategory::Thread, Some(proc));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t_always, t_fast]);
+
+        // t_always is non-modal (empty in_modes).
+        // t_fast is active only in "fast" mode.
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+
+        // t_always: period=10ms, exec=1ms -> U=0.1
+        b.set_property(t_always, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t_always,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(
+            t_always,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        // t_fast: period=10ms, exec=4ms -> U=0.4
+        b.set_property(t_fast, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            t_fast,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "4 ms",
+        );
+        b.set_property(
+            t_fast,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+        let som_slow = SystemOperationMode {
+            name: "slow".to_string(),
+            mode_selections: vec![(proc, slow_mode)],
+        };
+
+        // In "fast" mode: t_always (0.1) + t_fast (0.4) = 50%.
+        let diags_fast = SchedulingAnalysis.analyze_in_mode(&inst, &som_fast);
+        let util_fast: Vec<_> = diags_fast
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert!(
+            !util_fast.is_empty() && util_fast[0].message.contains("50.0%"),
+            "fast mode should be 50%: {:?}",
+            diags_fast
+        );
+
+        // In "slow" mode: only t_always (0.1) = 10%.
+        let diags_slow = SchedulingAnalysis.analyze_in_mode(&inst, &som_slow);
+        let util_slow: Vec<_> = diags_slow
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert!(
+            !util_slow.is_empty() && util_slow[0].message.contains("10.0%"),
+            "slow mode should be 10%: {:?}",
+            diags_slow
         );
     }
 
