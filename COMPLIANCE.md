@@ -1,6 +1,6 @@
 # AS5506 AADL v2.2 Compliance Gap Analysis
 
-**Updated**: 2026-04-06 (v0.5.0)
+**Updated**: 2026-04-05 (v0.6.0)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
 **Toolchain**: spar (1200+ tests passing across 16 crates)
 
@@ -12,12 +12,12 @@
 |-------|--------|-------|
 | **Parser (syntax)** | Excellent | ~95% — all major constructs parsed, doubled-quote strings |
 | **ItemTree (declaration capture)** | Good | ~85% — modes, prototypes, calls, flow impls, array dims, in_modes, requires_modes |
-| **Name Resolution** | Partial | ~55% — cross-file resolution + naming rules + duplicate package detection |
+| **Name Resolution** | Partial | ~60% — cross-file resolution + naming rules + duplicate package detection + renames resolution |
 | **Legality Rules (L-rules)** | Partial | ~15% — engine scaffold with ~20 rules from 6 categories |
 | **Naming Rules (N-rules)** | Partial | ~25% — duplicate detection, with-clause hygiene, scope uniqueness |
-| **Instance Model** | Good | ~80% — hierarchy + modes + semantic connections + features + **extends inheritance** |
-| **Property System** | Good | ~65% — typed PropertyExpr (14 variants), text fallback parser, unit conversion |
-| **Modes** | Good | ~65% — in ItemTree + instance model + requires_modes + modal filtering |
+| **Instance Model** | Good | ~85% — hierarchy + modes + semantic connections + features + **extends inheritance** + connection patterns + per-SOM analysis |
+| **Property System** | Good | ~75% — typed PropertyExpr (14 variants), text fallback parser, unit conversion, records, nested lists |
+| **Modes** | Good | ~75% — in ItemTree + instance model + requires_modes + modal filtering + per-SOM analysis |
 | **Predeclared Property Sets** | Good | ~90% — 8/8 sets, 102 properties (corrected classifications) |
 
 ---
@@ -85,7 +85,7 @@
 | 9.5 | Access Connections | DONE | DONE | PARTIAL — provides/requires tracked, direction rules applied |
 | 9.6 | Bus/Data/Subprogram Access | DONE | DONE | PARTIAL — access kind differentiated |
 | 9.7 | Parameter Connections | DONE | DONE | PARTIAL — direction rules applied, call context not validated |
-| 9.8 | Connection Patterns | PARTIAL | PARTIAL | MISSING — array patterns not handled |
+| 9.8 | Connection Patterns | DONE | DONE | PARTIAL — One_To_One + All_To_All patterns implemented; remaining patterns (One_To_All, All_To_One, Next, Previous, Cyclic) not yet |
 
 ### Chapter 10: Flows
 

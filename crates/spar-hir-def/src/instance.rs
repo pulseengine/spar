@@ -252,6 +252,26 @@ impl SystemInstance {
         instance
     }
 
+    /// Resolve the `Connection_Pattern` property for a given owner component.
+    ///
+    /// Per AS5506 §9.8, the `Connection_Pattern` property determines how
+    /// array subcomponent connections are expanded. The value is a nested list
+    /// like `((one_to_one))` or a simple identifier like `one_to_one`.
+    ///
+    /// Returns `AllToAll` as the default when no property is set.
+    fn resolve_connection_pattern(&self, owner: ComponentInstanceIdx) -> ConnectionPattern {
+        let props = self.properties_for(owner);
+
+        let raw = props
+            .get("Communication_Properties", "Connection_Pattern")
+            .or_else(|| props.get("", "Connection_Pattern"));
+
+        match raw {
+            Some(val) => parse_connection_pattern(val),
+            None => ConnectionPattern::AllToAll,
+        }
+    }
+
     /// Total number of component instances.
     pub fn component_count(&self) -> usize {
         self.components.len()
@@ -417,6 +437,11 @@ impl SystemInstance {
     ///
     /// For up/down connections at the root level, they produce standalone semantic
     /// connections with the root component's own port as one endpoint.
+    ///
+    /// Per AS5506 §9.8, when connections involve array subcomponents, the
+    /// `Connection_Pattern` property determines the pairing strategy:
+    /// - `One_To_One` — element i connects to element i (same-size arrays)
+    /// - `All_To_All` — every source element connects to every destination (default)
     pub fn compute_semantic_connections(&mut self) {
         /// Maximum recursion depth to prevent infinite loops.
         const MAX_TRACE_DEPTH: usize = 20;
@@ -475,44 +500,80 @@ impl SystemInstance {
                         });
                     }
 
-                    for &src_component in &src_matches {
-                        for &dst_component in &dst_matches {
-                            let base_path = vec![*conn_idx];
+                    // Determine the connection pattern (AS5506 §9.8).
+                    // Read Connection_Pattern from the owner's property map.
+                    let pattern = self.resolve_connection_pattern(conn_owner);
 
-                            // Trace ALL sources (fan-in) and ALL destinations (fan-out).
-                            let all_sources = self.trace_sources(
-                                src_component,
-                                &src.feature,
-                                &base_path,
-                                MAX_TRACE_DEPTH,
-                            );
-
-                            let all_destinations = self.trace_destinations(
-                                dst_component,
-                                &dst.feature,
-                                &base_path,
-                                MAX_TRACE_DEPTH,
-                            );
-
-                            // Each source × destination pair produces a semantic connection.
-                            for (src_comp, src_feat, src_path) in &all_sources {
-                                for (dst_comp, dst_feat, dst_path) in &all_destinations {
-                                    let mut path = src_path.clone();
-                                    // Append dst path elements that aren't already in src path.
-                                    for ci in dst_path {
-                                        if !path.contains(ci) {
-                                            path.push(*ci);
-                                        }
-                                    }
-
-                                    semantic.push(SemanticConnection {
-                                        name: conn_name.clone(),
-                                        kind: conn_kind,
-                                        ultimate_source: (*src_comp, src_feat.clone()),
-                                        ultimate_destination: (*dst_comp, dst_feat.clone()),
-                                        connection_path: path,
+                    // Build the list of (src_component, dst_component) pairs
+                    // based on the connection pattern.
+                    let pairs: Vec<(ComponentInstanceIdx, ComponentInstanceIdx)> = match pattern {
+                        ConnectionPattern::OneToOne => {
+                            // Both sides must have the same number of elements.
+                            if src_matches.len() != dst_matches.len() {
+                                let owner_name = self.components[conn_owner].name.clone();
+                                endpoint_diagnostics.push(InstanceDiagnostic {
+                                        message: format!(
+                                            "connection '{}': One_To_One pattern requires equal array sizes (source={}, destination={})",
+                                            conn_name, src_matches.len(), dst_matches.len(),
+                                        ),
+                                        path: vec![owner_name, conn_name.clone()],
                                     });
+                            }
+                            // Pair element-by-element up to the shorter length.
+                            src_matches
+                                .iter()
+                                .zip(dst_matches.iter())
+                                .map(|(&s, &d)| (s, d))
+                                .collect()
+                        }
+                        ConnectionPattern::AllToAll => {
+                            // Cartesian product: every source to every destination.
+                            let mut p = Vec::with_capacity(src_matches.len() * dst_matches.len());
+                            for &s in &src_matches {
+                                for &d in &dst_matches {
+                                    p.push((s, d));
                                 }
+                            }
+                            p
+                        }
+                    };
+
+                    for (src_component, dst_component) in pairs {
+                        let base_path = vec![*conn_idx];
+
+                        // Trace ALL sources (fan-in) and ALL destinations (fan-out).
+                        let all_sources = self.trace_sources(
+                            src_component,
+                            &src.feature,
+                            &base_path,
+                            MAX_TRACE_DEPTH,
+                        );
+
+                        let all_destinations = self.trace_destinations(
+                            dst_component,
+                            &dst.feature,
+                            &base_path,
+                            MAX_TRACE_DEPTH,
+                        );
+
+                        // Each source × destination pair produces a semantic connection.
+                        for (src_comp, src_feat, src_path) in &all_sources {
+                            for (dst_comp, dst_feat, dst_path) in &all_destinations {
+                                let mut path = src_path.clone();
+                                // Append dst path elements that aren't already in src path.
+                                for ci in dst_path {
+                                    if !path.contains(ci) {
+                                        path.push(*ci);
+                                    }
+                                }
+
+                                semantic.push(SemanticConnection {
+                                    name: conn_name.clone(),
+                                    kind: conn_kind,
+                                    ultimate_source: (*src_comp, src_feat.clone()),
+                                    ultimate_destination: (*dst_comp, dst_feat.clone()),
+                                    connection_path: path,
+                                });
                             }
                         }
                     }
@@ -1001,6 +1062,35 @@ fn feature_kind_to_connection_kind(kind: FeatureKind) -> ConnectionKind {
         | FeatureKind::SubprogramGroupAccess => ConnectionKind::Access,
         FeatureKind::FeatureGroup => ConnectionKind::FeatureGroup,
         FeatureKind::AbstractFeature => ConnectionKind::Feature,
+    }
+}
+
+/// Connection pattern for array subcomponent connections (AS5506 §9.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionPattern {
+    /// Element i connects to element i (requires same array size).
+    OneToOne,
+    /// Every source element connects to every destination element (default).
+    AllToAll,
+}
+
+/// Parse a `Connection_Pattern` property value string into a `ConnectionPattern`.
+///
+/// The value may be in nested list format like `((one_to_one))` or a simple
+/// identifier like `one_to_one`. Strips parentheses and whitespace, then
+/// matches case-insensitively. Unrecognized values default to `AllToAll`.
+fn parse_connection_pattern(value: &str) -> ConnectionPattern {
+    // Strip all parentheses, commas, and whitespace to get the bare pattern name.
+    let stripped: String = value
+        .chars()
+        .filter(|c| !matches!(c, '(' | ')' | ',' | ' ' | '\t' | '\n'))
+        .collect();
+
+    if stripped.eq_ignore_ascii_case("one_to_one") {
+        ConnectionPattern::OneToOne
+    } else {
+        // All_To_All is the default for any unrecognized or missing value.
+        ConnectionPattern::AllToAll
     }
 }
 
@@ -3526,5 +3616,336 @@ mod tests {
             missing
         );
         assert!(missing[0].message.contains("c_broken"));
+    }
+
+    // ── Connection pattern expansion tests (AS5506 §9.8) ─────────────
+
+    #[test]
+    fn test_connection_pattern_default_all_to_all() {
+        // Two 2-element arrays connected without an explicit Connection_Pattern
+        // should use All_To_All (default): 2 × 2 = 4 semantic connections.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // src[1], src[2]
+        let src1 = components.alloc(ComponentInstance {
+            name: Name::new("src[1]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(1),
+            in_modes: Vec::new(),
+        });
+        let src2 = components.alloc(ComponentInstance {
+            name: Name::new("src[2]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(2),
+            in_modes: Vec::new(),
+        });
+
+        // dst[1], dst[2]
+        let dst1 = components.alloc(ComponentInstance {
+            name: Name::new("dst[1]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("Q"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(1),
+            in_modes: Vec::new(),
+        });
+        let dst2 = components.alloc(ComponentInstance {
+            name: Name::new("dst[2]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("Q"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(2),
+            in_modes: Vec::new(),
+        });
+
+        components[root].children = vec![src1, src2, dst1, dst2];
+
+        // Connection: src.p -> dst.q (no explicit Connection_Pattern => All_To_All)
+        let conn_idx = connections.alloc(ConnectionInstance {
+            name: Name::new("c"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("src")),
+                feature: Name::new("p"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("dst")),
+                feature: Name::new("q"),
+            }),
+            in_modes: Vec::new(),
+        });
+        components[root].connections.push(conn_idx);
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.compute_semantic_connections();
+
+        // All_To_All: 2 sources × 2 destinations = 4 semantic connections.
+        assert_eq!(
+            instance.semantic_connections.len(),
+            4,
+            "All_To_All (default) should produce 2×2=4 semantic connections, got {}",
+            instance.semantic_connections.len()
+        );
+
+        // Verify all four pairings exist.
+        let pairs: Vec<(ComponentInstanceIdx, ComponentInstanceIdx)> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(src1, dst1)));
+        assert!(pairs.contains(&(src1, dst2)));
+        assert!(pairs.contains(&(src2, dst1)));
+        assert!(pairs.contains(&(src2, dst2)));
+    }
+
+    #[test]
+    fn test_connection_pattern_one_to_one() {
+        // Two 2-element arrays connected with One_To_One pattern:
+        // src[1].p -> dst[1].q, src[2].p -> dst[2].q = 2 semantic connections.
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        // src[1], src[2]
+        let src1 = components.alloc(ComponentInstance {
+            name: Name::new("src[1]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(1),
+            in_modes: Vec::new(),
+        });
+        let src2 = components.alloc(ComponentInstance {
+            name: Name::new("src[2]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("P"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(2),
+            in_modes: Vec::new(),
+        });
+
+        // dst[1], dst[2]
+        let dst1 = components.alloc(ComponentInstance {
+            name: Name::new("dst[1]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("Q"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(1),
+            in_modes: Vec::new(),
+        });
+        let dst2 = components.alloc(ComponentInstance {
+            name: Name::new("dst[2]"),
+            category: ComponentCategory::Process,
+            type_name: Name::new("Q"),
+            impl_name: None,
+            package: Name::new("Pkg"),
+            parent: Some(root),
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: Some(2),
+            in_modes: Vec::new(),
+        });
+
+        components[root].children = vec![src1, src2, dst1, dst2];
+
+        // Connection: src.p -> dst.q
+        let conn_idx = connections.alloc(ConnectionInstance {
+            name: Name::new("c"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("src")),
+                feature: Name::new("p"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("dst")),
+                feature: Name::new("q"),
+            }),
+            in_modes: Vec::new(),
+        });
+        components[root].connections.push(conn_idx);
+
+        // Set Connection_Pattern => ((One_To_One)) on the owner.
+        let mut prop_map = crate::properties::PropertyMap::new();
+        prop_map.add(crate::properties::PropertyValue {
+            name: crate::name::PropertyRef {
+                property_set: Some("Communication_Properties".into()),
+                property_name: "Connection_Pattern".into(),
+            },
+            value: "((one_to_one))".to_string(),
+            is_append: false,
+        });
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.property_maps.insert(root, prop_map);
+        instance.compute_semantic_connections();
+
+        // One_To_One: src[1]->dst[1], src[2]->dst[2] = 2 semantic connections.
+        assert_eq!(
+            instance.semantic_connections.len(),
+            2,
+            "One_To_One should produce 2 semantic connections, got {}",
+            instance.semantic_connections.len()
+        );
+
+        // Verify the exact pairings.
+        let pairs: Vec<(ComponentInstanceIdx, ComponentInstanceIdx)> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(
+            pairs.contains(&(src1, dst1)),
+            "expected src[1]->dst[1] pairing"
+        );
+        assert!(
+            pairs.contains(&(src2, dst2)),
+            "expected src[2]->dst[2] pairing"
+        );
+        // Should NOT contain cross-pairings.
+        assert!(
+            !pairs.contains(&(src1, dst2)),
+            "One_To_One should not have src[1]->dst[2]"
+        );
+        assert!(
+            !pairs.contains(&(src2, dst1)),
+            "One_To_One should not have src[2]->dst[1]"
+        );
+    }
+
+    // ── parse_connection_pattern tests ───────────────────────────────
+
+    #[test]
+    fn test_parse_connection_pattern_nested_list() {
+        assert_eq!(
+            parse_connection_pattern("((one_to_one))"),
+            ConnectionPattern::OneToOne
+        );
+        assert_eq!(
+            parse_connection_pattern("((All_To_All))"),
+            ConnectionPattern::AllToAll
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_bare() {
+        assert_eq!(
+            parse_connection_pattern("one_to_one"),
+            ConnectionPattern::OneToOne
+        );
+        assert_eq!(
+            parse_connection_pattern("all_to_all"),
+            ConnectionPattern::AllToAll
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_unknown_defaults_to_all() {
+        assert_eq!(
+            parse_connection_pattern("some_unknown"),
+            ConnectionPattern::AllToAll
+        );
     }
 }
