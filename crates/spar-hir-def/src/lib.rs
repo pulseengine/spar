@@ -698,6 +698,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "100 ms".to_string(),
+            typed_expr: None,
             is_append: false,
         });
 
@@ -713,6 +714,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "200 ms".to_string(),
+            typed_expr: None,
             is_append: false,
         });
 
@@ -726,6 +728,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "300 ms".to_string(),
+            typed_expr: None,
             is_append: true,
         });
 

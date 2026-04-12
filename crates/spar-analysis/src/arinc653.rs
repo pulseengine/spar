@@ -12,13 +12,14 @@
 //! - **ARINC-WINDOW-UTILIZATION**: The sum of virtual processor execution times
 //!   on a processor must not exceed the processor's major frame period.
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
     extract_reference_target, get_execution_time_or_exec, get_timing_property,
 };
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// ARINC 653 partition scheduling analysis.
 pub struct Arinc653Analysis;
@@ -26,6 +27,10 @@ pub struct Arinc653Analysis;
 impl Analysis for Arinc653Analysis {
     fn name(&self) -> &str {
         "arinc653"
+    }
+
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
@@ -37,9 +42,26 @@ impl Analysis for Arinc653Analysis {
         let mut diags = Vec::new();
 
         check_processor_has_partitions(instance, &mut diags);
-        check_partition_assignment(instance, &mut diags);
+        check_partition_assignment(instance, None, &mut diags);
         check_partition_isolation(instance, &mut diags);
-        check_window_utilization(instance, &mut diags);
+        check_window_utilization(instance, None, &mut diags);
+
+        diags
+    }
+}
+
+impl ModalAnalysis for Arinc653Analysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+
+        check_processor_has_partitions(instance, &mut diags);
+        check_partition_assignment(instance, Some(som), &mut diags);
+        check_partition_isolation(instance, &mut diags);
+        check_window_utilization(instance, Some(som), &mut diags);
 
         diags
     }
@@ -148,10 +170,21 @@ fn check_processor_has_partitions(instance: &SystemInstance, diags: &mut Vec<Ana
 /// **ARINC-PARTITION-ASSIGNMENT**: Every process subcomponent must be
 /// bound to a virtual processor (partition), either by containment
 /// hierarchy or explicit binding property.
-fn check_partition_assignment(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+fn check_partition_assignment(
+    instance: &SystemInstance,
+    som: Option<&SystemOperationMode>,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
     let processes = find_components_by_category(instance, ComponentCategory::Process);
 
     for proc_idx in processes {
+        // Filter by SOM if provided.
+        if let Some(som) = som {
+            if !is_component_active_in_som(instance, proc_idx, som) {
+                continue;
+            }
+        }
+
         if owning_partition(instance, proc_idx).is_none() {
             let comp = instance.component(proc_idx);
             diags.push(AnalysisDiagnostic {
@@ -288,7 +321,11 @@ fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<Analysis
 /// **ARINC-WINDOW-UTILIZATION**: The sum of virtual processor execution
 /// times on a single processor must not exceed the processor's major
 /// frame period.
-fn check_window_utilization(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+fn check_window_utilization(
+    instance: &SystemInstance,
+    som: Option<&SystemOperationMode>,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
     let processors = find_components_by_category(instance, ComponentCategory::Processor);
 
     for proc_idx in processors {
@@ -298,11 +335,19 @@ fn check_window_utilization(instance: &SystemInstance, diags: &mut Vec<AnalysisD
         // Get processor period (major frame)
         let proc_period_ps = get_timing_property(proc_props, "Period");
 
-        // Collect child virtual processors and their execution times
+        // Collect child virtual processors and their execution times,
+        // filtering by SOM if provided.
         let vp_children: Vec<ComponentInstanceIdx> = proc
             .children
             .iter()
             .filter(|&&c| instance.component(c).category == ComponentCategory::VirtualProcessor)
+            .filter(|&&c| {
+                if let Some(som) = som {
+                    is_component_active_in_som(instance, c, som)
+                } else {
+                    true
+                }
+            })
             .copied()
             .collect();
 
@@ -478,6 +523,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
+                typed_expr: None,
                 is_append: false,
             });
         }
@@ -1251,6 +1297,261 @@ mod tests {
             errors.is_empty(),
             "75% utilization should have no errors: {:?}",
             errors
+        );
+    }
+
+    // ── ModalAnalysis tests ─────────────────────────────────────
+
+    #[test]
+    fn as_modal_returns_some() {
+        let analysis = Arinc653Analysis;
+        assert!(
+            analysis.as_modal().is_some(),
+            "Arinc653Analysis should support modal analysis"
+        );
+    }
+
+    #[test]
+    fn modal_partition_assignment_filters_inactive_process() {
+        // Two processes, each active in a different mode.
+        // In "fast" mode only proc_fast is active. proc_slow is filtered out.
+        // proc_fast is unbound so it should produce a warning; proc_slow should not.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc_fast = b.add_component("proc_fast", ComponentCategory::Process, Some(root));
+        let proc_slow = b.add_component("proc_slow", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![proc_fast, proc_slow]);
+
+        b.components[proc_fast].in_modes = vec![Name::new("fast")];
+        b.components[proc_slow].in_modes = vec![Name::new("slow")];
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: root,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: root,
+        });
+        inst.components[root].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(root, fast_mode)],
+        };
+
+        let diags = Arinc653Analysis.analyze_in_mode(&inst, &som_fast);
+        let assignment_warnings: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("ARINC-PARTITION-ASSIGNMENT"))
+            .collect();
+        // Only proc_fast should be checked (and it's unbound)
+        assert_eq!(
+            assignment_warnings.len(),
+            1,
+            "should only warn for active process: {:?}",
+            diags
+        );
+        assert!(
+            assignment_warnings[0].message.contains("proc_fast"),
+            "warning should be for proc_fast: {}",
+            assignment_warnings[0].message
+        );
+    }
+
+    #[test]
+    fn modal_window_utilization_filters_inactive_vp() {
+        // Two VPs under a processor, each active in a different mode.
+        // In "fast" mode only vp_fast is active, so utilization = 80%.
+        // Without filtering, total would be 80+20=100%.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp_fast = b.add_component("vp_fast", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp_slow = b.add_component("vp_slow", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp_fast, vp_slow]);
+
+        b.components[vp_fast].in_modes = vec![Name::new("fast")];
+        b.components[vp_slow].in_modes = vec![Name::new("slow")];
+
+        b.set_property(cpu, "Timing_Properties", "Period", "100 ms");
+        b.set_property(vp_fast, "Timing_Properties", "Execution_Time", "80 ms");
+        b.set_property(vp_slow, "Timing_Properties", "Execution_Time", "20 ms");
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: cpu,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: cpu,
+        });
+        inst.components[cpu].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(cpu, fast_mode)],
+        };
+
+        let diags = Arinc653Analysis.analyze_in_mode(&inst, &som_fast);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info && d.message.contains("partition window utilization")
+            })
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report utilization for fast mode: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("80.0%"),
+            "fast mode should show 80%: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn modal_non_modal_vp_included_in_all_soms() {
+        // A non-modal VP (empty in_modes) should be included in every SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp_always =
+            b.add_component("vp_always", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp_fast = b.add_component("vp_fast", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp_always, vp_fast]);
+
+        b.components[vp_fast].in_modes = vec![Name::new("fast")];
+        // vp_always has empty in_modes -> always active
+
+        b.set_property(cpu, "Timing_Properties", "Period", "100 ms");
+        b.set_property(vp_always, "Timing_Properties", "Execution_Time", "30 ms");
+        b.set_property(vp_fast, "Timing_Properties", "Execution_Time", "40 ms");
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: cpu,
+        });
+        inst.components[cpu].modes = vec![fast_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(cpu, fast_mode)],
+        };
+
+        let diags = Arinc653Analysis.analyze_in_mode(&inst, &som_fast);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Info && d.message.contains("partition window utilization")
+            })
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report utilization for fast mode: {:?}",
+            diags
+        );
+        // 30 + 40 = 70 ms / 100 ms = 70%
+        assert!(
+            infos[0].message.contains("70.0%"),
+            "should include both VPs: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn modal_overcommitted_in_one_som_only() {
+        // Window is overcommitted in "heavy" mode but not in "light" mode.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp_heavy =
+            b.add_component("vp_heavy", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp_light =
+            b.add_component("vp_light", ComponentCategory::VirtualProcessor, Some(cpu));
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp_heavy, vp_light]);
+
+        b.components[vp_heavy].in_modes = vec![Name::new("heavy")];
+        b.components[vp_light].in_modes = vec![Name::new("light")];
+
+        b.set_property(cpu, "Timing_Properties", "Period", "100 ms");
+        // vp_heavy: 120 ms -> 120% (overcommitted)
+        b.set_property(vp_heavy, "Timing_Properties", "Execution_Time", "120 ms");
+        // vp_light: 50 ms -> 50% (within budget)
+        b.set_property(vp_light, "Timing_Properties", "Execution_Time", "50 ms");
+
+        let mut inst = b.build(root);
+        let heavy_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("heavy"),
+            is_initial: true,
+            owner: cpu,
+        });
+        let light_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("light"),
+            is_initial: false,
+            owner: cpu,
+        });
+        inst.components[cpu].modes = vec![heavy_mode, light_mode];
+
+        let som_heavy = SystemOperationMode {
+            name: "heavy".to_string(),
+            mode_selections: vec![(cpu, heavy_mode)],
+        };
+        let som_light = SystemOperationMode {
+            name: "light".to_string(),
+            mode_selections: vec![(cpu, light_mode)],
+        };
+
+        // Heavy mode should be overcommitted
+        let diags_heavy = Arinc653Analysis.analyze_in_mode(&inst, &som_heavy);
+        let errors: Vec<_> = diags_heavy
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "heavy mode should be overcommitted: {:?}",
+            diags_heavy
+        );
+
+        // Light mode should be within budget
+        let diags_light = Arinc653Analysis.analyze_in_mode(&inst, &som_light);
+        let errors_light: Vec<_> = diags_light
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("ARINC-WINDOW-UTILIZATION")
+            })
+            .collect();
+        assert!(
+            errors_light.is_empty(),
+            "light mode should be within budget: {:?}",
+            diags_light
         );
     }
 }

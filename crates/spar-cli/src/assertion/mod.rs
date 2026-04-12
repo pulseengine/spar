@@ -428,6 +428,7 @@ mod tests {
                 property_name: Name::new("Period"),
             },
             value: "10 ms".to_string(),
+            typed_expr: None,
             is_append: false,
         });
         t1_props.add(PropertyValue {
@@ -436,6 +437,7 @@ mod tests {
                 property_name: Name::new("Compute_Execution_Time"),
             },
             value: "1 ms .. 5 ms".to_string(),
+            typed_expr: None,
             is_append: false,
         });
         property_maps.insert(thread1_idx, t1_props);

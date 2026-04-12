@@ -464,6 +464,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
+                typed_expr: None,
                 is_append: false,
             });
         }

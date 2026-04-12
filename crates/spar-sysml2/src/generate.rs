@@ -148,16 +148,23 @@ impl RivetArtifactBuilder {
 ///
 /// Produces a SysML v2 source string with:
 /// - `requirement def` for each requirement artifact
-/// - `part def` for each design-decision tagged `sysml-part`
+/// - `part def` for each design-decision tagged `sysml-part` (with port comments)
+/// - `port def` for each `sysml-interface` artifact
 /// - `satisfy`, `verify`, `refine`, `allocate`, `derive` relationships
+/// - Package wrapping based on ID prefixes
 pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
     let mut out = String::new();
     out.push_str("// Generated from rivet artifacts by spar\n\n");
 
-    // Build a map from artifact ID to title for relationship resolution.
     let id_to_title: HashMap<&str, &str> = artifacts
         .iter()
         .map(|a| (a.id.as_str(), a.title.as_str()))
+        .collect();
+
+    // Collect port defs (sysml-interface artifacts).
+    let interfaces: Vec<&RivetArtifact> = artifacts
+        .iter()
+        .filter(|a| a.artifact_type == "sysml-interface")
         .collect();
 
     // Group: requirements first, then components
@@ -180,21 +187,61 @@ pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
         })
         .collect();
 
+    // Build a reverse map: component ID -> list of interface titles that link to it.
+    // An interface links to a component via "allocated-to" or "satisfies".
+    let component_ports: HashMap<&str, Vec<&str>> = {
+        let mut map: HashMap<&str, Vec<&str>> = HashMap::new();
+        for iface in &interfaces {
+            for link in &iface.links {
+                if link.link_type == "allocated-to" || link.link_type == "satisfies" {
+                    map.entry(link.target.as_str())
+                        .or_default()
+                        .push(iface.title.as_str());
+                }
+            }
+        }
+        map
+    };
+
+    // Compute package groups from ID prefixes.
+    // An ID like "REQ-001" has prefix "REQ"; "SYS-CTRL-001" has prefix "SYS-CTRL".
+    // Only create package wrapping if there are multiple distinct prefixes.
+    let prefixes = collect_id_prefixes(artifacts);
+    let use_packages = prefixes.len() > 1;
+
+    // Group all "definition" output by prefix for package wrapping.
+    let mut package_bodies: HashMap<String, String> = HashMap::new();
+
+    // Emit port defs for interfaces.
+    for iface in &interfaces {
+        let name = sanitize_sysml_name(&iface.title);
+        let body = package_bodies.entry(id_prefix(&iface.id)).or_default();
+        if !iface.description.is_empty() {
+            body.push_str(&format!(
+                "port def {name} {{\n    doc \"{}\"\n}}\n\n",
+                escape_string(&iface.description)
+            ));
+        } else {
+            body.push_str(&format!("port def {name} {{ }}\n\n"));
+        }
+    }
+
     // Emit requirement defs
     for req in &requirements {
         let name = sanitize_sysml_name(&req.title);
-        out.push_str(&format!("requirement def {name}"));
+        let body = package_bodies.entry(id_prefix(&req.id)).or_default();
+        body.push_str(&format!("requirement def {name}"));
         if !req.description.is_empty() {
-            out.push_str(&format!(
+            body.push_str(&format!(
                 " {{\n    doc \"{}\"\n}}\n\n",
                 escape_string(&req.description)
             ));
         } else {
-            out.push_str(" { }\n\n");
+            body.push_str(" { }\n\n");
         }
     }
 
-    // Emit part defs for components
+    // Emit part defs for components, with port comments.
     for comp in &components {
         let name = sanitize_sysml_name(&comp.title);
         let keyword = if comp.tags.iter().any(|t| t == "sysml-action") {
@@ -206,12 +253,27 @@ pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
         } else {
             "part"
         };
-        out.push_str(&format!("{keyword} def {name} {{ }}\n\n"));
+
+        let body = package_bodies.entry(id_prefix(&comp.id)).or_default();
+
+        // Check if this component has associated ports (from sysml-interface links).
+        let ports = component_ports.get(comp.id.as_str());
+        if let Some(port_names) = ports {
+            body.push_str(&format!("{keyword} def {name} {{\n"));
+            for port_name in port_names {
+                let sanitized = sanitize_sysml_name(port_name);
+                body.push_str(&format!("    // port: {sanitized}\n"));
+            }
+            body.push_str("}\n\n");
+        } else {
+            body.push_str(&format!("{keyword} def {name} {{ }}\n\n"));
+        }
     }
 
     // Emit relationships
     for req in &requirements {
         let name = sanitize_sysml_name(&req.title);
+        let body = package_bodies.entry(id_prefix(&req.id)).or_default();
         for link in &req.links {
             let target_name = id_to_title
                 .get(link.target.as_str())
@@ -220,26 +282,86 @@ pub fn generate_sysml2(artifacts: &[RivetArtifact]) -> String {
 
             match link.link_type.as_str() {
                 "satisfies" => {
-                    out.push_str(&format!("satisfy {name} by {target_name};\n"));
+                    body.push_str(&format!("satisfy {name} by {target_name};\n"));
                 }
                 "verifies" => {
-                    out.push_str(&format!("verify {name} by {target_name};\n"));
+                    body.push_str(&format!("verify {name} by {target_name};\n"));
                 }
                 "refines" => {
-                    out.push_str(&format!("refine {name} by {target_name};\n"));
+                    body.push_str(&format!("refine {name} by {target_name};\n"));
                 }
                 "allocated-to" => {
-                    out.push_str(&format!("allocate {name} to {target_name};\n"));
+                    body.push_str(&format!("allocate {name} to {target_name};\n"));
                 }
                 "derives-from" => {
-                    out.push_str(&format!("derive {name} from {target_name};\n"));
+                    body.push_str(&format!("derive {name} from {target_name};\n"));
                 }
                 _ => {} // Skip unknown link types
             }
         }
     }
 
+    // Assemble output: if using packages, wrap each prefix group.
+    if use_packages {
+        let mut sorted_prefixes: Vec<&String> = package_bodies.keys().collect();
+        sorted_prefixes.sort();
+        for prefix in sorted_prefixes {
+            let body = &package_bodies[prefix];
+            if body.is_empty() {
+                continue;
+            }
+            let pkg_name = sanitize_sysml_name(prefix);
+            out.push_str(&format!("package {pkg_name} {{\n"));
+            // Indent each line of body.
+            for line in body.lines() {
+                if line.is_empty() {
+                    out.push('\n');
+                } else {
+                    out.push_str(&format!("    {line}\n"));
+                }
+            }
+            out.push_str("}\n\n");
+        }
+    } else {
+        // Single prefix or no prefix — emit without package wrapping.
+        let mut sorted_prefixes: Vec<&String> = package_bodies.keys().collect();
+        sorted_prefixes.sort();
+        for prefix in sorted_prefixes {
+            out.push_str(&package_bodies[prefix]);
+        }
+    }
+
     out
+}
+
+/// Extract the prefix from an artifact ID (everything before the last '-' and digits).
+///
+/// Examples:
+/// - `"REQ-001"` -> `"REQ"`
+/// - `"SYS-CTRL-002"` -> `"SYS-CTRL"`
+/// - `"FEAT-042"` -> `"FEAT"`
+/// - `"NoPrefix"` -> `"NoPrefix"`
+fn id_prefix(id: &str) -> String {
+    // Find the last '-' followed by only digits.
+    if let Some(pos) = id.rfind('-') {
+        let suffix = &id[pos + 1..];
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return id[..pos].to_string();
+        }
+    }
+    id.to_string()
+}
+
+/// Collect distinct ID prefixes from all artifacts.
+fn collect_id_prefixes(artifacts: &[RivetArtifact]) -> Vec<String> {
+    let mut prefixes: Vec<String> = artifacts
+        .iter()
+        .map(|a| id_prefix(&a.id))
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    prefixes.sort();
+    prefixes
 }
 
 /// Sanitize a string to a valid SysML v2 identifier.
