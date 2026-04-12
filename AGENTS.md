@@ -9,8 +9,8 @@
 This project uses **Rivet** for SDLC artifact traceability.
 - Config: `rivet.yaml`
 - Schemas: common, dev, aspice, stpa, aadl, sysml2
-- Artifacts: 359 across 3 types
-- Validation: `rivet validate` (current status: pass)
+- Artifacts: 627 across 13 types
+- Validation: `rivet validate` (current status: 623 errors)
 
 ## Available Commands
 
@@ -31,20 +31,23 @@ This project uses **Rivet** for SDLC artifact traceability.
 
 | Type | Count | Description |
 |------|------:|-------------|
+| `control-action` | 21 | An action issued by a controller to a controlled process or another controller. |
+| `controlled-process` | 10 | A process being controlled — the physical or data transformation acted upon by controllers. |
+| `controller` | 22 | A system component (human or automated) responsible for issuing control actions. Each controller has a process model — its internal beliefs about the state of the controlled process. |
+| `controller-constraint` | 47 | A constraint on a controller's behavior derived by inverting a UCA. Specifies what the controller must or must not do. |
 | `design-decision` | 72 | An architectural or design decision with rationale |
 | `feature` | 113 | A user-visible capability or feature |
-| `requirement` | 174 | A functional or non-functional requirement |
+| `hazard` | 32 | A system state or set of conditions that, together with worst-case environmental conditions, will lead to a loss. |
+| `loss` | 19 | An undesired or unplanned event involving something of value to stakeholders. Losses define what the analysis aims to prevent. |
+| `loss-scenario` | 36 | A causal pathway describing how a UCA could occur or how the control action could be improperly executed, leading to a hazard. |
+| `requirement` | 168 | A functional or non-functional requirement |
+| `safety-requirement` | 6 |  |
+| `system-constraint` | 24 | A condition or behavior that must be satisfied to prevent a hazard. Each constraint is the inversion of a hazard. |
+| `uca` | 57 | An Unsafe Control Action — a control action that, in a particular context and worst-case environment, leads to a hazard. Four types (provably complete): 1. Not providing the control action leads to a hazard 2. Providing the control action leads to a hazard 3. Providing too early, too late, or in the wrong order 4. Control action stopped too soon or applied too long |
 | `aadl-analysis-result` | 0 | Output of a spar analysis pass |
 | `aadl-component` | 0 | AADL component type or implementation imported from spar |
 | `aadl-flow` | 0 | End-to-end flow with latency bounds |
 | `aadl-tool` | 0 | An AADL ecosystem tool — captures what it does, what makes it unique, and what capabilities spar could adopt from it. |
-| `control-action` | 0 | An action issued by a controller to a controlled process or another controller. |
-| `controlled-process` | 0 | A process being controlled — the physical or data transformation acted upon by controllers. |
-| `controller` | 0 | A system component (human or automated) responsible for issuing control actions. Each controller has a process model — its internal beliefs about the state of the controlled process. |
-| `controller-constraint` | 0 | A constraint on a controller's behavior derived by inverting a UCA. Specifies what the controller must or must not do. |
-| `hazard` | 0 | A system state or set of conditions that, together with worst-case environmental conditions, will lead to a loss. |
-| `loss` | 0 | An undesired or unplanned event involving something of value to stakeholders. Losses define what the analysis aims to prevent. |
-| `loss-scenario` | 0 | A causal pathway describing how a UCA could occur or how the control action could be improperly executed, leading to a hazard. |
 | `stakeholder-req` | 0 | Stakeholder requirement (SYS.1) |
 | `sub-hazard` | 0 | A refinement of a hazard into a more specific unsafe condition. |
 | `sw-arch-component` | 0 | Software architectural element (SWE.2) |
@@ -59,9 +62,7 @@ This project uses **Rivet** for SDLC artifact traceability.
 | `sysml-interface` | 0 | SysML v2 interface or port definition |
 | `sysml-requirement` | 0 | SysML v2 requirement (def or usage) |
 | `system-arch-component` | 0 | System architectural element (SYS.3) |
-| `system-constraint` | 0 | A condition or behavior that must be satisfied to prevent a hazard. Each constraint is the inversion of a hazard. |
 | `system-req` | 0 | System requirement derived from stakeholder needs (SYS.2) |
-| `uca` | 0 | An Unsafe Control Action — a control action that, in a particular context and worst-case environment, leads to a hazard. Four types (provably complete): 1. Not providing the control action leads to a hazard 2. Providing the control action leads to a hazard 3. Providing too early, too late, or in the wrong order 4. Control action stopped too soon or applied too long |
 | `unit-verification` | 0 | Unit verification measure (SWE.4 — Software Unit Verification) |
 | `verification-execution` | 0 | A verification execution run against a specific version |
 | `verification-verdict` | 0 | Pass/fail verdict for a single verification measure in an execution run |
@@ -91,6 +92,7 @@ Use `rivet validate --format json` for machine-readable output.
 | `caused-by-uca` | Loss scenario is caused by an unsafe control action | `causes-scenario` |
 | `constrained-by` | Source is constrained by the target | `constrains` |
 | `constrains-controller` | Constraint applies to a specific controller | `controller-constrained-by` |
+| `constraint-satisfies` | Requirement satisfies (implements) a system constraint | `satisfied-by-constraint` |
 | `contains` | Parent AADL component contains a child sub-component | `contained-by` |
 | `depends-on` | Source depends on target being completed first | `depended-on-by` |
 | `derives-from` | Source is derived from the target | `derived-into` |
