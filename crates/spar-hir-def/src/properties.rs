@@ -317,7 +317,13 @@ mod tests {
     #[test]
     fn get_typed_returns_none_for_untyped_property() {
         let mut map = PropertyMap::new();
-        map.add(make_typed_prop(Some("Timing"), "Period", "10 ms", None, false));
+        map.add(make_typed_prop(
+            Some("Timing"),
+            "Period",
+            "10 ms",
+            None,
+            false,
+        ));
         assert_eq!(map.get_typed("Timing", "Period"), None);
     }
 
@@ -349,8 +355,17 @@ mod tests {
         let mut map = PropertyMap::new();
         let expr = PropertyExpr::Boolean(true);
         // Store with empty set (unqualified)
-        map.add(make_typed_prop(None, "Active", "true", Some(expr.clone()), false));
+        map.add(make_typed_prop(
+            None,
+            "Active",
+            "true",
+            Some(expr.clone()),
+            false,
+        ));
         // Look up with a set name -- should fall back to empty-set entry
-        assert_eq!(map.get_typed("Deployment_Properties", "Active"), Some(&expr));
+        assert_eq!(
+            map.get_typed("Deployment_Properties", "Active"),
+            Some(&expr)
+        );
     }
 }

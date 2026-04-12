@@ -757,11 +757,8 @@ public
   end Top.impl;
 end P;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "typed_inst.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "typed_inst.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -773,7 +770,12 @@ end P;
         );
 
         let root = inst.component(inst.root);
-        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
 
         let s_idx = root.children[0];
         let props = inst.properties_for(s_idx);
@@ -817,11 +819,8 @@ public
   end Top.impl;
 end P;
 "#;
-        let file = spar_base_db::SourceFile::new(
-            &db,
-            "typed_extends.aadl".to_string(),
-            src.to_string(),
-        );
+        let file =
+            spar_base_db::SourceFile::new(&db, "typed_extends.aadl".to_string(), src.to_string());
         let tree = file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
 
@@ -833,7 +832,12 @@ end P;
         );
 
         let root = inst.component(inst.root);
-        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+        assert_eq!(
+            root.children.len(),
+            1,
+            "diagnostics: {:?}",
+            inst.diagnostics
+        );
 
         let c_idx = root.children[0];
         let props = inst.properties_for(c_idx);
