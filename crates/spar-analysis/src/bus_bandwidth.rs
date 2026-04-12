@@ -26,7 +26,11 @@ use rustc_hash::FxHashMap;
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::property_accessors::{extract_reference_target, get_size_property, get_timing_property};
+use spar_hir_def::item_tree::PropertyExpr;
+
+use crate::property_accessors::{
+    extract_real, extract_reference_target, get_size_property, get_timing_property,
+};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// Bus bandwidth analysis.
@@ -187,6 +191,38 @@ impl Analysis for BusBandwidthAnalysis {
     }
 }
 
+/// Extract a data rate value in bps from a typed [`PropertyExpr`].
+fn extract_data_rate_bps(expr: &PropertyExpr) -> Option<f64> {
+    match expr {
+        PropertyExpr::Real(s, Some(unit)) | PropertyExpr::Real(s, Some(unit)) => {
+            let v = s.parse::<f64>().ok()?;
+            let factor = DATA_RATE_UNITS
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(unit.as_str()))?
+                .1;
+            Some(v * factor)
+        }
+        PropertyExpr::Integer(v, Some(unit)) => {
+            let factor = DATA_RATE_UNITS
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(unit.as_str()))?
+                .1;
+            Some(*v as f64 * factor)
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let v = extract_real(inner)?;
+            let factor = DATA_RATE_UNITS
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(unit.as_str()))?
+                .1;
+            Some(v * factor)
+        }
+        PropertyExpr::Real(s, None) => s.parse::<f64>().ok(),
+        PropertyExpr::Integer(v, None) => Some(*v as f64),
+        _ => None,
+    }
+}
+
 /// Get bandwidth capacity of a bus in bits per second.
 ///
 /// Tries the following properties in order:
@@ -196,7 +232,32 @@ impl Analysis for BusBandwidthAnalysis {
 /// 4. `Communication_Properties::Data_Rate`
 /// 5. `Data_Rate` (unqualified)
 fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Option<f64> {
-    // Try Bandwidth property first (SEI or Communication_Properties).
+    // Typed path: try Bandwidth
+    let bandwidth_keys: &[(&str, &str)] = &[
+        ("SEI", "Bandwidth"),
+        ("Communication_Properties", "Bandwidth"),
+        ("", "Bandwidth"),
+    ];
+    for &(set, name) in bandwidth_keys {
+        if let Some(expr) = props.get_typed(set, name) {
+            if let Some(bps) = extract_data_rate_bps(expr) {
+                return Some(bps);
+            }
+        }
+    }
+
+    // Typed path: try Data_Rate
+    let data_rate_keys: &[(&str, &str)] =
+        &[("Communication_Properties", "Data_Rate"), ("", "Data_Rate")];
+    for &(set, name) in data_rate_keys {
+        if let Some(expr) = props.get_typed(set, name) {
+            if let Some(bps) = extract_data_rate_bps(expr) {
+                return Some(bps);
+            }
+        }
+    }
+
+    // String fallback: try Bandwidth
     let raw = props
         .get("SEI", "Bandwidth")
         .or_else(|| props.get("Communication_Properties", "Bandwidth"))
@@ -206,7 +267,7 @@ fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Opti
         return Some(bps);
     }
 
-    // Fall back to Data_Rate.
+    // String fallback: try Data_Rate
     let raw = props
         .get("Communication_Properties", "Data_Rate")
         .or_else(|| props.get("", "Data_Rate"));
@@ -464,6 +525,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
+                typed_expr: None,
                 is_append: false,
             });
         }

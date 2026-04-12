@@ -11,7 +11,8 @@
 use rustc_hash::FxHashMap;
 
 use crate::item_tree::{
-    ComponentImplIdx, ComponentTypeIdx, ItemTree, PropertyAssociationIdx, SubcomponentIdx,
+    ComponentImplIdx, ComponentTypeIdx, ItemTree, PropertyAssociationIdx, PropertyExpr,
+    SubcomponentIdx,
 };
 use crate::name::PropertyRef;
 use crate::resolver::CiName;
@@ -23,6 +24,8 @@ pub struct PropertyValue {
     pub name: PropertyRef,
     /// Raw text of the property value expression.
     pub value: String,
+    /// Typed property expression (when available from the parser).
+    pub typed_expr: Option<PropertyExpr>,
     /// Whether this is an append association (`+=>`).
     pub is_append: bool,
 }
@@ -87,6 +90,19 @@ impl PropertyMap {
             .map(|pv| pv.value.as_str())
     }
 
+    /// Look up the typed property expression by property set and name.
+    ///
+    /// Returns the typed expression of the most recent assignment, or `None`
+    /// if no value exists or if the value has no typed expression.
+    pub fn get_typed(&self, set: &str, name: &str) -> Option<&PropertyExpr> {
+        let set_key = CiName::from_str(set);
+        let name_key = CiName::from_str(name);
+        self.props
+            .get(&(set_key, name_key))
+            .and_then(|vals| vals.first())
+            .and_then(|pv| pv.typed_expr.as_ref())
+    }
+
     /// Look up all property values for a given property set and name.
     ///
     /// Returns all values including appended ones, in order.
@@ -135,6 +151,7 @@ impl PropertyMap {
                 map.add(PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_expr: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -148,6 +165,7 @@ impl PropertyMap {
                 map.add(PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_expr: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -171,6 +189,7 @@ impl PropertyMap {
             map.add(PropertyValue {
                 name: pa.name.clone(),
                 value: pa.value.clone(),
+                typed_expr: pa.typed_value.clone(),
                 is_append: pa.is_append,
             });
         }
@@ -186,6 +205,7 @@ impl PropertyMap {
             map.add(PropertyValue {
                 name: pa.name.clone(),
                 value: pa.value.clone(),
+                typed_expr: pa.typed_value.clone(),
                 is_append: pa.is_append,
             });
         }
@@ -205,6 +225,7 @@ mod tests {
                 property_name: name.into(),
             },
             value: value.to_string(),
+            typed_expr: None,
             is_append,
         }
     }

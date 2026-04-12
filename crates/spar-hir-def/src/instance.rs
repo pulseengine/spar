@@ -2064,6 +2064,7 @@ impl<'a> Builder<'a> {
                     map.add(crate::properties::PropertyValue {
                         name: pa.name.clone(),
                         value: pa.value.clone(),
+                        typed_expr: pa.typed_value.clone(),
                         is_append: pa.is_append,
                     });
                 }
@@ -2081,6 +2082,7 @@ impl<'a> Builder<'a> {
                     map.add(crate::properties::PropertyValue {
                         name: pa.name.clone(),
                         value: pa.value.clone(),
+                        typed_expr: pa.typed_value.clone(),
                         is_append: pa.is_append,
                     });
                 }
@@ -2097,6 +2099,7 @@ impl<'a> Builder<'a> {
                 map.add(crate::properties::PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_expr: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -2130,6 +2133,7 @@ impl<'a> Builder<'a> {
                     map.add(crate::properties::PropertyValue {
                         name: pa.name.clone(),
                         value: pa.value.clone(),
+                        typed_expr: pa.typed_value.clone(),
                         is_append: pa.is_append,
                     });
                 }
@@ -2144,6 +2148,7 @@ impl<'a> Builder<'a> {
                 map.add(crate::properties::PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_expr: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -2170,6 +2175,7 @@ impl<'a> Builder<'a> {
                 map.add(crate::properties::PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_expr: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -3875,6 +3881,7 @@ mod tests {
                 property_name: "Connection_Pattern".into(),
             },
             value: "((one_to_one))".to_string(),
+            typed_expr: None,
             is_append: false,
         });
 
