@@ -536,6 +536,98 @@ impl SystemInstance {
                             }
                             p
                         }
+                        ConnectionPattern::Next => {
+                            // Linear chain: element i -> element i+1 (N-1 pairs).
+                            if src_matches.len() != dst_matches.len() {
+                                let owner_name = self.components[conn_owner].name.clone();
+                                endpoint_diagnostics.push(InstanceDiagnostic {
+                                    message: format!(
+                                        "connection '{}': Next pattern requires equal array sizes (source={}, destination={})",
+                                        conn_name, src_matches.len(), dst_matches.len(),
+                                    ),
+                                    path: vec![owner_name, conn_name.clone()],
+                                });
+                            }
+                            let n = src_matches.len().min(dst_matches.len());
+                            (0..n.saturating_sub(1))
+                                .map(|i| (src_matches[i], dst_matches[i + 1]))
+                                .collect()
+                        }
+                        ConnectionPattern::Previous => {
+                            // Linear chain: element i -> element i-1 (N-1 pairs).
+                            if src_matches.len() != dst_matches.len() {
+                                let owner_name = self.components[conn_owner].name.clone();
+                                endpoint_diagnostics.push(InstanceDiagnostic {
+                                    message: format!(
+                                        "connection '{}': Previous pattern requires equal array sizes (source={}, destination={})",
+                                        conn_name, src_matches.len(), dst_matches.len(),
+                                    ),
+                                    path: vec![owner_name, conn_name.clone()],
+                                });
+                            }
+                            let n = src_matches.len().min(dst_matches.len());
+                            (1..n)
+                                .map(|i| (src_matches[i], dst_matches[i - 1]))
+                                .collect()
+                        }
+                        ConnectionPattern::CyclicNext => {
+                            // Cyclic ring: element i -> element (i+1) mod N.
+                            if src_matches.len() != dst_matches.len() {
+                                let owner_name = self.components[conn_owner].name.clone();
+                                endpoint_diagnostics.push(InstanceDiagnostic {
+                                    message: format!(
+                                        "connection '{}': Cyclic_Next pattern requires equal array sizes (source={}, destination={})",
+                                        conn_name, src_matches.len(), dst_matches.len(),
+                                    ),
+                                    path: vec![owner_name, conn_name.clone()],
+                                });
+                            }
+                            let n = src_matches.len().min(dst_matches.len());
+                            if n == 0 {
+                                Vec::new()
+                            } else {
+                                (0..n)
+                                    .map(|i| (src_matches[i], dst_matches[(i + 1) % n]))
+                                    .collect()
+                            }
+                        }
+                        ConnectionPattern::CyclicPrevious => {
+                            // Cyclic ring: element i -> element (i-1+N) mod N.
+                            if src_matches.len() != dst_matches.len() {
+                                let owner_name = self.components[conn_owner].name.clone();
+                                endpoint_diagnostics.push(InstanceDiagnostic {
+                                    message: format!(
+                                        "connection '{}': Cyclic_Previous pattern requires equal array sizes (source={}, destination={})",
+                                        conn_name, src_matches.len(), dst_matches.len(),
+                                    ),
+                                    path: vec![owner_name, conn_name.clone()],
+                                });
+                            }
+                            let n = src_matches.len().min(dst_matches.len());
+                            if n == 0 {
+                                Vec::new()
+                            } else {
+                                (0..n)
+                                    .map(|i| (src_matches[i], dst_matches[(i + n - 1) % n]))
+                                    .collect()
+                            }
+                        }
+                        ConnectionPattern::OneToAll => {
+                            // Fan-out: first source element connects to all destinations.
+                            if let Some(&first_src) = src_matches.first() {
+                                dst_matches.iter().map(|&d| (first_src, d)).collect()
+                            } else {
+                                Vec::new()
+                            }
+                        }
+                        ConnectionPattern::AllToOne => {
+                            // Fan-in: all source elements connect to the first destination.
+                            if let Some(&first_dst) = dst_matches.first() {
+                                src_matches.iter().map(|&s| (s, first_dst)).collect()
+                            } else {
+                                Vec::new()
+                            }
+                        }
                     };
 
                     for (src_component, dst_component) in pairs {
@@ -1072,6 +1164,18 @@ enum ConnectionPattern {
     OneToOne,
     /// Every source element connects to every destination element (default).
     AllToAll,
+    /// Element i connects to element i+1 (linear chain, N-1 pairs).
+    Next,
+    /// Element i connects to element i-1 (linear chain, N-1 pairs).
+    Previous,
+    /// Element i connects to element (i+1) mod N (cyclic ring, N pairs).
+    CyclicNext,
+    /// Element i connects to element (i-1+N) mod N (cyclic ring, N pairs).
+    CyclicPrevious,
+    /// First element connects to all elements (fan-out from element 0).
+    OneToAll,
+    /// All elements connect to the first element (fan-in to element 0).
+    AllToOne,
 }
 
 /// Parse a `Connection_Pattern` property value string into a `ConnectionPattern`.
@@ -1088,6 +1192,18 @@ fn parse_connection_pattern(value: &str) -> ConnectionPattern {
 
     if stripped.eq_ignore_ascii_case("one_to_one") {
         ConnectionPattern::OneToOne
+    } else if stripped.eq_ignore_ascii_case("next") {
+        ConnectionPattern::Next
+    } else if stripped.eq_ignore_ascii_case("previous") {
+        ConnectionPattern::Previous
+    } else if stripped.eq_ignore_ascii_case("cyclic_next") {
+        ConnectionPattern::CyclicNext
+    } else if stripped.eq_ignore_ascii_case("cyclic_previous") {
+        ConnectionPattern::CyclicPrevious
+    } else if stripped.eq_ignore_ascii_case("one_to_all") {
+        ConnectionPattern::OneToAll
+    } else if stripped.eq_ignore_ascii_case("all_to_one") {
+        ConnectionPattern::AllToOne
     } else {
         // All_To_All is the default for any unrecognized or missing value.
         ConnectionPattern::AllToAll
@@ -3947,5 +4063,294 @@ mod tests {
             parse_connection_pattern("some_unknown"),
             ConnectionPattern::AllToAll
         );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_next() {
+        assert_eq!(parse_connection_pattern("next"), ConnectionPattern::Next);
+        assert_eq!(parse_connection_pattern("((Next))"), ConnectionPattern::Next);
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_previous() {
+        assert_eq!(
+            parse_connection_pattern("previous"),
+            ConnectionPattern::Previous
+        );
+        assert_eq!(
+            parse_connection_pattern("((Previous))"),
+            ConnectionPattern::Previous
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_cyclic_next() {
+        assert_eq!(
+            parse_connection_pattern("cyclic_next"),
+            ConnectionPattern::CyclicNext
+        );
+        assert_eq!(
+            parse_connection_pattern("((Cyclic_Next))"),
+            ConnectionPattern::CyclicNext
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_cyclic_previous() {
+        assert_eq!(
+            parse_connection_pattern("cyclic_previous"),
+            ConnectionPattern::CyclicPrevious
+        );
+        assert_eq!(
+            parse_connection_pattern("((Cyclic_Previous))"),
+            ConnectionPattern::CyclicPrevious
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_one_to_all() {
+        assert_eq!(
+            parse_connection_pattern("one_to_all"),
+            ConnectionPattern::OneToAll
+        );
+        assert_eq!(
+            parse_connection_pattern("((One_To_All))"),
+            ConnectionPattern::OneToAll
+        );
+    }
+
+    #[test]
+    fn test_parse_connection_pattern_all_to_one() {
+        assert_eq!(
+            parse_connection_pattern("all_to_one"),
+            ConnectionPattern::AllToOne
+        );
+        assert_eq!(
+            parse_connection_pattern("((All_To_One))"),
+            ConnectionPattern::AllToOne
+        );
+    }
+
+    // ── expansion tests for new connection patterns ─────────────────
+
+    /// Helper: build a 3-element array test instance with a given Connection_Pattern value.
+    /// Returns (instance, root, [src1, src2, src3], [dst1, dst2, dst3]).
+    fn make_3elem_pattern_instance(
+        pattern_value: &str,
+    ) -> (
+        SystemInstance,
+        ComponentInstanceIdx,
+        [ComponentInstanceIdx; 3],
+        [ComponentInstanceIdx; 3],
+    ) {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let mut connections: Arena<ConnectionInstance> = Arena::default();
+
+        let root = components.alloc(ComponentInstance {
+            name: Name::new("top"),
+            category: ComponentCategory::System,
+            type_name: Name::new("Top"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+
+        let mut srcs = Vec::new();
+        let mut dsts = Vec::new();
+        for i in 1..=3 {
+            let s = components.alloc(ComponentInstance {
+                name: Name::new(&format!("src[{i}]")),
+                category: ComponentCategory::Process,
+                type_name: Name::new("P"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(i),
+                in_modes: Vec::new(),
+            });
+            srcs.push(s);
+        }
+        for i in 1..=3 {
+            let d = components.alloc(ComponentInstance {
+                name: Name::new(&format!("dst[{i}]")),
+                category: ComponentCategory::Process,
+                type_name: Name::new("Q"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(root),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: Some(i),
+                in_modes: Vec::new(),
+            });
+            dsts.push(d);
+        }
+
+        components[root].children = srcs.iter().chain(dsts.iter()).copied().collect();
+
+        let conn_idx = connections.alloc(ConnectionInstance {
+            name: Name::new("c"),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            owner: root,
+            src: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("src")),
+                feature: Name::new("p"),
+            }),
+            dst: Some(ConnectionEnd {
+                subcomponent: Some(Name::new("dst")),
+                feature: Name::new("q"),
+            }),
+            in_modes: Vec::new(),
+        });
+        components[root].connections.push(conn_idx);
+
+        let mut prop_map = crate::properties::PropertyMap::new();
+        prop_map.add(crate::properties::PropertyValue {
+            name: crate::name::PropertyRef {
+                property_set: Some("Communication_Properties".into()),
+                property_name: "Connection_Pattern".into(),
+            },
+            value: pattern_value.to_string(),
+            is_append: false,
+        });
+
+        let mut instance = make_instance(components, Arena::default(), connections, root);
+        instance.property_maps.insert(root, prop_map);
+        instance.compute_semantic_connections();
+
+        let src_arr = [srcs[0], srcs[1], srcs[2]];
+        let dst_arr = [dsts[0], dsts[1], dsts[2]];
+        (instance, root, src_arr, dst_arr)
+    }
+
+    #[test]
+    fn test_connection_pattern_next_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((next))");
+        // Next: src[1]->dst[2], src[2]->dst[3] = 2 pairs (N-1).
+        assert_eq!(
+            instance.semantic_connections.len(),
+            2,
+            "Next pattern with 3 elements should produce 2 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[0], dsts[1])), "expected src[1]->dst[2]");
+        assert!(pairs.contains(&(srcs[1], dsts[2])), "expected src[2]->dst[3]");
+    }
+
+    #[test]
+    fn test_connection_pattern_previous_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((previous))");
+        // Previous: src[2]->dst[1], src[3]->dst[2] = 2 pairs (N-1).
+        assert_eq!(
+            instance.semantic_connections.len(),
+            2,
+            "Previous pattern with 3 elements should produce 2 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[1], dsts[0])), "expected src[2]->dst[1]");
+        assert!(pairs.contains(&(srcs[2], dsts[1])), "expected src[3]->dst[2]");
+    }
+
+    #[test]
+    fn test_connection_pattern_cyclic_next_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((cyclic_next))");
+        // CyclicNext: src[1]->dst[2], src[2]->dst[3], src[3]->dst[1] = 3 pairs (N).
+        assert_eq!(
+            instance.semantic_connections.len(),
+            3,
+            "Cyclic_Next pattern with 3 elements should produce 3 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[0], dsts[1])), "expected src[1]->dst[2]");
+        assert!(pairs.contains(&(srcs[1], dsts[2])), "expected src[2]->dst[3]");
+        assert!(pairs.contains(&(srcs[2], dsts[0])), "expected src[3]->dst[1]");
+    }
+
+    #[test]
+    fn test_connection_pattern_cyclic_previous_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((cyclic_previous))");
+        // CyclicPrevious: src[1]->dst[3], src[2]->dst[1], src[3]->dst[2] = 3 pairs (N).
+        assert_eq!(
+            instance.semantic_connections.len(),
+            3,
+            "Cyclic_Previous pattern with 3 elements should produce 3 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[0], dsts[2])), "expected src[1]->dst[3]");
+        assert!(pairs.contains(&(srcs[1], dsts[0])), "expected src[2]->dst[1]");
+        assert!(pairs.contains(&(srcs[2], dsts[1])), "expected src[3]->dst[2]");
+    }
+
+    #[test]
+    fn test_connection_pattern_one_to_all_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((one_to_all))");
+        // OneToAll: src[1]->dst[1], src[1]->dst[2], src[1]->dst[3] = 3 pairs.
+        assert_eq!(
+            instance.semantic_connections.len(),
+            3,
+            "One_To_All pattern with 3 destinations should produce 3 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[0], dsts[0])), "expected src[1]->dst[1]");
+        assert!(pairs.contains(&(srcs[0], dsts[1])), "expected src[1]->dst[2]");
+        assert!(pairs.contains(&(srcs[0], dsts[2])), "expected src[1]->dst[3]");
+    }
+
+    #[test]
+    fn test_connection_pattern_all_to_one_expansion() {
+        let (instance, _, srcs, dsts) = make_3elem_pattern_instance("((all_to_one))");
+        // AllToOne: src[1]->dst[1], src[2]->dst[1], src[3]->dst[1] = 3 pairs.
+        assert_eq!(
+            instance.semantic_connections.len(),
+            3,
+            "All_To_One pattern with 3 sources should produce 3 connections"
+        );
+        let pairs: Vec<_> = instance
+            .semantic_connections
+            .iter()
+            .map(|sc| (sc.ultimate_source.0, sc.ultimate_destination.0))
+            .collect();
+        assert!(pairs.contains(&(srcs[0], dsts[0])), "expected src[1]->dst[1]");
+        assert!(pairs.contains(&(srcs[1], dsts[0])), "expected src[2]->dst[1]");
+        assert!(pairs.contains(&(srcs[2], dsts[0])), "expected src[3]->dst[1]");
     }
 }
