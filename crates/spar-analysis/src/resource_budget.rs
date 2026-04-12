@@ -1387,12 +1387,7 @@ mod tests {
             "Actual_Memory_Binding",
             "reference (ram)",
         );
-        b.set_property(
-            t_fast,
-            "Memory_Properties",
-            "Source_Code_Size",
-            "100 KByte",
-        );
+        b.set_property(t_fast, "Memory_Properties", "Source_Code_Size", "100 KByte");
         b.set_property(
             t_fast,
             "Deployment_Properties",
@@ -1459,12 +1454,7 @@ mod tests {
             "reference (ram)",
         );
         // t_light: 50 KB -> within 100 KB
-        b.set_property(
-            t_light,
-            "Memory_Properties",
-            "Source_Code_Size",
-            "50 KByte",
-        );
+        b.set_property(t_light, "Memory_Properties", "Source_Code_Size", "50 KByte");
         b.set_property(
             t_light,
             "Deployment_Properties",

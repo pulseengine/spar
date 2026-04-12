@@ -1487,10 +1487,8 @@ mod tests {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
         let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
-        let vp_heavy =
-            b.add_component("vp_heavy", ComponentCategory::VirtualProcessor, Some(cpu));
-        let vp_light =
-            b.add_component("vp_light", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp_heavy = b.add_component("vp_heavy", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp_light = b.add_component("vp_light", ComponentCategory::VirtualProcessor, Some(cpu));
         b.set_children(root, vec![cpu]);
         b.set_children(cpu, vec![vp_heavy, vp_light]);
 

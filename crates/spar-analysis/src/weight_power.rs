@@ -20,7 +20,9 @@
 //! 6. Info with aggregated totals per system/component.
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::item_tree::PropertyExpr;
 
+use crate::property_accessors::extract_real;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_depth, component_path};
 
 /// Weight and power aggregation analysis.
@@ -182,7 +184,107 @@ fn bottom_up_order(instance: &SystemInstance) -> Vec<ComponentInstanceIdx> {
     all.into_iter().map(|(idx, _)| idx).collect()
 }
 
+// ── Typed extraction helpers ────────────────────────────────────────
+
+/// Extract a weight value in kilograms from a typed [`PropertyExpr`].
+fn extract_weight_kg(expr: &PropertyExpr) -> Option<f64> {
+    let (val, unit_name) = extract_real_with_unit(expr)?;
+    let factor = WEIGHT_UNITS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&unit_name))?
+        .1;
+    Some(val * factor)
+}
+
+/// Extract a power value in milliwatts from a typed [`PropertyExpr`].
+fn extract_power_mw(expr: &PropertyExpr) -> Option<f64> {
+    let (val, unit_name) = extract_real_with_unit(expr)?;
+    let factor = POWER_UNITS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&unit_name))?
+        .1;
+    Some(val * factor)
+}
+
+/// Extract a numeric value and optional unit name from a typed expression.
+///
+/// Returns `(value, unit_name)`. If there is no unit, returns empty string
+/// so callers can apply a default.
+fn extract_real_with_unit(expr: &PropertyExpr) -> Option<(f64, String)> {
+    match expr {
+        PropertyExpr::Real(s, Some(unit)) => {
+            let v = s.parse::<f64>().ok()?;
+            Some((v, unit.as_str().to_string()))
+        }
+        PropertyExpr::Real(s, None) => {
+            let v = s.parse::<f64>().ok()?;
+            Some((v, String::new()))
+        }
+        PropertyExpr::Integer(v, Some(unit)) => Some((*v as f64, unit.as_str().to_string())),
+        PropertyExpr::Integer(v, None) => Some((*v as f64, String::new())),
+        PropertyExpr::UnitValue(inner, unit) => {
+            let v = extract_real(inner)?;
+            Some((v, unit.as_str().to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Try typed lookup across multiple (set, name) pairs, returning the
+/// first match that converts via `convert`.
+fn try_typed_multi<F: Fn(&PropertyExpr) -> Option<f64>>(
+    props: &spar_hir_def::properties::PropertyMap,
+    keys: &[(&str, &str)],
+    convert: F,
+) -> Option<f64> {
+    for &(set, name) in keys {
+        if let Some(expr) = props.get_typed(set, name) {
+            if let Some(v) = convert(expr) {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
 // ── Property helpers ────────────────────────────────────────────────
+
+/// Weight property lookup keys.
+const WEIGHT_KEYS: &[(&str, &str)] = &[
+    ("SEI", "GrossWeight"),
+    ("SEI", "Weight"),
+    ("Physical_Properties", "GrossWeight"),
+    ("Physical_Properties", "Weight"),
+    ("", "GrossWeight"),
+    ("", "Weight"),
+];
+
+/// Weight limit property lookup keys.
+const WEIGHT_LIMIT_KEYS: &[(&str, &str)] = &[
+    ("SEI", "WeightLimit"),
+    ("Physical_Properties", "WeightLimit"),
+    ("Physical_Properties", "Weight_Limit"),
+    ("", "WeightLimit"),
+    ("", "Weight_Limit"),
+];
+
+/// Power budget property lookup keys.
+const POWER_BUDGET_KEYS: &[(&str, &str)] = &[
+    ("SEI", "PowerBudget"),
+    ("Physical_Properties", "PowerBudget"),
+    ("Physical_Properties", "Power_Budget"),
+    ("", "PowerBudget"),
+    ("", "Power_Budget"),
+];
+
+/// Power capacity property lookup keys.
+const POWER_CAPACITY_KEYS: &[(&str, &str)] = &[
+    ("SEI", "PowerCapacity"),
+    ("Physical_Properties", "PowerCapacity"),
+    ("Physical_Properties", "Power_Capacity"),
+    ("", "PowerCapacity"),
+    ("", "Power_Capacity"),
+];
 
 /// Parse a weight property value from a component.
 ///
@@ -190,6 +292,12 @@ fn bottom_up_order(instance: &SystemInstance) -> Vec<ComponentInstanceIdx> {
 /// and unqualified `GrossWeight` / `Weight`. Accepts values like
 /// `"10.5 kg"`, `"10.5"`, or `"3200 g"`.
 fn get_weight_property(props: &spar_hir_def::properties::PropertyMap) -> Option<f64> {
+    // Typed path
+    if let Some(v) = try_typed_multi(props, WEIGHT_KEYS, extract_weight_kg) {
+        return Some(v);
+    }
+
+    // String fallback
     let raw = props
         .get("SEI", "GrossWeight")
         .or_else(|| props.get("SEI", "Weight"))
@@ -202,6 +310,12 @@ fn get_weight_property(props: &spar_hir_def::properties::PropertyMap) -> Option<
 
 /// Parse a weight limit property value from a component.
 fn get_weight_limit_property(props: &spar_hir_def::properties::PropertyMap) -> Option<f64> {
+    // Typed path
+    if let Some(v) = try_typed_multi(props, WEIGHT_LIMIT_KEYS, extract_weight_kg) {
+        return Some(v);
+    }
+
+    // String fallback
     let raw = props
         .get("SEI", "WeightLimit")
         .or_else(|| props.get("Physical_Properties", "WeightLimit"))
@@ -213,6 +327,12 @@ fn get_weight_limit_property(props: &spar_hir_def::properties::PropertyMap) -> O
 
 /// Parse a power budget property value from a component.
 fn get_power_budget_property(props: &spar_hir_def::properties::PropertyMap) -> Option<f64> {
+    // Typed path
+    if let Some(v) = try_typed_multi(props, POWER_BUDGET_KEYS, extract_power_mw) {
+        return Some(v);
+    }
+
+    // String fallback
     let raw = props
         .get("SEI", "PowerBudget")
         .or_else(|| props.get("Physical_Properties", "PowerBudget"))
@@ -224,6 +344,12 @@ fn get_power_budget_property(props: &spar_hir_def::properties::PropertyMap) -> O
 
 /// Parse a power capacity property value from a component.
 fn get_power_capacity_property(props: &spar_hir_def::properties::PropertyMap) -> Option<f64> {
+    // Typed path
+    if let Some(v) = try_typed_multi(props, POWER_CAPACITY_KEYS, extract_power_mw) {
+        return Some(v);
+    }
+
+    // String fallback
     let raw = props
         .get("SEI", "PowerCapacity")
         .or_else(|| props.get("Physical_Properties", "PowerCapacity"))

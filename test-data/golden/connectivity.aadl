@@ -1,0 +1,48 @@
+-- Golden test: connectivity analysis
+-- System with connected and unconnected ports.
+package Connectivity
+public
+
+  system Sensor
+    features
+      data_out : out data port;
+      status : out event port;
+  end Sensor;
+
+  system implementation Sensor.impl
+  end Sensor.impl;
+
+  system Controller
+    features
+      data_in : in data port;
+      cmd_out : out data port;
+  end Controller;
+
+  system implementation Controller.impl
+  end Controller.impl;
+
+  system Actuator
+    features
+      cmd_in : in data port;
+      feedback : out data port;
+  end Actuator;
+
+  system implementation Actuator.impl
+  end Actuator.impl;
+
+  system Top
+  end Top;
+
+  -- Only sensor.data_out -> controller.data_in is connected.
+  -- sensor.status, controller.cmd_out, actuator.cmd_in, actuator.feedback
+  -- are all unconnected.
+  system implementation Top.impl
+    subcomponents
+      sensor : system Sensor.impl;
+      controller : system Controller.impl;
+      actuator : system Actuator.impl;
+    connections
+      c1 : port sensor.data_out -> controller.data_in;
+  end Top.impl;
+
+end Connectivity;

@@ -52,7 +52,10 @@ fn golden_simple_timing_instantiates() {
     let aadl = include_str!("../../../test-data/golden/simple_timing.aadl");
     let inst = build_instance(aadl, "SimpleTiming", "Top", "impl");
     let root = inst.component(inst.root);
-    assert_eq!(root.category, spar_hir_def::item_tree::ComponentCategory::System);
+    assert_eq!(
+        root.category,
+        spar_hir_def::item_tree::ComponentCategory::System
+    );
     assert!(
         inst.component_count() >= 4,
         "expected at least 4 components (top, cpu, app, threads), got {}",
@@ -107,7 +110,10 @@ fn golden_memory_budget_instantiates() {
     let aadl = include_str!("../../../test-data/golden/memory_budget.aadl");
     let inst = build_instance(aadl, "MemoryBudget", "Top", "impl");
     let root = inst.component(inst.root);
-    assert_eq!(root.category, spar_hir_def::item_tree::ComponentCategory::System);
+    assert_eq!(
+        root.category,
+        spar_hir_def::item_tree::ComponentCategory::System
+    );
 }
 
 #[test]
@@ -153,7 +159,10 @@ fn golden_connectivity_instantiates() {
     let aadl = include_str!("../../../test-data/golden/connectivity.aadl");
     let inst = build_instance(aadl, "Connectivity", "Top", "impl");
     let root = inst.component(inst.root);
-    assert_eq!(root.category, spar_hir_def::item_tree::ComponentCategory::System);
+    assert_eq!(
+        root.category,
+        spar_hir_def::item_tree::ComponentCategory::System
+    );
 }
 
 #[test]
@@ -227,7 +236,10 @@ fn golden_modes_instantiates() {
     let aadl = include_str!("../../../test-data/golden/modes.aadl");
     let inst = build_instance(aadl, "ModalSystem", "Top", "impl");
     let root = inst.component(inst.root);
-    assert_eq!(root.category, spar_hir_def::item_tree::ComponentCategory::System);
+    assert_eq!(
+        root.category,
+        spar_hir_def::item_tree::ComponentCategory::System
+    );
 }
 
 #[test]
@@ -250,9 +262,7 @@ fn golden_modes_no_initial_mode_error() {
         from_analysis(&diags, "mode_check"),
     );
 
-    let mentions_initial = mode_errors
-        .iter()
-        .any(|d| d.message.contains("initial"));
+    let mentions_initial = mode_errors.iter().any(|d| d.message.contains("initial"));
     assert!(
         mentions_initial,
         "modal error should mention 'initial': {:?}",

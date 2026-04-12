@@ -1,0 +1,53 @@
+-- Golden test: scheduling / timing diagnostics
+-- Threads with Period and Compute_Execution_Time bound to a processor.
+package SimpleTiming
+public
+
+  processor CPU
+  end CPU;
+
+  processor implementation CPU.impl
+  end CPU.impl;
+
+  thread Sensor_Thread
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 20 ms;
+      Compute_Execution_Time => 5 ms .. 8 ms;
+  end Sensor_Thread;
+
+  thread implementation Sensor_Thread.impl
+  end Sensor_Thread.impl;
+
+  -- Thread missing Period (should trigger warning)
+  thread Logger_Thread
+    properties
+      Dispatch_Protocol => Periodic;
+      Compute_Execution_Time => 2 ms .. 3 ms;
+  end Logger_Thread;
+
+  thread implementation Logger_Thread.impl
+  end Logger_Thread.impl;
+
+  process App
+  end App;
+
+  process implementation App.impl
+    subcomponents
+      sensor : thread Sensor_Thread.impl;
+      logger : thread Logger_Thread.impl;
+  end App.impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      cpu : processor CPU.impl;
+      app : process App.impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to app.sensor;
+      Actual_Processor_Binding => (reference (cpu)) applies to app.logger;
+  end Top.impl;
+
+end SimpleTiming;

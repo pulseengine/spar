@@ -1,0 +1,37 @@
+-- Golden test: modal diagnostics
+-- System with modes, mode transitions, and modal subcomponents.
+package ModalSystem
+public
+
+  -- Component with modes but no initial mode (should trigger error)
+  system BadModal
+    modes
+      on : mode;
+      off : mode;
+  end BadModal;
+
+  system implementation BadModal.impl
+  end BadModal.impl;
+
+  system Controller
+    features
+      sensor_in : in data port;
+      cmd_out : out data port;
+    modes
+      idle : initial mode;
+      active : mode;
+  end Controller;
+
+  system implementation Controller.impl
+  end Controller.impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      bad : system BadModal.impl;
+      ctrl : system Controller.impl;
+  end Top.impl;
+
+end ModalSystem;

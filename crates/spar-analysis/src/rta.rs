@@ -192,6 +192,17 @@ struct RtaThreadInfo {
 
 /// Read the `Deployment_Properties::Priority` value.
 fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
+    // Typed path
+    if let Some(expr) = props
+        .get_typed("Deployment_Properties", "Priority")
+        .or_else(|| props.get_typed("", "Priority"))
+    {
+        if let Some(v) = crate::property_accessors::extract_integer(expr) {
+            return Some(v);
+        }
+    }
+
+    // String fallback
     let raw = props
         .get("Deployment_Properties", "Priority")
         .or_else(|| props.get("", "Priority"))?;

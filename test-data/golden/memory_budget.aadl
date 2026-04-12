@@ -1,0 +1,58 @@
+-- Golden test: memory budget analysis
+-- Threads bound to memory with Code_Size and Data_Size properties.
+package MemoryBudget
+public
+
+  memory RAM
+    properties
+      Memory_Size => 256 KByte;
+  end RAM;
+
+  memory implementation RAM.impl
+  end RAM.impl;
+
+  thread Worker
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 50 ms;
+      Compute_Execution_Time => 10 ms;
+      Code_Size => 100 KByte;
+      Data_Size => 50 KByte;
+      Actual_Memory_Binding => (reference (ram));
+  end Worker;
+
+  thread implementation Worker.impl
+  end Worker.impl;
+
+  thread BigTask
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 100 ms;
+      Compute_Execution_Time => 20 ms;
+      Code_Size => 150 KByte;
+      Data_Size => 80 KByte;
+      Actual_Memory_Binding => (reference (ram));
+  end BigTask;
+
+  thread implementation BigTask.impl
+  end BigTask.impl;
+
+  process App
+  end App;
+
+  process implementation App.impl
+    subcomponents
+      worker : thread Worker.impl;
+      big_task : thread BigTask.impl;
+  end App.impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      ram : memory RAM.impl;
+      app : process App.impl;
+  end Top.impl;
+
+end MemoryBudget;

@@ -631,4 +631,191 @@ satisfy LatencyReq by controller;
         // No underscore prefix when the first char is already valid.
         assert_eq!(sanitize_sysml_name("abc123"), "abc123");
     }
+
+    // ── New tests: port def from sysml-interface ───────────────────
+
+    #[test]
+    fn generate_port_def_from_interface() {
+        let artifacts = vec![RivetArtifact {
+            id: "IF-001".into(),
+            artifact_type: "sysml-interface".into(),
+            title: "SensorPort".into(),
+            description: "Temperature sensor data port".into(),
+            tags: vec![],
+            links: vec![],
+        }];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(sysml.contains("port def SensorPort"), "sysml: {sysml}");
+        assert!(
+            sysml.contains("Temperature sensor data port"),
+            "sysml: {sysml}"
+        );
+    }
+
+    #[test]
+    fn generate_port_def_empty_description() {
+        let artifacts = vec![RivetArtifact {
+            id: "IF-002".into(),
+            artifact_type: "sysml-interface".into(),
+            title: "CommandPort".into(),
+            description: String::new(),
+            tags: vec![],
+            links: vec![],
+        }];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(sysml.contains("port def CommandPort { }"), "sysml: {sysml}");
+    }
+
+    // ── New tests: part def with port comments ─────────────────────
+
+    #[test]
+    fn generate_part_def_with_port_comments() {
+        let artifacts = vec![
+            RivetArtifact {
+                id: "PART-001".into(),
+                artifact_type: "design-decision".into(),
+                title: "Controller".into(),
+                description: String::new(),
+                tags: vec!["sysml-part".into()],
+                links: vec![],
+            },
+            RivetArtifact {
+                id: "IF-001".into(),
+                artifact_type: "sysml-interface".into(),
+                title: "SensorInput".into(),
+                description: String::new(),
+                tags: vec![],
+                links: vec![RivetLink {
+                    link_type: "allocated-to".into(),
+                    target: "PART-001".into(),
+                }],
+            },
+            RivetArtifact {
+                id: "IF-002".into(),
+                artifact_type: "sysml-interface".into(),
+                title: "CommandOutput".into(),
+                description: String::new(),
+                tags: vec![],
+                links: vec![RivetLink {
+                    link_type: "allocated-to".into(),
+                    target: "PART-001".into(),
+                }],
+            },
+        ];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(sysml.contains("part def Controller"), "sysml: {sysml}");
+        assert!(sysml.contains("// port: SensorInput"), "sysml: {sysml}");
+        assert!(sysml.contains("// port: CommandOutput"), "sysml: {sysml}");
+    }
+
+    #[test]
+    fn generate_part_def_no_ports_no_comments() {
+        // Part with no interfaces linking to it should have empty body.
+        let artifacts = vec![RivetArtifact {
+            id: "PART-001".into(),
+            artifact_type: "design-decision".into(),
+            title: "StandalonePart".into(),
+            description: String::new(),
+            tags: vec!["sysml-part".into()],
+            links: vec![],
+        }];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(
+            sysml.contains("part def StandalonePart { }"),
+            "sysml: {sysml}"
+        );
+        assert!(
+            !sysml.contains("// port:"),
+            "no port comments expected: {sysml}"
+        );
+    }
+
+    // ── New tests: package wrapping ────────────────────────────────
+
+    #[test]
+    fn generate_package_wrapping_multiple_prefixes() {
+        let artifacts = vec![
+            RivetArtifact {
+                id: "REQ-001".into(),
+                artifact_type: "requirement".into(),
+                title: "SafetyReq".into(),
+                description: String::new(),
+                tags: vec![],
+                links: vec![],
+            },
+            RivetArtifact {
+                id: "PART-001".into(),
+                artifact_type: "design-decision".into(),
+                title: "Vehicle".into(),
+                description: String::new(),
+                tags: vec!["sysml-part".into()],
+                links: vec![],
+            },
+        ];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(
+            sysml.contains("package PART"),
+            "expected PART package: {sysml}"
+        );
+        assert!(
+            sysml.contains("package REQ"),
+            "expected REQ package: {sysml}"
+        );
+        // Definitions should be inside package blocks.
+        assert!(
+            sysml.contains("    requirement def SafetyReq"),
+            "requirement should be indented inside package: {sysml}"
+        );
+        assert!(
+            sysml.contains("    part def Vehicle"),
+            "part should be indented inside package: {sysml}"
+        );
+    }
+
+    #[test]
+    fn generate_no_package_wrapping_single_prefix() {
+        // All artifacts share the same prefix -- no package wrapping.
+        let artifacts = vec![
+            RivetArtifact {
+                id: "REQ-001".into(),
+                artifact_type: "requirement".into(),
+                title: "FirstReq".into(),
+                description: String::new(),
+                tags: vec![],
+                links: vec![],
+            },
+            RivetArtifact {
+                id: "REQ-002".into(),
+                artifact_type: "requirement".into(),
+                title: "SecondReq".into(),
+                description: String::new(),
+                tags: vec![],
+                links: vec![],
+            },
+        ];
+        let sysml = generate_sysml2(&artifacts);
+        assert!(
+            !sysml.contains("package "),
+            "single prefix should not generate package wrapping: {sysml}"
+        );
+        assert!(sysml.contains("requirement def FirstReq"), "sysml: {sysml}");
+        assert!(
+            sysml.contains("requirement def SecondReq"),
+            "sysml: {sysml}"
+        );
+    }
+
+    // ── New tests: id_prefix extraction ────────────────────────────
+
+    #[test]
+    fn id_prefix_simple() {
+        assert_eq!(id_prefix("REQ-001"), "REQ");
+        assert_eq!(id_prefix("PART-042"), "PART");
+    }
+
+    #[test]
+    fn id_prefix_compound() {
+        assert_eq!(id_prefix("SYS-CTRL-002"), "SYS-CTRL");
+        assert_eq!(id_prefix("HW-IO-100"), "HW-IO");
+    }
 }
