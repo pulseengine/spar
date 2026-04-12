@@ -11,7 +11,8 @@
 use rustc_hash::FxHashMap;
 
 use crate::item_tree::{
-    ComponentImplIdx, ComponentTypeIdx, ItemTree, PropertyAssociationIdx, SubcomponentIdx,
+    ComponentImplIdx, ComponentTypeIdx, ItemTree, PropertyAssociationIdx, PropertyExpr,
+    SubcomponentIdx,
 };
 use crate::name::PropertyRef;
 use crate::resolver::CiName;
@@ -23,6 +24,8 @@ pub struct PropertyValue {
     pub name: PropertyRef,
     /// Raw text of the property value expression.
     pub value: String,
+    /// Typed property expression computed during lowering (if available).
+    pub typed_value: Option<PropertyExpr>,
     /// Whether this is an append association (`+=>`).
     pub is_append: bool,
 }
@@ -87,6 +90,33 @@ impl PropertyMap {
             .map(|pv| pv.value.as_str())
     }
 
+    /// Get the typed value for a property, if available.
+    ///
+    /// Returns the typed `PropertyExpr` from the most recent assignment,
+    /// or `None` if the property is absent or was not typed during lowering.
+    ///
+    /// Falls back to matching with an empty property set if the qualified
+    /// lookup fails, mirroring the behaviour of [`get()`](Self::get).
+    pub fn get_typed(&self, set: &str, name: &str) -> Option<&PropertyExpr> {
+        let set_key = CiName::from_str(set);
+        let name_key = CiName::from_str(name);
+        self.props
+            .get(&(set_key, name_key))
+            .and_then(|vals| vals.last())
+            .and_then(|pv| pv.typed_value.as_ref())
+            .or_else(|| {
+                if !set.is_empty() {
+                    let empty_key = CiName::from_str("");
+                    self.props
+                        .get(&(empty_key, CiName::from_str(name)))
+                        .and_then(|vals| vals.last())
+                        .and_then(|pv| pv.typed_value.as_ref())
+                } else {
+                    None
+                }
+            })
+    }
+
     /// Look up all property values for a given property set and name.
     ///
     /// Returns all values including appended ones, in order.
@@ -135,6 +165,7 @@ impl PropertyMap {
                 map.add(PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_value: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -148,6 +179,7 @@ impl PropertyMap {
                 map.add(PropertyValue {
                     name: pa.name.clone(),
                     value: pa.value.clone(),
+                    typed_value: pa.typed_value.clone(),
                     is_append: pa.is_append,
                 });
             }
@@ -171,6 +203,7 @@ impl PropertyMap {
             map.add(PropertyValue {
                 name: pa.name.clone(),
                 value: pa.value.clone(),
+                typed_value: pa.typed_value.clone(),
                 is_append: pa.is_append,
             });
         }
@@ -186,6 +219,7 @@ impl PropertyMap {
             map.add(PropertyValue {
                 name: pa.name.clone(),
                 value: pa.value.clone(),
+                typed_value: pa.typed_value.clone(),
                 is_append: pa.is_append,
             });
         }
@@ -205,6 +239,7 @@ mod tests {
                 property_name: name.into(),
             },
             value: value.to_string(),
+            typed_value: None,
             is_append,
         }
     }
@@ -244,5 +279,78 @@ mod tests {
         map.add(make_prop(Some("Timing"), "Period", "10 ms", false));
         assert_eq!(map.get("Timing", "Period"), Some("10 ms"));
         assert_eq!(map.len(), 1);
+    }
+
+    fn make_typed_prop(
+        set: Option<&str>,
+        name: &str,
+        value: &str,
+        typed: Option<PropertyExpr>,
+        is_append: bool,
+    ) -> PropertyValue {
+        PropertyValue {
+            name: PropertyRef {
+                property_set: set.map(|s| s.into()),
+                property_name: name.into(),
+            },
+            value: value.to_string(),
+            typed_value: typed,
+            is_append,
+        }
+    }
+
+    #[test]
+    fn get_typed_returns_some_for_typed_property() {
+        let mut map = PropertyMap::new();
+        let expr = PropertyExpr::Integer(10, Some("ms".into()));
+        map.add(make_typed_prop(
+            Some("Timing"),
+            "Period",
+            "10 ms",
+            Some(expr.clone()),
+            false,
+        ));
+        let result = map.get_typed("Timing", "Period");
+        assert_eq!(result, Some(&expr));
+    }
+
+    #[test]
+    fn get_typed_returns_none_for_untyped_property() {
+        let mut map = PropertyMap::new();
+        map.add(make_typed_prop(Some("Timing"), "Period", "10 ms", None, false));
+        assert_eq!(map.get_typed("Timing", "Period"), None);
+    }
+
+    #[test]
+    fn get_typed_with_override_returns_latest() {
+        let mut map = PropertyMap::new();
+        let expr1 = PropertyExpr::Integer(10, Some("ms".into()));
+        let expr2 = PropertyExpr::Integer(20, Some("ms".into()));
+        map.add(make_typed_prop(
+            Some("Timing"),
+            "Period",
+            "10 ms",
+            Some(expr1),
+            false,
+        ));
+        // Override replaces all values; last() returns the single replacement.
+        map.add(make_typed_prop(
+            Some("Timing"),
+            "Period",
+            "20 ms",
+            Some(expr2.clone()),
+            false,
+        ));
+        assert_eq!(map.get_typed("Timing", "Period"), Some(&expr2));
+    }
+
+    #[test]
+    fn get_typed_with_set_fallback() {
+        let mut map = PropertyMap::new();
+        let expr = PropertyExpr::Boolean(true);
+        // Store with empty set (unqualified)
+        map.add(make_typed_prop(None, "Active", "true", Some(expr.clone()), false));
+        // Look up with a set name -- should fall back to empty-set entry
+        assert_eq!(map.get_typed("Deployment_Properties", "Active"), Some(&expr));
     }
 }

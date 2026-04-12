@@ -698,6 +698,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "100 ms".to_string(),
+            typed_value: None,
             is_append: false,
         });
 
@@ -713,6 +714,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "200 ms".to_string(),
+            typed_value: None,
             is_append: false,
         });
 
@@ -726,6 +728,7 @@ end Vehicle;
                 property_name: Name::new("Period"),
             },
             value: "300 ms".to_string(),
+            typed_value: None,
             is_append: true,
         });
 
@@ -733,6 +736,125 @@ end Vehicle;
         assert_eq!(all.len(), 2);
         assert_eq!(all[0], "200 ms");
         assert_eq!(all[1], "300 ms");
+    }
+
+    #[test]
+    fn typed_value_survives_instantiation() {
+        // A typed property on a component type should be visible via get_typed()
+        // after instantiation.
+        let db = make_db();
+        let src = r#"package P
+public
+  system Sensor
+    properties
+      Period => 10 ms;
+  end Sensor;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      s : system Sensor;
+  end Top.impl;
+end P;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "typed_inst.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("P"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        let root = inst.component(inst.root);
+        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+
+        let s_idx = root.children[0];
+        let props = inst.properties_for(s_idx);
+
+        // The lowering should produce a typed value for "10 ms"
+        assert_eq!(props.get("", "Period"), Some("10 ms"));
+
+        // Verify typed_value is propagated (the lowerer should produce an
+        // Integer(10, Some("ms")) expression for "10 ms").
+        let typed = props.get_typed("", "Period");
+        assert!(
+            typed.is_some(),
+            "typed_value should survive instantiation; props: {:?}",
+            props
+        );
+    }
+
+    #[test]
+    fn typed_value_survives_extends_chain() {
+        // Parent type has a typed property. The child extends the parent.
+        // After instantiation, the inherited property should have its typed_value.
+        let db = make_db();
+        let src = r#"package P
+public
+  system Base
+    properties
+      Period => 10 ms;
+  end Base;
+
+  system Child extends Base
+    properties
+      Priority => 7;
+  end Child;
+
+  system Top
+  end Top;
+
+  system implementation Top.impl
+    subcomponents
+      c : system Child;
+  end Top.impl;
+end P;
+"#;
+        let file = spar_base_db::SourceFile::new(
+            &db,
+            "typed_extends.aadl".to_string(),
+            src.to_string(),
+        );
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+
+        let inst = instance::SystemInstance::instantiate(
+            &scope,
+            &Name::new("P"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+
+        let root = inst.component(inst.root);
+        assert_eq!(root.children.len(), 1, "diagnostics: {:?}", inst.diagnostics);
+
+        let c_idx = root.children[0];
+        let props = inst.properties_for(c_idx);
+
+        // Period inherited from Base should still have typed_value
+        assert_eq!(props.get("", "Period"), Some("10 ms"));
+        let typed_period = props.get_typed("", "Period");
+        assert!(
+            typed_period.is_some(),
+            "typed_value for Period should survive extends chain; props: {:?}",
+            props
+        );
+
+        // Priority on Child should also have typed_value
+        assert_eq!(props.get("", "Priority"), Some("7"));
+        let typed_priority = props.get_typed("", "Priority");
+        assert!(
+            typed_priority.is_some(),
+            "typed_value for Priority should be present; props: {:?}",
+            props
+        );
     }
 
     #[test]

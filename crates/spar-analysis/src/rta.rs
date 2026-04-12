@@ -281,6 +281,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
+                typed_value: None,
                 is_append: false,
             });
         }
@@ -780,6 +781,7 @@ mod tests {
                 property_name: Name::new("Priority"),
             },
             value: "5".to_string(),
+            typed_value: None,
             is_append: false,
         });
 
@@ -805,6 +807,7 @@ mod tests {
                 property_name: Name::new("Priority"),
             },
             value: "not_a_number".to_string(),
+            typed_value: None,
             is_append: false,
         });
 
