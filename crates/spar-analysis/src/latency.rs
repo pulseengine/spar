@@ -9,11 +9,12 @@
 //! - Best case: sum of execution times only
 //! - Worst case: sum of execution times + sum of periods (sampling delays)
 
-use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// End-to-end flow latency analysis.
 pub struct LatencyAnalysis;
@@ -21,6 +22,10 @@ pub struct LatencyAnalysis;
 impl Analysis for LatencyAnalysis {
     fn name(&self) -> &str {
         "latency"
+    }
+
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
@@ -236,6 +241,136 @@ impl Analysis for LatencyAnalysis {
                 path: vec!["root".to_string()],
                 analysis: self.name().to_string(),
             });
+        }
+
+        diags
+    }
+}
+
+impl ModalAnalysis for LatencyAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+
+        for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
+            let owner_path = component_path(instance, e2e.owner);
+            let owner = instance.component(e2e.owner);
+
+            if e2e.segments.is_empty() {
+                continue;
+            }
+
+            let mut best_case_ps: u64 = 0;
+            let mut worst_case_ps: u64 = 0;
+            let mut missing_timing = Vec::new();
+            let mut connection_count: u64 = 0;
+            let mut skipped_inactive = Vec::new();
+
+            for (i, seg) in e2e.segments.iter().enumerate() {
+                if i % 2 == 1 {
+                    connection_count += 1;
+                    continue;
+                }
+
+                let seg_str = seg.as_str();
+                let subcomp_name = seg_str.split('.').next().unwrap_or(seg_str);
+
+                let child = owner.children.iter().find(|&&child_idx| {
+                    instance
+                        .component(child_idx)
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(subcomp_name)
+                });
+
+                if let Some(&child_idx) = child {
+                    // Skip components not active in this SOM.
+                    if !is_component_active_in_som(instance, child_idx, som) {
+                        skipped_inactive
+                            .push(instance.component(child_idx).name.as_str().to_string());
+                        continue;
+                    }
+
+                    let child_comp = instance.component(child_idx);
+                    let child_props = instance.properties_for(child_idx);
+
+                    let exec_ps = get_execution_time(child_props);
+                    let period_ps = get_timing_property(child_props, "Period");
+
+                    if let Some(exec) = exec_ps {
+                        best_case_ps = best_case_ps.saturating_add(exec);
+                        worst_case_ps = worst_case_ps.saturating_add(exec);
+                    } else {
+                        missing_timing.push(child_comp.name.as_str().to_string());
+                    }
+
+                    if connection_count > 0
+                        && let Some(period) = period_ps
+                    {
+                        worst_case_ps = worst_case_ps.saturating_add(period);
+                    }
+                } else {
+                    missing_timing.push(subcomp_name.to_string());
+                }
+            }
+
+            if !missing_timing.is_empty() {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "end-to-end flow '{}': components without timing properties: {}",
+                        e2e.name,
+                        missing_timing.join(", ")
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            let best_ms = best_case_ps as f64 / 1_000_000_000.0;
+            let worst_ms = worst_case_ps as f64 / 1_000_000_000.0;
+
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Info,
+                message: format!(
+                    "end-to-end flow '{}' latency: [{:.3} ms .. {:.3} ms]",
+                    e2e.name, best_ms, worst_ms,
+                ),
+                path: owner_path.clone(),
+                analysis: self.name().to_string(),
+            });
+
+            if !skipped_inactive.is_empty() {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "end-to-end flow '{}': components inactive in this mode: {}",
+                        e2e.name,
+                        skipped_inactive.join(", ")
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
+            let owner_props = instance.properties_for(e2e.owner);
+            if let Some(latency_bound) = get_timing_property(owner_props, "Latency")
+                && worst_case_ps > latency_bound
+            {
+                let bound_ms = latency_bound as f64 / 1_000_000_000.0;
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "end-to-end flow '{}' worst-case latency {:.3} ms exceeds bound {:.3} ms",
+                        e2e.name, worst_ms, bound_ms,
+                    ),
+                    path: owner_path,
+                    analysis: self.name().to_string(),
+                });
+            }
         }
 
         diags
@@ -973,6 +1108,355 @@ mod tests {
             infos[0].message.contains("[5.000 ms .. 5.000 ms]"),
             "first component should not get sampling delay: {}",
             infos[0].message
+        );
+    }
+
+    // ── Per-SOM latency tests ─────────────────────────────────────
+
+    #[test]
+    fn per_som_latency_excludes_inactive_component() {
+        // Flow: sensor -> c1 -> controller -> c2 -> actuator
+        // controller is only active in "fast" mode.
+        // In "slow" mode, controller is inactive — latency should exclude it.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![sensor, ctrl, actuator]);
+        b.add_connection_inst("c1", root);
+        b.add_connection_inst("c2", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.pass", "c2", "actuator.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+
+        b.set_property(
+            actuator,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(actuator, "Timing_Properties", "Period", "10 ms");
+
+        // Mark controller as active only in "fast" mode.
+        b.components[ctrl].in_modes = vec![Name::new("fast")];
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: root,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: root,
+        });
+        inst.components[root].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(root, fast_mode)],
+        };
+        let som_slow = SystemOperationMode {
+            name: "slow".to_string(),
+            mode_selections: vec![(root, slow_mode)],
+        };
+
+        // In "fast" mode: all components active.
+        // Best: 1+2+1=4ms, Worst: 1+2+20+1+10=34ms
+        let diags_fast = LatencyAnalysis.analyze_in_mode(&inst, &som_fast);
+        let infos_fast: Vec<_> = diags_fast
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos_fast.len(), 1);
+        assert!(
+            infos_fast[0].message.contains("4.000 ms"),
+            "fast best case should be 4ms: {}",
+            infos_fast[0].message
+        );
+        assert!(
+            infos_fast[0].message.contains("34.000 ms"),
+            "fast worst case should be 34ms: {}",
+            infos_fast[0].message
+        );
+
+        // In "slow" mode: controller inactive.
+        // Best: 1+1=2ms, Worst: 1+1+10=12ms (actuator sampling after c2)
+        let diags_slow = LatencyAnalysis.analyze_in_mode(&inst, &som_slow);
+        let infos_slow: Vec<_> = diags_slow
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos_slow.len(), 1);
+        assert!(
+            infos_slow[0].message.contains("2.000 ms"),
+            "slow best case should be 2ms: {}",
+            infos_slow[0].message
+        );
+        assert!(
+            infos_slow[0].message.contains("12.000 ms"),
+            "slow worst case should be 12ms: {}",
+            infos_slow[0].message
+        );
+
+        // Should report controller as inactive.
+        let inactive: Vec<_> = diags_slow
+            .iter()
+            .filter(|d| d.message.contains("inactive in this mode"))
+            .collect();
+        assert_eq!(
+            inactive.len(),
+            1,
+            "should report inactive component: {:?}",
+            diags_slow
+        );
+        assert!(
+            inactive[0].message.contains("controller"),
+            "should mention controller: {}",
+            inactive[0].message
+        );
+    }
+
+    #[test]
+    fn per_som_latency_non_modal_components_included_in_all_soms() {
+        // Non-modal components (empty in_modes) should appear in every SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+
+        // Both components are non-modal (empty in_modes).
+        let mut inst = b.build(root);
+        let mode_a = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("alpha"),
+            is_initial: true,
+            owner: root,
+        });
+        inst.components[root].modes = vec![mode_a];
+
+        let som = SystemOperationMode {
+            name: "alpha".to_string(),
+            mode_selections: vec![(root, mode_a)],
+        };
+
+        // Both components non-modal -> both included.
+        // Best: 1+2=3ms, Worst: 1+2+20=23ms
+        let diags = LatencyAnalysis.analyze_in_mode(&inst, &som);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1);
+        assert!(
+            infos[0].message.contains("3.000 ms"),
+            "best case should be 3ms: {}",
+            infos[0].message
+        );
+        assert!(
+            infos[0].message.contains("23.000 ms"),
+            "worst case should be 23ms: {}",
+            infos[0].message
+        );
+
+        // No inactive-component diagnostics.
+        let inactive: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("inactive"))
+            .collect();
+        assert!(
+            inactive.is_empty(),
+            "non-modal components should not be reported as inactive: {:?}",
+            inactive
+        );
+    }
+
+    #[test]
+    fn per_som_latency_all_components_inactive_zero_latency() {
+        // When all flow components are inactive in a SOM, latency should be zero.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+
+        // Both active only in "active" mode.
+        b.components[sensor].in_modes = vec![Name::new("active")];
+        b.components[ctrl].in_modes = vec![Name::new("active")];
+
+        let mut inst = b.build(root);
+        let active_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("active"),
+            is_initial: true,
+            owner: root,
+        });
+        let standby_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("standby"),
+            is_initial: false,
+            owner: root,
+        });
+        inst.components[root].modes = vec![active_mode, standby_mode];
+
+        let som_standby = SystemOperationMode {
+            name: "standby".to_string(),
+            mode_selections: vec![(root, standby_mode)],
+        };
+
+        let diags = LatencyAnalysis.analyze_in_mode(&inst, &som_standby);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1);
+        // Both inactive: latency = [0.000 ms .. 0.000 ms]
+        assert!(
+            infos[0].message.contains("[0.000 ms .. 0.000 ms]"),
+            "all-inactive should yield zero latency: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn per_som_latency_bound_check_respects_mode() {
+        // Worst-case latency changes per SOM; bound should be checked per SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let heavy = b.add_component("heavy", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, heavy]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "heavy.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+
+        b.set_property(
+            heavy,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "20 ms",
+        );
+        b.set_property(heavy, "Timing_Properties", "Period", "50 ms");
+
+        // heavy only active in "full" mode.
+        b.components[heavy].in_modes = vec![Name::new("full")];
+
+        // Bound: 15ms
+        b.set_property(root, "Timing_Properties", "Latency", "15 ms");
+
+        let mut inst = b.build(root);
+        let full_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("full"),
+            is_initial: true,
+            owner: root,
+        });
+        let lite_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("lite"),
+            is_initial: false,
+            owner: root,
+        });
+        inst.components[root].modes = vec![full_mode, lite_mode];
+
+        let som_full = SystemOperationMode {
+            name: "full".to_string(),
+            mode_selections: vec![(root, full_mode)],
+        };
+        let som_lite = SystemOperationMode {
+            name: "lite".to_string(),
+            mode_selections: vec![(root, lite_mode)],
+        };
+
+        // In "full" mode: sensor(1) + heavy(20) + heavy_period(50) = 71ms > 15ms bound
+        let diags_full = LatencyAnalysis.analyze_in_mode(&inst, &som_full);
+        let warns_full: Vec<_> = diags_full
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .collect();
+        assert_eq!(
+            warns_full.len(),
+            1,
+            "full mode should exceed bound: {:?}",
+            diags_full
+        );
+
+        // In "lite" mode: only sensor(1) = 1ms < 15ms bound
+        let diags_lite = LatencyAnalysis.analyze_in_mode(&inst, &som_lite);
+        let warns_lite: Vec<_> = diags_lite
+            .iter()
+            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .collect();
+        assert!(
+            warns_lite.is_empty(),
+            "lite mode should not exceed bound: {:?}",
+            diags_lite
         );
     }
 }

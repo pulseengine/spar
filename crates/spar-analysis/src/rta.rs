@@ -23,12 +23,13 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
 use crate::scheduling_verified::{self, RtaResult};
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Response Time Analysis pass.
 pub struct RtaAnalysis;
