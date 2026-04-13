@@ -24,7 +24,9 @@ use spar_hir_def::item_tree::PropertyExpr;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::extract_real;
-use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_depth, component_path};
+use crate::{
+    Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_depth, component_path,
+};
 
 /// Weight and power aggregation analysis.
 pub struct WeightPowerAnalysis;

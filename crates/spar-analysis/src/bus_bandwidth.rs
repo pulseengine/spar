@@ -1220,11 +1220,17 @@ mod tests {
         let root = b.add_component("root", ComponentCategory::System, None);
         let bus1 = b.add_component("bus1", ComponentCategory::Bus, Some(root));
         let sender_fast = b.add_component("sender_fast", ComponentCategory::Process, Some(root));
-        let sender_fast_thread =
-            b.add_component("sender_fast_thread", ComponentCategory::Thread, Some(sender_fast));
+        let sender_fast_thread = b.add_component(
+            "sender_fast_thread",
+            ComponentCategory::Thread,
+            Some(sender_fast),
+        );
         let sender_slow = b.add_component("sender_slow", ComponentCategory::Process, Some(root));
-        let sender_slow_thread =
-            b.add_component("sender_slow_thread", ComponentCategory::Thread, Some(sender_slow));
+        let sender_slow_thread = b.add_component(
+            "sender_slow_thread",
+            ComponentCategory::Thread,
+            Some(sender_slow),
+        );
         let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
         b.set_children(root, vec![bus1, sender_fast, sender_slow, receiver]);
         b.set_children(sender_fast, vec![sender_fast_thread]);

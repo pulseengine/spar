@@ -269,14 +269,13 @@ impl Analysis for LatencyAnalysis {
 /// `Timing_Properties::Inter_Processor_Overhead` (unqualified fallback),
 /// then `Timing_Properties::Transmission_Time`. Returns `None` when none
 /// of these properties are set.
-fn get_inter_processor_overhead(
-    props: &spar_hir_def::properties::PropertyMap,
-) -> Option<u64> {
+fn get_inter_processor_overhead(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
     use crate::property_accessors::extract_time_ps;
     use spar_hir_def::property_value::parse_time_value;
 
     // Try SPAR_Properties::Inter_Processor_Overhead (typed path).
-    if let Some(expr) = props.get_typed("SPAR_Properties", "Inter_Processor_Overhead")
+    if let Some(expr) = props
+        .get_typed("SPAR_Properties", "Inter_Processor_Overhead")
         .or_else(|| props.get_typed("", "Inter_Processor_Overhead"))
         && let Some(ps) = extract_time_ps(expr)
     {
@@ -1079,12 +1078,7 @@ mod tests {
         );
 
         // Set inter-processor overhead on the owner.
-        b.set_property(
-            root,
-            "SPAR_Properties",
-            "Inter_Processor_Overhead",
-            "5 ms",
-        );
+        b.set_property(root, "SPAR_Properties", "Inter_Processor_Overhead", "5 ms");
 
         let inst = b.build(root);
         let diags = LatencyAnalysis.analyze(&inst);
@@ -1209,12 +1203,7 @@ mod tests {
             "reference (cpu1)",
         );
 
-        b.set_property(
-            root,
-            "SPAR_Properties",
-            "Inter_Processor_Overhead",
-            "5 ms",
-        );
+        b.set_property(root, "SPAR_Properties", "Inter_Processor_Overhead", "5 ms");
 
         let inst = b.build(root);
         let diags = LatencyAnalysis.analyze(&inst);
