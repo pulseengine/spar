@@ -194,7 +194,7 @@ impl Analysis for BusBandwidthAnalysis {
 /// Extract a data rate value in bps from a typed [`PropertyExpr`].
 fn extract_data_rate_bps(expr: &PropertyExpr) -> Option<f64> {
     match expr {
-        PropertyExpr::Real(s, Some(unit)) | PropertyExpr::Real(s, Some(unit)) => {
+        PropertyExpr::Real(s, Some(unit)) => {
             let v = s.parse::<f64>().ok()?;
             let factor = DATA_RATE_UNITS
                 .iter()

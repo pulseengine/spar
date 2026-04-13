@@ -880,8 +880,8 @@ mod tests {
     #[test]
     fn extract_real_from_real() {
         assert_eq!(
-            extract_real(&PropertyExpr::Real("3.14".to_string(), None)),
-            Some(3.14)
+            extract_real(&PropertyExpr::Real("1.5".to_string(), None)),
+            Some(1.5)
         );
     }
 
