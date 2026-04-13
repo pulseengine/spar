@@ -6,11 +6,12 @@
 //! - Required bindings exist (thread→processor, process→memory)
 //! - Allowed_*_Binding constraints are satisfied by Actual_*_Binding
 
-use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::extract_reference_target;
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Validates deployment binding properties on the instance model.
 ///
@@ -25,7 +26,31 @@ impl Analysis for BindingCheckAnalysis {
         "binding_check"
     }
 
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
+    }
+
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        self.check_bindings(instance, None)
+    }
+}
+
+impl ModalAnalysis for BindingCheckAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        self.check_bindings(instance, Some(som))
+    }
+}
+
+impl BindingCheckAnalysis {
+    fn check_bindings(
+        &self,
+        instance: &SystemInstance,
+        som: Option<&SystemOperationMode>,
+    ) -> Vec<AnalysisDiagnostic> {
         // Severity rationale (STPA-REQ-016):
         //   Error — binding target is wrong component category
         //   Info  — thread missing processor binding, process missing memory binding
@@ -43,6 +68,13 @@ impl Analysis for BindingCheckAnalysis {
             .any(|(_, c)| matches!(c.category, ComponentCategory::Memory));
 
         for (comp_idx, comp) in instance.all_components() {
+            // Filter by SOM if provided.
+            if let Some(som) = som
+                && !is_component_active_in_som(instance, comp_idx, som)
+            {
+                continue;
+            }
+
             let path = component_path(instance, comp_idx);
             let props = instance.properties_for(comp_idx);
 
@@ -252,7 +284,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
-                typed_value: None,
+                typed_expr: None,
                 is_append: false,
             });
         }
@@ -520,6 +552,196 @@ mod tests {
             1,
             "binding to memory for processor: {:?}",
             diags
+        );
+    }
+
+    // ── ModalAnalysis tests ─────────────────────────────────────
+
+    #[test]
+    fn as_modal_returns_some() {
+        let analysis = BindingCheckAnalysis;
+        assert!(
+            analysis.as_modal().is_some(),
+            "BindingCheckAnalysis should support modal analysis"
+        );
+    }
+
+    #[test]
+    fn modal_filters_inactive_thread() {
+        // Two threads, each active in a different mode.
+        // In "fast" mode only t_fast is active. t_slow should be filtered out.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        let t_slow = b.add_component("t_slow", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t_fast, t_slow]);
+
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        b.components[t_slow].in_modes = vec![Name::new("slow")];
+
+        // Neither thread has a processor binding -> both would get info diagnostic if active.
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+
+        let diags = BindingCheckAnalysis.analyze_in_mode(&inst, &som_fast);
+        let binding_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Actual_Processor_Binding"))
+            .collect();
+        // Only t_fast should be checked (and it's missing a binding)
+        assert_eq!(
+            binding_diags.len(),
+            1,
+            "should only warn for active thread: {:?}",
+            diags
+        );
+        assert!(
+            binding_diags[0].message.contains("t_fast"),
+            "warning should be for t_fast: {}",
+            binding_diags[0].message
+        );
+    }
+
+    #[test]
+    fn modal_non_modal_thread_included_in_all_soms() {
+        // A non-modal thread (empty in_modes) should be included in every SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_always = b.add_component("t_always", ComponentCategory::Thread, Some(proc));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t_always, t_fast]);
+
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        // t_always has empty in_modes -> always active
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+
+        let diags = BindingCheckAnalysis.analyze_in_mode(&inst, &som_fast);
+        let binding_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("Actual_Processor_Binding"))
+            .collect();
+        // Both t_always and t_fast should be checked
+        assert_eq!(
+            binding_diags.len(),
+            2,
+            "both threads should be checked: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn modal_different_diagnostics_per_som() {
+        // In "fast" mode: t_fast is active (no binding -> info).
+        // In "slow" mode: t_slow is active (has binding -> no info).
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        let t_slow = b.add_component("t_slow", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t_fast, t_slow]);
+
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        b.components[t_slow].in_modes = vec![Name::new("slow")];
+
+        // t_fast has NO binding; t_slow HAS a binding
+        b.set_property(
+            t_slow,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu)",
+        );
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+        let som_slow = SystemOperationMode {
+            name: "slow".to_string(),
+            mode_selections: vec![(proc, slow_mode)],
+        };
+
+        // Fast mode: t_fast is active and missing binding
+        let diags_fast = BindingCheckAnalysis.analyze_in_mode(&inst, &som_fast);
+        let fast_binding: Vec<_> = diags_fast
+            .iter()
+            .filter(|d| {
+                d.message.contains("Actual_Processor_Binding") && d.message.contains("t_fast")
+            })
+            .collect();
+        assert_eq!(
+            fast_binding.len(),
+            1,
+            "t_fast should be missing binding in fast mode: {:?}",
+            diags_fast
+        );
+
+        // Slow mode: t_slow is active and HAS binding -> no missing-binding diagnostic
+        let diags_slow = BindingCheckAnalysis.analyze_in_mode(&inst, &som_slow);
+        let slow_binding: Vec<_> = diags_slow
+            .iter()
+            .filter(|d| {
+                d.message.contains("Actual_Processor_Binding") && d.message.contains("t_slow")
+            })
+            .collect();
+        assert!(
+            slow_binding.is_empty(),
+            "t_slow has binding, should not warn: {:?}",
+            diags_slow
         );
     }
 }

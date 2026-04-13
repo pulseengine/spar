@@ -12,11 +12,12 @@
 //! This is a v1 implementation focusing on memory budgets since those
 //! properties are most commonly specified in AADL models.
 
-use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{get_memory_binding, get_size_property};
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Resource budget analysis (memory, MIPS, bandwidth).
 pub struct ResourceBudgetAnalysis;
@@ -26,6 +27,10 @@ impl Analysis for ResourceBudgetAnalysis {
         "resource_budget"
     }
 
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
+    }
+
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         // Severity rationale (STPA-REQ-016):
         //   Error   — memory budget exceeded
@@ -33,7 +38,7 @@ impl Analysis for ResourceBudgetAnalysis {
         //   Info    — memory utilization within budget, modal awareness note
         let mut diags = Vec::new();
 
-        check_memory_budgets(instance, &mut diags);
+        check_memory_budgets(instance, None, &mut diags);
         check_bandwidth_budgets(instance, &mut diags);
 
         // STPA-REQ-017: Note modal awareness
@@ -54,8 +59,25 @@ impl Analysis for ResourceBudgetAnalysis {
     }
 }
 
+impl ModalAnalysis for ResourceBudgetAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+        check_memory_budgets(instance, Some(som), &mut diags);
+        check_bandwidth_budgets(instance, &mut diags);
+        diags
+    }
+}
+
 /// Check memory budgets: compare software memory demands against memory capacity.
-fn check_memory_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+fn check_memory_budgets(
+    instance: &SystemInstance,
+    som: Option<&SystemOperationMode>,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
     for (mem_idx, mem_comp) in instance.all_components() {
         if mem_comp.category != ComponentCategory::Memory {
             continue;
@@ -77,6 +99,13 @@ fn check_memory_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagn
         let mut bound_components: Vec<(String, u64)> = Vec::new();
 
         for (comp_idx, _comp) in instance.all_components() {
+            // Filter by SOM if provided.
+            if let Some(som) = som
+                && !is_component_active_in_som(instance, comp_idx, som)
+            {
+                continue;
+            }
+
             let comp_props = instance.properties_for(comp_idx);
 
             // Check if this component is bound to this memory
@@ -324,7 +353,7 @@ mod tests {
                     property_name: Name::new(name),
                 },
                 value: value.to_string(),
-                typed_value: None,
+                typed_expr: None,
                 is_append: false,
             });
         }
@@ -1246,6 +1275,239 @@ mod tests {
             modal_diags.is_empty(),
             "should not produce modal note without modes: {:?}",
             modal_diags
+        );
+    }
+
+    // ── ModalAnalysis tests ─────────────────────────────────────
+
+    #[test]
+    fn as_modal_returns_some() {
+        let analysis = ResourceBudgetAnalysis;
+        assert!(
+            analysis.as_modal().is_some(),
+            "ResourceBudgetAnalysis should support modal analysis"
+        );
+    }
+
+    #[test]
+    fn modal_filters_inactive_bound_component() {
+        // Two threads bound to same memory, each active in a different mode.
+        // In "fast" mode only t_fast is active -> only its demand counts.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        let t_slow = b.add_component("t_slow", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![t_fast, t_slow]);
+
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        b.components[t_slow].in_modes = vec![Name::new("slow")];
+
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "200 KByte");
+        // t_fast: 80 KB
+        b.set_property(t_fast, "Memory_Properties", "Source_Code_Size", "80 KByte");
+        b.set_property(
+            t_fast,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+        // t_slow: 100 KB
+        b.set_property(t_slow, "Memory_Properties", "Source_Code_Size", "100 KByte");
+        b.set_property(
+            t_slow,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        let slow_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("slow"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode, slow_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+
+        let diags = ResourceBudgetAnalysis.analyze_in_mode(&inst, &som_fast);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report utilization: {:?}", diags);
+        // 80 KB / 200 KB = 40%
+        assert!(
+            infos[0].message.contains("40.0%"),
+            "fast mode should show 40%: {}",
+            infos[0].message,
+        );
+    }
+
+    #[test]
+    fn modal_non_modal_thread_included_in_all_soms() {
+        // A non-modal thread (empty in_modes) should be included in every SOM.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_always = b.add_component("t_always", ComponentCategory::Thread, Some(proc));
+        let t_fast = b.add_component("t_fast", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![t_always, t_fast]);
+
+        b.components[t_fast].in_modes = vec![Name::new("fast")];
+        // t_always has empty in_modes -> always active
+
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "500 KByte");
+        b.set_property(
+            t_always,
+            "Memory_Properties",
+            "Source_Code_Size",
+            "50 KByte",
+        );
+        b.set_property(
+            t_always,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+        b.set_property(t_fast, "Memory_Properties", "Source_Code_Size", "100 KByte");
+        b.set_property(
+            t_fast,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let mut inst = b.build(root);
+        let fast_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("fast"),
+            is_initial: true,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![fast_mode];
+
+        let som_fast = SystemOperationMode {
+            name: "fast".to_string(),
+            mode_selections: vec![(proc, fast_mode)],
+        };
+
+        let diags = ResourceBudgetAnalysis.analyze_in_mode(&inst, &som_fast);
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("utilization"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report utilization: {:?}", diags);
+        // 50 + 100 = 150 KB / 500 KB = 30%
+        assert!(
+            infos[0].message.contains("30.0%"),
+            "should include both threads: {}",
+            infos[0].message,
+        );
+    }
+
+    #[test]
+    fn modal_budget_exceeded_in_one_som_only() {
+        // Memory is exceeded in "heavy" mode but not in "light" mode.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mem = b.add_component("ram", ComponentCategory::Memory, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t_heavy = b.add_component("t_heavy", ComponentCategory::Thread, Some(proc));
+        let t_light = b.add_component("t_light", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![mem, proc]);
+        b.set_children(proc, vec![t_heavy, t_light]);
+
+        b.components[t_heavy].in_modes = vec![Name::new("heavy")];
+        b.components[t_light].in_modes = vec![Name::new("light")];
+
+        b.set_property(mem, "Memory_Properties", "Memory_Size", "100 KByte");
+        // t_heavy: 120 KB -> exceeds 100 KB
+        b.set_property(
+            t_heavy,
+            "Memory_Properties",
+            "Source_Code_Size",
+            "120 KByte",
+        );
+        b.set_property(
+            t_heavy,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+        // t_light: 50 KB -> within 100 KB
+        b.set_property(t_light, "Memory_Properties", "Source_Code_Size", "50 KByte");
+        b.set_property(
+            t_light,
+            "Deployment_Properties",
+            "Actual_Memory_Binding",
+            "reference (ram)",
+        );
+
+        let mut inst = b.build(root);
+        let heavy_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("heavy"),
+            is_initial: true,
+            owner: proc,
+        });
+        let light_mode = inst.mode_instances.alloc(ModeInstance {
+            name: Name::new("light"),
+            is_initial: false,
+            owner: proc,
+        });
+        inst.components[proc].modes = vec![heavy_mode, light_mode];
+
+        let som_heavy = SystemOperationMode {
+            name: "heavy".to_string(),
+            mode_selections: vec![(proc, heavy_mode)],
+        };
+        let som_light = SystemOperationMode {
+            name: "light".to_string(),
+            mode_selections: vec![(proc, light_mode)],
+        };
+
+        // Heavy mode should exceed budget
+        let diags_heavy = ResourceBudgetAnalysis.analyze_in_mode(&inst, &som_heavy);
+        let errors: Vec<_> = diags_heavy
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "heavy mode should exceed budget: {:?}",
+            diags_heavy
+        );
+        assert!(errors[0].message.contains("exceeded"));
+
+        // Light mode should be within budget
+        let diags_light = ResourceBudgetAnalysis.analyze_in_mode(&inst, &som_light);
+        let errors_light: Vec<_> = diags_light
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors_light.is_empty(),
+            "light mode should be within budget: {:?}",
+            diags_light
         );
     }
 }
