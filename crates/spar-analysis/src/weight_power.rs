@@ -19,11 +19,12 @@
 //! 5. Error if children sum exceeds parent limit.
 //! 6. Info with aggregated totals per system/component.
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::PropertyExpr;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::extract_real;
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_depth, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_depth, component_path};
 
 /// Weight and power aggregation analysis.
 pub struct WeightPowerAnalysis;
@@ -33,12 +34,29 @@ impl Analysis for WeightPowerAnalysis {
         "weight_power"
     }
 
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
+    }
+
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         let mut diags = Vec::new();
 
-        check_weight_budgets(instance, &mut diags);
-        check_power_budgets(instance, &mut diags);
+        check_weight_budgets(instance, None, &mut diags);
+        check_power_budgets(instance, None, &mut diags);
 
+        diags
+    }
+}
+
+impl ModalAnalysis for WeightPowerAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        let mut diags = Vec::new();
+        check_weight_budgets(instance, Some(som), &mut diags);
+        check_power_budgets(instance, Some(som), &mut diags);
         diags
     }
 }
@@ -47,7 +65,11 @@ impl Analysis for WeightPowerAnalysis {
 
 /// Check weight budgets: for each component with a weight limit, sum
 /// children's weights and compare against the limit.
-fn check_weight_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+fn check_weight_budgets(
+    instance: &SystemInstance,
+    som: Option<&SystemOperationMode>,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
     // Process components bottom-up so leaf values are resolved first.
     let ordered = bottom_up_order(instance);
 
@@ -56,6 +78,13 @@ fn check_weight_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagn
         rustc_hash::FxHashMap::default();
 
     for &idx in &ordered {
+        // Filter by SOM if provided.
+        if let Some(som) = som
+            && !is_component_active_in_som(instance, idx, som)
+        {
+            continue;
+        }
+
         let comp = instance.component(idx);
         let props = instance.properties_for(idx);
 
@@ -114,13 +143,24 @@ fn check_weight_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagn
 
 /// Check power budgets: for each component with a power capacity, sum
 /// children's power budgets and compare against the capacity.
-fn check_power_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
+fn check_power_budgets(
+    instance: &SystemInstance,
+    som: Option<&SystemOperationMode>,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
     let ordered = bottom_up_order(instance);
 
     let mut aggregated: rustc_hash::FxHashMap<ComponentInstanceIdx, f64> =
         rustc_hash::FxHashMap::default();
 
     for &idx in &ordered {
+        // Filter by SOM if provided.
+        if let Some(som) = som
+            && !is_component_active_in_som(instance, idx, som)
+        {
+            continue;
+        }
+
         let comp = instance.component(idx);
         let props = instance.properties_for(idx);
 
@@ -1115,6 +1155,201 @@ mod tests {
             weight_diags.is_empty(),
             "no children weights = no check: {:?}",
             weight_diags
+        );
+    }
+
+    // ── Modal analysis tests ───────────────────────────────────────
+
+    #[test]
+    fn modal_weight_power_as_modal_returns_some() {
+        let analysis = WeightPowerAnalysis;
+        assert!(
+            analysis.as_modal().is_some(),
+            "WeightPowerAnalysis should support modal analysis"
+        );
+    }
+
+    #[test]
+    fn modal_weight_default_includes_all_children() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("vehicle", ComponentCategory::System, None);
+        let motor = b.add_component("motor", ComponentCategory::Device, Some(root));
+        let turbo = b.add_component("turbo", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![motor, turbo]);
+
+        b.components[motor].in_modes = vec![Name::new("sport")];
+        b.components[turbo].in_modes = vec![Name::new("sport")];
+
+        b.set_property(motor, "SEI", "GrossWeight", "50 kg");
+        b.set_property(turbo, "SEI", "GrossWeight", "60 kg");
+        b.set_property(root, "SEI", "WeightLimit", "100 kg");
+
+        let inst = b.build(root);
+        let diags = WeightPowerAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("weight"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "default (no modal filter) should include all: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn modal_weight_filters_inactive_children() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("vehicle", ComponentCategory::System, None);
+        let motor = b.add_component("motor", ComponentCategory::Device, Some(root));
+        let turbo = b.add_component("turbo", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![motor, turbo]);
+
+        b.components[motor].in_modes = vec![Name::new("eco")];
+        b.components[turbo].in_modes = vec![Name::new("sport")];
+
+        b.set_property(motor, "SEI", "GrossWeight", "40 kg");
+        b.set_property(turbo, "SEI", "GrossWeight", "70 kg");
+        b.set_property(root, "SEI", "WeightLimit", "100 kg");
+
+        let inst = {
+            let mut mode_instances = Arena::default();
+            let mode_idx = mode_instances.alloc(ModeInstance {
+                name: Name::new("eco"),
+                owner: root,
+                is_initial: false,
+            });
+
+            let som = SystemOperationMode {
+                name: "eco".to_string(),
+                mode_selections: vec![(root, mode_idx)],
+            };
+
+            SystemInstance {
+                root,
+                components: b.components,
+                features: b.features,
+                connections: b.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances,
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: b.property_maps,
+                semantic_connections: Vec::new(),
+                system_operation_modes: vec![som],
+            }
+        };
+
+        let som = &inst.system_operation_modes[0];
+        let diags = WeightPowerAnalysis
+            .as_modal()
+            .unwrap()
+            .analyze_in_mode(&inst, som);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "eco mode (40 kg < 100 kg) should not error: {:?}",
+            diags
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("weight budget"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report weight info for eco mode: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("40.00 kg"),
+            "should show 40 kg (motor only): {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn modal_power_filters_inactive_children() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("vehicle", ComponentCategory::System, None);
+        let motor = b.add_component("motor", ComponentCategory::Device, Some(root));
+        let turbo = b.add_component("turbo", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![motor, turbo]);
+
+        b.components[motor].in_modes = vec![Name::new("eco")];
+        b.components[turbo].in_modes = vec![Name::new("sport")];
+
+        b.set_property(motor, "", "PowerBudget", "40 W");
+        b.set_property(turbo, "", "PowerBudget", "70 W");
+        b.set_property(root, "", "PowerCapacity", "100 W");
+
+        let inst = {
+            let mut mode_instances = Arena::default();
+            let mode_idx = mode_instances.alloc(ModeInstance {
+                name: Name::new("eco"),
+                owner: root,
+                is_initial: false,
+            });
+
+            let som = SystemOperationMode {
+                name: "eco".to_string(),
+                mode_selections: vec![(root, mode_idx)],
+            };
+
+            SystemInstance {
+                root,
+                components: b.components,
+                features: b.features,
+                connections: b.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances,
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: b.property_maps,
+                semantic_connections: Vec::new(),
+                system_operation_modes: vec![som],
+            }
+        };
+
+        let som = &inst.system_operation_modes[0];
+        let diags = WeightPowerAnalysis
+            .as_modal()
+            .unwrap()
+            .analyze_in_mode(&inst, som);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "eco mode (40 W < 100 W) should not error: {:?}",
+            diags
+        );
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("power budget"))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "should report power info for eco mode: {:?}",
+            diags
+        );
+        assert!(
+            infos[0].message.contains("40.0%"),
+            "should show 40% utilization (40W of 100W): {}",
+            infos[0].message
         );
     }
 }

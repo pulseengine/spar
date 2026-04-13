@@ -23,15 +23,16 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use spar_hir_def::item_tree::PropertyExpr;
 
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
     extract_real, extract_reference_target, get_size_property, get_timing_property,
 };
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Bus bandwidth analysis.
 pub struct BusBandwidthAnalysis;
@@ -41,7 +42,31 @@ impl Analysis for BusBandwidthAnalysis {
         "bus_bandwidth"
     }
 
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
+    }
+
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        self.check_bandwidth(instance, None)
+    }
+}
+
+impl ModalAnalysis for BusBandwidthAnalysis {
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        self.check_bandwidth(instance, Some(som))
+    }
+}
+
+impl BusBandwidthAnalysis {
+    fn check_bandwidth(
+        &self,
+        instance: &SystemInstance,
+        som: Option<&SystemOperationMode>,
+    ) -> Vec<AnalysisDiagnostic> {
         let mut diags = Vec::new();
 
         // Collect all buses and their capacities.
@@ -125,6 +150,14 @@ impl Analysis for BusBandwidthAnalysis {
                         .and_then(|sub_name| {
                             find_child_by_name(instance, comp_idx, sub_name.as_str())
                         });
+
+                    // Filter by SOM: skip connections whose source is inactive.
+                    if let Some(som) = som
+                        && let Some(src_idx) = src_sub_idx
+                        && !is_component_active_in_som(instance, src_idx, som)
+                    {
+                        continue;
+                    }
 
                     let demand = compute_connection_demand(instance, src_sub_idx, &bus_map);
                     if demand > 0.0 {
@@ -1178,5 +1211,183 @@ mod tests {
     #[test]
     fn parse_data_rate_bytesps() {
         assert_eq!(parse_data_rate("100 Bytesps"), Some(800.0));
+    }
+
+    // ── Modal analysis tests ───────────────────────────────────────
+
+    fn build_modal_bus_model() -> (TestBuilder, ComponentInstanceIdx) {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let bus1 = b.add_component("bus1", ComponentCategory::Bus, Some(root));
+        let sender_fast = b.add_component("sender_fast", ComponentCategory::Process, Some(root));
+        let sender_fast_thread =
+            b.add_component("sender_fast_thread", ComponentCategory::Thread, Some(sender_fast));
+        let sender_slow = b.add_component("sender_slow", ComponentCategory::Process, Some(root));
+        let sender_slow_thread =
+            b.add_component("sender_slow_thread", ComponentCategory::Thread, Some(sender_slow));
+        let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![bus1, sender_fast, sender_slow, receiver]);
+        b.set_children(sender_fast, vec![sender_fast_thread]);
+        b.set_children(sender_slow, vec![sender_slow_thread]);
+
+        b.components[sender_fast].in_modes = vec![Name::new("fast")];
+        b.components[sender_slow].in_modes = vec![Name::new("slow")];
+
+        b.set_property(bus1, "SEI", "Bandwidth", "1 Mbitsps");
+
+        b.set_property(
+            sender_fast_thread,
+            "Memory_Properties",
+            "Data_Size",
+            "500 KByte",
+        );
+        b.set_property(sender_fast_thread, "Timing_Properties", "Period", "1 sec");
+
+        b.set_property(
+            sender_slow_thread,
+            "Memory_Properties",
+            "Data_Size",
+            "1 KByte",
+        );
+        b.set_property(sender_slow_thread, "Timing_Properties", "Period", "1 sec");
+
+        b.add_connection("c1", root, "sender_fast", "out", "receiver", "in1");
+        b.add_connection("c2", root, "sender_slow", "out", "receiver", "in2");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (bus1)",
+        );
+
+        (b, root)
+    }
+
+    #[test]
+    fn modal_bus_bandwidth_as_modal_returns_some() {
+        let analysis = BusBandwidthAnalysis;
+        assert!(
+            analysis.as_modal().is_some(),
+            "BusBandwidthAnalysis should support modal analysis"
+        );
+    }
+
+    #[test]
+    fn modal_bus_bandwidth_default_includes_all_senders() {
+        let (b, root) = build_modal_bus_model();
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "both senders should overload bus: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn modal_bus_bandwidth_slow_mode_excludes_fast_sender() {
+        let (b, root) = build_modal_bus_model();
+
+        let inst = {
+            let mut mode_instances = Arena::default();
+            let mode_idx = mode_instances.alloc(ModeInstance {
+                name: Name::new("slow"),
+                owner: root,
+                is_initial: false,
+            });
+
+            let som = SystemOperationMode {
+                name: "slow".to_string(),
+                mode_selections: vec![(root, mode_idx)],
+            };
+
+            SystemInstance {
+                root,
+                components: b.components,
+                features: b.features,
+                connections: b.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances,
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: b.property_maps,
+                semantic_connections: Vec::new(),
+                system_operation_modes: vec![som],
+            }
+        };
+
+        let som = &inst.system_operation_modes[0];
+        let diags = BusBandwidthAnalysis
+            .as_modal()
+            .unwrap()
+            .analyze_in_mode(&inst, som);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "slow mode should not overload bus (only 8192 bps): {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn modal_bus_bandwidth_fast_mode_overloads() {
+        let (b, root) = build_modal_bus_model();
+
+        let inst = {
+            let mut mode_instances = Arena::default();
+            let mode_idx = mode_instances.alloc(ModeInstance {
+                name: Name::new("fast"),
+                owner: root,
+                is_initial: false,
+            });
+
+            let som = SystemOperationMode {
+                name: "fast".to_string(),
+                mode_selections: vec![(root, mode_idx)],
+            };
+
+            SystemInstance {
+                root,
+                components: b.components,
+                features: b.features,
+                connections: b.connections,
+                flow_instances: Arena::default(),
+                end_to_end_flows: Arena::default(),
+                mode_instances,
+                mode_transition_instances: Arena::default(),
+                diagnostics: Vec::new(),
+                property_maps: b.property_maps,
+                semantic_connections: Vec::new(),
+                system_operation_modes: vec![som],
+            }
+        };
+
+        let som = &inst.system_operation_modes[0];
+        let diags = BusBandwidthAnalysis
+            .as_modal()
+            .unwrap()
+            .analyze_in_mode(&inst, som);
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "fast mode should overload bus (4096000 bps > 1 Mbps): {:?}",
+            diags
+        );
     }
 }

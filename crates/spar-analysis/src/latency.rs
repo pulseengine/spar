@@ -43,6 +43,12 @@ impl Analysis for LatencyAnalysis {
             let mut worst_case_ps: u64 = 0;
             let mut missing_timing = Vec::new();
             let mut connection_count: u64 = 0;
+            let mut prev_processor: Option<String> = None;
+
+            // Read inter-processor overhead from the owner (applied at each
+            // processor boundary crossing).
+            let owner_props_for_overhead = instance.properties_for(e2e.owner);
+            let inter_proc_overhead_ps = get_inter_processor_overhead(owner_props_for_overhead);
 
             for (i, seg) in e2e.segments.iter().enumerate() {
                 if i % 2 == 1 {
@@ -85,6 +91,21 @@ impl Analysis for LatencyAnalysis {
                         && let Some(period) = period_ps
                     {
                         worst_case_ps = worst_case_ps.saturating_add(period);
+                    }
+
+                    // Track processor binding for inter-processor overhead.
+                    let cur_binding = get_processor_binding(child_props);
+                    if let Some(ref cur) = cur_binding
+                        && let Some(ref prev) = prev_processor
+                        && !cur.eq_ignore_ascii_case(prev)
+                    {
+                        // Processor boundary crossing — add overhead.
+                        if let Some(overhead) = inter_proc_overhead_ps {
+                            worst_case_ps = worst_case_ps.saturating_add(overhead);
+                        }
+                    }
+                    if cur_binding.is_some() {
+                        prev_processor = cur_binding;
                     }
                 } else {
                     missing_timing.push(subcomp_name.to_string());
@@ -240,6 +261,44 @@ impl Analysis for LatencyAnalysis {
 
         diags
     }
+}
+
+/// Read inter-processor communication overhead in picoseconds.
+///
+/// Checks `SPAR_Properties::Inter_Processor_Overhead`,
+/// `Timing_Properties::Inter_Processor_Overhead` (unqualified fallback),
+/// then `Timing_Properties::Transmission_Time`. Returns `None` when none
+/// of these properties are set.
+fn get_inter_processor_overhead(
+    props: &spar_hir_def::properties::PropertyMap,
+) -> Option<u64> {
+    use crate::property_accessors::extract_time_ps;
+    use spar_hir_def::property_value::parse_time_value;
+
+    // Try SPAR_Properties::Inter_Processor_Overhead (typed path).
+    if let Some(expr) = props.get_typed("SPAR_Properties", "Inter_Processor_Overhead")
+        .or_else(|| props.get_typed("", "Inter_Processor_Overhead"))
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
+    }
+
+    // String fallback for Inter_Processor_Overhead.
+    if let Some(raw) = props
+        .get("SPAR_Properties", "Inter_Processor_Overhead")
+        .or_else(|| props.get("", "Inter_Processor_Overhead"))
+        && let Some(ps) = parse_time_value(raw)
+    {
+        return Some(ps);
+    }
+
+    // Try Timing_Properties::Inter_Processor_Overhead.
+    if let Some(val) = get_timing_property(props, "Inter_Processor_Overhead") {
+        return Some(val);
+    }
+
+    // Fall back to Transmission_Time.
+    get_timing_property(props, "Transmission_Time")
 }
 
 #[cfg(test)]
@@ -973,6 +1032,260 @@ mod tests {
         assert!(
             infos[0].message.contains("[5.000 ms .. 5.000 ms]"),
             "first component should not get sampling delay: {}",
+            infos[0].message
+        );
+    }
+
+    // ── Inter-processor overhead applied to latency ────────────────
+
+    #[test]
+    fn inter_processor_overhead_added_to_worst_case() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        // Set inter-processor overhead on the owner.
+        b.set_property(
+            root,
+            "SPAR_Properties",
+            "Inter_Processor_Overhead",
+            "5 ms",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report latency: {:?}", diags);
+
+        // Best case: 1 + 2 = 3 ms (overhead not in best case)
+        assert!(
+            infos[0].message.contains("3.000 ms"),
+            "best case should be 3ms: {}",
+            infos[0].message
+        );
+
+        // Worst case: 1 + 2 exec + 20 sampling + 5 overhead = 28 ms
+        assert!(
+            infos[0].message.contains("28.000 ms"),
+            "worst case should include 5ms overhead: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn inter_processor_overhead_transmission_time_fallback() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        // Use Transmission_Time instead of Inter_Processor_Overhead.
+        b.set_property(root, "Timing_Properties", "Transmission_Time", "3 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should report latency: {:?}", diags);
+
+        // Worst case: 1 + 2 exec + 20 sampling + 3 overhead = 26 ms
+        assert!(
+            infos[0].message.contains("26.000 ms"),
+            "worst case should include 3ms Transmission_Time: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn no_overhead_when_same_processor() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_same",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(
+            root,
+            "SPAR_Properties",
+            "Inter_Processor_Overhead",
+            "5 ms",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1);
+
+        // Worst case without overhead: 1 + 2 exec + 20 sampling = 23 ms
+        assert!(
+            infos[0].message.contains("23.000 ms"),
+            "same-processor flow should NOT include overhead: {}",
+            infos[0].message
+        );
+    }
+
+    #[test]
+    fn no_overhead_property_no_overhead_added() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1);
+
+        // Worst case without overhead: 1 + 2 exec + 20 sampling = 23 ms
+        assert!(
+            infos[0].message.contains("23.000 ms"),
+            "no overhead property = no overhead in latency: {}",
             infos[0].message
         );
     }
