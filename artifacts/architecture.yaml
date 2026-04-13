@@ -957,3 +957,97 @@ artifacts:
     links:
       - type: satisfies
         target: STPA-SEC-REQ-001
+
+  # ── v0.6.0 Architecture Decisions ──────────────────────────────────
+
+  - id: ARCH-PROP-FLOWTHROUGH
+    type: design-decision
+    title: Typed PropertyExpr through PropertyMap to analysis passes
+    description: >
+      PropertyValue gains typed_value: Option<PropertyExpr> carrying the
+      typed CST-lowered expression through the property system. PropertyMap
+      exposes get_typed(set, name) returning &PropertyExpr. All 7 instance
+      construction sites in instance.rs propagate typed_value. Analysis
+      passes call get_typed() before falling back to text parsing.
+    status: implemented
+    fields:
+      rationale: >
+        PropertyExpr was computed during CST lowering but discarded before
+        reaching analysis passes. Carrying typed values through eliminates
+        redundant text re-parsing and enables type-safe property access
+        in analysis passes. Backward compatible via typed_value: None.
+    tags: [v0.6.0, properties]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+      - type: satisfies
+        target: COVERAGE-CH11
+
+  - id: ARCH-MODAL-PER-SOM
+    type: design-decision
+    title: ModalAnalysis trait pattern for per-SOM analysis
+    description: >
+      ModalAnalysis sub-trait of Analysis adds analyze_in_mode(&self,
+      instance, som_name, active_modes) -> Vec<AnalysisDiagnostic>.
+      Analysis::as_modal() returns Option<&dyn ModalAnalysis> for
+      opt-in per-SOM support. AnalysisRunner::run_all_per_som() iterates
+      SOMs and dispatches to modal-capable passes. 8 passes implement it.
+    status: implemented
+    fields:
+      rationale: >
+        Sub-trait pattern allows existing passes to remain unchanged while
+        modal-capable passes opt in. run_all_per_som on AnalysisRunner
+        provides a single entry point for CLI --per-som flag. Diagnostic
+        prefixing with [mode: <name>] preserves traceability.
+    tags: [v0.6.0, analysis, modes]
+    links:
+      - type: satisfies
+        target: REQ-INST-004
+      - type: satisfies
+        target: REQ-ANALYSIS-009
+      - type: satisfies
+        target: COVERAGE-CH12
+
+  - id: ARCH-CONN-PATTERNS
+    type: design-decision
+    title: ConnectionPattern enum for array connection expansion
+    description: >
+      ConnectionPattern enum (OneToOne, AllToAll) controls how connections
+      between array subcomponents expand during instantiation.
+      resolve_connection_pattern() reads Connection_Pattern property from
+      the enclosing component. parse_connection_pattern() handles nested
+      list format and case-insensitive matching. AllToAll is the default.
+    status: implemented
+    fields:
+      rationale: >
+        AS5506 Ch.14 defines connection patterns for array subcomponents.
+        Enum-based dispatch keeps the expansion logic readable and testable.
+        Property-driven pattern selection follows the AADL standard.
+        Default AllToAll matches spec behavior when no property is set.
+    tags: [v0.6.0, instance-model, connections]
+    links:
+      - type: satisfies
+        target: REQ-INST-002
+      - type: satisfies
+        target: COVERAGE-CH14
+
+  - id: ARCH-RENDER-DEPTH
+    type: design-decision
+    title: MAX_RENDER_DEPTH flattening strategy for deep hierarchies
+    description: >
+      MAX_RENDER_DEPTH=5 constant limits rendering recursion depth.
+      Components beyond the depth limit are reparented to the nearest
+      visible ancestor, flattening the visual hierarchy without losing
+      structural information. Prevents stack overflow on deeply nested
+      models (100+ levels).
+    status: implemented
+    fields:
+      rationale: >
+        Stack overflow in recursive SVG rendering crashed on deeply nested
+        AADL models. Flattening at a fixed depth is simpler than
+        trampolining and produces a usable visual result. Depth 5 covers
+        the common case (system > process > thread_group > thread > data).
+    tags: [v0.6.0, rendering, bugfix]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-004
