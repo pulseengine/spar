@@ -239,10 +239,10 @@ fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Opti
         ("", "Bandwidth"),
     ];
     for &(set, name) in bandwidth_keys {
-        if let Some(expr) = props.get_typed(set, name) {
-            if let Some(bps) = extract_data_rate_bps(expr) {
-                return Some(bps);
-            }
+        if let Some(expr) = props.get_typed(set, name)
+            && let Some(bps) = extract_data_rate_bps(expr)
+        {
+            return Some(bps);
         }
     }
 
@@ -250,10 +250,10 @@ fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Opti
     let data_rate_keys: &[(&str, &str)] =
         &[("Communication_Properties", "Data_Rate"), ("", "Data_Rate")];
     for &(set, name) in data_rate_keys {
-        if let Some(expr) = props.get_typed(set, name) {
-            if let Some(bps) = extract_data_rate_bps(expr) {
-                return Some(bps);
-            }
+        if let Some(expr) = props.get_typed(set, name)
+            && let Some(bps) = extract_data_rate_bps(expr)
+        {
+            return Some(bps);
         }
     }
 

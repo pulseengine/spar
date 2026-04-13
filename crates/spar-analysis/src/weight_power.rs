@@ -238,10 +238,10 @@ fn try_typed_multi<F: Fn(&PropertyExpr) -> Option<f64>>(
     convert: F,
 ) -> Option<f64> {
     for &(set, name) in keys {
-        if let Some(expr) = props.get_typed(set, name) {
-            if let Some(v) = convert(expr) {
-                return Some(v);
-            }
+        if let Some(expr) = props.get_typed(set, name)
+            && let Some(v) = convert(expr)
+        {
+            return Some(v);
         }
     }
     None

@@ -194,10 +194,10 @@ fn get_typed_qualified<'a>(
 /// falls back to an unqualified lookup.  Tries typed access first.
 pub fn get_timing_property(props: &PropertyMap, name: &str) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", name) {
-        if let Some(ps) = extract_time_ps(expr) {
-            return Some(ps);
-        }
+    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", name)
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
     }
 
     // String fallback
@@ -213,10 +213,10 @@ pub fn get_timing_property(props: &PropertyMap, name: &str) -> Option<u64> {
 /// worst case (max). If it is a single value, we use that.
 pub fn get_execution_time(props: &PropertyMap) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", "Compute_Execution_Time") {
-        if let Some((_, max_ps)) = extract_time_range_ps(expr) {
-            return Some(max_ps);
-        }
+    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", "Compute_Execution_Time")
+        && let Some((_, max_ps)) = extract_time_range_ps(expr)
+    {
+        return Some(max_ps);
     }
 
     // String fallback
@@ -239,10 +239,10 @@ pub fn get_execution_time(props: &PropertyMap) -> Option<u64> {
 /// For a single value "3 ms", returns (3_000_000_000, 3_000_000_000).
 pub fn get_execution_time_range(props: &PropertyMap) -> Option<(u64, u64)> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", "Compute_Execution_Time") {
-        if let Some(range) = extract_time_range_ps(expr) {
-            return Some(range);
-        }
+    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", "Compute_Execution_Time")
+        && let Some(range) = extract_time_range_ps(expr)
+    {
+        return Some(range);
     }
 
     // String fallback
@@ -269,10 +269,10 @@ pub fn get_execution_time_or_exec(props: &PropertyMap) -> Option<u64> {
     // Typed path: try Execution_Time then Compute_Execution_Time
     let typed = get_typed_qualified(props, "Timing_Properties", "Execution_Time")
         .or_else(|| get_typed_qualified(props, "Timing_Properties", "Compute_Execution_Time"));
-    if let Some(expr) = typed {
-        if let Some((_, max_ps)) = extract_time_range_ps(expr) {
-            return Some(max_ps);
-        }
+    if let Some(expr) = typed
+        && let Some((_, max_ps)) = extract_time_range_ps(expr)
+    {
+        return Some(max_ps);
     }
 
     // String fallback
@@ -296,10 +296,9 @@ pub fn get_processor_binding(props: &PropertyMap) -> Option<String> {
     // Typed path
     if let Some(expr) =
         get_typed_qualified(props, "Deployment_Properties", "Actual_Processor_Binding")
+        && let Some(target) = extract_typed_reference(expr)
     {
-        if let Some(target) = extract_typed_reference(expr) {
-            return Some(target.to_string());
-        }
+        return Some(target.to_string());
     }
 
     // String fallback
@@ -316,10 +315,10 @@ pub fn get_processor_binding(props: &PropertyMap) -> Option<String> {
 /// falls back to an unqualified lookup.
 pub fn get_size_property(props: &PropertyMap, name: &str) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, "Memory_Properties", name) {
-        if let Some(bits) = extract_size_bits(expr) {
-            return Some(bits);
-        }
+    if let Some(expr) = get_typed_qualified(props, "Memory_Properties", name)
+        && let Some(bits) = extract_size_bits(expr)
+    {
+        return Some(bits);
     }
 
     // String fallback
@@ -333,10 +332,9 @@ pub fn get_size_property(props: &PropertyMap, name: &str) -> Option<u64> {
 pub fn get_memory_binding(props: &PropertyMap) -> Option<String> {
     // Typed path
     if let Some(expr) = get_typed_qualified(props, "Deployment_Properties", "Actual_Memory_Binding")
+        && let Some(target) = extract_typed_reference(expr)
     {
-        if let Some(target) = extract_typed_reference(expr) {
-            return Some(target.to_string());
-        }
+        return Some(target.to_string());
     }
 
     // String fallback
@@ -376,10 +374,10 @@ const AI_ML: &str = "AI_ML";
 /// Handles range format "20 ms .. 60 ms" and single values.
 pub fn get_inference_latency_range(props: &PropertyMap) -> Option<(u64, u64)> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, "Inference_Latency") {
-        if let Some(range) = extract_time_range_ps(expr) {
-            return Some(range);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, "Inference_Latency")
+        && let Some(range) = extract_time_range_ps(expr)
+    {
+        return Some(range);
     }
 
     // String fallback
@@ -399,10 +397,10 @@ pub fn get_inference_latency_range(props: &PropertyMap) -> Option<(u64, u64)> {
 /// Get `AI_ML::Fallback_Latency` in picoseconds.
 pub fn get_fallback_latency(props: &PropertyMap) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, "Fallback_Latency") {
-        if let Some(ps) = extract_time_ps(expr) {
-            return Some(ps);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, "Fallback_Latency")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
     }
 
     // String fallback
@@ -415,10 +413,10 @@ pub fn get_fallback_latency(props: &PropertyMap) -> Option<u64> {
 /// Get `AI_ML::Confidence_Threshold` as f64 (0.0-1.0).
 pub fn get_confidence_threshold(props: &PropertyMap) -> Option<f64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, "Confidence_Threshold") {
-        if let Some(v) = extract_real(expr) {
-            return Some(v);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, "Confidence_Threshold")
+        && let Some(v) = extract_real(expr)
+    {
+        return Some(v);
     }
 
     // String fallback
@@ -431,10 +429,10 @@ pub fn get_confidence_threshold(props: &PropertyMap) -> Option<f64> {
 /// Get a string AI_ML property (Inference_Mode, Fallback_Strategy, OOD_Detection_Method, etc.).
 pub fn get_ai_ml_string(props: &PropertyMap, name: &str) -> Option<String> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, name) {
-        if let Some(s) = extract_string(expr) {
-            return Some(s);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, name)
+        && let Some(s) = extract_string(expr)
+    {
+        return Some(s);
     }
 
     // String fallback
@@ -447,10 +445,10 @@ pub fn get_ai_ml_string(props: &PropertyMap, name: &str) -> Option<String> {
 /// Get `AI_ML::OOD_Detection_Enabled` as bool.
 pub fn get_ai_ml_bool(props: &PropertyMap, name: &str) -> Option<bool> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, name) {
-        if let Some(b) = extract_bool(expr) {
-            return Some(b);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, name)
+        && let Some(b) = extract_bool(expr)
+    {
+        return Some(b);
     }
 
     // String fallback
@@ -465,10 +463,10 @@ pub fn get_ai_ml_bool(props: &PropertyMap, name: &str) -> Option<bool> {
 /// Get `AI_ML::Max_Batch_Size` as integer.
 pub fn get_ai_ml_integer(props: &PropertyMap, name: &str) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, name) {
-        if let Some(v) = extract_integer(expr) {
-            return Some(v);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, name)
+        && let Some(v) = extract_integer(expr)
+    {
+        return Some(v);
     }
 
     // String fallback
@@ -479,10 +477,10 @@ pub fn get_ai_ml_integer(props: &PropertyMap, name: &str) -> Option<u64> {
 /// Get `AI_ML::Drift_Detection_Window` in picoseconds.
 pub fn get_drift_detection_window(props: &PropertyMap) -> Option<u64> {
     // Typed path
-    if let Some(expr) = get_typed_qualified(props, AI_ML, "Drift_Detection_Window") {
-        if let Some(ps) = extract_time_ps(expr) {
-            return Some(ps);
-        }
+    if let Some(expr) = get_typed_qualified(props, AI_ML, "Drift_Detection_Window")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
     }
 
     // String fallback

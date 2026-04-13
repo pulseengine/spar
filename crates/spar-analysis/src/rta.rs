@@ -196,10 +196,9 @@ fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
     if let Some(expr) = props
         .get_typed("Deployment_Properties", "Priority")
         .or_else(|| props.get_typed("", "Priority"))
+        && let Some(v) = crate::property_accessors::extract_integer(expr)
     {
-        if let Some(v) = crate::property_accessors::extract_integer(expr) {
-            return Some(v);
-        }
+        return Some(v);
     }
 
     // String fallback

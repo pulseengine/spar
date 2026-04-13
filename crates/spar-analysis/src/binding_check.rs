@@ -69,10 +69,10 @@ impl BindingCheckAnalysis {
 
         for (comp_idx, comp) in instance.all_components() {
             // Filter by SOM if provided.
-            if let Some(som) = som {
-                if !is_component_active_in_som(instance, comp_idx, som) {
-                    continue;
-                }
+            if let Some(som) = som
+                && !is_component_active_in_som(instance, comp_idx, som)
+            {
+                continue;
             }
 
             let path = component_path(instance, comp_idx);

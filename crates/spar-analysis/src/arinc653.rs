@@ -179,10 +179,10 @@ fn check_partition_assignment(
 
     for proc_idx in processes {
         // Filter by SOM if provided.
-        if let Some(som) = som {
-            if !is_component_active_in_som(instance, proc_idx, som) {
-                continue;
-            }
+        if let Some(som) = som
+            && !is_component_active_in_som(instance, proc_idx, som)
+        {
+            continue;
         }
 
         if owning_partition(instance, proc_idx).is_none() {

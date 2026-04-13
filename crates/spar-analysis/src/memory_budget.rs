@@ -90,10 +90,10 @@ impl MemoryBudgetAnalysis {
                 }
 
                 // Filter by SOM if provided.
-                if let Some(som) = som {
-                    if !is_component_active_in_som(instance, comp_idx, som) {
-                        continue;
-                    }
+                if let Some(som) = som
+                    && !is_component_active_in_som(instance, comp_idx, som)
+                {
+                    continue;
                 }
 
                 let comp_props = instance.properties_for(comp_idx);
