@@ -130,7 +130,7 @@ artifacts:
     description: >
       Compute SOMs as the cartesian product of modes across all
       modal subcomponents for each system level.
-    status: partial
+    status: implemented
     tags: [instance, as5506-ch12]
 
   # ── Property System (AS5506 Ch.11) ─────────────────────────────────────

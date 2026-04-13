@@ -851,3 +851,144 @@ artifacts:
         target: RENDER-REQ-003
       - type: satisfies
         target: REQ-LSP-001
+
+  # ── v0.6.0 Feature Records ─────────────────────────────────────────
+
+  - id: FEAT-MODAL-PER-SOM
+    type: feature
+    title: Per-SOM modal analysis via ModalAnalysis trait
+    description: >
+      ModalAnalysis trait with analyze_in_mode(), run_all_per_som() on
+      AnalysisRunner, --per-som CLI flag. 8 passes implement it:
+      scheduling, connectivity, ARINC 653, resource budget, memory budget,
+      weight/power, bus bandwidth, binding check. Diagnostics prefixed
+      with [mode: <name>] for per-SOM results.
+    status: passing
+    tags: [v0.6.0, analysis, modes]
+    links:
+      - type: satisfies
+        target: REQ-INST-004
+      - type: satisfies
+        target: REQ-ANALYSIS-009
+      - type: satisfies
+        target: COVERAGE-CH12
+      - type: implements
+        target: ARCH-MODAL-PER-SOM
+
+  - id: FEAT-RENAMES
+    type: feature
+    title: Renames resolution in GlobalScope
+    description: >
+      GlobalScope follows package renames, classifier renames, and feature
+      group renames declarations. Aliases stored in resolver and resolved
+      during name lookup. Enables cross-package aliasing per AS5506 Ch.4.
+    status: passing
+    tags: [v0.6.0, resolution]
+    links:
+      - type: satisfies
+        target: REQ-RESOLVE-001
+      - type: satisfies
+        target: COVERAGE-CH4
+
+  - id: FEAT-CONN-PATTERNS
+    type: feature
+    title: Connection pattern expansion for array subcomponents
+    description: >
+      Connection_Pattern property controls how array connections expand.
+      OneToOne (element i to element i, requires same array size) and
+      AllToAll (cartesian product, default). Property parsed from nested
+      list format or simple identifier, case-insensitive matching.
+    status: passing
+    tags: [v0.6.0, instance-model, connections]
+    links:
+      - type: satisfies
+        target: REQ-INST-002
+      - type: satisfies
+        target: COVERAGE-CH9
+      - type: satisfies
+        target: COVERAGE-CH14
+      - type: implements
+        target: ARCH-CONN-PATTERNS
+
+  - id: FEAT-PROP-FLOWTHROUGH
+    type: feature
+    title: Property type flow-through via typed PropertyExpr
+    description: >
+      PropertyValue carries typed_value (Option<PropertyExpr>) through
+      PropertyMap to analysis passes. get_typed() on PropertyMap returns
+      typed property values. All 7 instance.rs construction sites propagate
+      typed_value. Extends chain survival tested.
+    status: passing
+    tags: [v0.6.0, properties]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+      - type: satisfies
+        target: COVERAGE-CH11
+      - type: implements
+        target: ARCH-PROP-FLOWTHROUGH
+
+  - id: FEAT-PROP-TYPED-FIRST
+    type: feature
+    title: Property accessors refactored to typed-first values
+    description: >
+      15 property accessor functions in property_accessors.rs refactored
+      to try get_typed() before falling back to text parsing. Covers
+      timing properties, scheduling, bus bandwidth, memory, weight/power,
+      and binding properties. Reduces text-parsing fragility.
+    status: passing
+    tags: [v0.6.0, properties, analysis]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+      - type: satisfies
+        target: COVERAGE-CH11
+      - type: depends-on
+        target: FEAT-PROP-FLOWTHROUGH
+
+  - id: FEAT-RENDER-FIX
+    type: feature
+    title: Render stack overflow fix via MAX_RENDER_DEPTH flattening
+    description: >
+      MAX_RENDER_DEPTH=5 constant prevents stack overflow on deeply nested
+      hierarchies. Components beyond the depth limit are reparented to the
+      nearest visible ancestor. 5 new tests covering deep nesting scenarios.
+    status: passing
+    tags: [v0.6.0, rendering, bugfix]
+    links:
+      - type: satisfies
+        target: RENDER-REQ-004
+      - type: implements
+        target: ARCH-RENDER-DEPTH
+
+  - id: FEAT-SYSML2-ROUNDTRIP-V2
+    type: feature
+    title: SysML v2 roundtrip generation improvements
+    description: >
+      generate_sysml2() produces requirement def, part def, and relationship
+      statements (satisfy, verify, refine, allocate, derive) from rivet
+      artifacts. Supports action/state/connection keywords via tags.
+      Sanitizes identifiers for SysML v2 compliance.
+    status: passing
+    tags: [v0.6.0, sysml2]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-EXTRACT
+      - type: satisfies
+        target: REQ-INTEROP-001
+
+  - id: FEAT-PROP-RECORDS
+    type: feature
+    title: Property records and nested lists CST lowering
+    description: >
+      CST lowering handles record values ([field => value; ...]) and
+      nested list values. PropertyExpr::Record variant added. 670+ lines
+      of lowering enhancements in item_tree/lower.rs covering record
+      fields, nested lists, and complex property expression combinations.
+    status: passing
+    tags: [v0.6.0, properties]
+    links:
+      - type: satisfies
+        target: REQ-PROP-002
+      - type: satisfies
+        target: COVERAGE-CH11
