@@ -1976,7 +1976,8 @@ fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
         }
     }
 
-    let min = if let Some(num_text) = min_num {
+    let min = {
+        let num_text = min_num?;
         if min_is_real {
             let display = if min_sign < 0 {
                 format!("-{}", num_text)
@@ -1988,8 +1989,6 @@ fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
             let val = parse_aadl_integer(&num_text).unwrap_or(0) * min_sign;
             PropertyExpr::Integer(val, min_unit)
         }
-    } else {
-        return None;
     };
 
     let max = max_expr.unwrap_or_else(|| PropertyExpr::Opaque("?".to_string()));

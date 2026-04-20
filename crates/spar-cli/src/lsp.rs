@@ -1899,10 +1899,9 @@ fn make_swap_connection_edit(source: &str, uri: &Uri, diag_range: &Range) -> Opt
     // Look for `src -> dst` or `src <-> dst` pattern
     let (arrow, arrow_len) = if let Some(pos) = line.find(" -> ") {
         (pos, 4)
-    } else if let Some(pos) = line.find(" <-> ") {
-        (pos, 5)
     } else {
-        return None;
+        let pos = line.find(" <-> ")?;
+        (pos, 5)
     };
 
     // Find the source and destination parts
