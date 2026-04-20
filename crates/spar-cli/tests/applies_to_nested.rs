@@ -83,6 +83,57 @@ fn issue_128_binding_rules_accepts_nested_applies_to() {
     let _ = fs::remove_file(&path);
 }
 
+/// Unresolvable-path fallback: a property association whose `applies to`
+/// path does not resolve to a real subcomponent must not crash the
+/// pipeline. The property stays on the declaring component and a
+/// diagnostic is emitted; `spar instance` still completes.
+#[test]
+fn applies_to_unresolvable_path_emits_diagnostic() {
+    let src = "\
+package Test_Unresolvable
+public
+  processor Proc
+  end Proc;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.Impl
+    subcomponents
+      cpu: processor Proc;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to no_such_sub.no_such_thread;
+  end Sys.Impl;
+end Test_Unresolvable;
+";
+    let path = env::temp_dir().join(format!("spar_applies_to_bad_{}.aadl", std::process::id()));
+    fs::write(&path, src).expect("write temp AADL");
+
+    let output = spar()
+        .arg("instance")
+        .arg("--root")
+        .arg("Test_Unresolvable::Sys.Impl")
+        .arg(&path)
+        .output()
+        .expect("failed to run spar");
+
+    assert!(
+        output.status.success(),
+        "spar instance must not crash on unresolvable applies_to; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("applies_to path")
+            && stderr.contains("no_such_sub.no_such_thread")
+            && stderr.contains("could not be resolved"),
+        "expected unresolved-path diagnostic in stderr, got:\n{stderr}"
+    );
+
+    let _ = fs::remove_file(&path);
+}
+
 /// #129: `spar instance --format json` must emit the property on the
 /// target instance, not the declaring system.
 #[test]
