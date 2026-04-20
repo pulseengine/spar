@@ -86,8 +86,24 @@ fn property_value(p: &mut Parser) {
     }
 }
 
-/// Parse a property expression.
+/// Parse a property expression, including binary operator chains.
+///
+/// AS5506B §11.2.5 admits `numeric_term` with binary operators (e.g.
+/// `5 * 1000 ps`). Precedence is flat/left-associative — that is enough
+/// to parse the common unit-scaling idiom without a full expression
+/// grammar.
 fn property_expression(p: &mut Parser) {
+    property_expression_primary(p);
+    while matches!(
+        p.current(),
+        SyntaxKind::STAR | SyntaxKind::PLUS | SyntaxKind::MINUS
+    ) {
+        p.bump_any();
+        property_expression_primary(p);
+    }
+}
+
+fn property_expression_primary(p: &mut Parser) {
     match p.current() {
         SyntaxKind::INTEGER_LIT => {
             let m = p.start();
@@ -312,7 +328,7 @@ pub(crate) fn property_set(p: &mut Parser) {
 
     // property definitions and constants
     while !p.at(SyntaxKind::END_KW) && !p.at_end() {
-        if p.at(SyntaxKind::IDENT) {
+        if p.at_name() {
             property_definition_or_constant(p);
         } else {
             break;
@@ -377,19 +393,14 @@ fn property_type(p: &mut Parser) {
             p.bump(SyntaxKind::AADLINTEGER_KW);
             if p.at(SyntaxKind::UNITS_KW) {
                 p.bump(SyntaxKind::UNITS_KW);
-                // units reference
-                if p.at(SyntaxKind::IDENT) {
-                    super::classifier_ref(p);
-                }
+                numeric_units_designator(p);
             }
         }
         SyntaxKind::AADLREAL_KW => {
             p.bump(SyntaxKind::AADLREAL_KW);
             if p.at(SyntaxKind::UNITS_KW) {
                 p.bump(SyntaxKind::UNITS_KW);
-                if p.at(SyntaxKind::IDENT) {
-                    super::classifier_ref(p);
-                }
+                numeric_units_designator(p);
             }
         }
         SyntaxKind::AADLSTRING_KW => p.bump(SyntaxKind::AADLSTRING_KW),
@@ -432,29 +443,7 @@ fn property_type(p: &mut Parser) {
         SyntaxKind::UNITS_KW => {
             // units type: units (base, derived => base * factor, ...)
             p.bump(SyntaxKind::UNITS_KW);
-            p.expect(SyntaxKind::L_PAREN);
-            if p.at(SyntaxKind::IDENT) {
-                p.bump(SyntaxKind::IDENT);
-                while p.eat(SyntaxKind::COMMA) {
-                    if p.at(SyntaxKind::IDENT) {
-                        p.bump(SyntaxKind::IDENT);
-                        // Optional `=> base * factor`
-                        if p.eat(SyntaxKind::FAT_ARROW) {
-                            if p.at(SyntaxKind::IDENT) {
-                                p.bump(SyntaxKind::IDENT);
-                            }
-                            if p.eat(SyntaxKind::STAR) {
-                                if p.at(SyntaxKind::INTEGER_LIT) {
-                                    p.bump(SyntaxKind::INTEGER_LIT);
-                                } else if p.at(SyntaxKind::REAL_LIT) {
-                                    p.bump(SyntaxKind::REAL_LIT);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            p.expect(SyntaxKind::R_PAREN);
+            units_designator_body(p);
         }
         SyntaxKind::CLASSIFIER_KW => {
             p.bump(SyntaxKind::CLASSIFIER_KW);
@@ -482,6 +471,46 @@ fn property_type(p: &mut Parser) {
         }
     }
     m.complete(p, SyntaxKind::PROPERTY_TYPE);
+}
+
+/// Parse `(uA, mA => uA * 1000, ...)` — body of a `units` designator.
+///
+/// Called after the `units` keyword has been consumed. Shared between the
+/// standalone `units (...)` property type (AS5506B §11.3) and inline use
+/// on `aadlreal`/`aadlinteger` (`aadlreal units (...)`).
+fn units_designator_body(p: &mut Parser) {
+    p.expect(SyntaxKind::L_PAREN);
+    if p.at(SyntaxKind::IDENT) {
+        p.bump(SyntaxKind::IDENT);
+        while p.eat(SyntaxKind::COMMA) {
+            if p.at(SyntaxKind::IDENT) {
+                p.bump(SyntaxKind::IDENT);
+                if p.eat(SyntaxKind::FAT_ARROW) {
+                    if p.at(SyntaxKind::IDENT) {
+                        p.bump(SyntaxKind::IDENT);
+                    }
+                    if p.eat(SyntaxKind::STAR) {
+                        if p.at(SyntaxKind::INTEGER_LIT) {
+                            p.bump(SyntaxKind::INTEGER_LIT);
+                        } else if p.at(SyntaxKind::REAL_LIT) {
+                            p.bump(SyntaxKind::REAL_LIT);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    p.expect(SyntaxKind::R_PAREN);
+}
+
+/// On `aadlreal`/`aadlinteger`, accept either a named units classifier
+/// (`units My_Units`) or an inline `units (...)` block (AS5506B §11.3).
+fn numeric_units_designator(p: &mut Parser) {
+    if p.at(SyntaxKind::L_PAREN) {
+        units_designator_body(p);
+    } else if p.at(SyntaxKind::IDENT) {
+        super::classifier_ref(p);
+    }
 }
 
 fn applies_to_category(p: &mut Parser) {

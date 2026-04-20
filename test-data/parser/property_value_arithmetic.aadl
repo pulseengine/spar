@@ -1,0 +1,20 @@
+-- Regression test for GitHub issue #127:
+-- property values admit binary arithmetic per AS5506B §11.2.5.
+-- Unit suffix applies to the final operand (`5 * 1000 ps` = 5000 ps).
+package Test_Arithmetic
+public
+
+  processor P
+    properties
+      -- multiplication with trailing unit
+      Clock_Period => 5 * 1000 ps;
+      -- addition / subtraction
+      Priority => 10 + 5;
+      Offset => 100 - 50;
+      -- chained
+      Window => 2 * 3 * 4 ms;
+      -- signed operand on the left of a binary op
+      Slack => -3 + 10;
+  end P;
+
+end Test_Arithmetic;
