@@ -207,6 +207,7 @@ impl SystemInstance {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            pending_applies_to: Vec::new(),
             depth: 0,
             max_depth: 100,
         };
@@ -231,6 +232,10 @@ impl SystemInstance {
             None,
             None,
         );
+
+        // Resolve properties declared with `applies to <path>` onto their
+        // target component instances (AS5506B §8.3/§10.6; fixes #128, #129).
+        builder.resolve_pending_applies_to();
 
         let mut instance = SystemInstance {
             root: root_idx,
@@ -1284,6 +1289,17 @@ struct Builder<'a> {
     mode_transition_instances: Arena<ModeTransitionInstance>,
     diagnostics: Vec<InstanceDiagnostic>,
     property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    /// Property associations with a non-empty `applies to <path>` clause.
+    ///
+    /// These are collected during instantiation and eagerly attached to
+    /// their resolved target components in a post-pass, so that downstream
+    /// analyses (and JSON export) see the property on the target instance
+    /// rather than on the declaring ancestor (fixes #128, #129).
+    pending_applies_to: Vec<(
+        ComponentInstanceIdx,
+        String,
+        crate::properties::PropertyValue,
+    )>,
     depth: u32,
     max_depth: u32,
 }
@@ -2061,12 +2077,12 @@ impl<'a> Builder<'a> {
             for (tree_idx, pa_idx) in type_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        typed_expr: pa.typed_value.clone(),
-                        is_append: pa.is_append,
-                    });
+                    Self::push_property_association(
+                        pa,
+                        idx,
+                        &mut map,
+                        &mut self.pending_applies_to,
+                    );
                 }
             }
         }
@@ -2079,12 +2095,12 @@ impl<'a> Builder<'a> {
             for (tree_idx, pa_idx) in impl_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        typed_expr: pa.typed_value.clone(),
-                        is_append: pa.is_append,
-                    });
+                    Self::push_property_association(
+                        pa,
+                        idx,
+                        &mut map,
+                        &mut self.pending_applies_to,
+                    );
                 }
             }
         }
@@ -2096,12 +2112,7 @@ impl<'a> Builder<'a> {
             let sub = &tree.subcomponents[sub_idx];
             for &pa_idx in &sub.property_associations {
                 let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    typed_expr: pa.typed_value.clone(),
-                    is_append: pa.is_append,
-                });
+                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
             }
         }
 
@@ -2130,12 +2141,12 @@ impl<'a> Builder<'a> {
             for (tree_idx, pa_idx) in type_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
-                    map.add(crate::properties::PropertyValue {
-                        name: pa.name.clone(),
-                        value: pa.value.clone(),
-                        typed_expr: pa.typed_value.clone(),
-                        is_append: pa.is_append,
-                    });
+                    Self::push_property_association(
+                        pa,
+                        idx,
+                        &mut map,
+                        &mut self.pending_applies_to,
+                    );
                 }
             }
         }
@@ -2145,12 +2156,7 @@ impl<'a> Builder<'a> {
             let sub = &tree.subcomponents[sub_idx];
             for &pa_idx in &sub.property_associations {
                 let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    typed_expr: pa.typed_value.clone(),
-                    is_append: pa.is_append,
-                });
+                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
             }
         }
 
@@ -2172,18 +2178,98 @@ impl<'a> Builder<'a> {
             let sub = &tree.subcomponents[sub_idx];
             for &pa_idx in &sub.property_associations {
                 let pa = &tree.property_associations[pa_idx];
-                map.add(crate::properties::PropertyValue {
-                    name: pa.name.clone(),
-                    value: pa.value.clone(),
-                    typed_expr: pa.typed_value.clone(),
-                    is_append: pa.is_append,
-                });
+                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
             }
         }
 
         if !map.is_empty() {
             self.property_maps.insert(idx, map);
         }
+    }
+
+    /// Add a property association either to `map` (no `applies to` clause)
+    /// or to the pending queue (for post-pass eager target resolution).
+    ///
+    /// `owner` is the component on which the association is declared; the
+    /// pending queue later walks the dotted `applies_to` path starting from
+    /// `owner` to find the target instance.
+    fn push_property_association(
+        pa: &crate::item_tree::PropertyAssociationItem,
+        owner: ComponentInstanceIdx,
+        map: &mut PropertyMap,
+        pending: &mut Vec<(
+            ComponentInstanceIdx,
+            String,
+            crate::properties::PropertyValue,
+        )>,
+    ) {
+        let prop = crate::properties::PropertyValue {
+            name: pa.name.clone(),
+            value: pa.value.clone(),
+            typed_expr: pa.typed_value.clone(),
+            is_append: pa.is_append,
+        };
+        match pa.applies_to.as_deref() {
+            Some(path) if !path.trim().is_empty() => {
+                pending.push((owner, path.to_string(), prop));
+            }
+            _ => map.add(prop),
+        }
+    }
+
+    /// Post-instantiation pass: attach properties declared with
+    /// `applies to <dotted-path>` to their target component instances.
+    ///
+    /// AS5506B §8.3 / §10.6: a `Actual_Processor_Binding => ... applies to
+    /// fw.firmware;` declared at a system implementation must bind the
+    /// target thread instance, not the declaring system. This is resolved
+    /// eagerly so that downstream analyses and the JSON instance exporter
+    /// (#129) see the property on the target.
+    ///
+    /// If the path cannot be resolved (bad name, or walks into a feature
+    /// rather than a subcomponent), the property stays on the declaring
+    /// component and a diagnostic is recorded.
+    fn resolve_pending_applies_to(&mut self) {
+        let pending = std::mem::take(&mut self.pending_applies_to);
+        for (owner, path, prop) in pending {
+            match self.resolve_applies_to_path(owner, &path) {
+                Some(target) => {
+                    self.property_maps.entry(target).or_default().add(prop);
+                }
+                None => {
+                    // Unresolvable path: keep on owner (prior behavior) and
+                    // emit a diagnostic so the author notices.
+                    self.property_maps.entry(owner).or_default().add(prop);
+                    self.diagnostics.push(InstanceDiagnostic {
+                        message: format!(
+                            "applies_to path '{path}' could not be resolved to a component instance"
+                        ),
+                        path: vec![self.components[owner].name.clone()],
+                    });
+                }
+            }
+        }
+    }
+
+    /// Walk a dotted path (`fw.firmware`) from `owner` down through
+    /// subcomponent children, matching names case-insensitively. Returns
+    /// the resolved target component index, or `None` if any segment fails.
+    fn resolve_applies_to_path(
+        &self,
+        owner: ComponentInstanceIdx,
+        path: &str,
+    ) -> Option<ComponentInstanceIdx> {
+        let mut current = owner;
+        for segment in path.split('.').map(str::trim).filter(|s| !s.is_empty()) {
+            let child = self.components[current].children.iter().find(|&&ci| {
+                self.components[ci]
+                    .name
+                    .as_str()
+                    .eq_ignore_ascii_case(segment)
+            })?;
+            current = *child;
+        }
+        Some(current)
     }
 
     /// STPA-REQ-010: Validate that connection endpoint array indices are within bounds.
