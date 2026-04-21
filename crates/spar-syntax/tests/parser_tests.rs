@@ -914,8 +914,9 @@ end P;
     let result = parse(src);
     let errors = result.errors();
     assert!(
-        errors.iter().any(|e| e.msg.contains("duplicate")
-            && e.msg.contains("features")),
+        errors
+            .iter()
+            .any(|e| e.msg.contains("duplicate") && e.msg.contains("features")),
         "expected `duplicate features section` error, got: {:?}",
         errors
     );
@@ -936,8 +937,10 @@ end P;
 ";
     let result = parse(src);
     assert!(
-        result.errors().iter().any(|e| e.msg.contains("duplicate")
-            && e.msg.contains("modes")),
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("duplicate") && e.msg.contains("modes")),
         "expected `duplicate modes section` error, got: {:?}",
         result.errors()
     );
@@ -959,8 +962,10 @@ end P;
 ";
     let result = parse(src);
     assert!(
-        result.errors().iter().any(|e| e.msg.contains("duplicate")
-            && e.msg.contains("properties")),
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("duplicate") && e.msg.contains("properties")),
         "expected `duplicate properties section` error, got: {:?}",
         result.errors()
     );
@@ -982,10 +987,7 @@ end P;
 ";
     let result = parse(src);
     assert!(
-        !result
-            .errors()
-            .iter()
-            .any(|e| e.msg.contains("duplicate")),
+        !result.errors().iter().any(|e| e.msg.contains("duplicate")),
         "annex subclauses must not be flagged as duplicate; got errors: {:?}",
         result.errors()
     );

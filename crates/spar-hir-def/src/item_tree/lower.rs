@@ -1986,8 +1986,20 @@ fn lower_range_from_tokens(node: &SyntaxNode) -> Option<PropertyExpr> {
             };
             PropertyExpr::Real(display, min_unit)
         } else {
-            let val = parse_aadl_integer(&num_text).unwrap_or(0) * min_sign;
-            PropertyExpr::Integer(val, min_unit)
+            // Prior code used `unwrap_or(0)` here, silently substituting
+            // `0` for any integer literal that didn't fit in i64 — a range
+            // like `-9999999999999999999 .. 10` would lower to a range
+            // starting at 0 with zero diagnostic. Preserve the original
+            // literal as Opaque so analyses can detect the overflow
+            // instead of consuming a forged bound.
+            match parse_aadl_integer(&num_text).and_then(|v| v.checked_mul(min_sign)) {
+                Some(val) => PropertyExpr::Integer(val, min_unit),
+                None => PropertyExpr::Opaque(format!(
+                    "{}{}",
+                    if min_sign < 0 { "-" } else { "" },
+                    num_text
+                )),
+            }
         }
     };
 
@@ -2974,6 +2986,90 @@ end Pkg;
             ci.requires_modes,
             "component impl with `requires modes` should set requires_modes = true"
         );
+    }
+}
+
+#[cfg(test)]
+mod range_lowering_tests {
+    use super::*;
+    use spar_syntax::{SyntaxKind, parse};
+
+    /// Regression for the `unwrap_or(0)` silent-substitution bug in
+    /// `lower_range_from_tokens`. An AADL range whose min literal
+    /// exceeds i64 must NOT lower to `Integer(0, _)` — a forged bound
+    /// that downstream analyses would consume as legitimate.
+    #[test]
+    fn overflowing_range_min_does_not_silently_become_zero() {
+        // -9999999999999999999 is magnitude ~1e19, well above i64::MAX.
+        let src = r#"
+package P
+public
+  processor Proc
+    properties
+      Compute_Execution_Time => -9999999999999999999 ms .. 10 ms;
+  end Proc;
+end P;
+"#;
+        let parsed = parse(src);
+        // Walk to the RANGE_VALUE node and lower it directly.
+        let range = parsed
+            .syntax_node()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::RANGE_VALUE)
+            .expect("range value node");
+        let lowered = lower_range_from_tokens(&range).expect("range lowers");
+        match lowered {
+            PropertyExpr::Range { min, .. } => match *min {
+                PropertyExpr::Integer(0, _) => {
+                    panic!(
+                        "range min silently became 0 on i64 overflow; \
+                         author wrote -9999999999999999999"
+                    );
+                }
+                PropertyExpr::Integer(_, _) => {
+                    // Unexpected: should not fit in i64. A non-zero i64
+                    // would mean saturation or wrap — also wrong, but
+                    // not the regression we're guarding against here.
+                    panic!("range min fit in i64 unexpectedly");
+                }
+                PropertyExpr::Opaque(text) => {
+                    assert!(
+                        text.contains("9999999999999999999"),
+                        "Opaque min must preserve the original literal; got {text:?}"
+                    );
+                }
+                other => panic!("unexpected min shape: {other:?}"),
+            },
+            other => panic!("expected Range, got {other:?}"),
+        }
+    }
+
+    /// In-range positive integer range-min still lowers correctly.
+    #[test]
+    fn in_range_positive_min_lowers_correctly() {
+        let src = r#"
+package P
+public
+  processor Proc
+    properties
+      Compute_Execution_Time => 5 ms .. 10 ms;
+  end Proc;
+end P;
+"#;
+        let parsed = parse(src);
+        let range = parsed
+            .syntax_node()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::RANGE_VALUE)
+            .expect("range value node");
+        let lowered = lower_range_from_tokens(&range).expect("range lowers");
+        match lowered {
+            PropertyExpr::Range { min, .. } => match *min {
+                PropertyExpr::Integer(5, _) => {}
+                other => panic!("expected Integer(5, _), got {other:?}"),
+            },
+            other => panic!("expected Range, got {other:?}"),
+        }
     }
 }
 
