@@ -158,17 +158,65 @@ fn impl_extension(p: &mut Parser) {
     m.complete(p, SyntaxKind::IMPL_EXTENSION);
 }
 
+/// Track which distinct sections have been seen so far inside a single
+/// component type or implementation body.
+///
+/// AS-5506B §4.5 (component_type) and §5.1 (component_implementation)
+/// grammar uses `?` (zero-or-one) on each section — not `*`. A component
+/// declaration with two `features` clauses (or two `modes`, two
+/// `properties`, …) is therefore a syntax error. Without this guard the
+/// parser silently accepted duplicates, and lowering's `.find(|c| c.kind()
+/// == FEATURE_SECTION)` call at item_tree/lower.rs silently dropped the
+/// second section, so a reviewer who saw one interface in source ended up
+/// with a different interface in the instance model.
+#[derive(Default)]
+struct SeenSections {
+    seen: Vec<(SyntaxKind, &'static str)>,
+}
+
+impl SeenSections {
+    /// Returns true on the first hit, false (and emits an error) on a repeat.
+    fn check(&mut self, p: &mut Parser, kind: SyntaxKind, label: &'static str) -> bool {
+        if self.seen.iter().any(|(k, _)| *k == kind) {
+            p.error(format!("duplicate `{label}` section"));
+            false
+        } else {
+            self.seen.push((kind, label));
+            true
+        }
+    }
+}
+
 fn component_type_sections(p: &mut Parser) {
+    let mut seen = SeenSections::default();
     loop {
         match p.current() {
-            SyntaxKind::PROTOTYPES_KW => prototype_section(p),
-            SyntaxKind::FEATURES_KW => super::features::feature_section(p),
-            SyntaxKind::FLOWS_KW => super::flows::flow_spec_section(p),
-            SyntaxKind::MODES_KW => super::modes::mode_section(p),
-            SyntaxKind::REQUIRES_KW if p.nth(1) == SyntaxKind::MODES_KW => {
+            SyntaxKind::PROTOTYPES_KW => {
+                seen.check(p, SyntaxKind::PROTOTYPES_KW, "prototypes");
+                prototype_section(p);
+            }
+            SyntaxKind::FEATURES_KW => {
+                seen.check(p, SyntaxKind::FEATURES_KW, "features");
+                super::features::feature_section(p);
+            }
+            SyntaxKind::FLOWS_KW => {
+                seen.check(p, SyntaxKind::FLOWS_KW, "flows");
+                super::flows::flow_spec_section(p);
+            }
+            SyntaxKind::MODES_KW => {
+                seen.check(p, SyntaxKind::MODES_KW, "modes");
                 super::modes::mode_section(p);
             }
-            SyntaxKind::PROPERTIES_KW => super::properties::property_section(p),
+            SyntaxKind::REQUIRES_KW if p.nth(1) == SyntaxKind::MODES_KW => {
+                seen.check(p, SyntaxKind::MODES_KW, "modes");
+                super::modes::mode_section(p);
+            }
+            SyntaxKind::PROPERTIES_KW => {
+                seen.check(p, SyntaxKind::PROPERTIES_KW, "properties");
+                super::properties::property_section(p);
+            }
+            // AS-5506B §4.5: an annex subclause may appear multiple times
+            // (one per annex language), so do not dedup on ANNEX_KW here.
             SyntaxKind::ANNEX_KW => super::annexes::annex_subclause(p),
             _ => break,
         }
@@ -176,22 +224,50 @@ fn component_type_sections(p: &mut Parser) {
 }
 
 fn component_impl_sections(p: &mut Parser) {
+    let mut seen = SeenSections::default();
     loop {
         match p.current() {
-            SyntaxKind::PROTOTYPES_KW => prototype_section(p),
-            SyntaxKind::SUBCOMPONENTS_KW => subcomponent_section(p),
-            SyntaxKind::INTERNAL_KW => internal_features_section(p),
+            SyntaxKind::PROTOTYPES_KW => {
+                seen.check(p, SyntaxKind::PROTOTYPES_KW, "prototypes");
+                prototype_section(p);
+            }
+            SyntaxKind::SUBCOMPONENTS_KW => {
+                seen.check(p, SyntaxKind::SUBCOMPONENTS_KW, "subcomponents");
+                subcomponent_section(p);
+            }
+            SyntaxKind::INTERNAL_KW => {
+                seen.check(p, SyntaxKind::INTERNAL_KW, "internal features");
+                internal_features_section(p);
+            }
             SyntaxKind::PROCESSOR_KW if p.nth(1) == SyntaxKind::FEATURES_KW => {
+                seen.check(p, SyntaxKind::PROCESSOR_KW, "processor features");
                 processor_features_section(p);
             }
-            SyntaxKind::CONNECTIONS_KW => super::connections::connection_section(p),
-            SyntaxKind::CALLS_KW => call_section(p),
-            SyntaxKind::FLOWS_KW => super::flows::flow_impl_section(p),
-            SyntaxKind::MODES_KW => super::modes::mode_section(p),
-            SyntaxKind::REQUIRES_KW if p.nth(1) == SyntaxKind::MODES_KW => {
+            SyntaxKind::CONNECTIONS_KW => {
+                seen.check(p, SyntaxKind::CONNECTIONS_KW, "connections");
+                super::connections::connection_section(p);
+            }
+            SyntaxKind::CALLS_KW => {
+                seen.check(p, SyntaxKind::CALLS_KW, "calls");
+                call_section(p);
+            }
+            SyntaxKind::FLOWS_KW => {
+                seen.check(p, SyntaxKind::FLOWS_KW, "flows");
+                super::flows::flow_impl_section(p);
+            }
+            SyntaxKind::MODES_KW => {
+                seen.check(p, SyntaxKind::MODES_KW, "modes");
                 super::modes::mode_section(p);
             }
-            SyntaxKind::PROPERTIES_KW => super::properties::property_section(p),
+            SyntaxKind::REQUIRES_KW if p.nth(1) == SyntaxKind::MODES_KW => {
+                seen.check(p, SyntaxKind::MODES_KW, "modes");
+                super::modes::mode_section(p);
+            }
+            SyntaxKind::PROPERTIES_KW => {
+                seen.check(p, SyntaxKind::PROPERTIES_KW, "properties");
+                super::properties::property_section(p);
+            }
+            // AS-5506B §5.1: annex subclauses may repeat.
             SyntaxKind::ANNEX_KW => super::annexes::annex_subclause(p),
             _ => break,
         }

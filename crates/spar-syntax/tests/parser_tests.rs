@@ -891,6 +891,106 @@ fn test_data_property_value_signed_arithmetic() {
     check_file_no_errors("../../test-data/parser/property_value_signed_arithmetic.aadl");
 }
 
+// Regression for the duplicate-section silent-acceptance bug: AS-5506B
+// §4.5 / §5.1 use `?` on each component section, so a second `features`,
+// `modes`, `properties`, etc. inside the same component must be rejected.
+// The prior `loop { match }` dispatcher had no seen-tracking; worse,
+// lowering used `.find()` (not `.filter()`) and silently dropped the
+// second section, so a reviewer could see ports in source that never
+// reached the instance model.
+#[test]
+fn duplicate_features_section_is_rejected() {
+    let src = "\
+package P
+public
+  system S
+    features
+      p1 : in data port;
+    features
+      p2 : out data port;
+  end S;
+end P;
+";
+    let result = parse(src);
+    let errors = result.errors();
+    assert!(
+        errors.iter().any(|e| e.msg.contains("duplicate")
+            && e.msg.contains("features")),
+        "expected `duplicate features section` error, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn duplicate_modes_section_is_rejected() {
+    let src = "\
+package P
+public
+  system S
+    modes
+      m1 : initial mode;
+    modes
+      m2 : mode;
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result.errors().iter().any(|e| e.msg.contains("duplicate")
+            && e.msg.contains("modes")),
+        "expected `duplicate modes section` error, got: {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn duplicate_properties_section_in_impl_is_rejected() {
+    let src = "\
+package P
+public
+  system S end S;
+  system implementation S.i
+    properties
+      Priority => 5;
+    properties
+      Priority => 7;
+  end S.i;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result.errors().iter().any(|e| e.msg.contains("duplicate")
+            && e.msg.contains("properties")),
+        "expected `duplicate properties section` error, got: {:?}",
+        result.errors()
+    );
+}
+
+// Multiple annex subclauses must still be allowed — AS-5506B §4.5 / §5.1
+// don't dedup on annex_subclause, and real models routinely attach EMV2
+// alongside Behavior Annex.
+#[test]
+fn multiple_annex_subclauses_are_allowed() {
+    let src = "\
+package P
+public
+  system S
+    annex EMV2 {** **};
+    annex BLESS {** **};
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        !result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("duplicate")),
+        "annex subclauses must not be flagged as duplicate; got errors: {:?}",
+        result.errors()
+    );
+}
+
 // Shape-level assertion: in `-1 + 2` the signed PROPERTY_EXPRESSION node
 // must cover only `-1`, not the entire tail.
 #[test]
