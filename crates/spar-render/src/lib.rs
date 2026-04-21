@@ -166,10 +166,7 @@ fn ancestor_at_depth(
             return None;
         }
         let comp = instance.component(current);
-        match comp.parent {
-            Some(p) => current = p,
-            None => return None,
-        }
+        current = comp.parent?;
     }
 }
 

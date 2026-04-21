@@ -1899,10 +1899,9 @@ fn make_swap_connection_edit(source: &str, uri: &Uri, diag_range: &Range) -> Opt
     // Look for `src -> dst` or `src <-> dst` pattern
     let (arrow, arrow_len) = if let Some(pos) = line.find(" -> ") {
         (pos, 4)
-    } else if let Some(pos) = line.find(" <-> ") {
-        (pos, 5)
     } else {
-        return None;
+        let pos = line.find(" <-> ")?;
+        (pos, 5)
     };
 
     // Find the source and destination parts
@@ -4063,5 +4062,63 @@ mod tests {
             refs
         );
         assert!(has_end_name, "should find end-name on line 5: {:?}", refs);
+    }
+
+    // ── make_swap_connection_edit ───────────────────────────────────
+    //
+    // Cover both arrow shapes; the `<->` branch exists because the AADL
+    // grammar permits bidirectional `->` and `<->` connections, and the
+    // quick-fix has to preserve whichever arrow the source used.
+
+    #[test]
+    #[allow(clippy::mutable_key_type)] // Uri has interior mutability; see make_swap_connection_edit
+    fn swap_connection_supports_unidirectional_arrow() {
+        let uri: Uri = "file:///test.aadl".parse().unwrap();
+        let source = "package P\npublic\n  system S\n    features\n      p_in : in data port;\n      p_out : out data port;\n  end S;\n  system implementation S.i\n    subcomponents\n      sub : process Pr;\n    connections\n      c1 : port sub.outp -> p_out;\n  end S.i;\n  process Pr\n    features\n      outp : out data port;\n  end Pr;\nend P;\n";
+        // Position anywhere on the connection line.
+        let diag_range = Range::new(Position::new(11, 10), Position::new(11, 10));
+        let edit = make_swap_connection_edit(source, &uri, &diag_range)
+            .expect("-> connection must produce a swap edit");
+        let changes = edit.changes.expect("edit must carry changes");
+        let text_edits = changes.get(&uri).expect("edits keyed by URI");
+        assert_eq!(text_edits.len(), 1, "one TextEdit expected");
+        assert!(
+            text_edits[0].new_text.contains(" -> "),
+            "arrow must be preserved, got {:?}",
+            text_edits[0].new_text
+        );
+    }
+
+    #[test]
+    #[allow(clippy::mutable_key_type)] // Uri has interior mutability; see make_swap_connection_edit
+    fn swap_connection_supports_bidirectional_arrow() {
+        // Regression for codecov/patch gap on the `<->` branch of
+        // make_swap_connection_edit: a bidirectional connection must also
+        // produce a swap edit and preserve the `<->` arrow form.
+        let uri: Uri = "file:///test.aadl".parse().unwrap();
+        let source = "package P\npublic\n  bus B\n  end B;\n  device D\n    features\n      ba : requires bus access;\n  end D;\n  system S\n  end S;\n  system implementation S.i\n    subcomponents\n      bus1 : bus B;\n      dev : device D;\n    connections\n      c1 : bus access bus1 <-> dev.ba;\n  end S.i;\nend P;\n";
+        let diag_range = Range::new(Position::new(15, 10), Position::new(15, 10));
+        let edit = make_swap_connection_edit(source, &uri, &diag_range)
+            .expect("<-> connection must produce a swap edit");
+        let changes = edit.changes.expect("edit must carry changes");
+        let text_edits = changes.get(&uri).expect("edits keyed by URI");
+        assert_eq!(text_edits.len(), 1, "one TextEdit expected");
+        assert!(
+            text_edits[0].new_text.contains(" <-> "),
+            "bidirectional arrow must be preserved, got {:?}",
+            text_edits[0].new_text
+        );
+    }
+
+    #[test]
+    fn swap_connection_returns_none_when_no_arrow() {
+        // When the targeted line has neither `->` nor `<->`, the helper
+        // must bail out cleanly with None — exercises the `?` shortcut
+        // in the `<->` fallback branch.
+        let uri: Uri = "file:///test.aadl".parse().unwrap();
+        let source = "package P\npublic\n  system S\n  end S;\nend P;\n";
+        let diag_range = Range::new(Position::new(2, 2), Position::new(2, 2));
+        let edit = make_swap_connection_edit(source, &uri, &diag_range);
+        assert!(edit.is_none(), "no-arrow line must not produce a swap edit");
     }
 }
