@@ -882,6 +882,49 @@ fn test_data_property_value_arithmetic() {
     check_file_no_errors("../../test-data/parser/property_value_arithmetic.aadl");
 }
 
+// Regression for the unary-sign operator-precedence bug introduced when
+// property_expression was split into outer-binary-loop + _primary: the
+// PLUS/MINUS arm was still recursing into the outer function, so the sign
+// greedily consumed the following additive tail.
+#[test]
+fn test_data_property_value_signed_arithmetic() {
+    check_file_no_errors("../../test-data/parser/property_value_signed_arithmetic.aadl");
+}
+
+// Shape-level assertion: in `-1 + 2` the signed PROPERTY_EXPRESSION node
+// must cover only `-1`, not the entire tail.
+#[test]
+fn unary_sign_binds_to_literal_only_not_to_additive_tail() {
+    let src = "\
+package P
+public
+  processor PP
+    properties
+      Foo::Bar => -1 + 2;
+  end PP;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result.errors().is_empty(),
+        "expected clean parse, got: {:?}",
+        result.errors()
+    );
+    let root = result.syntax_node();
+    let signed = root
+        .descendants()
+        .find(|n| {
+            n.kind() == SyntaxKind::PROPERTY_EXPRESSION
+                && n.text().to_string().trim_start().starts_with('-')
+        })
+        .expect("signed-literal PROPERTY_EXPRESSION node");
+    let text = signed.text().to_string();
+    assert!(
+        !text.contains('+'),
+        "unary `-` greedy-ate the additive tail: signed node text = {text:?}"
+    );
+}
+
 // ====================================================================
 // OSATE2 test files
 // ====================================================================

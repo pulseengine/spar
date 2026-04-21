@@ -245,10 +245,16 @@ fn property_expression_primary(p: &mut Parser) {
             }
         }
         SyntaxKind::PLUS | SyntaxKind::MINUS => {
-            // Signed numeric value
+            // Signed numeric value. Recurse into *primary* (not the outer
+            // wrapper), otherwise the binary-op loop would greedily consume
+            // the following `+`/`-`/`*` operators into the signed operand —
+            // causing `-1 + 2` to parse as `-(1+2)` instead of `(-1)+2`.
+            // AS-5506B §11.2.5: `numeric_term ::= [sign] numeric_literal`
+            // — the sign is part of the signed literal, not a prefix over
+            // the additive expression.
             let m = p.start();
             p.bump_any();
-            property_expression(p);
+            property_expression_primary(p);
             m.complete(p, SyntaxKind::PROPERTY_EXPRESSION);
         }
         _ => {
