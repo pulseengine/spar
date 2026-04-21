@@ -2,13 +2,13 @@
 
 # Spar
 
-<sup>AADL v2.2/v2.3 toolchain + deployment solver</sup>
+<sup>AADL v2.3 toolchain + deployment solver</sup>
 
 &nbsp;
 
 ![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat-square&logo=rust&logoColor=white&labelColor=1a1b27)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat-square&logo=webassembly&logoColor=white&labelColor=1a1b27)
-![AADL](https://img.shields.io/badge/AADL_v2.2-AS5506D-654FF0?style=flat-square&labelColor=1a1b27)
+![AADL](https://img.shields.io/badge/AADL_v2.3-AS5506D-654FF0?style=flat-square&labelColor=1a1b27)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square&labelColor=1a1b27)
 
 [![CI](https://github.com/pulseengine/spar/actions/workflows/ci.yml/badge.svg)](https://github.com/pulseengine/spar/actions/workflows/ci.yml)

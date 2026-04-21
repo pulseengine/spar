@@ -1,8 +1,11 @@
-# spar — AADL v2.2 Toolchain
+# spar — AADL v2.3 Toolchain
 
 spar is a Rust-based toolchain for the Architecture Analysis & Design Language
-(AADL, SAE AS5506C). It provides parsing, semantic analysis, safety analysis,
-and interactive architecture visualization for safety-critical system design.
+(AADL, SAE AS5506D / AADL v2.3). It provides parsing, semantic analysis, safety
+analysis, and interactive architecture visualization for safety-critical system
+design. AADL v2.3 is a superset of v2.2, so v2.2 models parse without change;
+v2.3-specific constructs (arrays, prototypes, enhanced property expressions,
+modal filtering) are also supported.
 
 ## Architecture
 
@@ -43,7 +46,7 @@ graph TB
 
 | Crate | Purpose |
 |-------|---------|
-| `spar-parser` | AADL v2.2 lexer and parser |
+| `spar-parser` | AADL v2.3 lexer and parser |
 | `spar-syntax` | Lossless CST via rowan |
 | `spar-annex` | EMV2 and behavior annex parsing |
 | `spar-base-db` | Salsa incremental computation database |
@@ -58,7 +61,7 @@ graph TB
 
 ## Key Features
 
-- **Full AADL v2.2 parser** with error recovery and lossless syntax tree
+- **Full AADL v2.3 parser** (AS5506D) with error recovery and lossless syntax tree
 - **21 analysis passes** including RMA scheduling, latency, EMV2 fault trees, mode reachability
 - **Port-aware rendering** with orthogonal edge routing and interactive HTML
 - **LSP server** with 10 IDE features (diagnostics, hover, completion, go-to-def, rename, etc.)
