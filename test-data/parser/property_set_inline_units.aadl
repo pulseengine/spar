@@ -1,0 +1,18 @@
+-- Regression test for GitHub issue #126:
+-- AS5506B §11.3 permits an inline `units (...)` designator on a numeric
+-- property type (`aadlreal` / `aadlinteger`). The parser must accept
+-- both the named-classifier form and the inline form.
+property set Test_Units is
+
+  -- Inline units on aadlreal
+  Power: aadlreal units (uA, mA => uA * 1000, A => mA * 1000) applies to (device);
+
+  -- Inline units on aadlinteger
+  Capacity: aadlinteger units (mAh, Ah => mAh * 1000) applies to (device);
+
+  -- Named-classifier form must still work (pre-existing path).
+  Bandwidth: aadlreal units Test_Units::Data_Rate_Units applies to (bus);
+
+  Data_Rate_Units: type units (bps, Kbps => bps * 1000);
+
+end Test_Units;

@@ -124,7 +124,8 @@ fn cmd_parse(args: &[String]) {
         } else {
             has_errors = true;
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
         }
     }
@@ -439,7 +440,8 @@ fn cmd_analyze(args: &[String]) {
         let parsed = spar_syntax::parse(&source);
         if !parsed.ok() {
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
             eprintln!("Cannot analyze: parse errors in {}", file_path);
             process::exit(1);
@@ -586,7 +588,8 @@ fn cmd_allocate(args: &[String]) {
         let parsed = spar_syntax::parse(&source);
         if !parsed.ok() {
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
             eprintln!("Cannot allocate: parse errors in {}", file_path);
             process::exit(1);
@@ -1287,7 +1290,8 @@ fn cmd_verify(args: &[String]) {
         let parsed = spar_syntax::parse(&source);
         if !parsed.ok() {
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
             eprintln!("Cannot verify: parse errors in {}", file_path);
             process::exit(1);
@@ -1581,7 +1585,8 @@ fn cmd_codegen(args: &[String]) {
         let parsed = spar_syntax::parse(&source);
         if !parsed.ok() {
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
             eprintln!("Cannot codegen: parse errors in {}", file_path);
             process::exit(1);
@@ -1715,7 +1720,8 @@ fn cmd_sysml2_parse(args: &[String]) {
         } else {
             has_errors = true;
             for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
             }
         }
     }
@@ -1768,7 +1774,8 @@ fn cmd_sysml2_lower(args: &[String]) {
     let parsed = spar_sysml2::parse(&all_source);
     if !parsed.ok() {
         for err in parsed.errors() {
-            eprintln!("parse error at {}: {}", err.offset, err.msg);
+            let (line, col) = spar_base_db::offset_to_line_col(&all_source, err.offset);
+            eprintln!("parse error at {}:{}: {}", line, col, err.msg);
         }
         process::exit(1);
     }
@@ -1838,7 +1845,8 @@ fn cmd_sysml2_extract(args: &[String]) {
     let parsed = spar_sysml2::parse(&all_source);
     if !parsed.ok() {
         for err in parsed.errors() {
-            eprintln!("parse error at {}: {}", err.offset, err.msg);
+            let (line, col) = spar_base_db::offset_to_line_col(&all_source, err.offset);
+            eprintln!("parse error at {}:{}: {}", line, col, err.msg);
         }
         process::exit(1);
     }

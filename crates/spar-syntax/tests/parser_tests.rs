@@ -863,6 +863,25 @@ fn test_data_with_clauses() {
     check_file_no_errors("../../test-data/parser/with_clauses.aadl");
 }
 
+// Regression for #125: enumeration property definition followed by another
+// property must not break the property-set loop.
+#[test]
+fn test_data_property_set_enum_sequenced() {
+    check_file_no_errors("../../test-data/parser/property_set_enum_sequenced.aadl");
+}
+
+// Regression for #126: inline `units (...)` on aadlreal/aadlinteger.
+#[test]
+fn test_data_property_set_inline_units() {
+    check_file_no_errors("../../test-data/parser/property_set_inline_units.aadl");
+}
+
+// Regression for #127: binary arithmetic in property values.
+#[test]
+fn test_data_property_value_arithmetic() {
+    check_file_no_errors("../../test-data/parser/property_value_arithmetic.aadl");
+}
+
 // ====================================================================
 // OSATE2 test files
 // ====================================================================

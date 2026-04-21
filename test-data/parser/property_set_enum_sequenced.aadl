@@ -1,0 +1,11 @@
+-- Regression test for GitHub issue #125:
+-- an `enumeration` property definition followed by another property
+-- definition must parse cleanly. Before the fix, `Binding:` on the
+-- next line was lexed as BINDING_KW and the property-set loop broke.
+property set Test_Props is
+
+  Radio: enumeration (ThreadMesh, LoRa, BLE) applies to (bus);
+
+  Binding: aadlstring applies to (device);
+
+end Test_Props;

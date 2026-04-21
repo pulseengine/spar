@@ -380,6 +380,12 @@ pub struct InstanceNode {
     pub array_index: Option<u64>,
     pub features: Vec<InstanceFeature>,
     pub connections: Vec<InstanceConnection>,
+    /// Resolved property values on this instance — the raw value text keyed
+    /// by the (optional) property-set qualifier and property name, rendered
+    /// as `PropSet::Name` or just `Name`. Includes both type-level / impl
+    /// inheritance and values attached via `applies to <path>`.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub properties: std::collections::BTreeMap<String, String>,
     pub children: Vec<InstanceNode>,
     pub diagnostics: Vec<String>,
 }
@@ -544,6 +550,22 @@ impl Instance {
             .map(|&child_idx| self.build_node(child_idx))
             .collect();
 
+        // Resolved property values for this instance (fixes #129).
+        let properties = {
+            let mut out = std::collections::BTreeMap::new();
+            let pmap = self.inner.properties_for(idx);
+            for (_key, values) in pmap.iter() {
+                let Some(pv) = values.first() else { continue };
+                let name = pv.name.property_name.as_str();
+                let key = match pv.name.property_set.as_ref() {
+                    Some(ps) if !ps.as_str().is_empty() => format!("{}::{}", ps.as_str(), name),
+                    _ => name.to_string(),
+                };
+                out.insert(key, pv.value.clone());
+            }
+            out
+        };
+
         InstanceNode {
             name: comp.name.as_str().to_string(),
             category: comp.category,
@@ -553,6 +575,7 @@ impl Instance {
             array_index: comp.array_index,
             features,
             connections,
+            properties,
             children,
             diagnostics: vec![],
         }
@@ -2193,6 +2216,7 @@ mod serde_round_trip_tests {
                 source: Some("cpu1.data_out".to_string()),
                 destination: Some("cpu2.data_in".to_string()),
             }],
+            properties: std::collections::BTreeMap::new(),
             children: vec![
                 InstanceNode {
                     name: "cpu1".to_string(),
@@ -2208,6 +2232,7 @@ mod serde_round_trip_tests {
                         array_index: None,
                     }],
                     connections: vec![],
+                    properties: std::collections::BTreeMap::new(),
                     children: vec![],
                     diagnostics: vec![],
                 },
@@ -2225,6 +2250,7 @@ mod serde_round_trip_tests {
                         array_index: Some(2),
                     }],
                     connections: vec![],
+                    properties: std::collections::BTreeMap::new(),
                     children: vec![],
                     diagnostics: vec!["unresolved classifier".to_string()],
                 },
@@ -2253,6 +2279,7 @@ mod serde_round_trip_tests {
                 array_index: None,
             }],
             connections: vec![],
+            properties: std::collections::BTreeMap::new(),
             children: vec![],
             diagnostics: vec![],
         };
@@ -2266,6 +2293,7 @@ mod serde_round_trip_tests {
             array_index: None,
             features: vec![],
             connections: vec![],
+            properties: std::collections::BTreeMap::new(),
             children: vec![thread],
             diagnostics: vec![],
         };
@@ -2279,6 +2307,7 @@ mod serde_round_trip_tests {
             array_index: None,
             features: vec![],
             connections: vec![],
+            properties: std::collections::BTreeMap::new(),
             children: vec![process],
             diagnostics: vec![],
         };

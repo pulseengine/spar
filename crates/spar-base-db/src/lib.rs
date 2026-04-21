@@ -73,6 +73,20 @@ pub struct ParseError {
     pub offset: usize,
 }
 
+/// Convert a byte offset into source text to a 1-based `(line, column)` pair.
+///
+/// Lines are separated by `\n`. Column counts Unicode scalar values (chars),
+/// not bytes, so multibyte characters don't inflate the column number. If
+/// `offset` exceeds `source.len()` it is clamped to the end.
+pub fn offset_to_line_col(source: &str, offset: usize) -> (u32, u32) {
+    let clamped = offset.min(source.len());
+    let prefix = &source[..clamped];
+    let line = prefix.bytes().filter(|&b| b == b'\n').count() as u32 + 1;
+    let line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col = source[line_start..clamped].chars().count() as u32 + 1;
+    (line, col)
+}
+
 /// A parsed annex within a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnnexResult {
@@ -205,6 +219,33 @@ end ErrorLib;
         assert!(result.ok(), "errors: {:?}", result.errors());
         assert_eq!(result.annexes().len(), 1);
         assert_eq!(result.annexes()[0].name, "EMV2");
+    }
+
+    #[test]
+    fn offset_to_line_col_basic() {
+        let src = "abc\ndef\nghi";
+        assert_eq!(offset_to_line_col(src, 0), (1, 1));
+        assert_eq!(offset_to_line_col(src, 2), (1, 3));
+        assert_eq!(offset_to_line_col(src, 3), (1, 4)); // column after "abc"
+        assert_eq!(offset_to_line_col(src, 4), (2, 1)); // 'd'
+        assert_eq!(offset_to_line_col(src, 8), (3, 1)); // 'g'
+        assert_eq!(offset_to_line_col(src, 10), (3, 3)); // 'i'
+    }
+
+    #[test]
+    fn offset_to_line_col_clamps_past_end() {
+        let src = "one";
+        assert_eq!(offset_to_line_col(src, 9999), (1, 4));
+    }
+
+    #[test]
+    fn offset_to_line_col_multibyte() {
+        // 'é' is 2 bytes in UTF-8; offsets must land on char boundaries.
+        let src = "héllo\nworld";
+        let e_offset = 3; // byte offset after "hé" (1 + 2)
+        assert_eq!(offset_to_line_col(src, e_offset), (1, 3));
+        let w_offset = src.find('w').unwrap();
+        assert_eq!(offset_to_line_col(src, w_offset), (2, 1));
     }
 
     #[test]
