@@ -53,6 +53,9 @@ artifacts:
 
   - id: H-1
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
     title: Analysis produces false negative
     description: >
       Spar's analysis passes fail to detect a genuine architectural
@@ -63,6 +66,11 @@ artifacts:
 
   - id: H-2
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-2
+      - type: leads-to-loss
+        target: L-3
     title: Analysis produces false positive
     description: >
       Spar reports a defect that does not actually exist in the model,
@@ -72,6 +80,11 @@ artifacts:
 
   - id: H-3
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
+      - type: leads-to-loss
+        target: L-4
     title: Instance model does not match declarative model
     description: >
       The instantiated system tree diverges from the declared AADL
@@ -82,6 +95,9 @@ artifacts:
 
   - id: H-4
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-4
     title: Serialized output does not match internal model
     description: >
       JSON, SVG, or text output represents a different model than
@@ -91,6 +107,11 @@ artifacts:
 
   - id: H-5
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
+      - type: leads-to-loss
+        target: L-3
     title: Parser silently drops valid AADL constructs
     description: >
       The parser accepts input without error but silently omits valid
@@ -101,6 +122,9 @@ artifacts:
 
   - id: H-6
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
     title: Property values incorrectly evaluated
     description: >
       Timing, memory, or deployment properties are parsed or evaluated
@@ -111,6 +135,11 @@ artifacts:
 
   - id: H-7
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
+      - type: leads-to-loss
+        target: L-4
     title: SysML v2 lowering produces semantically incorrect AADL
     description: >
       The SysML v2 to AADL lowering transformation produces AADL
@@ -124,6 +153,11 @@ artifacts:
 
   - id: H-8
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-1
+      - type: leads-to-loss
+        target: L-3
     title: Verification pipeline provides false assurance
     description: >
       The Bazel-based verification pipeline (Verus, Lean4, WASM component
@@ -139,6 +173,9 @@ artifacts:
 
   - id: SC-1
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-1
     title: No false negatives on safety analyses
     description: >
       Spar must detect all genuine architectural defects for which it
@@ -148,6 +185,9 @@ artifacts:
 
   - id: SC-2
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-2
     title: Minimize false positives
     description: >
       Spar should not report defects that do not exist. When uncertain,
@@ -157,6 +197,9 @@ artifacts:
 
   - id: SC-3
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-3
     title: Instance model fidelity
     description: >
       The instance model must faithfully represent the declared AADL
@@ -166,6 +209,9 @@ artifacts:
 
   - id: SC-4
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-4
     title: Output fidelity
     description: >
       All serialized outputs (JSON, SVG, text) must accurately represent
@@ -175,6 +221,9 @@ artifacts:
 
   - id: SC-5
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-5
     title: Parser completeness
     description: >
       The parser must produce CST nodes for all valid AADL v2.2 constructs.
@@ -184,6 +233,9 @@ artifacts:
 
   - id: SC-6
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-6
     title: Property evaluation correctness
     description: >
       Property values must be evaluated with correct units, arithmetic,
@@ -193,6 +245,9 @@ artifacts:
 
   - id: SC-7
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-7
     title: SysML v2 lowering semantic fidelity
     description: >
       The SysML v2 to AADL lowering must faithfully preserve the design
@@ -204,6 +259,9 @@ artifacts:
 
   - id: SC-8
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-8
     title: Verification pipeline integrity
     description: >
       The Bazel verification pipeline must fail loudly when verification
@@ -338,6 +396,11 @@ artifacts:
 
   - id: CA-PARSE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-PARSER
+      - type: acts-on
+        target: CP-MODEL
     title: Parse AADL source
     action: Transform source text into concrete syntax tree
     source: CTRL-PARSER
@@ -345,6 +408,11 @@ artifacts:
 
   - id: CA-LOWER
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-MODEL
+      - type: acts-on
+        target: CP-MODEL
     title: Lower CST to ItemTree
     action: Convert syntax tree nodes to typed HIR items
     source: CTRL-MODEL
@@ -352,6 +420,11 @@ artifacts:
 
   - id: CA-INSTANTIATE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-INSTANCE
+      - type: acts-on
+        target: CP-MODEL
     title: Instantiate system
     action: Recursively expand root implementation into instance tree
     source: CTRL-INSTANCE
@@ -359,6 +432,11 @@ artifacts:
 
   - id: CA-ANALYZE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-ANALYSIS
+      - type: acts-on
+        target: CP-DIAGNOSTICS
     title: Run analysis passes
     action: Execute registered analyses against instance model
     source: CTRL-ANALYSIS
@@ -366,6 +444,11 @@ artifacts:
 
   - id: CA-REPORT
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-OUTPUT
+      - type: acts-on
+        target: CP-DECISIONS
     title: Report results
     action: Format and output analysis diagnostics
     source: CTRL-OUTPUT
@@ -373,6 +456,11 @@ artifacts:
 
   - id: CA-REVIEW
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-REVIEWER
+      - type: acts-on
+        target: CP-DECISIONS
     title: Review and approve architecture
     action: Evaluate analysis output and decide on architecture approval
     source: CTRL-REVIEWER
@@ -380,6 +468,11 @@ artifacts:
 
   - id: CA-SYSML2-LOWER
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SYSML2
+      - type: acts-on
+        target: CP-MODEL
     title: Lower SysML v2 to AADL
     action: Transform SysML v2 CST into AADL ItemTree using SEI mapping rules
     source: CTRL-SYSML2
@@ -387,6 +480,11 @@ artifacts:
 
   - id: CA-CODEGEN
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-CODEGEN
+      - type: acts-on
+        target: CP-DECISIONS
     title: Generate code and verification pipeline
     action: >
       Generate Rust crate skeletons, WIT interfaces, and Bazel BUILD files
@@ -402,6 +500,11 @@ artifacts:
 
   - id: UCA-1
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-PARSER
+      - type: leads-to-hazard
+        target: H-5
     title: Parser silently drops construct
     uca-type: not-providing
     context: >
@@ -416,6 +519,13 @@ artifacts:
 
   - id: UCA-2
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-PARSER
+      - type: leads-to-hazard
+        target: H-1
+      - type: leads-to-hazard
+        target: H-5
     title: Parser accepts invalid AADL without error
     uca-type: providing
     context: >
@@ -431,6 +541,13 @@ artifacts:
 
   - id: UCA-3
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-MODEL
+      - type: leads-to-hazard
+        target: H-1
+      - type: leads-to-hazard
+        target: H-3
     title: Lowering omits CST node
     uca-type: not-providing
     context: >
@@ -445,6 +562,11 @@ artifacts:
 
   - id: UCA-4
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-MODEL
+      - type: leads-to-hazard
+        target: H-6
     title: Lowering assigns wrong property value
     uca-type: providing
     context: >
@@ -458,6 +580,11 @@ artifacts:
 
   - id: UCA-5
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-MODEL
+      - type: leads-to-hazard
+        target: H-3
     title: Name resolution returns wrong classifier
     uca-type: providing
     context: >
@@ -473,6 +600,11 @@ artifacts:
 
   - id: UCA-6
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-INSTANCE
+      - type: leads-to-hazard
+        target: H-3
     title: Instance expansion misses subcomponent
     uca-type: not-providing
     context: >
@@ -487,6 +619,13 @@ artifacts:
 
   - id: UCA-7
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-INSTANCE
+      - type: leads-to-hazard
+        target: H-3
+      - type: leads-to-hazard
+        target: H-1
     title: Array expansion produces wrong count
     uca-type: providing
     context: >
@@ -500,6 +639,13 @@ artifacts:
 
   - id: UCA-8
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-INSTANCE
+      - type: leads-to-hazard
+        target: H-3
+      - type: leads-to-hazard
+        target: H-1
     title: Connection tracing produces wrong endpoint
     uca-type: providing
     context: >
@@ -514,6 +660,11 @@ artifacts:
 
   - id: UCA-9
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-INSTANCE
+      - type: leads-to-hazard
+        target: H-3
     title: Instance builder enters infinite recursion
     uca-type: stopped-too-soon
     context: >
@@ -530,6 +681,11 @@ artifacts:
 
   - id: UCA-10
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-ANALYSIS
+      - type: leads-to-hazard
+        target: H-1
     title: Analysis not registered
     uca-type: not-providing
     context: >
@@ -544,6 +700,13 @@ artifacts:
 
   - id: UCA-11
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-ANALYSIS
+      - type: leads-to-hazard
+        target: H-1
+      - type: leads-to-hazard
+        target: H-6
     title: Analysis uses wrong property value
     uca-type: providing
     context: >
@@ -557,6 +720,11 @@ artifacts:
 
   - id: UCA-12
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-ANALYSIS
+      - type: leads-to-hazard
+        target: H-1
     title: Analysis emits wrong severity
     uca-type: providing
     context: >
@@ -570,6 +738,11 @@ artifacts:
 
   - id: UCA-13
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-ANALYSIS
+      - type: leads-to-hazard
+        target: H-2
     title: Analysis produces false positive
     uca-type: providing
     context: >
@@ -585,6 +758,11 @@ artifacts:
 
   - id: UCA-14
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-OUTPUT
+      - type: leads-to-hazard
+        target: H-4
     title: JSON serialization drops field
     uca-type: not-providing
     context: >
@@ -599,6 +777,11 @@ artifacts:
 
   - id: UCA-15
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-OUTPUT
+      - type: leads-to-hazard
+        target: H-4
     title: SVG rendering misrepresents topology
     uca-type: providing
     context: >
@@ -612,6 +795,11 @@ artifacts:
 
   - id: UCA-16
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-OUTPUT
+      - type: leads-to-hazard
+        target: H-1
     title: Diagnostic output suppresses errors
     uca-type: not-providing
     context: >
@@ -626,6 +814,11 @@ artifacts:
 
   - id: UCA-17
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SYSML2
+      - type: leads-to-hazard
+        target: H-7
     title: SysML v2 lowering silently drops construct
     uca-type: not-providing
     context: >
@@ -643,6 +836,13 @@ artifacts:
 
   - id: UCA-18
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SYSML2
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-1
     title: SysML v2 lowering assigns wrong component category
     uca-type: providing
     context: >
@@ -660,6 +860,13 @@ artifacts:
 
   - id: UCA-19
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SYSML2
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-6
     title: SysML v2 property semantics lost in lowering
     uca-type: providing
     context: >
@@ -676,6 +883,13 @@ artifacts:
 
   - id: UCA-20
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SYSML2
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-3
     title: Subcomponent category hardcoded to System
     uca-type: providing
     context: >
@@ -694,6 +908,11 @@ artifacts:
 
   - id: UCA-21
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-CODEGEN
+      - type: leads-to-hazard
+        target: H-8
     title: Verification rule silently passes when tool missing
     uca-type: not-providing
     context: >
@@ -710,6 +929,11 @@ artifacts:
 
   - id: UCA-22
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-CODEGEN
+      - type: leads-to-hazard
+        target: H-8
     title: Generated BUILD.bazel omits verification targets
     uca-type: not-providing
     context: >
@@ -729,6 +953,15 @@ artifacts:
 
   - id: CC-1
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-PARSER
+      - type: inverts-uca
+        target: UCA-1
+      - type: inverts-uca
+        target: UCA-2
+      - type: prevents
+        target: H-5
     title: Parser must emit diagnostic for unrecognized constructs
     constraint: >
       The parser must produce an error diagnostic for any token sequence
@@ -740,6 +973,13 @@ artifacts:
 
   - id: CC-2
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-MODEL
+      - type: inverts-uca
+        target: UCA-3
+      - type: prevents
+        target: H-3
     title: Lowering must handle all SyntaxKind variants
     constraint: >
       The CST-to-ItemTree lowering must have a match arm for every
@@ -751,6 +991,13 @@ artifacts:
 
   - id: CC-3
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-MODEL
+      - type: inverts-uca
+        target: UCA-4
+      - type: prevents
+        target: H-6
     title: Property evaluation must use standard unit factors
     constraint: >
       Unit conversion factors must match AS5506 Appendix A.
@@ -761,6 +1008,13 @@ artifacts:
 
   - id: CC-4
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-MODEL
+      - type: inverts-uca
+        target: UCA-5
+      - type: prevents
+        target: H-3
     title: Resolver must handle ambiguous names deterministically
     constraint: >
       When multiple classifiers match a reference, the resolver must
@@ -772,6 +1026,13 @@ artifacts:
 
   - id: CC-5
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-INSTANCE
+      - type: inverts-uca
+        target: UCA-6
+      - type: prevents
+        target: H-3
     title: Instance builder must include all non-modal subcomponents
     constraint: >
       Subcomponents without in_modes filtering must always be instantiated.
@@ -783,6 +1044,13 @@ artifacts:
 
   - id: CC-6
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-INSTANCE
+      - type: inverts-uca
+        target: UCA-7
+      - type: prevents
+        target: H-3
     title: Array dimensions must be validated positive
     constraint: >
       Array dimension expressions must evaluate to positive integers.
@@ -793,6 +1061,13 @@ artifacts:
 
   - id: CC-7
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-INSTANCE
+      - type: inverts-uca
+        target: UCA-8
+      - type: prevents
+        target: H-3
     title: Connection tracing must verify endpoints
     constraint: >
       After multi-level connection tracing, both endpoints must resolve
@@ -804,6 +1079,13 @@ artifacts:
 
   - id: CC-8
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-INSTANCE
+      - type: inverts-uca
+        target: UCA-9
+      - type: prevents
+        target: H-3
     title: Instance builder must detect circular containment
     constraint: >
       Before recursive expansion, check for cycles in the classifier
@@ -815,6 +1097,13 @@ artifacts:
 
   - id: CC-9
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-ANALYSIS
+      - type: inverts-uca
+        target: UCA-10
+      - type: prevents
+        target: H-1
     title: All safety analyses must be registered by default
     constraint: >
       The AnalysisRunner must register all implemented analysis passes
@@ -826,6 +1115,15 @@ artifacts:
 
   - id: CC-10
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-ANALYSIS
+      - type: inverts-uca
+        target: UCA-11
+      - type: prevents
+        target: H-1
+      - type: prevents
+        target: H-6
     title: Analyses must read properties through validated accessors
     constraint: >
       Analysis passes must not directly interpret raw property strings.
@@ -837,6 +1135,13 @@ artifacts:
 
   - id: CC-11
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-ANALYSIS
+      - type: inverts-uca
+        target: UCA-12
+      - type: prevents
+        target: H-1
     title: Severity assignment must follow documented criteria
     constraint: >
       Error = confirmed standard violation or guaranteed runtime failure.
@@ -848,6 +1153,13 @@ artifacts:
 
   - id: CC-12
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-ANALYSIS
+      - type: inverts-uca
+        target: UCA-13
+      - type: prevents
+        target: H-2
     title: Analyses must account for modes and property overrides
     constraint: >
       Before reporting a defect, analyses must check whether the condition
@@ -859,6 +1171,13 @@ artifacts:
 
   - id: CC-13
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-OUTPUT
+      - type: inverts-uca
+        target: UCA-14
+      - type: prevents
+        target: H-4
     title: Serialization must include all public fields
     constraint: >
       Serde derives must be present on all public types. New fields
@@ -870,6 +1189,13 @@ artifacts:
 
   - id: CC-14
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-OUTPUT
+      - type: inverts-uca
+        target: UCA-16
+      - type: prevents
+        target: H-1
     title: Output must not filter error diagnostics
     constraint: >
       The output formatter must transmit all diagnostics regardless
@@ -881,6 +1207,13 @@ artifacts:
 
   - id: CC-15
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SYSML2
+      - type: inverts-uca
+        target: UCA-17
+      - type: prevents
+        target: H-7
     title: SysML v2 lowering must emit diagnostic for unhandled constructs
     constraint: >
       The lower_node function must not have a silent wildcard arm. Every
@@ -893,6 +1226,15 @@ artifacts:
 
   - id: CC-16
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SYSML2
+      - type: inverts-uca
+        target: UCA-18
+      - type: inverts-uca
+        target: UCA-20
+      - type: prevents
+        target: H-7
     title: Category inference must be validated against type definition
     constraint: >
       After lowering, the inferred category of a part def should be
@@ -906,6 +1248,15 @@ artifacts:
 
   - id: CC-17
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SYSML2
+      - type: inverts-uca
+        target: UCA-19
+      - type: prevents
+        target: H-7
+      - type: prevents
+        target: H-6
     title: SysML v2 constraint values must produce typed PropertyExpr
     constraint: >
       When lowering SysML v2 attribute or constraint usages that carry
@@ -919,6 +1270,13 @@ artifacts:
 
   - id: CC-18
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-CODEGEN
+      - type: inverts-uca
+        target: UCA-21
+      - type: prevents
+        target: H-8
     title: Verification rules must fail on missing tools
     constraint: >
       Bazel verification rules (verus_verify, lean_verify) must explicitly
@@ -931,6 +1289,13 @@ artifacts:
 
   - id: CC-19
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-CODEGEN
+      - type: inverts-uca
+        target: UCA-22
+      - type: prevents
+        target: H-8
     title: Generated crates must include verification targets
     constraint: >
       The code generator must produce verus_verify and/or lean_verify
@@ -947,6 +1312,13 @@ artifacts:
 
   - id: LS-1
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-1
+      - type: leads-to-hazard
+        target: H-5
+      - type: leads-to-hazard
+        target: H-1
     title: Annex subclause silently dropped
     scenario-type: inadequate-control-algorithm
     description: >
@@ -965,6 +1337,15 @@ artifacts:
 
   - id: LS-2
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-4
+      - type: caused-by-uca
+        target: UCA-11
+      - type: leads-to-hazard
+        target: H-6
+      - type: leads-to-hazard
+        target: H-1
     title: Unit conversion factor wrong for time property
     scenario-type: inadequate-process-model
     description: >
@@ -982,6 +1363,11 @@ artifacts:
 
   - id: LS-3
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-9
+      - type: leads-to-hazard
+        target: H-3
     title: Recursive instantiation overflow
     scenario-type: controller-failure
     description: >
@@ -999,6 +1385,13 @@ artifacts:
 
   - id: LS-4
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-8
+      - type: leads-to-hazard
+        target: H-3
+      - type: leads-to-hazard
+        target: H-1
     title: Connection tracing follows wrong feature group member
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1018,6 +1411,11 @@ artifacts:
 
   - id: LS-5
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-10
+      - type: leads-to-hazard
+        target: H-1
     title: Analysis pass not registered after code addition
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1035,6 +1433,11 @@ artifacts:
 
   - id: LS-6
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-14
+      - type: leads-to-hazard
+        target: H-4
     title: JSON drops new InstanceNode field
     scenario-type: inadequate-feedback
     description: >
@@ -1052,6 +1455,11 @@ artifacts:
 
   - id: LS-7
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-11
+      - type: leads-to-hazard
+        target: H-1
     title: Modal property override not considered in analysis
     scenario-type: inadequate-process-model
     description: >
@@ -1069,6 +1477,13 @@ artifacts:
 
   - id: LS-8
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-13
+      - type: leads-to-hazard
+        target: H-2
+      - type: leads-to-hazard
+        target: H-1
     title: Engineer dismisses analysis due to repeated false positives
     scenario-type: inadequate-feedback
     description: >
@@ -1086,6 +1501,13 @@ artifacts:
 
   - id: LS-9
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-17
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-1
     title: SysML v2 flow definition silently dropped during lowering
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1106,6 +1528,15 @@ artifacts:
 
   - id: LS-10
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-18
+      - type: caused-by-uca
+        target: UCA-20
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-1
     title: Part def misclassified as system instead of process
     scenario-type: inadequate-process-model
     description: >
@@ -1126,6 +1557,13 @@ artifacts:
 
   - id: LS-11
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-19
+      - type: leads-to-hazard
+        target: H-7
+      - type: leads-to-hazard
+        target: H-6
     title: SysML v2 timing constraint lowered as Opaque property
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1146,6 +1584,11 @@ artifacts:
 
   - id: LS-12
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-21
+      - type: leads-to-hazard
+        target: H-8
     title: Verus not installed but BUILD succeeds from cache
     scenario-type: inadequate-feedback
     description: >
@@ -1166,6 +1609,11 @@ artifacts:
 
   - id: LS-13
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-22
+      - type: leads-to-hazard
+        target: H-8
     title: Generated crate has no verification targets
     scenario-type: inadequate-control-algorithm
     description: >

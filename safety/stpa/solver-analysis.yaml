@@ -97,6 +97,15 @@ artifacts:
 
   - id: H-S1
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
+      - type: leads-to-loss
+        target: L-S2
+      - type: leads-to-loss
+        target: L-S3
+      - type: leads-to-loss
+        target: L-S6
     title: Solver marks infeasible binding as feasible
     description: >
       The solver produces a binding configuration that violates one or
@@ -108,6 +117,9 @@ artifacts:
 
   - id: H-S2
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
     title: Solver misses timing constraint
     description: >
       The solver's schedulability check (RTA at Layer 0) uses incorrect
@@ -118,6 +130,9 @@ artifacts:
 
   - id: H-S3
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S2
     title: Solver allows mixed-criticality without fault containment
     description: >
       The solver co-locates components of different ASIL/DAL/SIL levels
@@ -129,6 +144,9 @@ artifacts:
 
   - id: H-S4
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S3
     title: Solver selects protocol with insufficient properties
     description: >
       The solver selects a virtual bus (communication protocol) for a
@@ -141,6 +159,9 @@ artifacts:
 
   - id: H-S5
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S4
     title: Source rewrite corrupts AADL model
     description: >
       The solver's rowan CST editing inserts a property association in
@@ -151,6 +172,9 @@ artifacts:
 
   - id: H-S6
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S5
     title: Optimality certificate is invalid
     description: >
       The solver's optimality proof (e.g., dual bound from LP relaxation,
@@ -163,6 +187,11 @@ artifacts:
 
   - id: H-S7
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S5
+      - type: leads-to-loss
+        target: L-S1
     title: Solver produces non-deterministic results
     description: >
       Given the same input model and constraints, the solver produces
@@ -174,6 +203,11 @@ artifacts:
 
   - id: H-S8
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
+      - type: leads-to-loss
+        target: L-S4
     title: Stale analysis after source rewrite
     description: >
       The solver rewrites AADL source properties but the salsa
@@ -185,6 +219,11 @@ artifacts:
 
   - id: H-S9
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
+      - type: leads-to-loss
+        target: L-S3
     title: Hierarchical composition violates global constraint
     description: >
       Each solver layer produces a locally optimal solution, but the
@@ -197,6 +236,9 @@ artifacts:
 
   - id: H-S10
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S6
     title: Resource accounting error
     description: >
       The solver's resource budget tracking (memory, weight, power)
@@ -207,6 +249,13 @@ artifacts:
 
   - id: H-S11
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
+      - type: leads-to-loss
+        target: L-S3
+      - type: leads-to-loss
+        target: L-S6
     title: Incomplete model input causes unsound solution
     description: >
       The AADL model is missing properties that the solver needs
@@ -219,6 +268,9 @@ artifacts:
 
   - id: H-S12
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-S1
     title: Floating-point precision causes incorrect schedulability
     description: >
       The solver's RTA computation uses floating-point arithmetic
@@ -235,6 +287,9 @@ artifacts:
 
   - id: SC-S1
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S1
     title: Solver must not produce infeasible bindings marked feasible
     description: >
       Every binding configuration reported as feasible must satisfy all
@@ -244,6 +299,11 @@ artifacts:
 
   - id: SC-S2
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S2
+      - type: prevents
+        target: H-S12
     title: Timing analysis must be conservative
     description: >
       The solver's schedulability analysis must be pessimistic — it must
@@ -253,6 +313,9 @@ artifacts:
 
   - id: SC-S3
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S3
     title: Safety level separation must be enforced
     description: >
       The solver must not co-locate components of different safety levels
@@ -262,6 +325,9 @@ artifacts:
 
   - id: SC-S4
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S4
     title: Protocol selection must use worst-case properties
     description: >
       Protocol matching must use worst-case (not nominal) property values.
@@ -271,6 +337,9 @@ artifacts:
 
   - id: SC-S5
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S5
     title: Source rewrites must preserve model validity
     description: >
       After source rewriting, the modified AADL files must parse without
@@ -280,6 +349,9 @@ artifacts:
 
   - id: SC-S6
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S6
     title: Optimality certificates must be independently verifiable
     description: >
       Optimality certificates must contain sufficient information for
@@ -289,6 +361,9 @@ artifacts:
 
   - id: SC-S7
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S7
     title: Solver results must be deterministic
     description: >
       The solver must produce identical results given identical inputs.
@@ -297,6 +372,9 @@ artifacts:
 
   - id: SC-S8
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S8
     title: Cache must be invalidated after source rewrite
     description: >
       After source rewriting, the solver must either invalidate all
@@ -306,6 +384,9 @@ artifacts:
 
   - id: SC-S9
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S9
     title: Global constraints must be verified after hierarchical composition
     description: >
       After all solver layers complete, a global validation pass must
@@ -315,6 +396,9 @@ artifacts:
 
   - id: SC-S10
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-S11
     title: Missing model properties must produce diagnostics
     description: >
       When the solver encounters a component without required properties
@@ -436,6 +520,11 @@ artifacts:
 
   - id: CA-SOLVE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SOLVER
+      - type: acts-on
+        target: CP-BINDING
     title: Solve deployment configuration
     action: >
       Compute software-to-hardware binding by running Layer 0-3 solvers
@@ -445,6 +534,11 @@ artifacts:
 
   - id: CA-SCHEDULE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-LAYER0
+      - type: acts-on
+        target: CP-BINDING
     title: Check thread schedulability (Layer 0)
     action: >
       Perform response-time analysis for threads assigned to a processor.
@@ -455,6 +549,11 @@ artifacts:
 
   - id: CA-ALLOCATE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-LAYER1
+      - type: acts-on
+        target: CP-BINDING
     title: Allocate processes to processors (Layer 1)
     action: >
       Assign processes to processors using bin-packing with schedulability
@@ -464,6 +563,11 @@ artifacts:
 
   - id: CA-BIND-BUS
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-LAYER2
+      - type: acts-on
+        target: CP-BINDING
     title: Bind connections to buses and select protocols (Layer 2)
     action: >
       Select communication protocols from the virtual bus library for
@@ -473,6 +577,11 @@ artifacts:
 
   - id: CA-OPTIMIZE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-LAYER3
+      - type: acts-on
+        target: CP-BINDING
     title: Global optimization (Layer 3)
     action: >
       Optimize end-to-end latency, verify safety decomposition, and
@@ -482,6 +591,11 @@ artifacts:
 
   - id: CA-REWRITE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-REWRITER
+      - type: acts-on
+        target: CP-AADL-SOURCE
     title: Rewrite AADL source with binding properties
     action: >
       Apply computed binding configuration as AADL property associations
@@ -491,6 +605,11 @@ artifacts:
 
   - id: CA-CERTIFY
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-CERTIFIER
+      - type: acts-on
+        target: CP-CERTIFICATE
     title: Generate optimality certificate
     action: >
       Produce a mathematical certificate proving the solution quality
@@ -500,6 +619,11 @@ artifacts:
 
   - id: CA-VALIDATE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SOLVER
+      - type: acts-on
+        target: CP-BINDING
     title: Post-solve validation
     action: >
       Re-run analysis passes on the rewritten model to verify all
@@ -515,6 +639,13 @@ artifacts:
 
   - id: UCA-S1
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER0
+      - type: leads-to-hazard
+        target: H-S2
+      - type: leads-to-hazard
+        target: H-S12
     title: RTA accepts unschedulable task set
     uca-type: providing
     context: >
@@ -531,6 +662,13 @@ artifacts:
 
   - id: UCA-S2
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER0
+      - type: leads-to-hazard
+        target: H-S1
+      - type: leads-to-hazard
+        target: H-S2
     title: RTA not performed for a processor
     uca-type: not-providing
     context: >
@@ -547,6 +685,11 @@ artifacts:
 
   - id: UCA-S3
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER0
+      - type: leads-to-hazard
+        target: H-S2
     title: RTA uses wrong execution time value
     uca-type: providing
     context: >
@@ -563,6 +706,13 @@ artifacts:
 
   - id: UCA-S4
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER1
+      - type: leads-to-hazard
+        target: H-S1
+      - type: leads-to-hazard
+        target: H-S10
     title: Allocator exceeds processor capacity
     uca-type: providing
     context: >
@@ -578,6 +728,13 @@ artifacts:
 
   - id: UCA-S5
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER1
+      - type: leads-to-hazard
+        target: H-S1
+      - type: leads-to-hazard
+        target: H-S3
     title: Allocator ignores affinity constraints
     uca-type: not-providing
     context: >
@@ -593,6 +750,13 @@ artifacts:
 
   - id: UCA-S6
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER1
+      - type: leads-to-hazard
+        target: H-S2
+      - type: leads-to-hazard
+        target: H-S9
     title: Allocator does not invoke Layer 0 for new assignment
     uca-type: not-providing
     context: >
@@ -610,6 +774,11 @@ artifacts:
 
   - id: UCA-S7
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER2
+      - type: leads-to-hazard
+        target: H-S4
     title: Protocol selected with insufficient bandwidth
     uca-type: providing
     context: >
@@ -626,6 +795,11 @@ artifacts:
 
   - id: UCA-S8
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER2
+      - type: leads-to-hazard
+        target: H-S4
     title: Protocol selected without matching security level
     uca-type: providing
     context: >
@@ -641,6 +815,13 @@ artifacts:
 
   - id: UCA-S9
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER2
+      - type: leads-to-hazard
+        target: H-S3
+      - type: leads-to-hazard
+        target: H-S4
     title: Bus binding not performed for cross-processor connection
     uca-type: not-providing
     context: >
@@ -658,6 +839,13 @@ artifacts:
 
   - id: UCA-S10
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER3
+      - type: leads-to-hazard
+        target: H-S1
+      - type: leads-to-hazard
+        target: H-S9
     title: E2E latency check uses incomplete path
     uca-type: providing
     context: >
@@ -673,6 +861,11 @@ artifacts:
 
   - id: UCA-S11
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER3
+      - type: leads-to-hazard
+        target: H-S3
     title: Safety decomposition allows inadequate containment
     uca-type: providing
     context: >
@@ -688,6 +881,11 @@ artifacts:
 
   - id: UCA-S12
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER3
+      - type: leads-to-hazard
+        target: H-S9
     title: Global validation not performed after layer composition
     uca-type: not-providing
     context: >
@@ -705,6 +903,11 @@ artifacts:
 
   - id: UCA-S13
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-REWRITER
+      - type: leads-to-hazard
+        target: H-S5
     title: Property inserted in wrong component scope
     uca-type: providing
     context: >
@@ -722,6 +925,11 @@ artifacts:
 
   - id: UCA-S14
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-REWRITER
+      - type: leads-to-hazard
+        target: H-S5
     title: Rewriter deletes existing property
     uca-type: providing
     context: >
@@ -737,6 +945,11 @@ artifacts:
 
   - id: UCA-S15
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-REWRITER
+      - type: leads-to-hazard
+        target: H-S5
     title: Rewriter produces invalid AADL syntax
     uca-type: providing
     context: >
@@ -751,6 +964,13 @@ artifacts:
 
   - id: UCA-S16
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-REWRITER
+      - type: leads-to-hazard
+        target: H-S5
+      - type: leads-to-hazard
+        target: H-S8
     title: Rewriter does not update all files
     uca-type: not-providing
     context: >
@@ -768,6 +988,11 @@ artifacts:
 
   - id: UCA-S17
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-CERTIFIER
+      - type: leads-to-hazard
+        target: H-S6
     title: Certificate claims optimal when solution is suboptimal
     uca-type: providing
     context: >
@@ -783,6 +1008,11 @@ artifacts:
 
   - id: UCA-S18
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-CERTIFIER
+      - type: leads-to-hazard
+        target: H-S6
     title: Certificate claims infeasible when solution exists
     uca-type: providing
     context: >
@@ -799,6 +1029,11 @@ artifacts:
 
   - id: UCA-S19
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-CERTIFIER
+      - type: leads-to-hazard
+        target: H-S6
     title: Certificate not generated
     uca-type: not-providing
     context: >
@@ -816,6 +1051,13 @@ artifacts:
 
   - id: UCA-S20
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SOLVER
+      - type: leads-to-hazard
+        target: H-S1
+      - type: leads-to-hazard
+        target: H-S8
     title: Post-solve validation not performed
     uca-type: not-providing
     context: >
@@ -832,6 +1074,11 @@ artifacts:
 
   - id: UCA-S21
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SOLVER
+      - type: leads-to-hazard
+        target: H-S8
     title: Post-solve validation uses stale cache
     uca-type: providing
     context: >
@@ -849,6 +1096,11 @@ artifacts:
 
   - id: UCA-S22
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SOLVER
+      - type: leads-to-hazard
+        target: H-S11
     title: Solver uses default for missing property
     uca-type: providing
     context: >
@@ -866,6 +1118,11 @@ artifacts:
 
   - id: UCA-S23
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-LAYER2
+      - type: leads-to-hazard
+        target: H-S4
     title: Virtual bus library properties do not match reality
     uca-type: providing
     context: >
@@ -885,6 +1142,15 @@ artifacts:
 
   - id: CC-S1
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER0
+      - type: inverts-uca
+        target: UCA-S1
+      - type: inverts-uca
+        target: UCA-S3
+      - type: prevents
+        target: H-S2
     title: RTA must use worst-case parameters
     constraint: >
       Response-time analysis must use worst-case execution time (maximum
@@ -898,6 +1164,15 @@ artifacts:
 
   - id: CC-S2
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER0
+      - type: inverts-uca
+        target: UCA-S2
+      - type: inverts-uca
+        target: UCA-S6
+      - type: prevents
+        target: H-S2
     title: Schedulability must be checked for every populated processor
     constraint: >
       After Layer 1 allocation completes, Layer 0 RTA must be re-run for
@@ -909,6 +1184,13 @@ artifacts:
 
   - id: CC-S3
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER1
+      - type: inverts-uca
+        target: UCA-S4
+      - type: prevents
+        target: H-S10
     title: Resource accounting must include all bound components
     constraint: >
       Memory, CPU, weight, and power budgets must account for every
@@ -920,6 +1202,13 @@ artifacts:
 
   - id: CC-S4
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER1
+      - type: inverts-uca
+        target: UCA-S5
+      - type: prevents
+        target: H-S3
     title: Affinity and anti-affinity constraints must be enforced
     constraint: >
       The allocator must read Allowed_Processor_Binding, Not_Collocated,
@@ -931,6 +1220,13 @@ artifacts:
 
   - id: CC-S5
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER2
+      - type: inverts-uca
+        target: UCA-S7
+      - type: prevents
+        target: H-S4
     title: Aggregate bus bandwidth must be checked
     constraint: >
       Protocol selection must check aggregate bandwidth of all connections
@@ -942,6 +1238,13 @@ artifacts:
 
   - id: CC-S6
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER2
+      - type: inverts-uca
+        target: UCA-S8
+      - type: prevents
+        target: H-S4
     title: Security zone matching must be enforced
     constraint: >
       Connections crossing security zone boundaries must be bound to
@@ -954,6 +1257,13 @@ artifacts:
 
   - id: CC-S7
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER2
+      - type: inverts-uca
+        target: UCA-S9
+      - type: prevents
+        target: H-S4
     title: All cross-processor connections must be identified
     constraint: >
       The solver must enumerate all connections whose source and
@@ -965,6 +1275,15 @@ artifacts:
 
   - id: CC-S8
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER3
+      - type: inverts-uca
+        target: UCA-S10
+      - type: prevents
+        target: H-S1
+      - type: prevents
+        target: H-S9
     title: E2E latency must include all path segments
     constraint: >
       End-to-end latency computation must include: thread execution time,
@@ -976,6 +1295,13 @@ artifacts:
 
   - id: CC-S9
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER3
+      - type: inverts-uca
+        target: UCA-S11
+      - type: prevents
+        target: H-S3
     title: Safety co-location requires verified containment
     constraint: >
       Co-locating components of different safety levels on the same
@@ -988,6 +1314,13 @@ artifacts:
 
   - id: CC-S10
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER3
+      - type: inverts-uca
+        target: UCA-S12
+      - type: prevents
+        target: H-S9
     title: Global validation must run after all layers complete
     constraint: >
       After Layer 0-2 produce their results, Layer 3 must run a
@@ -1000,6 +1333,13 @@ artifacts:
 
   - id: CC-S11
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-REWRITER
+      - type: inverts-uca
+        target: UCA-S13
+      - type: prevents
+        target: H-S5
     title: Source rewrite must target correct CST node
     constraint: >
       The rewriter must identify the CST node for the target component
@@ -1011,6 +1351,13 @@ artifacts:
 
   - id: CC-S12
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-REWRITER
+      - type: inverts-uca
+        target: UCA-S14
+      - type: prevents
+        target: H-S5
     title: Source rewrite must preserve existing properties
     constraint: >
       The rewriter must not delete, modify, or reorder existing property
@@ -1023,6 +1370,13 @@ artifacts:
 
   - id: CC-S13
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-REWRITER
+      - type: inverts-uca
+        target: UCA-S15
+      - type: prevents
+        target: H-S5
     title: Source rewrite output must parse cleanly
     constraint: >
       After rewriting, the modified AADL source must be re-parsed by spar
@@ -1034,6 +1388,13 @@ artifacts:
 
   - id: CC-S14
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-REWRITER
+      - type: inverts-uca
+        target: UCA-S16
+      - type: prevents
+        target: H-S5
     title: All affected files must be rewritten
     constraint: >
       The rewriter must identify all AADL files that need modification
@@ -1045,6 +1406,15 @@ artifacts:
 
   - id: CC-S15
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-CERTIFIER
+      - type: inverts-uca
+        target: UCA-S17
+      - type: inverts-uca
+        target: UCA-S18
+      - type: prevents
+        target: H-S6
     title: Optimality certificate must be independently verifiable
     constraint: >
       The certificate must contain: (a) the objective function value,
@@ -1057,6 +1427,13 @@ artifacts:
 
   - id: CC-S16
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-CERTIFIER
+      - type: inverts-uca
+        target: UCA-S19
+      - type: prevents
+        target: H-S6
     title: Certificate must be generated for every solver run
     constraint: >
       Every solver invocation must produce a certificate, including
@@ -1068,6 +1445,15 @@ artifacts:
 
   - id: CC-S17
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SOLVER
+      - type: inverts-uca
+        target: UCA-S20
+      - type: inverts-uca
+        target: UCA-S21
+      - type: prevents
+        target: H-S8
     title: Post-solve analysis must use fresh computation
     constraint: >
       Post-solve validation must force full re-computation (either by
@@ -1080,6 +1466,13 @@ artifacts:
 
   - id: CC-S18
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SOLVER
+      - type: inverts-uca
+        target: UCA-S22
+      - type: prevents
+        target: H-S11
     title: Missing properties must be errors, not defaults
     constraint: >
       When the solver encounters a component without a required property
@@ -1092,6 +1485,13 @@ artifacts:
 
   - id: CC-S19
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER2
+      - type: inverts-uca
+        target: UCA-S23
+      - type: prevents
+        target: H-S4
     title: Virtual bus library must distinguish nominal vs worst-case
     constraint: >
       The virtual bus library must provide separate worst-case and
@@ -1104,6 +1504,13 @@ artifacts:
 
   - id: CC-S20
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-LAYER0
+      - type: inverts-uca
+        target: UCA-S1
+      - type: prevents
+        target: H-S12
     title: Numerical computation must use integer or bounded arithmetic
     constraint: >
       Schedulability computations must use integer arithmetic (picosecond
@@ -1120,6 +1527,13 @@ artifacts:
 
   - id: LS-S1
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S1
+      - type: leads-to-hazard
+        target: H-S12
+      - type: leads-to-hazard
+        target: H-S2
     title: Floating-point RTA accepts boundary-case task set
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1141,6 +1555,11 @@ artifacts:
 
   - id: LS-S2
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S4
+      - type: leads-to-hazard
+        target: H-S10
     title: Allocator double-counts shared memory
     scenario-type: inadequate-process-model
     description: >
@@ -1161,6 +1580,11 @@ artifacts:
 
   - id: LS-S3
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S5
+      - type: leads-to-hazard
+        target: H-S3
     title: Solver ignores Allowed_Processor_Binding constraint
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1179,6 +1603,11 @@ artifacts:
 
   - id: LS-S4
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S7
+      - type: leads-to-hazard
+        target: H-S4
     title: Aggregate bus bandwidth exceeded
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1197,6 +1626,11 @@ artifacts:
 
   - id: LS-S5
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S13
+      - type: leads-to-hazard
+        target: H-S5
     title: Rewriter inserts binding on wrong subcomponent
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1217,6 +1651,11 @@ artifacts:
 
   - id: LS-S6
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S15
+      - type: leads-to-hazard
+        target: H-S5
     title: Rewriter corrupts property block formatting
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1236,6 +1675,11 @@ artifacts:
 
   - id: LS-S7
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S21
+      - type: leads-to-hazard
+        target: H-S8
     title: Salsa cache returns pre-rewrite property values
     scenario-type: inadequate-feedback
     description: >
@@ -1258,6 +1702,11 @@ artifacts:
 
   - id: LS-S8
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S9
+      - type: leads-to-hazard
+        target: H-S4
     title: Layer 2 misses cross-processor connection
     scenario-type: inadequate-process-model
     description: >
@@ -1277,6 +1726,13 @@ artifacts:
 
   - id: LS-S9
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S10
+      - type: caused-by-uca
+        target: UCA-S12
+      - type: leads-to-hazard
+        target: H-S9
     title: Local optima violate global E2E latency
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1301,6 +1757,11 @@ artifacts:
 
   - id: LS-S10
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S23
+      - type: leads-to-hazard
+        target: H-S4
     title: Virtual bus library understates AFDX worst-case latency
     scenario-type: inadequate-process-model
     description: >
@@ -1321,6 +1782,11 @@ artifacts:
 
   - id: LS-S11
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S23
+      - type: leads-to-hazard
+        target: H-S7
     title: Solver non-determinism from HashMap iteration
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1341,6 +1807,11 @@ artifacts:
 
   - id: LS-S12
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S11
+      - type: leads-to-hazard
+        target: H-S3
     title: DAL-A and DAL-D co-located without partition verification
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1363,6 +1834,13 @@ artifacts:
 
   - id: LS-S13
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S22
+      - type: leads-to-hazard
+        target: H-S11
+      - type: leads-to-hazard
+        target: H-S2
     title: Missing Compute_Execution_Time silently assumed zero
     scenario-type: inadequate-process-model
     description: >
@@ -1382,6 +1860,11 @@ artifacts:
 
   - id: LS-S14
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S17
+      - type: leads-to-hazard
+        target: H-S6
     title: Certificate validates wrong objective function
     scenario-type: inadequate-control-algorithm
     description: >
@@ -1401,6 +1884,13 @@ artifacts:
 
   - id: LS-S15
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-S6
+      - type: leads-to-hazard
+        target: H-S2
+      - type: leads-to-hazard
+        target: H-S9
     title: Incremental allocation breaks prior schedulability
     scenario-type: inadequate-control-algorithm
     description: >
