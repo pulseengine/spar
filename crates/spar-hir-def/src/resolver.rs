@@ -356,21 +356,42 @@ impl GlobalScope {
             return result;
         }
 
-        // Check classifier and feature group renames in the originating package
+        // Check classifier and feature group renames in the originating package.
+        //
+        // AS-5506D §4.2: a classifier alias names a type and can be used
+        // anywhere that type can, including in `alias.impl_name` form. The
+        // prior guard `impl_name.is_none()` skipped this branch whenever an
+        // implementation suffix was present, so `MyAlias.i` resolved to
+        // Unresolved despite `MyAlias renames system A::Target;`. Drop the
+        // `impl_name.is_none()` gate and preserve `impl_name` through the
+        // rewrite.
         if reference.package.is_none()
-            && reference.impl_name.is_none()
             && let Some(from_scope) = self.packages.get(&from_key)
         {
             let type_key = CiName::new(&reference.type_name);
 
-            // Classifier renames: alias → (package, type_name)
+            // Classifier renames: alias → (package, type_name). If the
+            // reference carries `.impl_name`, preserve it through the
+            // rewrite so `MyAlias.i` resolves to `orig_pkg::orig_type.i`.
             if let Some((orig_pkg, orig_type)) = from_scope.classifier_renames.get(&type_key) {
-                let aliased_ref = ClassifierRef::qualified(orig_pkg.clone(), orig_type.clone());
+                let aliased_ref = match &reference.impl_name {
+                    Some(impl_name) => ClassifierRef::implementation(
+                        Some(orig_pkg.clone()),
+                        orig_type.clone(),
+                        impl_name.clone(),
+                    ),
+                    None => ClassifierRef::qualified(orig_pkg.clone(), orig_type.clone()),
+                };
                 return self.resolve_classifier(from_package, &aliased_ref);
             }
 
-            // Feature group renames: alias → (package, fgt_name)
-            if let Some((orig_pkg, orig_fgt)) = from_scope.feature_group_renames.get(&type_key) {
+            // Feature group renames: alias → (package, fgt_name). Feature
+            // group types do not have implementations, so the `.impl` form
+            // should not be rewritten against a feature-group alias — fall
+            // through if impl_name is present.
+            if reference.impl_name.is_none()
+                && let Some((orig_pkg, orig_fgt)) = from_scope.feature_group_renames.get(&type_key)
+            {
                 let aliased_ref = ClassifierRef::qualified(orig_pkg.clone(), orig_fgt.clone());
                 return self.resolve_classifier(from_package, &aliased_ref);
             }
@@ -1140,6 +1161,81 @@ mod tests {
                 } if package.as_str() == "A"
             ),
             "classifier rename should resolve MySensor to A::OriginalSensor: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn classifier_renames_resolves_impl_reference() {
+        // AS-5506D §4.2: classifier alias usable wherever the type is —
+        // including `alias.impl_name` form. Prior to the fix,
+        // resolve_classifier gated rename handling on `impl_name.is_none()`,
+        // so `MyAlias.i` returned Unresolved despite a valid rename.
+        let mut tree = ItemTree::default();
+
+        let ct = tree.component_types.alloc(ComponentTypeItem {
+            name: Name::new("OriginalSensor"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            features: Vec::new(),
+            flow_specs: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            property_associations: Vec::new(),
+            requires_modes: false,
+        });
+        let ci = tree.component_impls.alloc(ComponentImplItem {
+            type_name: Name::new("OriginalSensor"),
+            impl_name: Name::new("i"),
+            category: ComponentCategory::System,
+            is_public: true,
+            extends: None,
+            subcomponents: Vec::new(),
+            connections: Vec::new(),
+            end_to_end_flows: Vec::new(),
+            flow_impls: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            prototypes: Vec::new(),
+            call_sequences: Vec::new(),
+            property_associations: Vec::new(),
+            requires_modes: false,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("A"),
+            with_clauses: Vec::new(),
+            public_items: vec![ItemRef::ComponentType(ct), ItemRef::ComponentImpl(ci)],
+            private_items: Vec::new(),
+            renames: Vec::new(),
+        });
+
+        let renames_idx = tree.renames.alloc(RenamesItem {
+            alias: Name::new("MySensor"),
+            original: Name::new("A::OriginalSensor"),
+            kind: RenamesKind::Classifier,
+        });
+        tree.packages.alloc(Package {
+            name: Name::new("B"),
+            with_clauses: vec![Name::new("A")],
+            public_items: Vec::new(),
+            private_items: Vec::new(),
+            renames: vec![renames_idx],
+        });
+
+        let scope = GlobalScope::from_trees(vec![Arc::new(tree)]);
+
+        // `MySensor.i` from B should resolve to A::OriginalSensor.i
+        let reference = ClassifierRef::implementation(None, Name::new("MySensor"), Name::new("i"));
+        let result = scope.resolve_classifier(&Name::new("B"), &reference);
+        assert!(
+            matches!(
+                result,
+                ResolvedClassifier::ComponentImpl { ref package, .. }
+                    if package.as_str() == "A"
+            ),
+            "classifier rename should resolve MySensor.i to A::OriginalSensor.i: {:?}",
             result
         );
     }

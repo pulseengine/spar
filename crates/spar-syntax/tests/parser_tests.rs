@@ -882,6 +882,136 @@ fn test_data_property_value_arithmetic() {
     check_file_no_errors("../../test-data/parser/property_value_arithmetic.aadl");
 }
 
+// AS-5506B §9.2: a non-refined connection must have source and destination.
+// Previously `c1 : port ;` parsed cleanly (the instance-level check caught it
+// later, but the diagnostic locality was poor).
+#[test]
+fn connection_without_endpoints_is_rejected() {
+    let src = "\
+package P
+public
+  system S end S;
+  system implementation S.i
+    connections
+      c1 : port ;
+  end S.i;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("source and destination")),
+        "expected `source and destination` error, got: {:?}",
+        result.errors()
+    );
+}
+
+// `refined to` connections may legitimately omit endpoints — the refinement
+// inherits them. Keep this form working.
+#[test]
+fn refined_connection_may_omit_endpoints() {
+    let src = "\
+package P
+public
+  system S end S;
+  system implementation S.Base
+    connections
+      c1 : port ;
+  end S.Base;
+  system implementation S.Extended extends S.Base
+    connections
+      c1 : refined to port ;
+  end S.Extended;
+end P;
+";
+    let result = parse(src);
+    // S.Base's connection is still invalid (no `refined to`), so we expect
+    // one error from S.Base. The S.Extended refinement must NOT add a
+    // second error.
+    let source_dest_errors: Vec<_> = result
+        .errors()
+        .iter()
+        .filter(|e| e.msg.contains("source and destination"))
+        .collect();
+    assert_eq!(
+        source_dest_errors.len(),
+        1,
+        "refined-to connection without endpoints must parse cleanly; \
+         got {} source/destination errors: {:?}",
+        source_dest_errors.len(),
+        source_dest_errors
+    );
+}
+
+// AS-5506B §8.1: feature_direction ::= in | out | in out — order-specific.
+// `out in` / `in in` / `out out` are not legal; the parser must reject
+// at the syntax layer rather than relying on HIR normalization to drop
+// the direction to None later.
+#[test]
+fn out_in_feature_direction_is_rejected() {
+    let src = "\
+package P
+public
+  abstract A
+    features
+      p : out in data port;
+  end A;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("feature direction")),
+        "expected direction error, got: {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn in_in_feature_direction_is_rejected() {
+    let src = "\
+package P
+public
+  abstract A
+    features
+      p : in in data port;
+  end A;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("feature direction")),
+        "expected direction error, got: {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn in_out_feature_direction_still_accepted() {
+    let src = "\
+package P
+public
+  abstract A
+    features
+      p : in out data port;
+  end A;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result.errors().is_empty(),
+        "`in out` must still parse cleanly, got: {:?}",
+        result.errors()
+    );
+}
+
 // Regression for the unary-sign operator-precedence bug introduced when
 // property_expression was split into outer-binary-loop + _primary: the
 // PLUS/MINUS arm was still recursing into the outer function, so the sign

@@ -112,11 +112,25 @@ pub fn lookup_property(
     None
 }
 
-/// Evaluate a numeric property expression to an `f64` value.
+/// Evaluate a numeric property expression to an `f64` **magnitude only**.
 ///
-/// Handles `Integer`, `Real`, `UnitValue` (which wraps a numeric inner
-/// expression), and `BinaryOp` (arithmetic on sub-expressions).
-/// Returns `None` for non-numeric expressions.
+/// # Units are silently stripped
+///
+/// This function returns the bare magnitude of the expression with NO unit
+/// normalization: `5 ms` and `5 ns` both evaluate to `5.0`, and a binary
+/// expression's result has no unit attached. Do NOT use this for timing,
+/// bandwidth, memory, or any other unit-bearing property — downstream
+/// analyses that do will silently operate on wrong values (10³–10⁹× factor
+/// errors in the timing case).
+///
+/// For unit-aware evaluation, use `crates/spar-analysis/src/property_accessors.rs`
+/// (`extract_time_ps`, `extract_size_bits`) or `crate::property_value::convert_units`,
+/// both of which carry proper unit-factor tables.
+///
+/// This helper is retained only for the narrow case of evaluating an
+/// explicitly-unitless numeric property (e.g. a priority, a count) where the
+/// caller has already confirmed unit-irrelevance.
+#[doc(hidden)]
 pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
     match expr {
         PropertyExpr::Integer(v, _unit) => Some(*v as f64),
@@ -142,12 +156,21 @@ pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
     }
 }
 
-/// Compute a numeric property expression, returning both the value
-/// and its unit (if any).
+/// Compute a numeric property expression, returning the value and unit.
 ///
-/// For `Integer(v, Some(u))` returns `Some((v, Some(u)))`.
-/// For `UnitValue(inner, u)` returns `Some((numeric(inner), Some(u)))`.
-/// For bare `Integer(v, None)` returns `Some((v, None))`.
+/// # Unit propagation through arithmetic is NOT implemented
+///
+/// For leaf `Integer` / `Real` / `UnitValue` the returned unit is correct.
+/// For `BinaryOp` (e.g. `5 ms + 3 ms`) the returned unit is `None` — this
+/// helper does not propagate units through arithmetic, even when both
+/// operands agree. Any caller that expects `5 ms + 3 ms` to yield
+/// `(8.0, Some("ms"))` will get a unit-stripped result instead.
+///
+/// For timing / bandwidth / memory extraction, use the unit-aware helpers
+/// in `crates/spar-analysis/src/property_accessors.rs`
+/// (`extract_time_ps`, `extract_size_bits`) instead — they consult a
+/// full unit-factor table and return a single canonical scale.
+#[doc(hidden)]
 pub fn numeric_with_unit(expr: &PropertyExpr) -> Option<(f64, Option<&Name>)> {
     match expr {
         PropertyExpr::Integer(v, unit) => Some((*v as f64, unit.as_ref())),

@@ -25,12 +25,15 @@ fn connection(p: &mut Parser) {
     p.bump_any(); // name (IDENT or keyword-as-name)
     p.expect(SyntaxKind::COLON);
 
-    // Optional `refined to`
+    // Optional `refined to` — refined connections may legitimately omit
+    // endpoints (they inherit them from the refined declaration).
+    let mut is_refined = false;
     if p.at(SyntaxKind::REFINED_KW) {
         let r = p.start();
         p.bump(SyntaxKind::REFINED_KW);
         p.expect(SyntaxKind::TO_KW);
         r.complete(p, SyntaxKind::REFINED_TO);
+        is_refined = true;
     }
 
     // Connection kind keyword
@@ -94,7 +97,15 @@ fn connection(p: &mut Parser) {
         }
     };
 
-    // Source and destination elements (optional for refined connections)
+    // Source and destination elements.
+    //
+    // AS-5506B §9.2: a non-refined connection declaration MUST have a
+    // source reference, arrow (`->` or `<->`), and destination reference.
+    // A refined connection MAY omit endpoints (the refinement inherits
+    // them). Before this check the parser silently accepted
+    // `c1 : port ;` — zero endpoints, no arrow — because the guard only
+    // entered on IDENT/keyword/SELF_KW. The instance-level validator
+    // caught it downstream, but the diagnostic locality was poor.
     if p.at(SyntaxKind::IDENT) || p.current().is_keyword() || p.at(SyntaxKind::SELF_KW) {
         connected_element(p);
 
@@ -105,6 +116,8 @@ fn connection(p: &mut Parser) {
 
         // Destination element
         connected_element(p);
+    } else if !is_refined {
+        p.error("connection must have source and destination (AS-5506B §9.2); use `refined to` to inherit endpoints");
     }
 
     // Optional property block
