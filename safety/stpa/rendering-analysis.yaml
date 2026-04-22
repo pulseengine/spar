@@ -53,6 +53,11 @@ artifacts:
 
   - id: H-R1
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-R1
+      - type: leads-to-loss
+        target: L-R3
     title: Edge spaghetti obscures connection topology
     description: >
       Connections between components are rendered as overlapping,
@@ -64,6 +69,11 @@ artifacts:
 
   - id: H-R2
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-R3
+      - type: leads-to-loss
+        target: L-R4
     title: No port visibility
     description: >
       Ports are not rendered or are rendered without directional
@@ -75,6 +85,9 @@ artifacts:
 
   - id: H-R3
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-R2
     title: Cannot navigate large models
     description: >
       No zoom, pan, search, or filtering capability exists, so
@@ -85,6 +98,11 @@ artifacts:
 
   - id: H-R4
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-R1
+      - type: leads-to-loss
+        target: L-R2
     title: Layout instability
     description: >
       A small change to the AADL model (adding one port, renaming a
@@ -96,6 +114,11 @@ artifacts:
 
   - id: H-R5
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-R2
+      - type: leads-to-loss
+        target: L-R4
     title: No selection or highlighting
     description: >
       There is no way to select a component or connection and see its
@@ -109,7 +132,7 @@ artifacts:
   # ══════════════════════════════════════════════════════════════════════
 
   - id: RENDER-REQ-001
-    type: safety-requirement
+    type: requirement
     title: Orthogonal edge routing
     status: implemented
     description: >
@@ -121,7 +144,7 @@ artifacts:
     verified-by: [VAL-R2]
 
   - id: RENDER-REQ-002
-    type: safety-requirement
+    type: requirement
     title: Visible ports with directional indicators
     status: implemented
     description: >
@@ -134,7 +157,7 @@ artifacts:
     verified-by: [VAL-R3]
 
   - id: RENDER-REQ-003
-    type: safety-requirement
+    type: requirement
     title: Interactive HTML with zoom/pan/minimap/search
     status: partial
     description: >
@@ -147,7 +170,7 @@ artifacts:
     verified-by: [VAL-R4]
 
   - id: RENDER-REQ-004
-    type: safety-requirement
+    type: requirement
     title: Deterministic layout
     status: implemented
     description: >
@@ -159,7 +182,7 @@ artifacts:
     verified-by: [VAL-R1]
 
   - id: RENDER-REQ-005
-    type: safety-requirement
+    type: requirement
     title: Selection and group highlighting
     status: implemented
     description: >
@@ -171,7 +194,7 @@ artifacts:
     verified-by: [VAL-R4]
 
   - id: RENDER-REQ-006
-    type: safety-requirement
+    type: requirement
     title: Semantic zoom
     status: implemented
     description: >

@@ -78,6 +78,11 @@ artifacts:
 
   - id: H-SEC-1
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-1
+      - type: leads-to-loss
+        target: L-SEC-2
     title: Unsanitized model names in generated source code
     description: >
       Component, port, package, and feature names from the AADL/SysML v2
@@ -92,6 +97,11 @@ artifacts:
 
   - id: H-SEC-2
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-1
+      - type: leads-to-loss
+        target: L-SEC-2
     title: Property values injected into generated code without validation
     description: >
       Property values from the AADL model (timing values, dispatch
@@ -104,6 +114,9 @@ artifacts:
 
   - id: H-SEC-3
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-3
     title: SysML v2 lowering silently alters component semantics
     description: >
       The SysML v2 lowering uses heuristics (infer_category) to decide
@@ -117,6 +130,9 @@ artifacts:
 
   - id: H-SEC-4
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-4
     title: Generated workspace pulls untrusted dependencies
     description: >
       workspace_gen generates Cargo.toml with hardcoded dependency
@@ -130,6 +146,9 @@ artifacts:
 
   - id: H-SEC-5
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-2
     title: Verification artifacts do not cover runtime behavior
     description: >
       Generated Lean4 proofs only verify scheduling properties (RTA).
@@ -143,6 +162,11 @@ artifacts:
 
   - id: H-SEC-6
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-1
+      - type: leads-to-loss
+        target: L-SEC-4
     title: Codegen writes to arbitrary filesystem paths
     description: >
       The codegen CLI writes generated files to --output directory
@@ -155,6 +179,9 @@ artifacts:
 
   - id: H-SEC-7
     type: hazard
+    links:
+      - type: leads-to-loss
+        target: L-SEC-5
     title: Model complexity causes resource exhaustion
     description: >
       The codegen pipeline iterates over all_components() multiple
@@ -171,6 +198,11 @@ artifacts:
 
   - id: SC-SEC-1
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-1
+      - type: prevents
+        target: H-SEC-2
     title: No code injection through model-derived identifiers
     description: >
       Names and values extracted from input models must be sanitized
@@ -181,6 +213,9 @@ artifacts:
 
   - id: SC-SEC-2
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-6
     title: Generated file paths must be confined to output directory
     description: >
       All generated file paths must be validated to resolve within the
@@ -190,6 +225,9 @@ artifacts:
 
   - id: SC-SEC-3
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-5
     title: Verification must cover safety-critical properties
     description: >
       Generated verification artifacts must cover the same safety
@@ -200,6 +238,9 @@ artifacts:
 
   - id: SC-SEC-4
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-3
     title: SysML v2 lowering must not silently drop constructs
     description: >
       Unrecognized SysML v2 syntax kinds must produce diagnostics.
@@ -209,6 +250,9 @@ artifacts:
 
   - id: SC-SEC-5
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-4
     title: Generated build configurations must use pinned dependencies
     description: >
       Generated Cargo.toml and BUILD.bazel must use exact version pins,
@@ -218,6 +262,9 @@ artifacts:
 
   - id: SC-SEC-6
     type: system-constraint
+    links:
+      - type: prevents
+        target: H-SEC-7
     title: Resource bounds on code generation
     description: >
       Code generation must enforce limits on the number of generated
@@ -312,6 +359,11 @@ artifacts:
 
   - id: CA-SEC-LOWER
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SEC-SYSML2
+      - type: acts-on
+        target: CP-SEC-MODEL-INPUT
     title: Lower SysML v2 to AADL
     action: Transform SysML v2 CST into AADL ItemTree
     source: CTRL-SEC-SYSML2
@@ -319,6 +371,11 @@ artifacts:
 
   - id: CA-SEC-GENERATE
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SEC-CODEGEN
+      - type: acts-on
+        target: CP-SEC-GENERATED-CODE
     title: Generate code from AADL model
     action: Produce Rust, WIT, config, proof, and build files from instance model
     source: CTRL-SEC-CODEGEN
@@ -326,6 +383,11 @@ artifacts:
 
   - id: CA-SEC-GENPROOF
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SEC-PROOFGEN
+      - type: acts-on
+        target: CP-SEC-GENERATED-CODE
     title: Generate verification artifacts
     action: Produce Lean4 proofs and Kani harnesses from timing properties
     source: CTRL-SEC-PROOFGEN
@@ -333,6 +395,11 @@ artifacts:
 
   - id: CA-SEC-GENBUILD
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SEC-BUILDGEN
+      - type: acts-on
+        target: CP-SEC-GENERATED-CODE
     title: Generate build configuration
     action: Produce Cargo.toml and BUILD.bazel workspace files
     source: CTRL-SEC-BUILDGEN
@@ -340,6 +407,11 @@ artifacts:
 
   - id: CA-SEC-VERIFY
     type: control-action
+    links:
+      - type: issued-by
+        target: CTRL-SEC-VERUS
+      - type: acts-on
+        target: CP-SEC-VERIFIED-ARTIFACTS
     title: Run formal verification
     action: Execute Verus/Lean4/Kani on generated artifacts
     source: CTRL-SEC-VERUS
@@ -353,6 +425,11 @@ artifacts:
 
   - id: UCA-SEC-1
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-SYSML2
+      - type: leads-to-hazard
+        target: H-SEC-3
     title: Lowering silently drops security-relevant constructs
     uca-type: not-providing
     context: >
@@ -370,6 +447,11 @@ artifacts:
 
   - id: UCA-SEC-2
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-SYSML2
+      - type: leads-to-hazard
+        target: H-SEC-3
     title: Category heuristic misclassifies security-critical component
     uca-type: providing
     context: >
@@ -389,6 +471,11 @@ artifacts:
 
   - id: UCA-SEC-3
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-CODEGEN
+      - type: leads-to-hazard
+        target: H-SEC-1
     title: Codegen interpolates unsanitized name into Rust source
     uca-type: providing
     context: >
@@ -407,6 +494,11 @@ artifacts:
 
   - id: UCA-SEC-4
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-CODEGEN
+      - type: leads-to-hazard
+        target: H-SEC-2
     title: Codegen embeds property value in Rust constant without bounds
     uca-type: providing
     context: >
@@ -423,6 +515,11 @@ artifacts:
 
   - id: UCA-SEC-5
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-CODEGEN
+      - type: leads-to-hazard
+        target: H-SEC-6
     title: Codegen writes file outside output directory
     uca-type: providing
     context: >
@@ -441,6 +538,11 @@ artifacts:
 
   - id: UCA-SEC-6
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-CODEGEN
+      - type: leads-to-hazard
+        target: H-SEC-1
     title: Codegen produces WIT with type confusion
     uca-type: providing
     context: >
@@ -462,6 +564,11 @@ artifacts:
 
   - id: UCA-SEC-7
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-PROOFGEN
+      - type: leads-to-hazard
+        target: H-SEC-5
     title: Proof generator substitutes default timing values
     uca-type: providing
     context: >
@@ -479,6 +586,11 @@ artifacts:
 
   - id: UCA-SEC-8
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-PROOFGEN
+      - type: leads-to-hazard
+        target: H-SEC-5
     title: Kani harness verifies only base case without interference
     uca-type: stopped-too-soon
     context: >
@@ -498,6 +610,11 @@ artifacts:
 
   - id: UCA-SEC-9
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-BUILDGEN
+      - type: leads-to-hazard
+        target: H-SEC-4
     title: Generated Cargo.toml uses unpinned dependency versions
     uca-type: providing
     context: >
@@ -514,6 +631,11 @@ artifacts:
 
   - id: UCA-SEC-10
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-BUILDGEN
+      - type: leads-to-hazard
+        target: H-SEC-4
     title: Generated crate names may collide with public registry
     uca-type: providing
     context: >
@@ -532,6 +654,13 @@ artifacts:
 
   - id: UCA-SEC-11
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-VERUS
+      - type: leads-to-hazard
+        target: H-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-4
     title: Verus rule passes shell-injectable paths
     uca-type: providing
     context: >
@@ -548,6 +677,13 @@ artifacts:
 
   - id: UCA-SEC-12
     type: uca
+    links:
+      - type: issued-by
+        target: CTRL-SEC-VERUS
+      - type: leads-to-hazard
+        target: H-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-2
     title: wasm-tools component new accepts unverified core module
     uca-type: not-providing
     context: >
@@ -570,6 +706,15 @@ artifacts:
 
   - id: CC-SEC-1
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-CODEGEN
+      - type: inverts-uca
+        target: UCA-SEC-3
+      - type: inverts-uca
+        target: UCA-SEC-6
+      - type: prevents
+        target: H-SEC-1
     title: Language-specific sanitization for all generated code
     constraint: >
       Every model-derived string interpolated into generated source
@@ -583,6 +728,15 @@ artifacts:
 
   - id: CC-SEC-2
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-CODEGEN
+      - type: inverts-uca
+        target: UCA-SEC-4
+      - type: inverts-uca
+        target: UCA-SEC-7
+      - type: prevents
+        target: H-SEC-2
     title: Timing property bounds validation before code generation
     constraint: >
       Before generating code or proofs, timing properties must be
@@ -595,6 +749,13 @@ artifacts:
 
   - id: CC-SEC-3
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-CODEGEN
+      - type: inverts-uca
+        target: UCA-SEC-5
+      - type: prevents
+        target: H-SEC-6
     title: Output path confinement
     constraint: >
       All generated file paths must be canonicalized and verified
@@ -607,6 +768,15 @@ artifacts:
 
   - id: CC-SEC-4
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-SYSML2
+      - type: inverts-uca
+        target: UCA-SEC-1
+      - type: inverts-uca
+        target: UCA-SEC-2
+      - type: prevents
+        target: H-SEC-3
     title: SysML v2 lowering must diagnose unhandled constructs
     constraint: >
       The wildcard match arm in lower_node must emit a diagnostic
@@ -619,6 +789,15 @@ artifacts:
 
   - id: CC-SEC-5
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-BUILDGEN
+      - type: inverts-uca
+        target: UCA-SEC-9
+      - type: inverts-uca
+        target: UCA-SEC-10
+      - type: prevents
+        target: H-SEC-4
     title: Generated dependencies must use exact version pins with checksums
     constraint: >
       Generated Cargo.toml must use exact version pins (= prefix)
@@ -631,6 +810,15 @@ artifacts:
 
   - id: CC-SEC-6
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-PROOFGEN
+      - type: inverts-uca
+        target: UCA-SEC-7
+      - type: inverts-uca
+        target: UCA-SEC-8
+      - type: prevents
+        target: H-SEC-5
     title: Verification harnesses must document coverage scope
     constraint: >
       Generated Kani harnesses and Lean4 proofs must include
@@ -643,6 +831,13 @@ artifacts:
 
   - id: CC-SEC-7
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-VERUS
+      - type: inverts-uca
+        target: UCA-SEC-11
+      - type: prevents
+        target: H-SEC-1
     title: Bazel rules must not construct shell commands from paths
     constraint: >
       Verus and wasm-tools Bazel rules must use ctx.actions.run
@@ -654,6 +849,15 @@ artifacts:
 
   - id: CC-SEC-8
     type: controller-constraint
+    links:
+      - type: constrains-controller
+        target: CTRL-SEC-VERUS
+      - type: inverts-uca
+        target: UCA-SEC-12
+      - type: prevents
+        target: H-SEC-1
+      - type: prevents
+        target: H-SEC-2
     title: WASM component must verify provenance of core module
     constraint: >
       The wasm_component rule must verify that the core WASM module
@@ -670,6 +874,15 @@ artifacts:
 
   - id: LS-SEC-1
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-3
+      - type: caused-by-uca
+        target: UCA-SEC-4
+      - type: leads-to-hazard
+        target: H-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-2
     title: "Attack path: model-driven code injection via component name"
     scenario-type: inadequate-control-algorithm
     description: >
@@ -694,6 +907,17 @@ artifacts:
 
   - id: LS-SEC-2
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-4
+      - type: caused-by-uca
+        target: UCA-SEC-7
+      - type: caused-by-uca
+        target: UCA-SEC-8
+      - type: leads-to-hazard
+        target: H-SEC-2
+      - type: leads-to-hazard
+        target: H-SEC-5
     title: "Attack path: timing property manipulation for proof bypass"
     scenario-type: inadequate-process-model
     description: >
@@ -716,6 +940,11 @@ artifacts:
 
   - id: LS-SEC-3
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-2
+      - type: leads-to-hazard
+        target: H-SEC-3
     title: "Attack path: SysML v2 category confusion for partition bypass"
     scenario-type: inadequate-control-algorithm
     description: >
@@ -739,6 +968,11 @@ artifacts:
 
   - id: LS-SEC-4
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-10
+      - type: leads-to-hazard
+        target: H-SEC-4
     title: "Attack path: dependency confusion via generated workspace"
     scenario-type: inadequate-control-algorithm
     description: >
@@ -764,6 +998,13 @@ artifacts:
 
   - id: LS-SEC-5
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-11
+      - type: leads-to-hazard
+        target: H-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-4
     title: "Attack path: shell injection via Verus verification rule"
     scenario-type: inadequate-control-algorithm
     description: >
@@ -787,6 +1028,13 @@ artifacts:
 
   - id: LS-SEC-6
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-12
+      - type: leads-to-hazard
+        target: H-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-2
     title: "Attack path: WASM component substitution via build cache"
     scenario-type: inadequate-feedback
     description: >
@@ -808,6 +1056,11 @@ artifacts:
 
   - id: LS-SEC-7
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-7
+      - type: leads-to-hazard
+        target: H-SEC-7
     title: "Attack path: resource exhaustion via model complexity bomb"
     scenario-type: inadequate-control-algorithm
     description: >
@@ -828,6 +1081,11 @@ artifacts:
 
   - id: LS-SEC-8
     type: loss-scenario
+    links:
+      - type: caused-by-uca
+        target: UCA-SEC-1
+      - type: leads-to-hazard
+        target: H-SEC-3
     title: "Attack path: SysML v2 wildcard drops security annotations"
     scenario-type: inadequate-control-algorithm
     description: >
