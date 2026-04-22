@@ -49,10 +49,15 @@ public
 end Test_Applies_To;
 ";
 
-fn write_model() -> std::path::PathBuf {
+fn write_model(tag: &str) -> std::path::PathBuf {
+    // Per-test tag: cargo runs tests in parallel within the same process,
+    // so process::id() alone collides. The trailing tag disambiguates so
+    // one test's fs::remove_file does not race another test's spar
+    // invocation reading the same path.
     let path = env::temp_dir().join(format!(
-        "spar_applies_to_nested_{}.aadl",
-        std::process::id()
+        "spar_applies_to_nested_{}_{}.aadl",
+        std::process::id(),
+        tag
     ));
     fs::write(&path, MODEL).expect("write temp AADL");
     path
@@ -61,7 +66,7 @@ fn write_model() -> std::path::PathBuf {
 /// #128: binding_rules must see the binding on the thread instance.
 #[test]
 fn issue_128_binding_rules_accepts_nested_applies_to() {
-    let path = write_model();
+    let path = write_model("128");
     let output = spar()
         .arg("analyze")
         .arg("--root")
@@ -138,7 +143,7 @@ end Test_Unresolvable;
 /// target instance, not the declaring system.
 #[test]
 fn issue_129_instance_json_includes_applies_to_properties() {
-    let path = write_model();
+    let path = write_model("129");
     let output = spar()
         .arg("instance")
         .arg("--root")
