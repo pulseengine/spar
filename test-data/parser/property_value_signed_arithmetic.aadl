@@ -1,0 +1,23 @@
+-- Regression test: unary sign must bind only to the adjacent numeric
+-- literal, not to the whole following additive expression. Prior to the
+-- fix, the PLUS/MINUS primary arm recursed into the outer
+-- property_expression (which runs a left-associative binary-op loop),
+-- so `-1 + 2` parsed as `-(1+2)` instead of `(-1)+2` — silently
+-- inverting the sign of every downstream arithmetic property.
+-- AS-5506B §11.2.5: `numeric_term ::= [sign] numeric_literal`.
+package Test_Signed_Arithmetic
+public
+
+  processor P
+    properties
+      -- leading negative + additive tail
+      Slack => -1 + 2;
+      -- leading positive + additive tail
+      Bias => +3 + 4;
+      -- subtractive tail after leading negative
+      Adjust => -10 - 3;
+      -- mixed with multiplication
+      Scale => -2 * 5 + 1;
+  end P;
+
+end Test_Signed_Arithmetic;
