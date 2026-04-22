@@ -63,11 +63,23 @@ fn feature(p: &mut Parser) {
     // Determine feature type
     match p.current() {
         SyntaxKind::IN_KW | SyntaxKind::OUT_KW => {
-            // Direction
+            // Direction. AS-5506B §8.1 grammar:
+            //   feature_direction ::= in | out | in out
+            // Only the `in out` combination is legal — `out in`, `in in`,
+            // and `out out` are not. The HIR lowering normalizes unknown
+            // direction text to `None`, so these used to parse silently
+            // and leave downstream direction_rules to skip the feature;
+            // reject at the syntax layer for better locality of diagnosis
+            // and spec-conformance.
             let d = p.start();
+            let first_was_in = p.at(SyntaxKind::IN_KW);
             p.bump_any(); // in or out
-            if p.at(SyntaxKind::OUT_KW) || p.at(SyntaxKind::IN_KW) {
-                p.bump_any(); // second part of `in out`
+            // Only `in` may be followed by `out` to form `in out`.
+            if first_was_in && p.at(SyntaxKind::OUT_KW) {
+                p.bump(SyntaxKind::OUT_KW);
+            } else if p.at(SyntaxKind::IN_KW) || p.at(SyntaxKind::OUT_KW) {
+                p.error("feature direction must be `in`, `out`, or `in out` (AS-5506B §8.1)");
+                p.bump_any(); // consume the offending keyword so the parser recovers
             }
             d.complete(p, SyntaxKind::DIRECTION);
 
