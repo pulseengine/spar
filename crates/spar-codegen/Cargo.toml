@@ -18,6 +18,11 @@ toml.workspace = true
 spar-hir-def.workspace = true
 spar-base-db.workspace = true
 la-arena.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "codegen_benchmarks"
+harness = false
 
 # Kani-only dev-dependencies. `kani` is the verifier's own crate; it is
 # provided by the `cargo kani` driver and only resolvable under the `kani`

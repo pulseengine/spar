@@ -10,6 +10,7 @@ members = [
     "crates/spar-analysis",
     "crates/spar-transform",
     "crates/spar-cli",
+    "crates/spar-codegen",
     "crates/spar-render",
     "crates/spar-solver",
     "crates/spar-sysml2",
@@ -54,3 +55,4 @@ syn = { version = "2", features = ["full"] }
 proc-macro2 = "1"
 proptest = "1"
 good_lp = { version = "1", default-features = false, features = ["highs"] }
+criterion = { version = "0.5", features = ["html_reports"] }
