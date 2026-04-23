@@ -191,12 +191,15 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
+      # cargo-fuzz defaults to x86_64-unknown-linux-musl, whose statically-
+      # linked libc is incompatible with ASan ("sanitizer is incompatible
+      # with statically linked libc"). Pin to the GNU triple explicitly.
       - name: fuzz_aadl_parse (60s)
-        run: cargo +nightly fuzz run fuzz_aadl_parse -- -max_total_time=60 -timeout=10
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_aadl_parse -- -max_total_time=60 -timeout=10
       - name: fuzz_scheduler_solver (60s)
-        run: cargo +nightly fuzz run fuzz_scheduler_solver -- -max_total_time=60 -timeout=5
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_scheduler_solver -- -max_total_time=60 -timeout=5
       - name: fuzz_codegen_roundtrip (60s)
-        run: cargo +nightly fuzz run fuzz_codegen_roundtrip -- -max_total_time=60 -timeout=10
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_codegen_roundtrip -- -max_total_time=60 -timeout=10
 
   # ── Supply chain verification ───────────────────────────────────────
   supply-chain:
