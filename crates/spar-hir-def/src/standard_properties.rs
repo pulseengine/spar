@@ -18,6 +18,12 @@ pub struct StandardProperty {
 }
 
 /// All standard predefined property set names.
+///
+/// Includes the AS5506 Appendix A predeclared sets plus two non-standard
+/// spar-defined sets (`Spar_Timing`, `Spar_Trace`) that support
+/// IRQ-aware RTA (Track A, v0.7.0) and closed-loop trace verification
+/// (v0.8.0 precursor). The spar-defined sets are treated like predefined
+/// sets so they resolve without explicit `with` imports.
 pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Timing_Properties",
     "Communication_Properties",
@@ -27,6 +33,8 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Programming_Properties",
     "Modeling_Properties",
     "AADL_Project",
+    "Spar_Timing",
+    "Spar_Trace",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -279,6 +287,53 @@ const AADL_PROJECT: &[(&str, &str)] = &[
     ),
 ];
 
+// ── Spar_Timing ─────────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for IRQ-aware RTA (Track A, v0.7.0). Models the interrupt layer so
+// hierarchical RTA can reason about ISR priority, the ISR body's own
+// BCET..WCET, the hardware-dispatch latency bound, and the top-half /
+// bottom-half deferred-work split.
+
+const SPAR_TIMING: &[(&str, &str)] = &[
+    // Priority at which the ISR executes (higher than any task).
+    // Drives hierarchical RTA layer ordering. Applies to thread
+    // (handler thread) and virtual processor (ISR layer).
+    ("ISR_Priority", "aadlinteger"),
+    // BCET..WCET of the ISR body itself, separately from the handler
+    // thread. Applies to thread and device.
+    ("ISR_Execution_Time", "Time_Range"),
+    // Platform-given upper bound on IRQ-assertion → ISR-entry
+    // (hardware + kernel dispatch). Drives the "from wire to handler"
+    // latency chain. Applies to processor and device.
+    ("Interrupt_Latency_Bound", "Time"),
+    // Reference to the thread that handles deferred ISR work (classic
+    // top-half / bottom-half split). Applies to thread and device.
+    ("Bottom_Half_Server", "reference (thread)"),
+];
+
+// ── Spar_Trace ──────────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for closed-loop trace verification (v0.8.0 precursor). Annotates
+// components whose entry/exit codegen should emit a runtime trace
+// event and carries design-time predictions against which the observed
+// traces are compared by `spar verify-trace`.
+
+const SPAR_TRACE: &[(&str, &str)] = &[
+    // Flags a component whose entry/exit codegen should emit a trace
+    // event (Zephyr CTF k_*-primitive style in v0.8.0).
+    ("Probe_Point", "aadlboolean"),
+    // Design-time best-case prediction, separate from
+    // Compute_Execution_Time because these are predictions for runtime
+    // comparison, not the declared WCET the scheduler uses.
+    ("Expected_BCET", "Time"),
+    // Design-time worst-case prediction (runtime-comparison only).
+    ("Expected_WCET", "Time"),
+    // Design-time mean/expected prediction (runtime-comparison only).
+    ("Expected_Mean", "Time"),
+];
+
 /// Helper: collect properties from a table into the result vector.
 fn collect_properties(
     table: &[(&'static str, &'static str)],
@@ -314,6 +369,8 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     );
     collect_properties(MODELING_PROPERTIES, "Modeling_Properties", &mut result);
     collect_properties(AADL_PROJECT, "AADL_Project", &mut result);
+    collect_properties(SPAR_TIMING, "Spar_Timing", &mut result);
+    collect_properties(SPAR_TRACE, "Spar_Trace", &mut result);
 
     result
 }
@@ -339,6 +396,8 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "programming_properties" => Some(PROGRAMMING_PROPERTIES),
         "modeling_properties" => Some(MODELING_PROPERTIES),
         "aadl_project" => Some(AADL_PROJECT),
+        "spar_timing" => Some(SPAR_TIMING),
+        "spar_trace" => Some(SPAR_TRACE),
         _ => None,
     }
 }
@@ -383,6 +442,8 @@ mod tests {
         assert!(is_standard_property_set("Programming_Properties"));
         assert!(is_standard_property_set("Modeling_Properties"));
         assert!(is_standard_property_set("AADL_Project"));
+        assert!(is_standard_property_set("Spar_Timing"));
+        assert!(is_standard_property_set("Spar_Trace"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -548,6 +609,118 @@ mod tests {
     }
 
     #[test]
+    fn test_standard_properties_in_spar_timing() {
+        // Spar_Timing is a known property set.
+        assert!(is_standard_property_set("Spar_Timing"));
+
+        let props = standard_properties_in_set("Spar_Timing");
+        assert_eq!(props.len(), 4);
+        assert!(props.contains(&"ISR_Priority"));
+        assert!(props.contains(&"ISR_Execution_Time"));
+        assert!(props.contains(&"Interrupt_Latency_Bound"));
+        assert!(props.contains(&"Bottom_Half_Server"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_Timing", "ISR_Priority"),
+            Some("aadlinteger")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Timing", "ISR_Execution_Time"),
+            Some("Time_Range")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Timing", "Interrupt_Latency_Bound"),
+            Some("Time")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Timing", "Bottom_Half_Server"),
+            Some("reference (thread)")
+        );
+
+        // Deliberately-wrong name returns None.
+        assert_eq!(standard_property_type("Spar_Timing", "Nonexistent"), None);
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_timing", "isr_priority"),
+            Some("aadlinteger")
+        );
+    }
+
+    #[test]
+    fn test_standard_properties_in_spar_trace() {
+        // Spar_Trace is a known property set.
+        assert!(is_standard_property_set("Spar_Trace"));
+
+        let props = standard_properties_in_set("Spar_Trace");
+        assert_eq!(props.len(), 4);
+        assert!(props.contains(&"Probe_Point"));
+        assert!(props.contains(&"Expected_BCET"));
+        assert!(props.contains(&"Expected_WCET"));
+        assert!(props.contains(&"Expected_Mean"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_Trace", "Probe_Point"),
+            Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Trace", "Expected_BCET"),
+            Some("Time")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Trace", "Expected_WCET"),
+            Some("Time")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Trace", "Expected_Mean"),
+            Some("Time")
+        );
+
+        // Deliberately-wrong name returns None.
+        assert_eq!(standard_property_type("Spar_Trace", "Nonexistent"), None);
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_trace", "probe_point"),
+            Some("aadlboolean")
+        );
+    }
+
+    #[test]
+    fn test_spar_property_sets_resolved_via_global_scope() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        let scope = GlobalScope::from_trees(vec![]);
+
+        // Spar_Timing::ISR_Priority is resolvable without explicit `with`.
+        let result = scope.resolve_property(&Name::new("Spar_Timing"), &Name::new("ISR_Priority"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected PropertyDef for Spar_Timing::ISR_Priority, got {:?}",
+            result
+        );
+
+        // Spar_Trace::Probe_Point is resolvable without explicit `with`.
+        let result = scope.resolve_property(&Name::new("Spar_Trace"), &Name::new("Probe_Point"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected PropertyDef for Spar_Trace::Probe_Point, got {:?}",
+            result
+        );
+
+        // Deliberately-wrong name inside a known spar set is Unresolved.
+        let result = scope.resolve_property(&Name::new("Spar_Timing"), &Name::new("Nonexistent"));
+        assert!(
+            matches!(result, ResolvedProperty::Unresolved),
+            "expected Unresolved for Spar_Timing::Nonexistent, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_standard_properties_unknown_set() {
         let props = standard_properties_in_set("Nonexistent_Properties");
         assert!(props.is_empty());
@@ -563,8 +736,8 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 = 102
-        assert_eq!(all.len(), 102);
+        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 = 110
+        assert_eq!(all.len(), 110);
     }
 
     #[test]
