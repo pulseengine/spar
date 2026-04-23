@@ -1008,4 +1008,67 @@ artifacts:
     status: planned
     tags: [interop, autosar, bridge, v050]
 
+  # ── IRQ-aware RTA (Track A, v0.7.0) ────────────────────────────────
+
+  - id: REQ-TIMING-IRQ-001
+    type: requirement
+    title: ISR execution time distinct from handler thread WCET
+    description: >
+      System shall support modeling of ISR execution time separate from
+      handler thread WCET. Exposed via the non-standard Spar_Timing
+      property set as ISR_Execution_Time (Time_Range). This commit lands
+      the property-set surface only; hierarchical RTA consumption ships
+      in subsequent Track A commits.
+    status: planned
+    tags: [timing, irq, rta, v070]
+
+  - id: REQ-TIMING-IRQ-002
+    type: requirement
+    title: Hardware IRQ-to-ISR latency bound
+    description: >
+      System shall support modeling of hardware IRQ-assertion-to-ISR-entry
+      latency bound (platform-given upper bound covering hardware dispatch
+      plus kernel vectoring). Exposed via Spar_Timing::Interrupt_Latency_Bound
+      (Time). Drives the "from wire to handler" latency chain in hierarchical
+      RTA.
+    status: planned
+    tags: [timing, irq, rta, v070]
+
+  - id: REQ-TIMING-IRQ-003
+    type: requirement
+    title: Top-half/bottom-half thread decomposition
+    description: >
+      System shall support top-half/bottom-half thread decomposition via
+      the Spar_Timing::Bottom_Half_Server property (reference to thread).
+      Allows ISR bodies to declare the handler thread responsible for
+      deferred work, so hierarchical RTA can chain the two layers.
+    status: planned
+    tags: [timing, irq, rta, v070]
+
+  # ── Closed-loop trace verification (v0.8.0 precursor) ──────────────
+
+  - id: REQ-TRACE-001
+    type: requirement
+    title: Probe-point annotation for runtime trace emission
+    description: >
+      System shall support probe-point annotation on components for
+      runtime trace emission. Exposed via Spar_Trace::Probe_Point
+      (aadlboolean). Flags components whose entry/exit codegen should
+      emit a trace event (Zephyr CTF k_*-primitive style in v0.8.0).
+    status: planned
+    tags: [trace, verification, v080]
+
+  - id: REQ-TRACE-002
+    type: requirement
+    title: Per-component expected-timing properties for runtime comparison
+    description: >
+      System shall support per-component expected-timing properties
+      (BCET/WCET/Mean) for runtime comparison. Exposed via
+      Spar_Trace::Expected_BCET, Expected_WCET, Expected_Mean (all Time).
+      Distinct from Compute_Execution_Time because these are design-time
+      predictions intended for runtime comparison by `spar verify-trace`,
+      not the declared WCET the scheduler uses.
+    status: planned
+    tags: [trace, verification, v080]
+
   # Research findings tracked separately in research/findings.yaml

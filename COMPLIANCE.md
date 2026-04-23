@@ -214,6 +214,12 @@
 
 ---
 
+## In progress / v0.7.0
+
+- IRQ-aware RTA: property-set surface (`Spar_Timing::*`, `Spar_Trace::*`) landed; analysis wiring in follow-up commits.
+
+---
+
 ## What's Working Well
 
 - **Parser coverage is excellent** (~95%). All major AADL constructs parse correctly.

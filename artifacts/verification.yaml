@@ -992,3 +992,47 @@ artifacts:
         target: REQ-PROP-002
       - type: satisfies
         target: COVERAGE-CH11
+
+  - id: TEST-SPAR-TIMING-PROPS
+    type: feature
+    title: Spar_Timing property set surface tests
+    description: >
+      Unit tests in spar-hir-def/src/standard_properties.rs verifying
+      that Spar_Timing is a known predefined property set, that each of
+      ISR_Priority, ISR_Execution_Time, Interrupt_Latency_Bound, and
+      Bottom_Half_Server resolves to the expected AADL type, and that
+      unknown names in the set return None / ResolvedProperty::Unresolved.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def -- test_standard_properties_in_spar_timing test_spar_property_sets_resolved_via_global_scope
+    status: passing
+    tags: [v0.7.0, timing, irq, properties]
+    links:
+      - type: satisfies
+        target: REQ-TIMING-IRQ-001
+      - type: satisfies
+        target: REQ-TIMING-IRQ-002
+      - type: satisfies
+        target: REQ-TIMING-IRQ-003
+
+  - id: TEST-SPAR-TRACE-PROPS
+    type: feature
+    title: Spar_Trace property set surface tests
+    description: >
+      Unit tests in spar-hir-def/src/standard_properties.rs verifying
+      that Spar_Trace is a known predefined property set, that each of
+      Probe_Point, Expected_BCET, Expected_WCET, and Expected_Mean
+      resolves to the expected AADL type, and that unknown names return
+      None / ResolvedProperty::Unresolved.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def -- test_standard_properties_in_spar_trace test_spar_property_sets_resolved_via_global_scope
+    status: passing
+    tags: [v0.8.0, trace, verification, properties]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-001
+      - type: satisfies
+        target: REQ-TRACE-002
