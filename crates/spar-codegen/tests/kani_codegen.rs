@@ -19,8 +19,27 @@
 /// Maximum tasks in a bounded schedule (matches `kani_solver.rs`).
 const MAX_TASKS: usize = 4;
 
-/// Unwind limit: `MAX_TASKS + 1` + headroom for the per-task string assembly loop.
-const UNWIND_N: u32 = 8;
+/// Output buffer size, in bytes.
+///
+/// Sized to fit a worst-case emission for `MAX_TASKS = 4`:
+/// header (9 bytes "schedule:") + per-task `task=<id>proc=<id>;` (14 bytes × 4) = 65 bytes.
+/// Rounded down to 64 — the harness only needs to verify byte presence, not
+/// total length, so any truncation past `BUF_SIZE` is harmless and the
+/// `cursor < buf.len()` guards in `emit` make it safe.
+const BUF_SIZE: usize = 64;
+
+/// Unwind limit for the harness.
+///
+/// Must cover the largest loop iteration count in the harness. The
+/// `emit_len` and `contains` helpers each scan all `BUF_SIZE` bytes, so the
+/// CBMC unwinder needs `BUF_SIZE + 1 = 65` to prove termination. The
+/// per-task `tokens` array (11 bytes) and the 9-byte header iterator are
+/// also covered by this bound. Raising the unwind here does NOT weaken the
+/// correctness assertions — it only allows CBMC to fully explore the loops
+/// (per the `kani_solver.rs` guidance: "raise UNWIND_N rather than the
+/// loop bound"). The actual proof obligations (header presence, task-ID
+/// containment) are unchanged.
+const UNWIND_N: u32 = 65;
 
 /// Bounded representation of one task in the emitted schedule.
 ///
@@ -77,8 +96,8 @@ impl Schedule {
 /// binding. What matters for the theorem is that **every `task_id` from the
 /// input appears in the output**, so the format is kept minimal to keep
 /// Kani's buffer reasoning tractable.
-fn emit(s: &Schedule) -> [u8; 64] {
-    let mut buf = [0u8; 64];
+fn emit(s: &Schedule) -> [u8; BUF_SIZE] {
+    let mut buf = [0u8; BUF_SIZE];
     let mut cursor: usize = 0;
 
     // Fixed header for non-empty outputs.
@@ -117,9 +136,9 @@ fn emit(s: &Schedule) -> [u8; 64] {
 }
 
 /// Count of non-zero bytes — a Kani-safe proxy for "length of emitted output".
-fn emit_len(buf: &[u8; 64]) -> usize {
+fn emit_len(buf: &[u8; BUF_SIZE]) -> usize {
     let mut n = 0;
-    for i in 0..64 {
+    for i in 0..BUF_SIZE {
         if buf[i] != 0 {
             n += 1;
         }
@@ -128,8 +147,8 @@ fn emit_len(buf: &[u8; 64]) -> usize {
 }
 
 /// Contains-check: does `buf` contain the byte `needle`?
-fn contains(buf: &[u8; 64], needle: u8) -> bool {
-    for i in 0..64 {
+fn contains(buf: &[u8; BUF_SIZE], needle: u8) -> bool {
+    for i in 0..BUF_SIZE {
         if buf[i] == needle {
             return true;
         }
@@ -159,7 +178,7 @@ fn contains(buf: &[u8; 64], needle: u8) -> bool {
 /// that task is never exposed to downstream tools). The harness enumerates
 /// schedule lengths 1..=MAX_TASKS and asserts containment for every task ID.
 #[kani::proof]
-#[kani::unwind(8)]
+#[kani::unwind(65)]
 fn kani_emit_preserves_schedule() {
     let len: usize = kani::any();
     kani::assume(len >= 1 && len <= MAX_TASKS);
