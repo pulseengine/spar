@@ -1,0 +1,54 @@
+[package]
+name = "spar-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+# `cargo fuzz` expects this crate to live *outside* the workspace so its
+# nightly-only `-Zsanitizer` flags don't poison other builds.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+spar-parser   = { path = "../crates/spar-parser" }
+spar-syntax   = { path = "../crates/spar-syntax" }
+spar-solver   = { path = "../crates/spar-solver" }
+spar-codegen  = { path = "../crates/spar-codegen" }
+spar-hir-def  = { path = "../crates/spar-hir-def" }
+spar-base-db  = { path = "../crates/spar-base-db" }
+la-arena      = "0.3"
+
+# cargo-fuzz disables default features of workspace members, but spar-solver
+# compiles in default configuration here (it depends on good_lp + HiGHS).
+
+[profile.release]
+debug = 1
+
+# ── fuzz target binaries ─────────────────────────────────────────────
+
+[[bin]]
+name = "fuzz_aadl_parse"
+path = "fuzz_targets/fuzz_aadl_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_scheduler_solver"
+path = "fuzz_targets/fuzz_scheduler_solver.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_codegen_roundtrip"
+path = "fuzz_targets/fuzz_codegen_roundtrip.rs"
+test = false
+doc = false
+bench = false

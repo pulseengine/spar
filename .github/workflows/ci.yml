@@ -175,6 +175,29 @@ jobs:
           name: mutants-report
           path: mutants-out/
 
+  # ── Fuzz smoke (60s per target on PRs) ──────────────────────────────
+  fuzz-smoke:
+    name: Fuzz smoke (60s/target)
+    runs-on: ubuntu-latest
+    # Only run on PRs — pushes to main hit the nightly workflow instead.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: fuzz_aadl_parse (60s)
+        run: cargo +nightly fuzz run fuzz_aadl_parse -- -max_total_time=60 -timeout=10
+      - name: fuzz_scheduler_solver (60s)
+        run: cargo +nightly fuzz run fuzz_scheduler_solver -- -max_total_time=60 -timeout=5
+      - name: fuzz_codegen_roundtrip (60s)
+        run: cargo +nightly fuzz run fuzz_codegen_roundtrip -- -max_total_time=60 -timeout=10
+
   # ── Supply chain verification ───────────────────────────────────────
   supply-chain:
     name: Supply Chain (cargo-vet)
