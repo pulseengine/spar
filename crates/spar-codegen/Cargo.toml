@@ -18,3 +18,14 @@ toml.workspace = true
 spar-hir-def.workspace = true
 spar-base-db.workspace = true
 la-arena.workspace = true
+
+# Kani-only dev-dependencies. `kani` is the verifier's own crate; it is
+# provided by the `cargo kani` driver and only resolvable under the `kani`
+# cfg. The `target.'cfg(kani)'` gate keeps normal `cargo test` from trying
+# to pull it from crates.io.
+[target.'cfg(kani)'.dev-dependencies]
+# `kani` is injected by cargo-kani; no version pin needed.
+
+[lints.rust]
+# Permit the `#[cfg(kani)]` gates used by `tests/kani_codegen.rs`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

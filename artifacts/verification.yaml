@@ -707,6 +707,105 @@ artifacts:
       - type: satisfies
         target: ARCH-CODEGEN-002
 
+  # ── Kani bounded model checking harnesses (issue #136) ─────────────
+  # Each VAL-KANI-* record corresponds to one #[kani::proof] harness.
+  # The proof_link field points to the Lean theorem whose invariant the
+  # harness mirrors over bounded (≤4 task) integer arithmetic.
+
+  - id: VAL-KANI-SOLVER-001
+    type: feature
+    status: pending
+    title: Kani — solver output implies no deadline miss
+    description: >
+      kani_schedule_implies_no_deadline_miss harness: for any TaskSet of
+      size ≤4, if the task set is reported RM-schedulable, then total
+      utilization ≤ RMA bound and every task's WCET ≤ period. Mirrors
+      the Liu & Layland 1973 sufficient condition proven in
+      RMBound.lean:49 (rmBound_ge_ln2) with the single-task no-miss
+      witness at RMBound.lean:76 (rm_single_task).
+    fields:
+      method: formal-bounded
+      proof_link: proofs/Proofs/Scheduling/RMBound.lean#L49
+      steps:
+        - run: cargo kani --tests -p spar-solver --harness kani_schedule_implies_no_deadline_miss
+    links:
+      - type: verifies
+        target: REQ-ANALYSIS-002
+      - type: verifies
+        target: REQ-SOLVER-003
+      - type: verifies
+        target: REQ-CODEGEN-VERIFY-PROOF
+
+  - id: VAL-KANI-SOLVER-002
+    type: feature
+    status: pending
+    title: Kani — priority ordering is monotone and antisymmetric
+    description: >
+      kani_priority_monotonicity harness: for any two tasks in a ≤4-task
+      set, the deadline-monotonic priority ordering (deadline ascending,
+      period ascending as tiebreaker) is antisymmetric and total. Mirrors
+      the monotonicity of the RTA step function proven in
+      RTA.lean:74 (rtaStep_mono) and RTA.lean:65
+      (totalInterference_mono).
+    fields:
+      method: formal-bounded
+      proof_link: proofs/Proofs/Scheduling/RTA.lean#L74
+      steps:
+        - run: cargo kani --tests -p spar-solver --harness kani_priority_monotonicity
+    links:
+      - type: verifies
+        target: REQ-ANALYSIS-002
+      - type: verifies
+        target: REQ-RTA-001
+      - type: verifies
+        target: REQ-CODEGEN-VERIFY-PROOF
+
+  - id: VAL-KANI-SOLVER-003
+    type: feature
+    status: pending
+    title: Kani — EDF accepts U=1 at n=2, RM rejects
+    description: >
+      kani_zero_laxity_handled harness: a 2-task implicit-deadline set
+      with U = 1.0 is EDF-feasible but RM-infeasible (since rmBound(2) =
+      0.8284 < 1). At n=1 with U=1 both RM and EDF accept (rmBound_one).
+      Mirrors Dertouzos EDF optimality from
+      EDF.lean:88 (edf_two_tasks_demand) and the single-task RM bound
+      from RMBound.lean:38 (rmBound_one).
+    fields:
+      method: formal-bounded
+      proof_link: proofs/Proofs/Scheduling/EDF.lean#L88
+      steps:
+        - run: cargo kani --tests -p spar-solver --harness kani_zero_laxity_handled
+    links:
+      - type: verifies
+        target: REQ-ANALYSIS-002
+      - type: verifies
+        target: REQ-SOLVER-003
+      - type: verifies
+        target: REQ-CODEGEN-VERIFY-PROOF
+
+  - id: VAL-KANI-CODEGEN-001
+    type: feature
+    status: pending
+    title: Kani — codegen emission preserves schedule task IDs
+    description: >
+      kani_emit_preserves_schedule harness: for any Schedule of size
+      1..=4, the emitted artifact is non-empty and contains every input
+      task_id byte. Mirrors the least-fixed-point preservation property
+      proven in RTA.lean:186 (rta_finds_least_fixed_point) — the
+      emitter must not drop any task from the solver's output, else
+      downstream tools never see R* for that task.
+    fields:
+      method: formal-bounded
+      proof_link: proofs/Proofs/Scheduling/RTA.lean#L186
+      steps:
+        - run: cargo kani --tests -p spar-codegen --harness kani_emit_preserves_schedule
+    links:
+      - type: verifies
+        target: REQ-CODEGEN-001
+      - type: verifies
+        target: REQ-CODEGEN-VERIFY-PROOF
+
   - id: VAL-MUTATION-001
     type: feature
     status: pass

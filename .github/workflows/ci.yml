@@ -188,3 +188,34 @@ jobs:
           tool: cargo-vet
       - name: Verify supply chain
         run: cargo vet --locked
+
+  # ── Bounded model checking (Kani) ───────────────────────────────────
+  # First-pass Kani harnesses for spar-solver + spar-codegen invariants.
+  # Each harness mirrors a theorem in proofs/Proofs/Scheduling/ (RMBound,
+  # EDF, RTA) and verifies the same invariant over bounded integer
+  # arithmetic that Kani's CBMC backend can enumerate exactly.
+  #
+  # continue-on-error: true — these harnesses are first-pass; unwind
+  # bounds may need tuning as we evolve them. The eventual hard-gate plan
+  # is:
+  #   1. Land harnesses + observe stable runtime over 2-3 weeks of CI.
+  #   2. Once all three solver harnesses + the codegen harness complete
+  #      in <5 min wall time with no unwind-assertion failures, flip
+  #      continue-on-error to false and add to the required-checks list.
+  #   3. At that point, extend MAX_TASKS from 4 to 8 and re-tune unwinds.
+  kani:
+    name: Kani Bounded Model Checking
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Kani
+        run: |
+          cargo install --locked kani-verifier
+          cargo kani setup
+      - name: Run Kani on spar-solver
+        run: cargo kani --tests -p spar-solver
+      - name: Run Kani on spar-codegen
+        run: cargo kani --tests -p spar-codegen

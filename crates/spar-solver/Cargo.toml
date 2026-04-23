@@ -14,3 +14,14 @@ la-arena.workspace = true
 rustc-hash = "2"
 serde.workspace = true
 good_lp.workspace = true
+
+# Kani-only dev-dependencies. `kani` is the verifier's own crate; it is
+# provided by the `cargo kani` driver and only resolvable under the `kani`
+# cfg. The `target.'cfg(kani)'` gate keeps normal `cargo test` from trying
+# to pull it from crates.io.
+[target.'cfg(kani)'.dev-dependencies]
+# `kani` is injected by cargo-kani; no version pin needed.
+
+[lints.rust]
+# Permit the `#[cfg(kani)]` gates used by `tests/kani_solver.rs`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
