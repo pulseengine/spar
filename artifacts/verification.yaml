@@ -1135,3 +1135,73 @@ artifacts:
         target: REQ-TRACE-001
       - type: satisfies
         target: REQ-TRACE-002
+  # ── Fuzz Verification (issue #138) ──────────────────────────────────
+
+  - id: FUZZ-PARSER
+    type: feature
+    title: cargo-fuzz target — AADL parser robustness
+    description: >
+      libfuzzer-sys harness `fuzz_aadl_parse` feeds arbitrary byte sequences
+      (UTF-8 filtered) through `spar_syntax::parse`. Contract: no panic and
+      no hang (libfuzzer `-timeout=10` backstop) on any input, exercising
+      the parser's error-recovery paths with adversarial data.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo +nightly fuzz run fuzz_aadl_parse -- -max_total_time=60 -timeout=10
+    status: implemented
+    tags: [fuzz, parser, robustness]
+    links:
+      - type: verifies
+        target: REQ-PARSE-001
+      - type: verifies
+        target: REQ-PARSE-002
+      - type: verifies
+        target: REQ-PARSER-001
+
+  - id: FUZZ-SOLVER
+    type: feature
+    title: cargo-fuzz target — scheduler/solver robustness
+    description: >
+      libfuzzer-sys harness `fuzz_scheduler_solver` derives a bounded
+      `TaskSet` (≤8 tasks, ≤4 processors, u16-bounded timing fields) via
+      `arbitrary::Arbitrary` and calls `spar_solver::milp::solve_milp`.
+      Contract: return `Ok` or `Err`, never panic; `-timeout=5` catches
+      non-terminating MILP calls.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo +nightly fuzz run fuzz_scheduler_solver -- -max_total_time=60 -timeout=5
+    status: implemented
+    tags: [fuzz, solver, robustness]
+    links:
+      - type: verifies
+        target: REQ-SOLVER-001
+      - type: verifies
+        target: REQ-SOLVER-003
+      - type: verifies
+        target: REQ-SOLVER-005
+
+  - id: FUZZ-CODEGEN
+    type: feature
+    title: cargo-fuzz target — codegen roundtrip robustness
+    description: >
+      libfuzzer-sys harness `fuzz_codegen_roundtrip` feeds a deterministic
+      AADL fixture (`test-data/codegen/building_control.aadl`) through
+      `SystemInstance::instantiate` and varies the `CodegenConfig` knobs
+      (format, verify mode, rivet, dry_run) from arbitrary bytes. Contract:
+      `spar_codegen::generate` must not panic for any reachable
+      configuration combination.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo +nightly fuzz run fuzz_codegen_roundtrip -- -max_total_time=60 -timeout=10
+    status: implemented
+    tags: [fuzz, codegen, robustness]
+    links:
+      - type: verifies
+        target: REQ-CODEGEN-001
+      - type: verifies
+        target: REQ-CODEGEN-WIT
+      - type: verifies
+        target: REQ-CODEGEN-RUST
