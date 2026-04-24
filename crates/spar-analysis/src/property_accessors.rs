@@ -365,6 +365,116 @@ pub fn extract_reference_target(val: &str) -> Option<&str> {
     None
 }
 
+// ── Spar_Timing property accessors (IRQ-aware RTA, v0.7.0) ──────────
+
+const SPAR_TIMING: &str = "Spar_Timing";
+
+/// Get `Spar_Timing::ISR_Priority` as an integer (higher = more important).
+pub fn get_isr_priority(props: &PropertyMap) -> Option<u64> {
+    // Typed path
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "ISR_Priority")
+        && let Some(v) = extract_integer(expr)
+    {
+        return Some(v);
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "ISR_Priority")
+        .or_else(|| props.get("", "ISR_Priority"))?;
+    raw.trim().parse::<u64>().ok()
+}
+
+/// Get `Spar_Timing::ISR_Execution_Time` as a (BCET, WCET) range in picoseconds.
+pub fn get_isr_execution_time_range(props: &PropertyMap) -> Option<(u64, u64)> {
+    // Typed path
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "ISR_Execution_Time")
+        && let Some(range) = extract_time_range_ps(expr)
+    {
+        return Some(range);
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "ISR_Execution_Time")
+        .or_else(|| props.get("", "ISR_Execution_Time"))?;
+
+    if let Some((min_str, max_str)) = raw.split_once("..") {
+        let min_ps = parse_time_value(min_str.trim())?;
+        let max_ps = parse_time_value(max_str.trim())?;
+        Some((min_ps, max_ps))
+    } else {
+        let val = parse_time_value(raw)?;
+        Some((val, val))
+    }
+}
+
+/// Get `Spar_Timing::Interrupt_Latency_Bound` in picoseconds.
+///
+/// This is a processor-level property bounding HW+kernel IRQ dispatch.
+pub fn get_interrupt_latency_bound(props: &PropertyMap) -> Option<u64> {
+    // Typed path
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "Interrupt_Latency_Bound")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "Interrupt_Latency_Bound")
+        .or_else(|| props.get("", "Interrupt_Latency_Bound"))?;
+    parse_time_value(raw)
+}
+
+/// Get `Spar_Timing::Bottom_Half_Server` reference name.
+pub fn get_bottom_half_server(props: &PropertyMap) -> Option<String> {
+    // Typed path
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "Bottom_Half_Server")
+        && let Some(target) = extract_typed_reference(expr)
+    {
+        return Some(target.to_string());
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "Bottom_Half_Server")
+        .or_else(|| props.get("", "Bottom_Half_Server"))?;
+    extract_reference_target(raw).map(|s| s.to_string())
+}
+
+/// Get `Timing_Properties::Dispatch_Jitter` in picoseconds.
+///
+/// Note: Dispatch_Jitter lives under `Timing_Properties`, not `Spar_Timing`.
+pub fn get_dispatch_jitter(props: &PropertyMap) -> Option<u64> {
+    get_timing_property(props, "Dispatch_Jitter")
+}
+
+/// Get `Thread_Properties::Dispatch_Protocol` as a string (e.g. "Sporadic", "Periodic").
+///
+/// Falls back to `Timing_Properties::Dispatch_Protocol` for legacy models.
+pub fn get_dispatch_protocol(props: &PropertyMap) -> Option<String> {
+    // Typed path: Thread_Properties first
+    if let Some(expr) = get_typed_qualified(props, "Thread_Properties", "Dispatch_Protocol")
+        && let Some(s) = extract_string(expr)
+    {
+        return Some(s);
+    }
+    // Legacy typed path: Timing_Properties
+    if let Some(expr) = get_typed_qualified(props, "Timing_Properties", "Dispatch_Protocol")
+        && let Some(s) = extract_string(expr)
+    {
+        return Some(s);
+    }
+
+    // String fallback
+    props
+        .get("Thread_Properties", "Dispatch_Protocol")
+        .or_else(|| props.get("Timing_Properties", "Dispatch_Protocol"))
+        .or_else(|| props.get("", "Dispatch_Protocol"))
+        .map(|s| s.trim().to_string())
+}
+
 // ── AI_ML property accessors ───────────────────────────────────────
 
 const AI_ML: &str = "AI_ML";

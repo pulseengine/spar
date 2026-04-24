@@ -1,0 +1,57 @@
+-- Three interrupt sources on one CPU, showing total ISR utilization.
+--
+-- Expected: IsrOverloadedCpu error on cpu1 (total util > 30%).
+
+package MultiIsr
+public
+
+  processor cpu
+  end cpu;
+  processor implementation cpu.basic
+  end cpu.basic;
+
+  device src1
+    properties
+      Timing_Properties::Period       => 10 ms;
+      Spar_Timing::ISR_Execution_Time => 1 ms;
+      Spar_Timing::ISR_Priority       => 90;
+      Spar_Timing::Bottom_Half_Server => reference (dummy);
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end src1;
+  device implementation src1.impl
+  end src1.impl;
+
+  device src2
+    properties
+      Timing_Properties::Period       => 10 ms;
+      Spar_Timing::ISR_Execution_Time => 1 ms;
+      Spar_Timing::ISR_Priority       => 91;
+      Spar_Timing::Bottom_Half_Server => reference (dummy);
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end src2;
+  device implementation src2.impl
+  end src2.impl;
+
+  device src3
+    properties
+      Timing_Properties::Period       => 10 ms;
+      Spar_Timing::ISR_Execution_Time => 1500 us;
+      Spar_Timing::ISR_Priority       => 92;
+      Spar_Timing::Bottom_Half_Server => reference (dummy);
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end src3;
+  device implementation src3.impl
+  end src3.impl;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.impl
+    subcomponents
+      cpu1  : processor cpu.basic;
+      dummy : device src1.impl;
+      d2    : device src2.impl;
+      d3    : device src3.impl;
+  end Sys.impl;
+
+end MultiIsr;

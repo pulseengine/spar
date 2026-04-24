@@ -1205,3 +1205,54 @@ artifacts:
         target: REQ-CODEGEN-WIT
       - type: verifies
         target: REQ-CODEGEN-RUST
+
+  - id: TEST-RTA-HIERARCHICAL
+    type: feature
+    title: Hierarchical IRQ-aware RTA unit tests
+    description: >
+      Unit tests in crates/spar-analysis/src/rta.rs covering the
+      two-tier (ISR layer + task RTA) analysis. Includes the
+      no_isrs_matches_classical_rta non-regression gate, ISR
+      utilization overload, Dispatch_Jitter inflation, BCET/WCET
+      response band, IRQ chain budget, Bottom_Half_Server warning,
+      multi-processor isolation, zero-jitter equivalence, and ISR
+      priority above all tasks. Also exercises the new verified
+      function compute_response_time_jittered.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta::tests scheduling_verified
+    status: passing
+    tags: [v0.7.0, timing, irq, rta]
+    links:
+      - type: satisfies
+        target: REQ-TIMING-IRQ-001
+      - type: satisfies
+        target: REQ-TIMING-IRQ-002
+      - type: satisfies
+        target: REQ-TIMING-IRQ-003
+
+  - id: TEST-RTA-FIXTURES
+    type: feature
+    title: Hierarchical IRQ-aware RTA fixture tests
+    description: >
+      Integration tests in crates/spar-analysis/tests/rta_fixtures.rs
+      that parse committed AADL fixtures in tests/fixtures/rta/ and
+      diff the sorted RTA diagnostic output against the committed
+      .expected.json snapshots. Fixtures cover: irq_brake_handler
+      (full chain with device ISR and sporadic handler),
+      multi_isr_same_cpu (ISR-overload detection), and jittered_chain
+      (Tindell-Clark Dispatch_Jitter extension).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --test rta_fixtures
+    status: passing
+    tags: [v0.7.0, timing, irq, rta, fixtures]
+    links:
+      - type: satisfies
+        target: REQ-TIMING-IRQ-001
+      - type: satisfies
+        target: REQ-TIMING-IRQ-002
+      - type: satisfies
+        target: REQ-TIMING-IRQ-003

@@ -1,0 +1,5 @@
+[
+  "IRQ chain via event 'wheel_sensor': predicted response 270.00 us <= deadline 1.00 ms (slack 730.00 us)",
+  "thread 'handler' on processor 'cpu1': response time 230.00 us <= deadline 1.00 ms",
+  "thread 'handler' response band: BCET response 80.00 us .. WCET response 230.00 us"
+]

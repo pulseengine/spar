@@ -1,0 +1,65 @@
+-- Brake-actuator IRQ chain.
+--
+-- A wheel-speed sensor device triggers an event port. The device
+-- runs an ISR (20..30 us) at Spar_Timing::ISR_Priority 99, then
+-- hands work off to a Sporadic handler thread bound on cpu1. The
+-- handler has a hard 1 ms deadline; its Compute_Execution_Time is
+-- 50..200 us. The processor itself declares a 10 us
+-- Interrupt_Latency_Bound.
+--
+-- Expected: IRQ chain diagnostic, slack > 0.
+
+package BrakeIrq
+public
+
+  processor cpu
+    properties
+      Spar_Timing::Interrupt_Latency_Bound => 10 us;
+  end cpu;
+
+  processor implementation cpu.basic
+  end cpu.basic;
+
+  device brake_sensor
+    properties
+      Timing_Properties::Period         => 2 ms;
+      Spar_Timing::ISR_Execution_Time   => 20 us .. 30 us;
+      Spar_Timing::ISR_Priority         => 99;
+      Spar_Timing::Bottom_Half_Server   => reference (handler);
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end brake_sensor;
+
+  device implementation brake_sensor.impl
+  end brake_sensor.impl;
+
+  thread brake_handler
+    properties
+      Thread_Properties::Dispatch_Protocol => Sporadic;
+      Timing_Properties::Period            => 1 ms;
+      Timing_Properties::Deadline          => 1 ms;
+      Timing_Properties::Compute_Execution_Time => 50 us .. 200 us;
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end brake_handler;
+
+  thread implementation brake_handler.impl
+  end brake_handler.impl;
+
+  process brake_proc
+  end brake_proc;
+
+  process implementation brake_proc.impl
+    subcomponents
+      handler : thread brake_handler.impl;
+  end brake_proc.impl;
+
+  system BrakeSys
+  end BrakeSys;
+
+  system implementation BrakeSys.impl
+    subcomponents
+      cpu1         : processor cpu.basic;
+      wheel_sensor : device brake_sensor.impl;
+      proc         : process brake_proc.impl;
+  end BrakeSys.impl;
+
+end BrakeIrq;

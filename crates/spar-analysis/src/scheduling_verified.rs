@@ -91,6 +91,102 @@ pub fn compute_response_time(
     RtaResult::Diverged
 }
 
+/// Interference from one higher-priority task with release jitter.
+///
+/// Tindell-Clark extension: the task's release window is inflated by
+/// its own jitter, which multiplies ceiling jobs it can release within
+/// interval `r`:
+///
+///   interference_j(period, exec, jitter, r) = ⌈(r + jitter) / period⌉ × exec
+///
+/// When `jitter == 0` this reduces to [`interference`].
+#[inline]
+pub fn interference_jittered(period: u64, exec: u64, jitter: u64, r: u64) -> u64 {
+    ceil_div(r.saturating_add(jitter), period).saturating_mul(exec)
+}
+
+/// Total interference from higher-priority tasks, each with its own jitter.
+///
+/// `higher_priority_jittered` items are `(period, exec, jitter)`.
+pub fn total_interference_jittered(higher_priority_jittered: &[(u64, u64, u64)], r: u64) -> u64 {
+    let mut total: u64 = 0;
+    for &(period, exec, jitter) in higher_priority_jittered {
+        total = total.saturating_add(interference_jittered(period, exec, jitter, r));
+    }
+    total
+}
+
+/// Total interference from periodic ISRs on the same CPU.
+///
+/// ISRs preempt all tasks unconditionally. Each ISR contributes
+/// `⌈r / period⌉ × exec` to the task-level interference term.
+/// `isrs` items are `(period, exec)`.
+pub fn total_isr_interference(isrs: &[(u64, u64)], r: u64) -> u64 {
+    total_interference(isrs, r)
+}
+
+/// Jittered RTA recurrence with ISR interference.
+///
+/// Computes
+///
+///   R_{n+1} = exec + jitter
+///           + Σ_{hp j} ⌈(R_n + J_j)/T_j⌉ × C_j
+///           + Σ_{ISR k} ⌈R_n / T_k⌉ × C_k
+///
+/// The own jitter `jitter` is added as a constant (the release window
+/// of the task under analysis); higher-priority tasks' jitters scale
+/// their ceiling counts. ISR interference is added as an extra term.
+///
+/// The classical convergence argument (monotone, bounded below, with
+/// an upper bound of deadline+1) still applies because all added terms
+/// are monotone non-decreasing in `r`.
+#[inline]
+pub fn rta_step_jittered(
+    exec: u64,
+    jitter: u64,
+    higher_priority_jittered: &[(u64, u64, u64)],
+    isr_interference: &[(u64, u64)],
+    r: u64,
+) -> u64 {
+    exec.saturating_add(jitter)
+        .saturating_add(total_interference_jittered(higher_priority_jittered, r))
+        .saturating_add(total_isr_interference(isr_interference, r))
+}
+
+/// Compute worst-case response time for a task with release jitter,
+/// competing HP tasks (also with jitter), and ISR interference.
+///
+/// When `jitter == 0`, all `higher_priority_jittered` items have
+/// `jitter == 0`, and `isr_interference` is empty, this reduces to
+/// exactly the same fixed-point as [`compute_response_time`].
+///
+/// Max iterations bounded by `deadline + 1` (monotone convergence).
+pub fn compute_response_time_jittered(
+    exec: u64,
+    deadline: u64,
+    jitter: u64,
+    higher_priority_jittered: &[(u64, u64, u64)],
+    isr_interference: &[(u64, u64)],
+) -> RtaResult {
+    // Initial value: exec + own jitter (the minimum response-window width).
+    let mut r = exec.saturating_add(jitter);
+    // If the starting point already exceeds the deadline, we've missed it.
+    if r > deadline {
+        return RtaResult::Diverged;
+    }
+    for _ in 0..=deadline {
+        let new_r = rta_step_jittered(exec, jitter, higher_priority_jittered, isr_interference, r);
+        if new_r == r {
+            return RtaResult::Converged(r);
+        }
+        if new_r > deadline {
+            return RtaResult::Diverged;
+        }
+        r = new_r;
+    }
+    RtaResult::Diverged
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +262,53 @@ mod tests {
             compute_response_time(3, 10, &[(5, 2)]),
             RtaResult::Converged(5)
         );
+    }
+
+    // ── Jittered recurrence tests ──────────────────────────────────
+
+    #[test]
+    fn jittered_reduces_to_classical_when_zero() {
+        // zero jitter, no ISRs: must match classical RTA exactly.
+        let hp_jittered = [(10, 2, 0)];
+        let r_j = compute_response_time_jittered(3, 10, 0, &hp_jittered, &[]);
+        let r_c = compute_response_time(3, 10, &[(10, 2)]);
+        assert_eq!(r_j, r_c);
+    }
+
+    #[test]
+    fn jittered_own_jitter_adds_constant() {
+        // Single task, own jitter = 1: R = C + J = 3 + 1 = 4.
+        let r = compute_response_time_jittered(3, 10, 1, &[], &[]);
+        assert_eq!(r, RtaResult::Converged(4));
+    }
+
+    #[test]
+    fn jittered_hp_jitter_inflates_ceiling() {
+        // Task: C=3, D=100. HP: T=10, C=2, J=5.
+        // R0 = 3
+        // R1 = 3 + ceil((3+5)/10) * 2 = 3 + 1*2 = 5
+        // R2 = 3 + ceil((5+5)/10) * 2 = 3 + 1*2 = 5 (converged)
+        // Without jitter: R = 3 + ceil(3/10)*2 = 3+2 = 5 also.
+        // With J=15: R = 3 + ceil((5+15)/10)*2 = 3+4 = 7 ...
+        let r_big = compute_response_time_jittered(3, 100, 0, &[(10, 2, 15)], &[]);
+        match r_big {
+            RtaResult::Converged(v) => assert!(v > 5, "jitter should inflate response: got {v}"),
+            _ => panic!("should converge"),
+        }
+    }
+
+    #[test]
+    fn jittered_isr_interference_adds_term() {
+        // Task: C=3, D=100. No HP tasks. One ISR: T=10, C=1.
+        // R0 = 3, R1 = 3 + ceil(3/10)*1 = 3 + 1 = 4, R2 = 3 + ceil(4/10)*1 = 4. Converged.
+        let r = compute_response_time_jittered(3, 100, 0, &[], &[(10, 1)]);
+        assert_eq!(r, RtaResult::Converged(4));
+    }
+
+    #[test]
+    fn jittered_diverges_on_overload() {
+        // C=8, D=10, HP T=10 C=5, J=0: classical diverges. Jittered should too.
+        let r = compute_response_time_jittered(8, 10, 0, &[(10, 5, 0)], &[]);
+        assert_eq!(r, RtaResult::Diverged);
     }
 }

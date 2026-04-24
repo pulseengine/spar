@@ -216,7 +216,7 @@
 
 ## In progress / v0.7.0
 
-- IRQ-aware RTA: property-set surface (`Spar_Timing::*`, `Spar_Trace::*`) landed; analysis wiring in follow-up commits.
+- IRQ-aware RTA: hierarchical two-tier analysis with `Dispatch_Jitter` and BCET/WCET split landed (Track A commit 2); PIP/PCP blocking deferred to v0.7.1.
 
 ---
 

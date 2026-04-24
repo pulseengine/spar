@@ -1,0 +1,4 @@
+[
+  "thread 't_hi' on processor 'cpu1': response time 3.00 ms <= deadline 10.00 ms",
+  "thread 't_lo' on processor 'cpu1': response time 12.00 ms <= deadline 100.00 ms"
+]
