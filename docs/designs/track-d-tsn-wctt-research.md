@@ -881,6 +881,17 @@ their Coq code; we *re-state* the theorems in mathlib idioms (over
 `OrderedAddCommMonoid` and `ENNReal`-valued functions) and prove
 them using mathlib's existing min-plus tactics where available.
 
+**NC-Coq library evaluation.** Marc Boyer (ONERA) maintains a Coq
+library called **NC-Coq** that mechanically checks the core min-plus
+results used by RTaW-Pegase ([Boyer ONERA TSN-NC presentation,
+2023][boyer-nc-coq]). Theorem statements include rate-latency residual
+bounds, monotonicity of ⊗, and TSN-specific shaper compositions —
+exactly what spar's `Network/MinPlus.lean` will need. Concrete leverage
+for spar: re-state Boyer's theorems in Lean 4 / mathlib4 *before*
+attempting our own proofs. See [Appendix A][appendix-a] for sourcing
+details and [§6 milestone v0.8.x][roadmap-v08x] for the evaluation
+spike.
+
 ### 5.6 Integration with existing analyses
 
 **Backward compatibility for `bus_bandwidth.rs` users.** The
@@ -994,6 +1005,19 @@ implementer, that buys ~0.5 weeks; with two, ~1 week.
   end-to-end.
 - **PR #144 (rivet binding contract)**: needed for Commit 6's rivet
   artefacts.
+
+### 6.2.1 Additional v0.8.x research milestones (post-v0.8.0)
+
+Cross-referenced from the appendices added in this revision:
+
+| Milestone | Source | Effort | Trigger |
+|---|---|---|---|
+| **NC-Coq evaluation spike** | [Appendix A.4][appendix-a] | 0.5 wk | After v0.8.0's `MinPlus.lean` lands. Stated theorems in Boyer's NC-Coq are re-mapped to spar's Lean 4 file; whichever map cleanly reduces our `sorry` count. |
+| **RTaW-Yang YANG ingest spike** | [Appendix A.3][appendix-a] | 0.5–1 wk | Customer ships an RTaW-Pegase project. spar adds a `spar-network::yang` reader that consumes RTaW-Yang XML exports as an alternative to AADL `Spar_TSN::*` annotation. Validates spar's WCTT against RTaW's published bounds on the same input. |
+| **OMNeT++/INET 4.6 oracle harness** | [Appendix B.5][appendix-b] | 1 wk | After SFA lands in v0.9.0. Use INET's TSN simulator as 99-percentile reference for spar's worst-case bounds. |
+
+These three are *off the v0.8.0 critical path* but they are the
+highest-leverage research directions surfaced by the appendix surveys.
 
 ### 6.3 What we explicitly defer to v0.9.0+
 
@@ -1262,3 +1286,381 @@ Based on this research, the original issue acceptance list is refined:
 [bah-annex]: https://resources.sei.cmu.edu/asset_files/ConferencePaper/2011_021_001_88049.pdf
 [snc]: https://disco.cs.uni-kl.de/index.php/projects/snc-toolbox/88-projects/129-stochastic-network-calculator
 [saturn-wiki]: https://en.wikipedia.org/wiki/Saturn_(software)
+
+---
+
+## Appendix A — RTaW-Pegase deep-dive
+
+**Scope.** This appendix extends [§2.7][rtaw-section] (RTaW-Pegase summary) with
+material on (i) the company's Inria origin and how that pattern is
+relevant to spar, (ii) RTaW's *public* artefacts that spar can ingest
+(YANG schemas, technical papers), (iii) the **NC-Coq** Coq library that
+RTaW co-author Marc Boyer maintains and which is a concrete leverage
+opportunity for our Lean work, (iv) what we know about the customer
+base and pricing model, and (v) the 802.1Q standards table updated for
+2025–26. Anything already in §2.7 is referenced, not repeated.
+
+### A.1 Origin pattern — Inria spin-off, parallel to spar's situation
+
+RTaW (RealTime-at-Work) was founded in 2007 by Nicolas Navet
+(then Inria researcher), joined in 2008 by Jörn Migge, as an Inria
+*essaimage* / spin-off out of the LORIA / Inria Nancy – Grand Est
+joint laboratory ([Inria startups list][inria-startups];
+[Inria RealTime-at-Work profile][inria-rtaw]). Inria provided
+training and a *technology transfer* of academic NC code to the
+commercial product line.
+
+| Aspect | RTaW (2007–2026) | spar (2024–) | What spar can learn |
+|---|---|---|---|
+| Origin | Inria/LORIA TRIO group, Nancy | PulseEngine ecosystem | Academic-to-product is a viable pattern even with NC-heavy math |
+| Math substrate | Network calculus + stochastic NC | Network calculus (TFA → SFA → PMOO over time) | Same core algebra; RTaW's tightening tricks are documented in published papers |
+| Initial market | Avionics (CAN, AFDX) | Automotive vehicle E/E (TSN, AUTOSAR) | TSN is a more open ecosystem in 2026 than AFDX was in 2007 |
+| Differentiator | Industrial NC tightness on real customer networks | AADL spec-conformance + Lean proofs | Different defensible niche (no overlap with RTaW's commercial scope) |
+| Time to first paying customer | ~2 years post-founding | TBD | RTaW had Airbus Helicopters as a 2013 anchor; spar should target a similar lighthouse account |
+
+### A.2 Customer base and pricing model (publicly disclosed only)
+
+From RTaW's public references page ([RTaW references][rtaw-refs]) and
+recent conference appearances:
+
+| Customer | Public evidence | Domain |
+|---|---|---|
+| Renault Group | Presented "Overcoming QoS Challenges in a Full Automotive Ethernet Architecture" — IEEE SA, Oct 2025 | Automotive Ethernet/TSN |
+| Volvo Cars | Multiple Automotive Ethernet Congress talks using RTaW-Pegase | Automotive Ethernet/TSN |
+| BMW | "Automotive System Requirements on Traffic Shaping" — TSN/A Conference, Oct 2024 | Automotive TSN |
+| Airbus Helicopters | Customer since 2013 (CAN + Ethernet design and verification) | Aerospace |
+| Airbus / Airbus Defence and Space | TSN migration and tech-selection studies | Aerospace |
+| ArianeGroup, NASA, Huawei, ABB, Aptiv, Bosch | Listed in references | Mixed |
+
+**Pricing model** (from [TEGAKARI product introduction, July
+2023][tegakari-rtaw], a Japanese reseller):
+
+- **Single-computer / single-login** perpetual license; one user,
+  one machine; remote-access concurrent use is permitted via the same
+  login.
+- **Modular** — separate fees per network technology module
+  (CAN, FlexRay, AFDX, TSN, etc.); customers buy only the technologies
+  they design for.
+- **First year** of support and maintenance bundled; renewal annual.
+- Each license **includes 20 perpetual Viewer seats** so non-engineering
+  stakeholders can browse models and reports without consuming a
+  full seat.
+- *Quoted prices not publicly disclosed.* RTaW publishes no list price.
+  Industry rumour (unverifiable from public sources) puts the per-seat
+  price for the TSN module at roughly the order of a senior engineer
+  for one month per year.
+
+**Implication for spar.** RTaW's pricing tier ($X0,000s/year/seat,
+modular) is the *commercial benchmark* spar's open-source path
+disrupts. spar does not compete on bound *tightness* (RTaW's <15%
+pessimism is the published target), but on (a) *spec-conformance*,
+(b) *Lean-proof traceability*, and (c) *zero per-seat cost*. See §6.
+
+### A.3 Public artefact: RTaW-Yang YANG schema repository
+
+RTaW publishes a GitHub organisation **RTaW-Yang** with a single repo
+**Yang** ([RTaW-Yang/Yang][rtaw-yang-repo]) containing the YANG modules
+that RTaW-Pegase and TSN.configurator emit. As of 2026:
+
+| Module name | Source standard | RTaW deltas |
+|---|---|---|
+| `ieee802-dot1q-types` | IEEE 802.1Q YANG | Removed obsolete grouping `type` |
+| `ieee802-dot1q-bridge` | IEEE 802.1Q YANG | Added missing prefixes |
+| `ieee802-dot1q-sched` | IEEE 802.1Qbv YANG | Removed some `must` checks |
+| Several `ieee802-1q-*` augmentations | IEEE | Pegase-specific extensions |
+
+**Significance for spar.** This is a *public, machine-readable*
+description of the configuration language RTaW writes/reads. spar can:
+
+1. **Ingest RTaW XML exports** as an alternative to native AADL
+   `Spar_TSN::*` annotation — useful when a customer brings an
+   existing RTaW project. See [§6.2.1 milestone "RTaW-Yang YANG ingest
+   spike"][roadmap-v08x].
+2. **Cross-validate** spar's WCTT bounds against RTaW's bounds on the
+   *exact same input network* — fairer comparison than re-encoding
+   in AADL by hand.
+3. **Anchor spar's YANG export** (a v0.9.0+ `spar-codegen` target) on
+   the same RTaW deltas so generated configs are RTaW-importable.
+
+The standard IEEE YANG modules are also at
+[YangModels/yang][yangmodels-yang] for reference; RTaW's deltas are
+small and documented.
+
+### A.4 NC-Coq — Marc Boyer's Coq formalisation
+
+Marc Boyer (ONERA, Toulouse) is a long-time NC theorist and
+collaborator on RTaW's algorithmic side. He maintains a Coq library
+known as **NC-Coq**, hosted on ONERA infrastructure, that mechanically
+checks the core min-plus theorems used in deterministic NC
+([Boyer 2023 TSN-NC presentation][boyer-nc-coq];
+[Roux/Quinton/Boyer NASA Formal Methods 2021 — "Verifying min-plus
+Computations with Coq"][min-plus-coq-nfm]).
+
+| Theorem class in NC-Coq | What it proves | spar's Lean port priority |
+|---|---|---|
+| Min-plus convolution monoid | Associativity, identity, monotonicity | High — exactly `min_plus_convolution_assoc/mono` in §5.5 |
+| Rate-latency residual under FIFO | β residual when flows share a server | High — needed for SFA in v0.9.0 |
+| Piecewise-affine and UPP function representation | Decidable equality, normal forms | Medium — informs Rust `Vec<(t,y)>` invariants |
+| TSN shaper composition (CBS, ATS, TAS) | Shaper laws as service curve transformations | Medium — only after v0.8.0's TFA |
+| Boyer/Maia/Cucu RTA-NC link (ECRTS 2022) | RTA bound = NC bound under stated assumptions | High — *bridge* between spar's RTA proofs and WCTT proofs |
+
+**Why this matters for spar.** Lean 4 / mathlib4 has no NC library as
+of April 2026 (spar would be first per [§4.6][formalised-section]).
+NC-Coq's *theorem statements* are the closest thing to a
+ready-to-port specification. spar's Lean work should:
+
+1. **Re-state** NC-Coq's headline lemmas in mathlib4 idioms
+   (`OrderedAddCommMonoid`, `ENNReal`-valued functions). This is a
+   spec exercise, not a proof exercise.
+2. **Try mathlib4's tactics** on the simpler results (associativity,
+   monotonicity); these often close in `simp` + `omega` / `nlinarith`.
+3. **Defer the deeper theorems** (TAS service curve correctness,
+   residual under non-FIFO multiplexing) to v1.0.0 with `sorry`s
+   that cite the NC-Coq counterpart.
+
+**Concrete deliverable** (proposed in [§6.2.1][roadmap-v08x]):
+`Proofs/Network/NC_Coq_Map.md` — a 2-column table mapping each
+NC-Coq theorem to its spar Lean counterpart, marking
+`✓` (proved), `sorry` (stated), or `—` (out of scope). About 0.5 weeks
+of work, post-v0.8.0.
+
+### A.5 802.1Q standards table — extended to 2026
+
+This table extends [§1.1][standards-table] with two amendments not
+captured there, and 2026 status updates relevant to RTaW-Pegase
+coverage. Differences from §1.1 are flagged with **(new)**.
+
+| Amendment | Status (2026) | RTaW-Pegase coverage | spar v0.8.0 plan |
+|---|---|---|---|
+| 802.1AS-2020 / ASdm-2024 | Published | Full (sync error budget) | Property only; bound delegated to user |
+| 802.1Qav (CBS) | Stable | Full | Service curve in v0.9.0 |
+| 802.1Qbv (TAS) | Stable | Full + GCL synthesis | Service curve in v0.8.0 |
+| 802.1Qbu / 802.3br (preempt) | Stable | Full | Blocking term in v0.8.0 |
+| 802.1Qci (PSFP) | Stable | Full | Stub property in v0.8.0 |
+| 802.1Qch (CQF) | Stable | Full | Stub property in v0.8.0 |
+| 802.1CB (FRER) | Stable | Replication points only | Stub property in v0.8.0; cycle handling in v0.9.0 |
+| 802.1Qcc (CNC/CUC + YANG) | Stable | Yes (RTaW-Yang) | spar emits via codegen v0.9.0+ |
+| 802.1Qcr (ATS / UBS) | Stable | Full | Stub property in v0.8.0 |
+| **802.1Qdj-2024 (config enhancements)** **(new)** | Published | YANG-only | Property surface compatible; no math impact |
+| 802.1DG-2025 (automotive profile) | Published Q3 2025 | Profile-aware shipped 2025 | Anchor profile for spar |
+| 802.1DP (aerospace) | In flight | Targeted via Pegase aerospace edition | Out of scope |
+| **802f — YANG Data Model for EtherTypes** **(new)** | In flight (TSN YANGsters) | Tracked | Out of scope |
+
+### A.6 Where RTaW-Pegase complements spar (rather than competes)
+
+| spar best when | RTaW best when |
+|---|---|
+| Architecture is AADL-described and Lean traceability matters | Architecture is RTaW-native or YANG-imported |
+| Cost-of-tooling sensitive (universities, Tier-2/3) | Tier-1 OEM with budget for tightest bounds |
+| Modal (mode-switched) E/E systems | Single-mode TSN networks dominate |
+| Codegen (AUTOSAR EthSwt, Cisco IOS XE configs) is required | Configuration via RTaW.TSN-configurator already in workflow |
+| Open-source / community-traceable proofs | Vendor-supported pessimism guarantees |
+
+The two tools are **complementary** for many customers: spar at design
+time inside the AADL-driven architecture exploration, RTaW for the
+final tightness audit before tape-out.
+
+---
+
+## Appendix B — Other commercial tools survey
+
+**Scope.** Tools surveyed in §2 cover NC-specific analysers. This
+appendix covers the broader commercial landscape that touches
+TSN/Ethernet timing analysis: TSN switch silicon vendors with their own
+config tools, automotive E/E platform vendors, network simulators, and
+HIL/SIL platforms. Each row asks four questions: license, primary
+capability, AADL integration if any, and where spar's design space
+overlaps or complements.
+
+### B.1 TTTech — TSN switch IP + Slate XNS configuration software
+
+| Aspect | Detail |
+|---|---|
+| Vendor | TTTech Computertechnik AG (Vienna, Austria) + TTTech Auto |
+| License | Commercial. TSN switch IP licensed to ASIC/ASSP vendors (NXP SJA1110 was co-developed); Slate XNS sold standalone |
+| Primary capability | (a) TSN switch IP (1/2.5/10 Gbit, automotive + aerospace + industrial); (b) **Slate XNS** — vendor-independent TSN configuration software per IEEE 802.1Qcc CNC, browser-based, NETCONF/YANG/JSON over standard interfaces, 1000s-of-node scheduler |
+| AADL integration | None directly. Slate XNS reads YANG/JSON; AADL ⟶ YANG would be needed |
+| Math substrate | **Schedule synthesis** (constraint solving / SMT-style), not NC analysis. Computes feasible GCLs from stream requirements |
+| Standards | 802.1Qbv full, 802.1Qbu and 802.1CB on the roadmap (per Slate XNS announcement) |
+| Volume signal | Switch IP shipped in *>16 million* vehicles via NXP and Tier-1 partners ([TTTech chip page][tttech-chip]) |
+| Where it complements spar | Spar does *analysis* of a given GCL; Slate XNS does *synthesis* of a feasible GCL. Combined workflow: Slate XNS proposes GCLs → spar verifies WCTT bounds for the proposed GCL on AADL system model. AADL ⟶ YANG codegen target in v0.9.0+ aligns spar to Slate XNS's input format |
+| Where it competes | Slate XNS *also* checks schedulability; if a customer's only need is "does my GCL meet my deadlines?" Slate XNS already answers it (without NC bounds, from synthesis feasibility) |
+
+Sources: [TTTech Slate XNS announcement][tttech-slate-press];
+[TTTech Slate XNS aerospace product page][tttech-slate-aero];
+[TTTech chip page][tttech-chip].
+
+### B.2 Siemens Capital VSTAR + Capital Network Designer (ex-Mentor / Volcano)
+
+| Aspect | Detail |
+|---|---|
+| Vendor | Siemens Digital Industries Software (acquired Mentor Graphics 2017; Mentor acquired Volcano 2010) |
+| License | Commercial, per-seat + per-module (AUTOSAR, Ethernet, TSN, OEM-specific). Listed as the dominant Tier-1 EDA stack |
+| Primary capability | (a) **Capital VSTAR** — AUTOSAR Classic stack (formerly Volcano VSTAR) including Ethernet/SOME-IP/TSN BSW modules; (b) **Capital Network Designer** (formerly VSA COM Designer) — in-vehicle network design across CAN, LIN, FlexRay, Ethernet AVB/TSN |
+| AADL integration | None. SysML ⟶ AUTOSAR is the documented bridge ([Siemens SysML→AUTOSAR blog 2024][siemens-sysml-autosar]) |
+| Math substrate | Timing margin analysis on signal arrival ("does the signal reach its destination in time, with how much spare?"). *Not* NC; closer to RTA + bus-load summation. AISIN reference customer for Capital VSTAR ([Siemens AISIN press][siemens-aisin]) |
+| Standards | TSN extension in roadmap ([Capital VSTAR Ethernet fact sheet][capital-vstar-eth]); 10BASE-T1S, DoIP, SOME/IP shipping; MACsec/IPsec/TLS/DTLS in Ethernet Configuration Package |
+| Where it complements spar | Capital is the *production codegen + integration* tool. spar's design-time analysis precedes it. spar v1.0 codegen targets Capital-importable formats (AUTOSAR ARXML EthSwt) |
+| Where it competes | Capital Network Designer's timing analyser does compute end-to-end signal latencies — but on Mentor's in-house abstraction, not NC, and not Lean-traceable |
+
+Sources: [Capital VSTAR Ethernet fact sheet][capital-vstar-eth];
+[CEVT (Geely) used Volcano VSA to cut design time 50%][cevt-volcano];
+[Siemens E/E architecture blog][siemens-ee].
+
+### B.3 Vector — full automotive timing portfolio
+
+| Tool | License | TSN-relevance | spar overlap |
+|---|---|---|---|
+| **CANoe.Ethernet** | Commercial, per-seat | Full simulation/monitoring of TSN/AVB streams ([CANoe.Ethernet][canoe-eth]); time-sync visualization, gPTP |
+| **vTESTstudio** | Commercial | Test-case design ⟶ executed in CANoe ([vTESTstudio][vteststudio]); test design phase |
+| **MICROSAR Adaptive / Classic** | Commercial | Vector's AUTOSAR stack with TSN BSW; production codegen target |
+| **Vector ITDP timing analyzer** | *Not found in public 2026 sources* | — | (see "couldn't find" note in report) |
+
+**License**: per-seat commercial across the Vector portfolio.
+**Math substrate**: Vector's tools are predominantly **simulation +
+trace analysis** (CANoe), **test-design** (vTESTstudio), or **stack
+codegen** (MICROSAR). No public NC-based worst-case bound analyser
+shipping in 2026.
+**AADL integration**: None.
+**Where it complements spar.** Vector's CANoe is the standard
+*runtime trace oracle* — record actual timings from a running ECU bench
+or HIL, compare to spar's WCTT bound. CANoe replay of TSN streams
+into a spar-modelled topology validates spar's pessimism class.
+**Where it competes.** It doesn't, directly. Vector targets
+test/integration; spar targets design-time analysis with formal
+proofs. The portfolios are layered, not overlapping.
+
+Sources: [CANoe.Ethernet][canoe-eth]; [vTESTstudio][vteststudio];
+[Vector TSN webinar][vector-tsn-webinar];
+[Vector Time Synchronization PDF][vector-timesync].
+
+### B.4 Cisco — TSN switches in the IE3x00 / IE9300 industrial line
+
+| Aspect | Detail |
+|---|---|
+| Vendor | Cisco Systems |
+| License | Commercial hardware + IOS XE licensing |
+| Primary capability | TSN-capable industrial Ethernet switches (Catalyst IE3300/IE3400/IE9300 Rugged) — gPTP, 802.1Qbv, FRER on selected models. Targets industrial automation more than automotive |
+| Configuration tools | **Cisco Catalyst Center** (formerly DNA Center) — topology + policy GUI; **WebUI** per-device. *No NC analyser*. NETCONF/YANG via standard IOS XE drivers |
+| AADL integration | None. Industrial automation hardly touches AADL |
+| Math substrate | Configuration-only; timing analysis delegated to external tools (often a partnership with TTTech or RTaW for industrial workloads) |
+| Where it complements spar | If a customer has a Cisco-based industrial deployment (e.g., factory IO with TSN), spar can analyse the topology and emit IOS XE-compatible YANG via the same RTaW-Yang schema (Appendix A.3) |
+| Where it competes | Not as an analyser. As a hardware target, Cisco's industrial TSN line and TTTech's automotive line bracket spar's domain |
+
+Sources: [Cisco Catalyst IE9300 datasheet][cisco-ie9300];
+[Cisco Catalyst IE3400 datasheet][cisco-ie3400];
+[Cisco IE3x00 26.1 release notes][cisco-ie3-rn].
+
+### B.5 OMNeT++ / INET — open-source simulation oracle
+
+| Aspect | Detail |
+|---|---|
+| License | OMNeT++ Academic Public License (free for academic, paid for commercial); INET BSD-style |
+| Primary capability | Discrete-event network simulator. **INET 4.6** ships native TSN modules (gPTP, Time-Aware Shaper, FRER, **TSNsched**-based gate scheduling) ([INET 4.6 TSN docs][inet-tsn]) |
+| Math substrate | **Event-driven simulation** — produces *empirical* end-to-end delay distributions, not worst-case bounds |
+| AADL integration | None directly. AADL ⟶ INET-NED translation has been done in research (e.g., FORA project) but not productised |
+| Predecessors | NeSTiNg ([NeSTiNg paper][nesting-paper]) — superseded by INET native; CoRE4INET (HAW-Hamburg, [CoRE4INET][core4inet]) — still active for Time-Triggered Ethernet variants; SDN4CoRE — programmable real-time Ethernet |
+| Where it complements spar | **Critical** — INET is the natural *99-percentile / average-case oracle* for spar's worst-case bounds. spar emits WCTT ≤ X µs; INET simulation on the same topology shows P99 ≤ Y µs and P50 ≤ Z µs. The pessimism gap (X − Y) calibrates spar's TFA tightness in the absence of a commercial reference |
+| Where it competes | Not at all — different math (simulation vs analytical bound) |
+
+**Roadmap leverage** (per [§6.2.1][roadmap-v08x]): post-v0.9.0 SFA
+landing, build a `tests/wctt-oracle/` harness that runs INET 4.6 on
+the same `.aadl` test models (via a small AADL → INET-NED converter)
+and asserts `spar_wctt_bound ≥ inet_p999_observed`. This is
+spar's correctness sanity-check for the entire WCTT pipeline.
+
+Sources: [INET 4.6 TSN docs][inet-tsn]; [INET TSN tutorial June
+2025][inet-tutorial]; [NeSTiNg paper][nesting-paper];
+[CoRE4INET][core4inet].
+
+### B.6 OPAL-RT and dSPACE — HIL/SIL platforms with Ethernet support
+
+| Aspect | OPAL-RT | dSPACE |
+|---|---|---|
+| License | Commercial hardware + RT-LAB / HYPERSIM software | Commercial hardware (SCALEXIO) + ConfigurationDesk + Ethernet Configuration Package |
+| Primary capability | Real-time HIL simulator with FPGA + CPU; ePHASORSIM for power systems; Simulink/Stateflow co-execution | SCALEXIO HIL system; CES 2025 SIL/HIL announcement; Ethernet Configuration Package supports MACsec, IPsec, TLS/DTLS, gPTP |
+| TSN/802.1Qbv specifically | No public 2026 evidence of NC analysis or 802.1Qbv shaper modelling — they *transport* TSN streams over their I/O, but do not compute worst-case bounds | Ethernet Configuration Package handles AUTOSAR Ethernet config; gPTP supported; no public NC-style worst-case analyser |
+| Math substrate | Real-time *execution* of Simulink models on FPGA+CPU. Not a bound analyser. | Same — execution + AUTOSAR config tooling. Not a bound analyser. |
+| AADL integration | None | None |
+| Where it complements spar | Both are **post-design empirical validation** layers. spar's WCTT bound feeds an HIL test plan: trigger worst-case-traffic load and confirm observed delay stays within spar's bound. Closes the spec-to-bench loop |
+| Where it competes | Doesn't. Different problem class entirely (execution vs analysis) |
+
+Sources: [OPAL-RT main site][opalrt]; [OPAL-RT 2024 timeline][opalrt-2024];
+[dSPACE Ethernet Configuration Package][dspace-eth];
+[dSPACE SCALEXIO FSX press release][dspace-scalexio];
+[dSPACE CES 2025][dspace-ces2025].
+
+### B.7 TimeNet / TimeBase — historical, no modern equivalent in 2026
+
+| Tool | Status |
+|---|---|
+| TimeNet (TU Berlin, ~2000s) | Stochastic Petri net analyser; superseded by general SPN tools. Not TSN-relevant in 2026 |
+| TimeBase (academic) | No active project found under that name in 2026 |
+| Modern equivalent for TSN bound analysis | **None** in the pure-NC academic-tool space; all serious worst-case TSN bound work in 2026 lives in RTaW-Pegase (commercial) or NetCal/DNC (academic), both already in [§2][nc-tooling-section] |
+
+This row exists to confirm that no rediscovered legacy tool fills the
+gap spar targets.
+
+### B.8 Summary — extended commercial landscape
+
+| Tool / vendor | Role re: spar | License | NC bounds? | AADL? |
+|---|---|---|---|---|
+| RTaW-Pegase | Primary commercial benchmark + complementary tightness | Closed | Yes (industrial-tight) | Limited |
+| TTTech Slate XNS | Schedule synthesis; YANG/NETCONF target for spar codegen | Closed | No (synthesis-only) | No |
+| Siemens Capital | Production codegen + integration; signal-margin analysis | Closed | No (RTA-style) | No |
+| Vector (CANoe, vTESTstudio, MICROSAR) | Trace oracle + test design + stack | Closed | No (simulation+trace) | No |
+| Cisco IE3x00/IE9300 | Hardware target for industrial deployments | Closed (HW+SW) | No | No |
+| OMNeT++ / INET 4.6 | **Open-source simulation oracle** for spar | Academic free / commercial paid; INET BSD | No (P99 simulation) | No (research) |
+| OPAL-RT | HIL execution for empirical validation | Closed | No | No |
+| dSPACE SCALEXIO | HIL execution for empirical validation | Closed | No | No |
+
+**Most striking pattern.** Despite the maturity of the TSN
+amendment chain (15+ years, [§1.1][standards-table]), the *only*
+tools that compute formal worst-case TSN bounds in 2026 are RTaW-Pegase
+(commercial) and the academic NC libraries from
+[§2.2 / §2.3][nc-tooling-section]. Every other vendor in this
+appendix — TTTech, Siemens, Vector, Cisco, OPAL-RT, dSPACE — handles
+TSN at the *configuration*, *simulation*, *trace*, or *execution*
+layer, not the *bound-analysis* layer. This is the open niche spar
+targets, and the absence of a Rust + Lean entrant in the niche is the
+research opportunity §5 quantifies.
+
+[appendix-a]: #appendix-a--rtaw-pegase-deep-dive
+[appendix-b]: #appendix-b--other-commercial-tools-survey
+[roadmap-v08x]: #621-additional-v08x-research-milestones-post-v080
+[rtaw-section]: #27-rtaw-pegase-realtime-at-work-commercial
+[standards-table]: #11-the-8021q-tsn-amendment-chain
+[formalised-section]: #46-what-is-already-formalised
+[nc-tooling-section]: #section-2--existing-network-calculus-tooling
+
+[inria-startups]: https://www.inria.fr/en/startups-projects-inria-centre-universite-lorraine
+[inria-rtaw]: https://www.inria.fr/en/realtime-work-systems-connected-cars
+[rtaw-refs]: https://www.realtimeatwork.com/references/
+[tegakari-rtaw]: https://www.tegakari.net/en/2023/07/rtaw-pegase/
+[rtaw-yang-repo]: https://github.com/RTaW-Yang/Yang
+[yangmodels-yang]: https://github.com/YangModels/yang
+[boyer-nc-coq]: https://w3.onera.fr/fonisen/sites/default/files/2023-12/tsn-boyer.pdf
+[min-plus-coq-nfm]: https://hal.science/hal-03176024/document
+[tttech-chip]: https://www.tttech.com/chip
+[tttech-slate-press]: https://www.tttech.com/tttech-releases-worlds-first-vendor-independent-tsn-configuration-software
+[tttech-slate-aero]: https://www.tttech.com/aerospace/products/slate-xns
+[siemens-sysml-autosar]: https://blogs.sw.siemens.com/ee-systems/2024/08/08/latest-improvements-in-going-from-sysml-to-autosar-an-ongoing-story-of-embedded-software-development/
+[siemens-aisin]: https://news.siemens.com/en-gb/siemens-autosar-aisin-capital-vstar/
+[capital-vstar-eth]: https://www.plm.automation.siemens.com/media/global/en/Siemens-SW-Capital-VSTAR-Ethernet-Fact-Sheet_tcm27-94942.pdf
+[cevt-volcano]: https://www.automotiveworld.com/news-releases/cevt-cuts-vehicle-network-design-time-50-percent-mentors-volcano-vsa-com-designer/
+[canoe-eth]: https://www.vector.com/int/en/products/products-a-z/software/canoe/option-ethernet/
+[vteststudio]: https://www.vector.com/int/en/products/products-a-z/software/vteststudio/
+[vector-tsn-webinar]: https://www.vector.com/int/en/events/global-de-en/webinar-recordings/2024/time-sensitive-networking-overview-automotive-relevant-standards-and-available-implementations/
+[vector-timesync]: https://www.vector.com/int/en/download/time-synchronization-in-automotive-ethernet-networks-balancing-act-between-autosar-ieee-and-tsn/
+[cisco-ie9300]: https://www.cisco.com/c/en/us/products/collateral/switches/catalyst-ie9300-rugged-series/catalyst-ie9300-rugged-series-ds.html
+[cisco-ie3400]: https://www.cisco.com/c/en/us/products/collateral/switches/catalyst-ie3400-rugged-series/cat-ie3400-rugged-series-ds.html
+[cisco-ie3-rn]: https://www.cisco.com/c/en/us/td/docs/switches/lan/cisco_ie3X00/software/26-x/release-notes/26-1-x-rn-ie3x00-ess3300.html
+[inet-tsn]: https://inet.omnetpp.org/docs/users-guide/ch-tsn.html
+[inet-tutorial]: https://omnest.com/2025/06/14/simulating-tsn-inet
+[nesting-paper]: https://ieeexplore.ieee.org/abstract/document/8854500
+[core4inet]: https://github.com/CoRE-RG/CoRE4INET
+[opalrt]: https://www.opal-rt.com/
+[opalrt-2024]: https://www.opal-rt.com/timeline/2024/
+[dspace-eth]: https://www.dspace.com/en/pub/home/products/sw/impsw/ecp.cfm
+[dspace-scalexio]: https://chargedevs.com/newswire/dspace-expands-its-scalexio-real-time-testing-platform/
+[dspace-ces2025]: https://www.businesswire.com/news/home/20241212405479/en/dSPACE-at-CES-2025-How-Seamless-SILHIL-Validation-Accelerates-Automotive-Software-Development
