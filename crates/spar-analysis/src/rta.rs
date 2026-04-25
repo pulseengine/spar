@@ -7,18 +7,25 @@
 //!   unconditionally. Their CPU utilization is computed first; if the
 //!   sum per CPU exceeds a configurable threshold (default 30%), an
 //!   [`IsrOverloadedCpu`]-style error diagnostic fires.
-//! * **Tier 2 — Task RTA with Tindell-Clark jitter and ISR
-//!   interference.** For each thread the worst-case response time is
-//!   computed via the jittered fixed-point
+//! * **Tier 2 — Task RTA with Tindell-Clark jitter, ISR interference,
+//!   and PIP/PCP blocking.** For each thread the worst-case response
+//!   time is computed via the jittered, blocked fixed-point
 //!
 //!   ```text
-//!   R(0) = C_i + J_i
-//!   R(n+1) = C_i + J_i
+//!   R(0) = C_i + J_i + B_i
+//!   R(n+1) = C_i + J_i + B_i
 //!          + Σ_j ⌈(R(n) + J_j) / T_j⌉ × C_j    (hp tasks)
 //!          + Σ_k ⌈R(n) / T_k⌉ × C_k             (ISRs on same CPU)
 //!   ```
 //!
-//!   implemented by [`scheduling_verified::compute_response_time_jittered`].
+//!   implemented by
+//!   [`scheduling_verified::compute_response_time_jittered_blocking`].
+//!   `B_i` comes from `Spar_Timing::Critical_Section_Blocking` and is
+//!   only applied when `Thread_Properties::Locking_Protocol` is set to
+//!   `Priority_Inheritance_Protocol` or `Priority_Ceiling_Protocol`
+//!   (see Joseph & Pandya 1986; Buttazzo, *Hard Real-Time Computing
+//!   Systems*). Other locking-protocol values (`Stop_For_Lock`, `None`)
+//!   degrade to the no-blocking recurrence.
 //!
 //! For Sporadic-dispatched threads reachable from an ISR (either by
 //! name via the device's `Bottom_Half_Server` property, or by being
@@ -31,11 +38,13 @@
 //!
 //! # Non-regression
 //!
-//! Models without any `Spar_Timing::*` property produce diagnostics
+//! Models without any `Spar_Timing::*` property and no
+//! `Thread_Properties::Locking_Protocol` produce diagnostics
 //! byte-identical to the prior (classical) implementation. The
-//! jittered recurrence with all jitters zero and no ISR interference
-//! reduces to the classical recurrence, and no Spar_Timing-driven
-//! diagnostic fires. See the `no_isrs_matches_classical_rta` test.
+//! jittered, blocked recurrence with all jitters zero, no ISR
+//! interference, and `B_i = 0` reduces to the classical recurrence,
+//! and no Spar_Timing- or PIP/PCP-driven diagnostic fires. See the
+//! `no_isrs_matches_classical_rta` and `no_locking_matches_v070` tests.
 
 use rustc_hash::FxHashMap;
 
@@ -43,9 +52,10 @@ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::property_accessors::{
-    get_bottom_half_server, get_dispatch_jitter, get_dispatch_protocol, get_execution_time,
-    get_execution_time_range, get_interrupt_latency_bound, get_isr_execution_time_range,
-    get_isr_priority, get_processor_binding, get_timing_property,
+    LockingProtocol, get_bottom_half_server, get_critical_section_blocking, get_dispatch_jitter,
+    get_dispatch_protocol, get_execution_time, get_execution_time_range,
+    get_interrupt_latency_bound, get_isr_execution_time_range, get_isr_priority,
+    get_locking_protocol, get_processor_binding, get_timing_property,
 };
 use crate::scheduling_verified::{self, RtaResult};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -206,6 +216,20 @@ impl Analysis for RtaAnalysis {
             let exec_range = get_execution_time_range(props);
             let dispatch_protocol = get_dispatch_protocol(props);
 
+            // ── PIP/PCP blocking term (v0.7.1). ──────────────────────
+            //
+            // Only PIP and PCP contribute a blocking term in the
+            // recurrence. `Stop_For_Lock` and `None` degrade to the
+            // no-blocking recurrence (Buttazzo, §7). Threads with no
+            // Locking_Protocol are non-regression: blocking_ps = 0.
+            let locking_protocol = get_locking_protocol(props);
+            let blocking_ps = match locking_protocol {
+                Some(LockingProtocol::Pip) | Some(LockingProtocol::Pcp) => {
+                    get_critical_section_blocking(props).unwrap_or(0)
+                }
+                _ => 0,
+            };
+
             processor_threads
                 .entry(binding)
                 .or_default()
@@ -219,6 +243,8 @@ impl Analysis for RtaAnalysis {
                     jitter_ps,
                     comp_idx: idx,
                     dispatch_protocol,
+                    locking_protocol,
+                    blocking_ps,
                 });
         }
 
@@ -299,10 +325,34 @@ impl Analysis for RtaAnalysis {
 
                 let thread_path = component_path(instance, thread.comp_idx);
 
-                let result = scheduling_verified::compute_response_time_jittered(
+                // ── BlockingInflated (Info) — emitted before RTA so
+                // it appears in deterministic order for the thread. ─
+                if thread.locking_protocol.is_some() && thread.blocking_ps > 0 {
+                    let proto_name = match thread.locking_protocol {
+                        Some(LockingProtocol::Pip) => "Priority_Inheritance_Protocol",
+                        Some(LockingProtocol::Pcp) => "Priority_Ceiling_Protocol",
+                        Some(LockingProtocol::StopForLock) => "Stop_For_Lock",
+                        Some(LockingProtocol::None) => "None",
+                        None => unreachable!(),
+                    };
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "thread '{}' blocking inflated by {} under {}",
+                            thread.name,
+                            format_time(thread.blocking_ps),
+                            proto_name,
+                        ),
+                        path: thread_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+
+                let result = scheduling_verified::compute_response_time_jittered_blocking(
                     thread.exec_ps,
                     thread.deadline_ps,
                     thread.jitter_ps,
+                    thread.blocking_ps,
                     &higher_priority_jittered,
                     &isr_interference,
                 );
@@ -345,13 +395,15 @@ impl Analysis for RtaAnalysis {
                         if let Some(bcet_ps) = thread.exec_bcet_ps
                             && bcet_ps != thread.exec_ps
                         {
-                            let r_bcet = scheduling_verified::compute_response_time_jittered(
-                                bcet_ps,
-                                thread.deadline_ps,
-                                thread.jitter_ps,
-                                &higher_priority_jittered,
-                                &isr_interference,
-                            );
+                            let r_bcet =
+                                scheduling_verified::compute_response_time_jittered_blocking(
+                                    bcet_ps,
+                                    thread.deadline_ps,
+                                    thread.jitter_ps,
+                                    thread.blocking_ps,
+                                    &higher_priority_jittered,
+                                    &isr_interference,
+                                );
                             if let RtaResult::Converged(r_b) = r_bcet {
                                 diags.push(AnalysisDiagnostic {
                                     severity: Severity::Info,
@@ -452,6 +504,14 @@ struct RtaThreadInfo {
     comp_idx: ComponentInstanceIdx,
     /// `Thread_Properties::Dispatch_Protocol` string, if set.
     dispatch_protocol: Option<String>,
+    /// `Thread_Properties::Locking_Protocol`, if set. Only PIP and PCP
+    /// produce a blocking term in the v0.7.1 RTA recurrence.
+    locking_protocol: Option<LockingProtocol>,
+    /// Effective blocking term `B_i` in picoseconds. Zero when no
+    /// `Locking_Protocol` is set, when the protocol does not request
+    /// blocking analysis (`Stop_For_Lock`, `None`), or when
+    /// `Spar_Timing::Critical_Section_Blocking` is absent.
+    blocking_ps: u64,
 }
 
 /// Per-CPU ISR record for Tier 1 utilization.
@@ -1371,6 +1431,310 @@ mod tests {
                 .collect()
         }
         assert_eq!(make(false), make(true));
+    }
+
+    // ╔══════════════════════════════════════════════════════════════╗
+    // ║ v0.7.1 PIP/PCP blocking-term tests                          ║
+    // ╚══════════════════════════════════════════════════════════════╝
+
+    /// Helper: set Locking_Protocol + Critical_Section_Blocking on a thread.
+    fn set_blocking(b: &mut TestBuilder, idx: ComponentInstanceIdx, proto: &str, blocking: &str) {
+        b.set_property(idx, "Thread_Properties", "Locking_Protocol", proto);
+        b.set_property(idx, "Spar_Timing", "Critical_Section_Blocking", blocking);
+    }
+
+    /// Helper: build the basic_convergence_two_threads model and analyze.
+    fn make_two_thread_model_diags(
+        with_proto: Option<&str>,
+        with_blocking: Option<&str>,
+    ) -> Vec<AnalysisDiagnostic> {
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1, t2]);
+
+        bind_thread(&mut b, t1, "10 ms", "1 ms", None);
+        bind_thread(&mut b, t2, "20 ms", "2 ms", None);
+
+        if let Some(proto) = with_proto {
+            b.set_property(t2, "Thread_Properties", "Locking_Protocol", proto);
+        }
+        if let Some(blk) = with_blocking {
+            b.set_property(t2, "Spar_Timing", "Critical_Section_Blocking", blk);
+        }
+
+        let inst = b.build(root);
+        RtaAnalysis.analyze(&inst)
+    }
+
+    // ── B1: non-regression — no Locking_Protocol must match v0.7.0 byte-for-byte ─
+    #[test]
+    fn no_locking_matches_v070() {
+        // No Locking_Protocol on any thread: diagnostics must be
+        // identical to the v0.7.0 baseline (the same test set that
+        // `no_isrs_matches_classical_rta` checks against).
+        let diags = make_two_thread_model_diags(None, None);
+
+        // No BlockingInflated diagnostic of any kind.
+        for d in &diags {
+            assert!(
+                !d.message.contains("blocking inflated"),
+                "no Locking_Protocol must not emit BlockingInflated, got: {}",
+                d.message,
+            );
+        }
+
+        // Golden snapshot identical to the v0.7.0 classical-RTA snapshot.
+        let mut msgs: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
+        msgs.sort();
+        let expected: Vec<String> = vec![
+            "thread 't1' on processor 'cpu1': response time 1.00 ms <= deadline 10.00 ms"
+                .to_string(),
+            "thread 't2' on processor 'cpu1': response time 3.00 ms <= deadline 20.00 ms"
+                .to_string(),
+        ];
+        assert_eq!(msgs, expected, "v0.7.0 byte-for-byte non-regression");
+    }
+
+    // ── B2: PIP blocking inflates response by exactly the configured amount ─
+    #[test]
+    fn pip_blocking_inflates_response() {
+        // Baseline (no blocking): t2 response = 3.00 ms.
+        // With PIP + 100us blocking: response = 3.10 ms (additive).
+        let diags =
+            make_two_thread_model_diags(Some("Priority_Inheritance_Protocol"), Some("100 us"));
+
+        let info = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("thread 't2'")
+                    && d.message.contains("response time")
+            })
+            .unwrap_or_else(|| panic!("no t2 response diagnostic: {:#?}", diags));
+        assert!(
+            info.message.contains("3.10 ms"),
+            "PIP +100us must inflate to 3.10 ms, got: {}",
+            info.message,
+        );
+
+        // BlockingInflated Info diagnostic emitted with magnitude.
+        let blk = diags
+            .iter()
+            .find(|d| d.message.contains("blocking inflated"))
+            .unwrap_or_else(|| panic!("no BlockingInflated diagnostic: {:#?}", diags));
+        assert_eq!(blk.severity, Severity::Info);
+        assert!(blk.message.contains("Priority_Inheritance_Protocol"));
+        assert!(blk.message.contains("100.00 us"));
+    }
+
+    // ── B3: PCP blocking inflates response by exactly the configured amount ─
+    #[test]
+    fn pcp_blocking_inflates_response() {
+        let diags = make_two_thread_model_diags(Some("Priority_Ceiling_Protocol"), Some("100 us"));
+
+        let info = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("thread 't2'")
+                    && d.message.contains("response time")
+            })
+            .unwrap_or_else(|| panic!("no t2 response diagnostic: {:#?}", diags));
+        assert!(
+            info.message.contains("3.10 ms"),
+            "PCP +100us must inflate to 3.10 ms, got: {}",
+            info.message,
+        );
+
+        let blk = diags
+            .iter()
+            .find(|d| d.message.contains("blocking inflated"))
+            .unwrap_or_else(|| panic!("no BlockingInflated diagnostic: {:#?}", diags));
+        assert!(blk.message.contains("Priority_Ceiling_Protocol"));
+    }
+
+    // ── B4: zero blocking value emits no BlockingInflated diagnostic ─
+    #[test]
+    fn zero_blocking_no_diagnostic() {
+        // PIP set but Critical_Section_Blocking = 0 → no diagnostic.
+        let diags =
+            make_two_thread_model_diags(Some("Priority_Inheritance_Protocol"), Some("0 us"));
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("blocking inflated")),
+            "zero blocking must not emit BlockingInflated: {:#?}",
+            diags,
+        );
+    }
+
+    // ── B5: ISR + blocking compose additively ──────────────────────
+    #[test]
+    fn blocking_plus_isr_compose() {
+        // CPU1: one ISR (T=2ms, C=100us) + one task (C=8ms, T=10ms,
+        // D=10ms). Without blocking and with the 5% ISR:
+        //   R0 = 8ms; R1 = 8 + ⌈8/2⌉*100us = 8.4ms; R2 = 8 + ⌈8.4/2⌉*100us = 8.5ms;
+        //   R3 = 8 + ⌈8.5/2⌉*100us = 8.5ms (fixed).
+        // With PCP + 200us blocking, every iterate adds +200us:
+        //   R0 = 8.2ms; R1 = 8.2 + ⌈8.2/2⌉*100us = 8.7ms (was 8.4ms);
+        //   R2 = 8.2 + ⌈8.7/2⌉*100us = 8.7ms (fixed).
+        let (mut b, root, proc) = make_base();
+        let dev = add_isr_device(&mut b, root, "irq_src", "2 ms", "100 us", 99);
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+                dev,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+
+        bind_thread(&mut b, t1, "10 ms", "8 ms", Some("10 ms"));
+        set_blocking(&mut b, t1, "Priority_Ceiling_Protocol", "200 us");
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let info = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("thread 't1'")
+                    && d.message.contains("response time")
+            })
+            .unwrap_or_else(|| panic!("no t1 response diag: {:#?}", diags));
+        // ISR (8.5ms) + 200us blocking = 8.70 ms. Both terms applied.
+        assert!(
+            info.message.contains("8.70 ms"),
+            "ISR (8.50ms) + blocking (200us) must compose to 8.70 ms: {}",
+            info.message,
+        );
+
+        // BlockingInflated is also present.
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("blocking inflated")),
+            "expected BlockingInflated diagnostic: {:#?}",
+            diags,
+        );
+    }
+
+    // ── B6: jitter + blocking compose ──────────────────────────────
+    #[test]
+    fn blocking_plus_jitter_compose() {
+        // Single task with own Dispatch_Jitter = 50us and PIP blocking
+        // 75us: R = C + J + B = 1.000ms + 50us + 75us = 1.125 ms.
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+
+        bind_thread(&mut b, t1, "10 ms", "1 ms", Some("10 ms"));
+        b.set_property(t1, "Timing_Properties", "Dispatch_Jitter", "50 us");
+        set_blocking(&mut b, t1, "Priority_Inheritance_Protocol", "75 us");
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let info = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.contains("thread 't1'")
+                    && d.message.contains("response time")
+            })
+            .unwrap_or_else(|| panic!("no t1 response diag: {:#?}", diags));
+        assert!(
+            info.message.contains("1.13 ms") || info.message.contains("1.12 ms"),
+            "jitter + blocking must compose to ~1.125 ms: {}",
+            info.message,
+        );
+    }
+
+    // ── B7: blocking forces a deadline miss ────────────────────────
+    #[test]
+    fn pip_deadline_miss_with_blocking() {
+        // Single task: C=8ms, T=10ms, D=10ms, no HP, no ISR.
+        // Without blocking: R = 8ms, slack 2ms.
+        // With PIP + 3ms blocking: R = 11ms > D=10ms → Error.
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+
+        bind_thread(&mut b, t1, "10 ms", "8 ms", Some("10 ms"));
+        set_blocking(&mut b, t1, "Priority_Inheritance_Protocol", "3 ms");
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let err = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Error
+                    && d.message.contains("thread 't1'")
+                    && d.message.contains("misses deadline")
+            })
+            .unwrap_or_else(|| panic!("expected deadline miss: {:#?}", diags));
+        let _ = err;
+    }
+
+    // ── B8: Stop_For_Lock and None opt out of blocking ─────────────
+    #[test]
+    fn stop_for_lock_treated_as_no_blocking() {
+        // Stop_For_Lock with a non-zero Critical_Section_Blocking must
+        // be ignored — blocking term is 0, no BlockingInflated, and
+        // response time is the no-blocking baseline (3.00 ms).
+        for proto in &["Stop_For_Lock", "None"] {
+            let diags = make_two_thread_model_diags(Some(proto), Some("100 us"));
+            assert!(
+                !diags
+                    .iter()
+                    .any(|d| d.message.contains("blocking inflated")),
+                "{} must not emit BlockingInflated: {:#?}",
+                proto,
+                diags,
+            );
+            let info = diags
+                .iter()
+                .find(|d| {
+                    d.severity == Severity::Info
+                        && d.message.contains("thread 't2'")
+                        && d.message.contains("response time")
+                })
+                .unwrap();
+            assert!(
+                info.message.contains("3.00 ms"),
+                "{} must NOT inflate response time, got: {}",
+                proto,
+                info.message,
+            );
+        }
     }
 
     // ── T10: ISR priority preempts regardless of task priority ─────

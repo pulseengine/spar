@@ -1204,4 +1204,26 @@ artifacts:
     status: planned
     tags: [variants, track-b, v07x]
 
+  # ── PIP/PCP blocking term in hierarchical RTA (v0.7.1) ─────────────
+
+  - id: REQ-TIMING-PIP-001
+    type: requirement
+    title: PCP/PIP blocking analysis in hierarchical RTA
+    description: >
+      System shall support PCP/PIP blocking analysis. Threads declaring
+      Thread_Properties::Locking_Protocol => Priority_Inheritance_Protocol
+      or Priority_Ceiling_Protocol contribute a blocking term B_i to the
+      v0.7.0 hierarchical IRQ-aware RTA recurrence (Joseph & Pandya 1986;
+      Buttazzo, *Hard Real-Time Computing Systems*). The blocking-term
+      magnitude is read from the new Spar_Timing::Critical_Section_Blocking
+      property (Time, picoseconds) and represents the user's bound on how
+      long a higher-priority task can be blocked by lower-priority tasks
+      holding shared resources. Stop_For_Lock and None values opt out of
+      blocking analysis (B_i = 0). Scope is the simple-ceiling case;
+      per-resource blocking analysis with shared-resource declarations is
+      deferred to v0.8.0+. Discharges the v0.7.1 follow-up explicitly
+      carved out of #147 / #149.
+    status: implemented
+    tags: [timing, rta, pip, pcp, blocking, v071]
+
   # Research findings tracked separately in research/findings.yaml

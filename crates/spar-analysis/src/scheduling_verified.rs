@@ -187,6 +187,75 @@ pub fn compute_response_time_jittered(
     RtaResult::Diverged
 }
 
+/// Jittered RTA recurrence with ISR interference and a PIP/PCP blocking term.
+///
+/// Joseph & Pandya 1986 / Buttazzo: the blocking term `B_i` is the
+/// maximum time the task can be blocked by lower-priority tasks
+/// holding shared resources under the configured Locking_Protocol.
+/// Modelled here as a constant added per step:
+///
+/// ```text
+/// R_{n+1} = exec + jitter + blocking
+///         + Σ_{hp j} ⌈(R_n + J_j)/T_j⌉ × C_j
+///         + Σ_{ISR k} ⌈R_n / T_k⌉ × C_k
+/// ```
+///
+/// Convergence: `blocking` is a constant, so the recurrence remains
+/// monotone non-decreasing in `r` and bounded above by `deadline + 1`,
+/// preserving the proven termination argument.
+#[inline]
+pub fn rta_step_jittered_blocking(
+    exec: u64,
+    jitter: u64,
+    blocking: u64,
+    higher_priority_jittered: &[(u64, u64, u64)],
+    isr_interference: &[(u64, u64)],
+    r: u64,
+) -> u64 {
+    rta_step_jittered(exec, jitter, higher_priority_jittered, isr_interference, r)
+        .saturating_add(blocking)
+}
+
+/// Compute worst-case response time with jitter, ISR interference, and
+/// a PIP/PCP blocking term `B_i`.
+///
+/// When `blocking == 0` this reduces to
+/// [`compute_response_time_jittered`] exactly (every iterate is identical).
+///
+/// Max iterations bounded by `deadline + 1` (monotone convergence).
+pub fn compute_response_time_jittered_blocking(
+    exec: u64,
+    deadline: u64,
+    jitter: u64,
+    blocking: u64,
+    higher_priority_jittered: &[(u64, u64, u64)],
+    isr_interference: &[(u64, u64)],
+) -> RtaResult {
+    // Initial value: exec + own jitter + blocking (the minimum response window).
+    let mut r = exec.saturating_add(jitter).saturating_add(blocking);
+    if r > deadline {
+        return RtaResult::Diverged;
+    }
+    for _ in 0..=deadline {
+        let new_r = rta_step_jittered_blocking(
+            exec,
+            jitter,
+            blocking,
+            higher_priority_jittered,
+            isr_interference,
+            r,
+        );
+        if new_r == r {
+            return RtaResult::Converged(r);
+        }
+        if new_r > deadline {
+            return RtaResult::Diverged;
+        }
+        r = new_r;
+    }
+    RtaResult::Diverged
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +378,40 @@ mod tests {
     fn jittered_diverges_on_overload() {
         // C=8, D=10, HP T=10 C=5, J=0: classical diverges. Jittered should too.
         let r = compute_response_time_jittered(8, 10, 0, &[(10, 5, 0)], &[]);
+        assert_eq!(r, RtaResult::Diverged);
+    }
+
+    // ── Blocking-term recurrence tests (v0.7.1) ────────────────────
+
+    #[test]
+    fn blocking_zero_matches_jittered() {
+        // Identical to compute_response_time_jittered when blocking=0.
+        let hp = [(10, 2, 0)];
+        let r_b = compute_response_time_jittered_blocking(3, 100, 0, 0, &hp, &[]);
+        let r_j = compute_response_time_jittered(3, 100, 0, &hp, &[]);
+        assert_eq!(r_b, r_j);
+    }
+
+    #[test]
+    fn blocking_inflates_by_constant() {
+        // Single task, no HP, no ISR, B=2: R = C + B = 3 + 2 = 5.
+        let r = compute_response_time_jittered_blocking(3, 10, 0, 2, &[], &[]);
+        assert_eq!(r, RtaResult::Converged(5));
+    }
+
+    #[test]
+    fn blocking_plus_isr_compose() {
+        // C=3, D=100, B=5, ISR T=10 C=1.
+        // Without blocking: jittered → R0=3, R1=3+ceil(3/10)*1=4, R2=3+ceil(4/10)*1=4. R=4.
+        // With B=5: every iterate adds +5 → R=9.
+        let r = compute_response_time_jittered_blocking(3, 100, 0, 5, &[], &[(10, 1)]);
+        assert_eq!(r, RtaResult::Converged(9));
+    }
+
+    #[test]
+    fn blocking_diverges_on_overflow_of_deadline() {
+        // C=8, D=10, B=5: even before any HP/ISR work, exec+B=13 > D=10.
+        let r = compute_response_time_jittered_blocking(8, 10, 0, 5, &[], &[]);
         assert_eq!(r, RtaResult::Diverged);
     }
 }
