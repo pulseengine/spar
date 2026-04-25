@@ -31,7 +31,9 @@ jobs:
   lean:
     name: Lean proof typecheck (lake build)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 90 min covers cold-cache Mathlib fetches via `lake exe cache get`
+    # plus our in-tree proof compile. Warm runs land in well under 10 min.
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: proofs
@@ -39,8 +41,11 @@ jobs:
       - uses: actions/checkout@v4
 
       # Cache the Lake build outputs (Mathlib + transitive deps + our proofs).
-      # Mathlib alone is ~2 GB of .olean and rebuilds in 30+ min from cold;
-      # warm runs reuse it and only recompile changed modules in-tree.
+      # Warm runs reuse this and only recompile changed in-tree modules.
+      # Cold runs fall through to the Mathlib precompiled cache fetched by
+      # lean-action's `use-mathlib-cache: true` below — that pulls
+      # ~2 GB of `.olean` files from Mathlib's cloud cache instead of
+      # rebuilding them from source (30+ min compile vs ~5 min download).
       - name: Cache Lake build (.lake)
         uses: actions/cache@v4
         with:
@@ -52,15 +57,19 @@ jobs:
             lake-${{ runner.os }}-
 
       # leanprover/lean-action reads `proofs/lean-toolchain` and installs the
-      # matching toolchain via elan, then runs `lake build` from the working
-      # directory. The action fails the job on any Lean error or `sorry`.
+      # matching toolchain via elan, runs `lake exe cache get` to pull
+      # precompiled Mathlib `.olean`s from the cloud cache, then runs
+      # `lake build`. The action fails the job on any Lean error or `sorry`.
       - name: Build proofs (lake build)
         id: lake_build
         uses: leanprover/lean-action@v1
         with:
           lake-package-directory: proofs
-          # We rely on actions/cache above; let lean-action skip its own.
-          use-mathlib-cache: false
+          # Pull Mathlib's precompiled .olean files instead of rebuilding
+          # from source. Without this, the cold-cache build hits the 1h
+          # GH Actions timeout at ~98% Mathlib (saw this on the first run
+          # of #151 — module 2796/2845 cancelled by timeout).
+          use-mathlib-cache: true
           build-args: ""
 
       # Capture the Lake log on failure for forensic review. The action
