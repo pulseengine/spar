@@ -1,8 +1,8 @@
 # AS5506 AADL v2.2 Compliance Gap Analysis
 
-**Updated**: 2026-04-05 (v0.6.0)
+**Updated**: 2026-04-25 (v0.7.0 in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (1200+ tests passing across 16 crates)
+**Toolchain**: spar (1900+ tests passing across 17 crates)
 
 ---
 
@@ -216,7 +216,36 @@
 
 ## In progress / v0.7.0
 
-- IRQ-aware RTA: hierarchical two-tier analysis with `Dispatch_Jitter` and BCET/WCET split landed (Track A commit 2); PIP/PCP blocking deferred to v0.7.1.
+**Track A — IRQ-aware RTA (4/4 commits delivered)**
+
+- Foundation (#145): `Spar_Timing::{ISR_Priority, ISR_Execution_Time, Interrupt_Latency_Bound, Bottom_Half_Server}` and `Spar_Trace::{Probe_Point, Expected_BCET, Expected_WCET, Expected_Mean}` property sets land as non-standard predefined sets, resolvable via the same idiom as AS5506 standard sets.
+- Hierarchical RTA (#147): two-tier analysis — ISR layer steals CPU capacity first; residual feeds task RTA. `Dispatch_Jitter` woven into the Tindell-Clark recurrence. `Compute_Execution_Time`'s Time_Range consumed as `(BCET, WCET)`. Five new diagnostic kinds: `IrqResponseBudget`, `IrqBudgetViolated`, `IsrOverloadedCpu`, `MissingBottomHalfServer`, `ResponseBand`. Non-regression gate (`no_isrs_matches_classical_rta`) verifies models without `Spar_Timing::*` produce byte-identical RTA output.
+- Lean convergence (#148): `proofs/Proofs/Scheduling/RTAJittered.lean` proves monotonicity, zero-jitter degeneration to classical `rtaStep`, and least-fixed-point convergence in `deadline + 1` iterations. Three core theorems plus two helper lemmas, no `sorry`.
+- Close-out (this commit): COMPLIANCE wording, COMPLIANCE-side acknowledgement of out-of-scope items.
+
+**Out of scope for v0.7.0, deferred to v0.7.1+**: priority inheritance (PIP) / priority ceiling (PCP) blocking; multi-processor ISR migration; cache-aware interference inflation (research-grade, v1.0+).
+
+**Track B — Variants (foundation only)**
+
+- Variant binding contract v1 (#144): `docs/contracts/rivet-spar-variant-v1.md` — rivet owns the PLE truth (feature model, variant configs, bindings, SAT), spar consumes a JSON context blob and filters HIR. Implementation of the consumer crate (`spar-variants`) waits for rivet to emit its first context blob; tracked separately.
+
+**v0.7.x infrastructure landed alongside Track A**
+
+- Kani harnesses for spar-solver and spar-codegen invariants (#141, closes #136).
+- cargo-fuzz scaffolding for parser, solver, codegen-roundtrip targets (#142, closes #138).
+- Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
+- Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
+- Track D and Track E research design docs landed (#152, #153) anchoring v0.8.0+ scope.
+
+---
+
+## v0.8.0 planning
+
+Two parallel tracks scoped from the v0.7.0 research:
+
+**Track D — TSN/Ethernet WCTT analysis (#149)**: WCTT is a foundational primitive for honest end-to-end timing, not a TSN-specific feature. Phase 1 (v0.8.0) ships a Network Calculus engine for FIFO+priority networks (classical Ethernet, CAN, FlexRay) and replaces `latency.rs`'s scalar bus-latency lookup with per-stream NC-derived bounds. Phase 2 (v0.8.x) adds TSN-specific service curves (TAS, CBS, frame preemption). Roadmap: 7 weeks across 6 commits.
+
+**Track E — Frozen-platform / mobile-application split + hypothetical-rebinding oracle (#150)**: Adds `Spar_Migration::{Frozen, Mobile, Allowed_Targets, Pinned_Reason}` plus a verification mode (`spar moves verify`) and an enumeration mode (`spar moves enumerate`). The MCP tool surface (`spar.verify_move`, `spar.enumerate_moves`) ships in v0.9.0 — read-only / idempotent only, deterministic apply via CLI. LLM agents propose moves; spar deterministically verifies; certification chain stays in spar. Roadmap: 8 weeks across 8 commits for v0.8.0; another 8.5 weeks across the v0.9.0 MCP surface.
 
 ---
 
