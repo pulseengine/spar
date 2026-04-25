@@ -22,6 +22,7 @@ pub mod instance;
 pub mod item_tree;
 pub mod migration;
 pub mod name;
+pub mod overlay;
 pub mod properties;
 pub mod property_check;
 pub mod property_eval;
@@ -34,6 +35,10 @@ use std::sync::Arc;
 
 pub use item_tree::ItemTree;
 pub use name::{ClassifierRef, Name, PropertyRef};
+pub use overlay::{
+    AllowedTargetsViolation, BindingOverlay, FrozenViolation, OverlayDiagnostic,
+    actual_processor_binding_with_overlay,
+};
 pub use resolver::{GlobalScope, ItemLoc, ResolvedClassifier, ResolvedProperty};
 
 /// The salsa database trait for HIR definitions.

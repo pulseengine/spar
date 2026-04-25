@@ -1153,6 +1153,28 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080, audit]
 
+  - id: REQ-MIGRATION-004
+    type: requirement
+    title: Hypothetical-binding overlay over a SystemInstance
+    description: >
+      System shall support hypothetical-binding overlays that allow any
+      analysis to run on a tentative rebinding without mutating the
+      SystemInstance. The overlay maps component instance indices to
+      hypothetical target processor indices and is consulted in place
+      of the declared Actual_Processor_Binding when present; absent
+      entries fall through to the declared binding. The overlay
+      validates against Spar_Migration::Frozen (refuses to move
+      platform components) and Spar_Migration::Allowed_Targets
+      (refuses targets outside the declared set when the list is
+      non-empty), returning structured FrozenViolation /
+      AllowedTargetsViolation diagnostics. An empty overlay is the
+      identity (non-regression baseline). Load-bearing infrastructure
+      for spar moves verify (Track E commit 3) and spar moves
+      enumerate (Track E commits 4-5). Per Track E commit 2/8 of the
+      v0.8.0 migration design research (§6.4).
+    status: planned
+    tags: [migration, track-e, v080]
+
   - id: REQ-NETWORK-004
     type: requirement
     title: Typed network graph extraction from a SystemInstance
