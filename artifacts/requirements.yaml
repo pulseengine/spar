@@ -1168,4 +1168,22 @@ artifacts:
     status: planned
     tags: [network, wctt, v080]
 
+  - id: REQ-NETWORK-005
+    type: requirement
+    title: Network Calculus arrival/service curve primitives and operators
+    description: >
+      System shall provide Network Calculus arrival/service-curve
+      primitives plus the closed-form min-plus operations (backlog
+      bound, delay bound, residual service, output bound) needed by
+      the WCTT analysis pass. Curves cover the affine "leaky bucket"
+      arrival form (burst + sustained rate, optional peak) and the
+      rate-latency service form, with all values represented as u64
+      picoseconds / bytes / bits per second so the kernel is free of
+      floating-point drift. The piecewise-affine extension and TSN-
+      specific service curves are deferred to v0.8.x. Track D commit 3
+      of the v0.8.0 design (docs/designs/track-d-tsn-wctt-research.md
+      §4.3-4.4).
+    status: planned
+    tags: [network, wctt, v080]
+
   # Research findings tracked separately in research/findings.yaml
