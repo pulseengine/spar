@@ -55,6 +55,20 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
+  # ── Bench compile smoke (fast regression gate) ──────────────────────
+  bench-smoke:
+    name: Bench compile smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify benches compile
+        # --no-run builds the bench binaries without executing them. This
+        # catches API drift in criterion harnesses on every PR with only
+        # the cost of a `cargo check`-like compile.
+        run: cargo bench --workspace --no-run
+
   # ── Security audits ──────────────────────────────────────────────────
   audit:
     name: Security Audit (RustSec)

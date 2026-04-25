@@ -1,0 +1,41 @@
+name: Bench Nightly
+
+# Runs criterion benchmarks nightly and archives the `target/criterion/`
+# directory as a build artifact. No regression gate yet — the goal of
+# this workflow is to collect a stable baseline across commits so we can
+# build a data-driven ratchet later.
+#
+# Scheduled at 03:30 UTC, offset from other nightly jobs (e.g. fuzzing)
+# so bench machines aren't contending for runner minutes.
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  # Allow manual triggering from the GitHub UI for ad-hoc baselines.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  solver-benchmarks:
+    name: Solver criterion nightly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Run solver benchmarks (save baseline)
+        # --save-baseline nightly stores this run under
+        # target/criterion/*/nightly so future runs can diff against it.
+        run: cargo bench --bench solver_benchmarks -p spar-solver -- --save-baseline nightly
+      - name: Run codegen benchmarks (save baseline)
+        run: cargo bench --bench codegen_benchmarks -p spar-codegen -- --save-baseline nightly
+      - name: Upload criterion output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-nightly
+          path: target/criterion/
+          if-no-files-found: warn
+          retention-days: 30

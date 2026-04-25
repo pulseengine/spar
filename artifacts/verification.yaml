@@ -486,6 +486,114 @@ artifacts:
       - type: satisfies
         target: ARCH-R4
 
+  # ── Performance Benchmarks (criterion) ──────────────────────────────
+  #
+  # Per ISO 26262-6 Table 10 row 1e ("performance test", HR at ASIL D):
+  # criterion benchmarks guard against silent runtime regressions in the
+  # scheduling solver and codegen emit path. CI runs `cargo bench --no-run`
+  # on every PR (bench-smoke job in .github/workflows/ci.yml). A nightly
+  # job (.github/workflows/bench-nightly.yml) runs the full bench and
+  # archives target/criterion/ as a build artifact for baseline tracking.
+
+  - id: BENCH-SOLVER-SMALL
+    type: feature
+    title: Solver bench — 8-task workload
+    description: >
+      Criterion benchmark group `solver_small`: 8 periodic tasks, 2
+      processors, utilisation ≤ 0.69 (below RM bound). Benches MILP,
+      FFD, BFD, and NSGA-II against the same input. Warmup 3s,
+      measurement 5s.
+    status: implemented
+    fields:
+      method: performance-test
+      steps:
+        - run: cargo bench --bench solver_benchmarks -p spar-solver -- solver_small
+    links:
+      - type: verifies
+        target: REQ-SOLVER-003
+      - type: verifies
+        target: REQ-SOLVER-004
+
+  - id: BENCH-SOLVER-MEDIUM
+    type: feature
+    title: Solver bench — 64-task workload
+    description: >
+      Criterion benchmark group `solver_medium`: 64 periodic tasks
+      across 8 processors, representative avionics/automotive scale.
+      Exercises MILP, FFD, BFD, and NSGA-II.
+    status: implemented
+    fields:
+      method: performance-test
+      steps:
+        - run: cargo bench --bench solver_benchmarks -p spar-solver -- solver_medium
+    links:
+      - type: verifies
+        target: REQ-SOLVER-004
+      - type: verifies
+        target: REQ-SOLVER-005
+      - type: verifies
+        target: REQ-SOLVER-006
+
+  - id: BENCH-SOLVER-LARGE
+    type: feature
+    title: Solver bench — 256-task stress workload
+    description: >
+      Criterion benchmark group `solver_large`: 256 tasks across 32
+      processors. `sample_size(10)` to bound wall-clock under MILP.
+      Intended as a regression canary for super-linear algorithmic
+      blowups.
+    status: implemented
+    fields:
+      method: performance-test
+      steps:
+        - run: cargo bench --bench solver_benchmarks -p spar-solver -- solver_large
+    links:
+      - type: verifies
+        target: REQ-SOLVER-004
+      - type: verifies
+        target: REQ-SOLVER-005
+
+  - id: BENCH-SOLVER-WORST-CASE
+    type: feature
+    title: Solver bench — adversarial near-boundary workload
+    description: >
+      Criterion benchmark group `solver_worst_case`: 64 tasks near the
+      schedulability boundary (u ≈ 0.95) with prime periods forcing
+      many rate-monotonic priority-inversion checks. Emulates the
+      hardest inputs produced by the fuzz corpus.
+    status: implemented
+    fields:
+      method: performance-test
+      steps:
+        - run: cargo bench --bench solver_benchmarks -p spar-solver -- solver_worst_case
+    links:
+      - type: verifies
+        target: REQ-SOLVER-004
+      - type: verifies
+        target: REQ-SOLVER-005
+      - type: verifies
+        target: REQ-SOLVER-006
+
+  - id: BENCH-CODEGEN-EMIT
+    type: feature
+    title: Codegen bench — 64-thread emit pipeline
+    description: >
+      Criterion benchmark group `codegen_emit`: builds a synthetic
+      SystemInstance with 64 periodic threads and benches
+      `spar_codegen::generate()` end-to-end (Rust + WIT + config +
+      tests + proofs + docs + workspace) as well as the Rust-only
+      emit path.
+    status: implemented
+    fields:
+      method: performance-test
+      steps:
+        - run: cargo bench --bench codegen_benchmarks -p spar-codegen
+    links:
+      - type: verifies
+        target: REQ-CODEGEN-001
+      - type: verifies
+        target: REQ-CODEGEN-RUST
+
   # ── v0.3.0 Verification Records ─────────────────────────────────────
 
   - id: VAL-RTA-001
