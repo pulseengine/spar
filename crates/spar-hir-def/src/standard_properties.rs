@@ -37,6 +37,7 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Spar_Timing",
     "Spar_Trace",
     "Spar_Network",
+    "Spar_Migration",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -372,6 +373,42 @@ const SPAR_NETWORK: &[(&str, &str)] = &[
     ("Output_Rate", "Data_Rate"),
 ];
 
+// ── Spar_Migration ──────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for the v0.8.0 Track E "frozen-platform / mobile-application" split
+// and the hypothetical-rebinding oracle. Provides the AADL vocabulary
+// for declaring which items are platform (immutable for hypothetical
+// rebinding) vs. which are application (eligible for movement). Per
+// the design research in `docs/designs/track-e-migration-research.md`
+// §6.1.
+
+const SPAR_MIGRATION: &[(&str, &str)] = &[
+    // Marks the item as platform — its binding/properties cannot be
+    // altered by hypothetical-rebinding queries. Default false. Applies
+    // to every component category (process, processor, memory, bus,
+    // device, system, thread, …).
+    ("Frozen", "aadlboolean"),
+    // Marks the item as application — eligible for hypothetical
+    // rebinding. Default false. Mutually inconsistent with Frozen=true;
+    // when both are set Frozen wins (defensive; see is_frozen helper).
+    ("Mobile", "aadlboolean"),
+    // Enumerates the set of valid rebinding targets. Empty list = no
+    // restriction beyond the platform's frozen set.
+    //
+    // TODO(v0.9.0): broaden to "list of reference (component)" once the
+    // AADL type table supports the generic-component reference form.
+    // Today we register as `list of reference (thread)` — the most
+    // common case for hypothetical rebinding (threads are what get
+    // rebound). Per §6.1 of the migration research; the property set
+    // surface is permissive at the registration level since the
+    // declarative type only gates parser-level type checking, and
+    // analyses read the references untyped via PropertyExpr.
+    ("Allowed_Targets", "list of reference (thread)"),
+    // Human-readable reason for `Frozen => true`. For audit trails.
+    ("Pinned_Reason", "aadlstring"),
+];
+
 /// Helper: collect properties from a table into the result vector.
 fn collect_properties(
     table: &[(&'static str, &'static str)],
@@ -410,6 +447,7 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     collect_properties(SPAR_TIMING, "Spar_Timing", &mut result);
     collect_properties(SPAR_TRACE, "Spar_Trace", &mut result);
     collect_properties(SPAR_NETWORK, "Spar_Network", &mut result);
+    collect_properties(SPAR_MIGRATION, "Spar_Migration", &mut result);
 
     result
 }
@@ -438,6 +476,7 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "spar_timing" => Some(SPAR_TIMING),
         "spar_trace" => Some(SPAR_TRACE),
         "spar_network" => Some(SPAR_NETWORK),
+        "spar_migration" => Some(SPAR_MIGRATION),
         _ => None,
     }
 }
@@ -485,6 +524,7 @@ mod tests {
         assert!(is_standard_property_set("Spar_Timing"));
         assert!(is_standard_property_set("Spar_Trace"));
         assert!(is_standard_property_set("Spar_Network"));
+        assert!(is_standard_property_set("Spar_Migration"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -833,6 +873,99 @@ mod tests {
     }
 
     #[test]
+    fn test_standard_properties_in_spar_migration() {
+        // Spar_Migration is a known property set.
+        assert!(is_standard_property_set("Spar_Migration"));
+
+        let props = standard_properties_in_set("Spar_Migration");
+        assert_eq!(props.len(), 4);
+        assert!(props.contains(&"Frozen"));
+        assert!(props.contains(&"Mobile"));
+        assert!(props.contains(&"Allowed_Targets"));
+        assert!(props.contains(&"Pinned_Reason"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Frozen"),
+            Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Mobile"),
+            Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Allowed_Targets"),
+            Some("list of reference (thread)")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Pinned_Reason"),
+            Some("aadlstring")
+        );
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_migration", "frozen"),
+            Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("SPAR_MIGRATION", "PINNED_REASON"),
+            Some("aadlstring")
+        );
+    }
+
+    #[test]
+    fn test_spar_migration_unknown_property_returns_none() {
+        // Unknown property within a known spar_migration set.
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Nonexistent"),
+            None
+        );
+        assert_eq!(
+            standard_property_type("Spar_Migration", "Migration_Cost"),
+            None,
+            "Migration_Cost is documented in §6.1 but deferred past commit 1; \
+             must not resolve in the foundation property set"
+        );
+    }
+
+    #[test]
+    fn test_spar_migration_property_set_resolved_via_global_scope() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        let scope = GlobalScope::from_trees(vec![]);
+
+        // Each Spar_Migration property is resolvable without explicit `with`.
+        for prop_name in ["Frozen", "Mobile", "Allowed_Targets", "Pinned_Reason"] {
+            let result =
+                scope.resolve_property(&Name::new("Spar_Migration"), &Name::new(prop_name));
+            assert!(
+                matches!(result, ResolvedProperty::PropertyDef { .. }),
+                "expected PropertyDef for Spar_Migration::{}, got {:?}",
+                prop_name,
+                result
+            );
+        }
+
+        // Deliberately-wrong name inside a known spar set is Unresolved.
+        let result =
+            scope.resolve_property(&Name::new("Spar_Migration"), &Name::new("Nonexistent"));
+        assert!(
+            matches!(result, ResolvedProperty::Unresolved),
+            "expected Unresolved for Spar_Migration::Nonexistent, got {:?}",
+            result
+        );
+
+        // Case-insensitive resolution
+        let result = scope.resolve_property(&Name::new("spar_migration"), &Name::new("frozen"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected case-insensitive match for Spar_Migration::Frozen, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_standard_properties_unknown_set() {
         let props = standard_properties_in_set("Nonexistent_Properties");
         assert!(props.is_empty());
@@ -848,8 +981,11 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 + 4 = 114
-        assert_eq!(all.len(), 114);
+        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 + 4 + 4 = 118
+        // (Timing + Communication + Memory + Deployment + Thread + Programming
+        //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
+        //  + Spar_Migration)
+        assert_eq!(all.len(), 118);
     }
 
     #[test]

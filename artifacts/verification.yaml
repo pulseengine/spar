@@ -1391,3 +1391,57 @@ artifacts:
         target: REQ-NETWORK-002
       - type: satisfies
         target: REQ-NETWORK-003
+
+  - id: TEST-SPAR-MIGRATION-PROPS
+    type: feature
+    title: Spar_Migration property set unit tests
+    description: >
+      Unit tests in crates/spar-hir-def/src/standard_properties.rs
+      that exercise registration of the Spar_Migration property set
+      (Track E commit 1/8). Covers: each of the four properties
+      (Frozen, Mobile, Allowed_Targets, Pinned_Reason) resolves to its
+      expected AADL type via standard_property_type; the property set
+      is registered in STANDARD_PROPERTY_SET_NAMES and resolves through
+      GlobalScope without an explicit `with` import; unknown property
+      names within the set return None / Unresolved; resolution is
+      case-insensitive per the AADL spec.
+    fields:
+      method: automated-test
+      steps:
+        - run: >-
+            cargo test -p spar-hir-def --lib --
+            standard_properties::tests::test_standard_properties_in_spar_migration
+            standard_properties::tests::test_spar_migration_property_set_resolved_via_global_scope
+            standard_properties::tests::test_spar_migration_unknown_property_returns_none
+    status: passing
+    tags: [migration, track-e, v080]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-001
+      - type: satisfies
+        target: REQ-MIGRATION-002
+      - type: satisfies
+        target: REQ-MIGRATION-003
+
+  - id: TEST-SPAR-MIGRATION-HELPERS
+    type: feature
+    title: is_frozen / is_mobile helper unit tests
+    description: >
+      Unit tests in crates/spar-hir-def/src/migration.rs that exercise
+      the boolean helpers over the Spar_Migration property set. Covers:
+      default-false behaviour for unannotated property maps; honouring
+      typed PropertyExpr::Boolean values; raw-string fallback for
+      pre-typed-lowering fixtures; defensive Frozen-wins-over-Mobile
+      resolution when both are declared on the same item (per §6.1 of
+      the v0.8.0 migration design).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- migration::tests
+    status: passing
+    tags: [migration, track-e, v080]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-001
+      - type: satisfies
+        target: REQ-MIGRATION-002

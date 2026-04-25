@@ -1112,4 +1112,45 @@ artifacts:
     status: planned
     tags: [network, wctt, v080]
 
+  # ── Track E: hypothetical-rebinding oracle (v0.8.0) ────────────────
+
+  - id: REQ-MIGRATION-001
+    type: requirement
+    title: Frozen-platform component annotation
+    description: >
+      System shall support marking components as frozen (platform) via
+      Spar_Migration::Frozen (aadlboolean). Frozen items are platform —
+      their binding/properties cannot be altered by hypothetical-rebinding
+      queries. Default false (unannotated components are eligible for
+      rebinding). Per Track E commit 1/8 of the v0.8.0 migration design
+      research (docs/designs/track-e-migration-research.md §6.1).
+    status: planned
+    tags: [migration, track-e, v080]
+
+  - id: REQ-MIGRATION-002
+    type: requirement
+    title: Mobile-application component annotation with allowed targets
+    description: >
+      System shall support marking components as mobile (application) via
+      Spar_Migration::Mobile (aadlboolean), with optional Allowed_Targets
+      (list of reference) enumeration restricting valid hypothetical
+      rebinding destinations. Empty Allowed_Targets means "no restriction
+      beyond the platform's frozen set". When both Frozen=true and
+      Mobile=true are declared on the same item, Frozen wins (defensive
+      — refuse to rebind). Per §6.1 of the v0.8.0 migration design.
+    status: planned
+    tags: [migration, track-e, v080]
+
+  - id: REQ-MIGRATION-003
+    type: requirement
+    title: Pinned-reason audit metadata
+    description: >
+      System shall record human-readable Pinned_Reason for frozen items
+      as audit metadata. Exposed via Spar_Migration::Pinned_Reason
+      (aadlstring). Captures the rationale a reviewer would need to
+      certify why an item is platform (e.g., "ASIL-D platform partition",
+      "RTOS kernel image"). Per §6.1 of the v0.8.0 migration design.
+    status: planned
+    tags: [migration, track-e, v080, audit]
+
   # Research findings tracked separately in research/findings.yaml
