@@ -20,6 +20,7 @@ pub mod category_rules;
 pub mod feature_group;
 pub mod instance;
 pub mod item_tree;
+pub mod migration;
 pub mod name;
 pub mod properties;
 pub mod property_check;
