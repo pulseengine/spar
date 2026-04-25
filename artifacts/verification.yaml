@@ -1502,3 +1502,33 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-NETWORK-005
+
+  - id: TEST-VARIANTS-CONSUMER
+    type: feature
+    title: spar-variants consumer-side unit tests
+    description: >
+      Unit tests in crates/spar-variants/src/{context,binding,filter}.rs
+      that exercise the v1 contract reader end-to-end on the consumer
+      side. Covers: round-trip of a minimal v1 blob; strict rejection of
+      any rivet_spar_context_version other than "1"; deserialization of
+      both artifact- and symbol-scoped bindings (untagged enum); the
+      §"Example" blob from docs/contracts/rivet-spar-variant-v1.md
+      parses and populates every field; artifact-binding match on exact
+      and dot-slash-normalized paths plus non-match on a sibling path or
+      missing item path; symbol-binding match on self and on textually
+      nested FQNs (boundary-aware so DieselV2 is not matched by Diesel);
+      keep_in_variant intersection semantics (one unsatisfied requires
+      drops the item even if other bindings are satisfied);
+      keep_in_variant treats items with no matching binding as
+      variant-independent infrastructure (kept unconditionally);
+      keep_in_variant accepts an empty requires list as vacuously
+      satisfied.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-variants
+    status: passing
+    tags: [variants, track-b, v07x]
+    links:
+      - type: satisfies
+        target: REQ-VARIANT-001
