@@ -230,23 +230,74 @@ is the reference for spec conformance. spar engages both, weighted toward OMG.
 
 ## §3 — Rust SysML v2 ecosystem (positioning)
 
-| Project | Author | Scope | Status | License | Stars |
-|---|---|---|---|---|---:|
-| `syster-base` / `syster-lsp` / `syster-codegen` | **Jade Wilson (Microsoft)** | Rust SysML v2 parser + LSP + codegen | Alpha | MIT | ~10 |
-| Sensmetry `Sysand` | Sensmetry | Rust SysML v2 package manager + registry | Active 2026 | MIT/Apache-2.0 | (varies) |
-| `tree-sitter-sysml` | Community | tree-sitter grammar | Active 2026-03 | (varies) | (varies) |
-| `kerml` (crate) | Community | Stand-alone | Lower activity | (varies) | (varies) |
-| `sysml-parser` (crate) | Community | "Heavy construction" Mar 2025 | Stalled? | (varies) | (varies) |
-| `sysml.rs` | artob | "🚧" marked | Unclear | (varies) | (varies) |
-| **`spar-sysml2`** | PulseEngine | AADL-side parser + lower + extract + generate | Production | (workspace, MIT pending) | (in-tree) |
+| Project | Author | Scope | Status | License | Stars | Last commit |
+|---|---|---|---|---|---:|---|
+| `syster` (umbrella) | Jade Wilson (Microsoft) | Multi-component ecosystem (parser+codegen+CLI+Python+LSP+VS Code+diagrams) | Alpha | **MIT** | 10 | 2026-02-20 |
+| `syster-base` | Jade Wilson | Parser + AST + Salsa-driven HIR | Alpha | **NONE** ⚠️ | 5 | 2026-02-19 |
+| `syster-lsp` | Jade Wilson | LSP server | Alpha | **NONE** ⚠️ | 1 | 2026-02-20 |
+| `syster-codegen` | Jade Wilson | KEBNF → parser/lexer code generator | Alpha | MIT | 0 | 2026-02-14 |
+| `syster-cli` | Jade Wilson | CLI wrapper | Alpha | MIT | 2 | 2026-02-24 |
+| Sensmetry `Sysand` | Sensmetry | Rust SysML v2 package manager + registry | Active 2026 | MIT/Apache-2.0 | (varies) | active |
+| `tree-sitter-sysml` | Community | tree-sitter grammar | Active 2026-03 | (varies) | (varies) | active |
+| `kerml` (crate) | Community | Stand-alone | Lower activity | (varies) | (varies) | quiet |
+| `sysml-parser` (crate) | Community | "Heavy construction" Mar 2025 | Stalled? | (varies) | (varies) | quiet |
+| `sysml.rs` | artob | "🚧" marked | Unclear | (varies) | (varies) | quiet |
+| **`spar-sysml2`** | PulseEngine | AADL-side parser + lower + extract + generate | Production | (workspace, MIT pending) | (in-tree) | active |
 
-**spar's positioning sentence:** *the AADL-side Rust toolchain that produces
-SysML v2 artifacts and round-trips requirements bidirectionally; complementary
-to `syster` (which targets SysML v2 directly) and to the OMG Pilot-Implementation
-(which is Java/Xtext).*
+### 3.1 syster — corrected picture (deeper inspection 2026-04-26)
+
+Initial Track F research saw "alpha, MIT, ~10 stars" and characterized
+syster as a single Rust SysML v2 parser. Direct GitHub inspection showed
+something more nuanced:
+
+- **Mixed licensing.** Umbrella `syster`, `syster-codegen`, `syster-cli`
+  are MIT. `syster-base` and `syster-lsp` — the actual parser and
+  language server — **have no LICENSE file.** Default copyright is
+  "all rights reserved", so they cannot be consumed by spar (or anyone)
+  legally without explicit permission. **This is a hidden blocker for
+  any code-level consumption.**
+- **Activity slowed.** Last commits Feb 14–24, 2026, mostly
+  repo-restructure + submodule shuffling. Two-month quiet since.
+  Not abandonment, but momentum has cooled.
+- **Architectural breadth.** README confirms full ecosystem: parser →
+  codegen → CLI → Python wrapper → LSP → VS Code extensions (language
+  client + modeller + viewer) → diagram core + UI. Far more ambitious
+  than spar-sysml2's scope.
+- **KEBNF-driven codegen.** `syster-base`'s parser is *generated* from
+  KEBNF grammar files (the OMG-shipped grammar definition format) via
+  `syster-codegen`. spar-sysml2's parser is hand-rolled. **This is a
+  real architectural asymmetry** — auto-conformance to future SysML v2
+  spec revisions is a property syster has and spar doesn't.
+
+### 3.2 spar's positioning (refined)
+
+*spar is the AADL-side Rust toolchain that produces SysML v2 artifacts
+and round-trips requirements bidirectionally; complementary to `syster`
+(which targets SysML v2 directly), to the OMG Pilot-Implementation
+(Java/Xtext), and to Sensmetry's `Sysand` (package manager).*
 
 **Avoid:** any messaging that reads as "another Rust SysML v2 parser".
 spar is on the AADL side and emits SysML v2; that's the differentiator.
+
+**Cooperation policy:** spar pursues active cooperation with `syster`
+**only when it's a strategic asset**, not a courtesy. Default mode is
+"stay code-aware, don't duplicate work spar doesn't need" (e.g. spar
+will not build a VS Code modeller when syster has one). Active
+cooperation is conditional on syster solving its license issue first
+(see §4.2 below).
+
+### 3.3 Architectural lesson worth tracking — KEBNF codegen (v0.9.0+ consideration)
+
+`syster-codegen` (MIT) reads KEBNF grammar files and generates a Rust
+parser. The OMG ships KEBNF for SysML v2 / KerML; using `syster-codegen`
+or porting its approach into spar-sysml2 would give automatic
+conformance to spec revisions.
+
+**Trade-off:** spar-sysml2's hand-rolled parser is mature and tested
+(7,167 LOC, 59+ tests). Replacing it is a substantial rewrite; the
+benefit is alignment to future spec revisions without manual port work.
+Not a v0.8.0 candidate; revisit as a v0.9.0+ option once SysML v2 1.1
+ships and we see how often the KEBNF revisions land.
 
 ## §4 — Strategic anchors
 
@@ -264,6 +315,21 @@ spar is on the AADL side and emits SysML v2; that's the differentiator.
 3. **Pilot-Implementation issue #571** (LSP/tree-sitter request, 22 months
    without maintainer response). Both spar's parser and `syster`'s LSP
    exist; offering them as community options is a visible contribution.
+
+### 4.2 syster — minimum-viable engagement only
+
+Per §3.1's findings (mixed licensing, two-month commit slowdown), spar
+pursues *minimum-viable* engagement with `syster`:
+
+- **One issue against `jade-codes/syster-base`** asking for an explicit
+  LICENSE file (MIT to match umbrella). Content-free, low-stakes,
+  unblocks any future cooperation. **Don't go further until this lands.**
+- If/when license clarifies, *re-evaluate* — don't auto-engage. The
+  cooperation criterion is "complete strategic value to spar", not
+  community courtesy.
+- Until then: stay code-aware, avoid duplicating work spar doesn't need
+  (don't build a VS Code modeller, don't reinvent KEBNF codegen for
+  v0.8.0).
 4. **`syster-cli` issue #4** (`sysml.library` doesn't parse cleanly in
    syster). spar has parsed the same library successfully in conformance
    tests; cross-validation would help both projects.
