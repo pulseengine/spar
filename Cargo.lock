@@ -1297,6 +1297,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-network"
+version = "0.6.0"
+
+[[package]]
 name = "spar-parser"
 version = "0.6.0"
 dependencies = [

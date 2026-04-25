@@ -8,6 +8,7 @@ members = [
     "crates/spar-hir-def",
     "crates/spar-hir",
     "crates/spar-analysis",
+    "crates/spar-network",
     "crates/spar-transform",
     "crates/spar-cli",
     "crates/spar-codegen",
@@ -33,6 +34,7 @@ spar-base-db = { path = "crates/spar-base-db" }
 spar-hir-def = { path = "crates/spar-hir-def" }
 spar-hir = { path = "crates/spar-hir" }
 spar-analysis = { path = "crates/spar-analysis" }
+spar-network = { path = "crates/spar-network" }
 spar-render = { path = "crates/spar-render" }
 spar-solver = { path = "crates/spar-solver" }
 spar-sysml2 = { path = "crates/spar-sysml2" }

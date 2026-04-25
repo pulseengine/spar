@@ -1364,3 +1364,30 @@ artifacts:
         target: REQ-TIMING-IRQ-002
       - type: satisfies
         target: REQ-TIMING-IRQ-003
+
+  - id: TEST-SPAR-NETWORK-PROPS
+    type: feature
+    title: Spar_Network property set surface tests
+    description: >
+      Unit tests in spar-hir-def/src/standard_properties.rs verifying
+      that Spar_Network is a known predefined property set, that each
+      of Switch_Type, Queue_Depth, Forwarding_Latency, and Output_Rate
+      resolves to the expected AADL type, that the set resolves via the
+      GlobalScope without an explicit `with` import, and that unknown
+      names in the set return None / ResolvedProperty::Unresolved.
+      Foundation for Track D (TSN/Ethernet WCTT, v0.8.0); subsequent
+      commits add the spar-network crate's NC primitives, the wctt
+      analysis pass, and the supporting Lean theorems.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def -- test_standard_properties_in_spar_network test_spar_network_property_set_resolved_via_global_scope test_spar_network_unknown_property_returns_none
+    status: passing
+    tags: [v0.8.0, network, wctt, tsn, properties]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-001
+      - type: satisfies
+        target: REQ-NETWORK-002
+      - type: satisfies
+        target: REQ-NETWORK-003
