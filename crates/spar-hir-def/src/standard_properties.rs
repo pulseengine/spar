@@ -19,11 +19,12 @@ pub struct StandardProperty {
 
 /// All standard predefined property set names.
 ///
-/// Includes the AS5506 Appendix A predeclared sets plus two non-standard
-/// spar-defined sets (`Spar_Timing`, `Spar_Trace`) that support
-/// IRQ-aware RTA (Track A, v0.7.0) and closed-loop trace verification
-/// (v0.8.0 precursor). The spar-defined sets are treated like predefined
-/// sets so they resolve without explicit `with` imports.
+/// Includes the AS5506 Appendix A predeclared sets plus three non-standard
+/// spar-defined sets (`Spar_Timing`, `Spar_Trace`, `Spar_Network`) that
+/// support IRQ-aware RTA (Track A, v0.7.0), closed-loop trace verification
+/// (v0.8.0 precursor), and TSN/Ethernet WCTT analysis (Track D, v0.8.0).
+/// The spar-defined sets are treated like predefined sets so they resolve
+/// without explicit `with` imports.
 pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Timing_Properties",
     "Communication_Properties",
@@ -35,6 +36,7 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "AADL_Project",
     "Spar_Timing",
     "Spar_Trace",
+    "Spar_Network",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -334,6 +336,42 @@ const SPAR_TRACE: &[(&str, &str)] = &[
     ("Expected_Mean", "Time"),
 ];
 
+// ── Spar_Network ────────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for TSN/Ethernet WCTT analysis (Track D, v0.8.0). Provides the AADL
+// vocabulary for switch modeling under the Option C decision in
+// research PR #152: a switched bus is modeled as
+// `bus implementation` carrying a `Switch_Type` discriminator.
+//
+// Phase 1 (this milestone) covers FIFO + Priority networks. Phase 2's
+// TSN-specific properties land in a separate `Spar_TSN::*` set.
+//
+// See `docs/designs/track-d-tsn-wctt-research.md` §5.1.
+
+const SPAR_NETWORK: &[(&str, &str)] = &[
+    // Discriminator for the bus's forwarding discipline. `FIFO` and
+    // `Priority` cover Phase 1 (classical Ethernet, CAN, FlexRay
+    // priority-based). `TSN` is reserved for Phase 2's scheduled-traffic
+    // service curves; analysis passes treat it as opaque until the
+    // Spar_TSN property set lands.
+    ("Switch_Type", "enumeration (FIFO, Priority, TSN)"),
+    // Per-port queue capacity in frames. Bounds the burst that can
+    // accumulate at a switch egress before drops; an input to the
+    // backlog bound used by the WCTT analysis.
+    ("Queue_Depth", "aadlinteger"),
+    // Store-and-forward latency: per-hop best-case .. worst-case
+    // contribution from switch fabric and MAC processing. Modeled as
+    // Time_Range so analyses can preserve BCET..WCET separation.
+    ("Forwarding_Latency", "Time_Range"),
+    // Egress link bandwidth per port. Note: AADL's `Data_Rate` is a
+    // unit-typed integer (`aadlinteger units Data_Rate_Units`) in
+    // Communication_Properties; the type description here is the
+    // human-readable form. Proper unit-aware parsing of `Data_Rate`
+    // is deferred to the WCTT analysis pass (Track D commit 4).
+    ("Output_Rate", "Data_Rate"),
+];
+
 /// Helper: collect properties from a table into the result vector.
 fn collect_properties(
     table: &[(&'static str, &'static str)],
@@ -371,6 +409,7 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     collect_properties(AADL_PROJECT, "AADL_Project", &mut result);
     collect_properties(SPAR_TIMING, "Spar_Timing", &mut result);
     collect_properties(SPAR_TRACE, "Spar_Trace", &mut result);
+    collect_properties(SPAR_NETWORK, "Spar_Network", &mut result);
 
     result
 }
@@ -398,6 +437,7 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "aadl_project" => Some(AADL_PROJECT),
         "spar_timing" => Some(SPAR_TIMING),
         "spar_trace" => Some(SPAR_TRACE),
+        "spar_network" => Some(SPAR_NETWORK),
         _ => None,
     }
 }
@@ -444,6 +484,7 @@ mod tests {
         assert!(is_standard_property_set("AADL_Project"));
         assert!(is_standard_property_set("Spar_Timing"));
         assert!(is_standard_property_set("Spar_Trace"));
+        assert!(is_standard_property_set("Spar_Network"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -689,6 +730,77 @@ mod tests {
     }
 
     #[test]
+    fn test_standard_properties_in_spar_network() {
+        // Spar_Network is a known property set.
+        assert!(is_standard_property_set("Spar_Network"));
+
+        let props = standard_properties_in_set("Spar_Network");
+        assert_eq!(props.len(), 4);
+        assert!(props.contains(&"Switch_Type"));
+        assert!(props.contains(&"Queue_Depth"));
+        assert!(props.contains(&"Forwarding_Latency"));
+        assert!(props.contains(&"Output_Rate"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_Network", "Switch_Type"),
+            Some("enumeration (FIFO, Priority, TSN)")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Network", "Queue_Depth"),
+            Some("aadlinteger")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Network", "Forwarding_Latency"),
+            Some("Time_Range")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Network", "Output_Rate"),
+            Some("Data_Rate")
+        );
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_network", "switch_type"),
+            Some("enumeration (FIFO, Priority, TSN)")
+        );
+    }
+
+    #[test]
+    fn test_spar_network_property_set_resolved_via_global_scope() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        let scope = GlobalScope::from_trees(vec![]);
+
+        // Spar_Network::Switch_Type is resolvable without explicit `with`.
+        let result = scope.resolve_property(&Name::new("Spar_Network"), &Name::new("Switch_Type"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected PropertyDef for Spar_Network::Switch_Type, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_spar_network_unknown_property_returns_none() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        // Lookup-table layer: unknown property in a known spar set is None.
+        assert_eq!(standard_property_type("Spar_Network", "Nonexistent"), None);
+
+        // Resolver layer: unknown property in a known spar set is Unresolved.
+        let scope = GlobalScope::from_trees(vec![]);
+        let result = scope.resolve_property(&Name::new("Spar_Network"), &Name::new("Nonexistent"));
+        assert!(
+            matches!(result, ResolvedProperty::Unresolved),
+            "expected Unresolved for Spar_Network::Nonexistent, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_spar_property_sets_resolved_via_global_scope() {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
@@ -736,8 +848,8 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 = 110
-        assert_eq!(all.len(), 110);
+        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 + 4 = 114
+        assert_eq!(all.len(), 114);
     }
 
     #[test]

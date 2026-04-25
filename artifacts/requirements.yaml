@@ -1071,4 +1071,45 @@ artifacts:
     status: planned
     tags: [trace, verification, v080]
 
+  # ── TSN/Ethernet WCTT analysis (Track D, v0.8.0) ───────────────────
+
+  - id: REQ-NETWORK-001
+    type: requirement
+    title: Network switch modeling via Switch_Type discriminator
+    description: >
+      System shall support modeling of network switch components via
+      Spar_Network::Switch_Type discriminator. Switches are modeled as
+      `bus implementation` (Option C from PR #152 research) carrying the
+      Switch_Type enumeration (FIFO, Priority, TSN); Phase 1 covers FIFO
+      and Priority disciplines, Phase 2 introduces TSN-specific service
+      curves under a separate Spar_TSN property set.
+    status: planned
+    tags: [network, wctt, tsn, v080]
+
+  - id: REQ-NETWORK-002
+    type: requirement
+    title: Per-bus queue depth and forwarding latency
+    description: >
+      System shall support modeling of per-bus queue depth and
+      store-and-forward latency. Exposed via Spar_Network::Queue_Depth
+      (aadlinteger; per-port frame capacity) and
+      Spar_Network::Forwarding_Latency (Time_Range; per-hop BCET..WCET
+      switch-fabric/MAC contribution). Both feed the WCTT analysis
+      pass that lands later in Track D.
+    status: planned
+    tags: [network, wctt, v080]
+
+  - id: REQ-NETWORK-003
+    type: requirement
+    title: Per-port output rate (egress bandwidth)
+    description: >
+      System shall support modeling of per-port output rate (egress
+      bandwidth). Exposed via Spar_Network::Output_Rate (Data_Rate;
+      applies to bus and port). Distinct from
+      Communication_Properties::Output_Rate, which is a producer-side
+      Rate_Spec; Spar_Network::Output_Rate is the link/port egress
+      bandwidth used by the WCTT serialization-time term.
+    status: planned
+    tags: [network, wctt, v080]
+
   # Research findings tracked separately in research/findings.yaml
