@@ -245,9 +245,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install rivet CLI
-        # Pinned to the same release the compliance action uses
-        # (see .github/workflows/release.yml: rivet-version: v0.1.0).
-        run: cargo install --locked --git https://github.com/pulseengine/rivet --tag v0.1.0 rivet
+        # The binary `rivet` ships in the `rivet-cli` package (renamed
+        # in the 0.4.x rework). v0.1.0 used a single `rivet` package
+        # and treated unknown fields as errors, which fails on legitimate
+        # schema-extension fields used by Track A/B/D/E artifacts.
+        run: cargo install --locked --git https://github.com/pulseengine/rivet --tag v0.4.3 rivet-cli
       - name: rivet validate
         run: rivet validate --format text
 
