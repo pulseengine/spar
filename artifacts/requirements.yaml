@@ -1153,4 +1153,19 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080, audit]
 
+  - id: REQ-NETWORK-004
+    type: requirement
+    title: Typed network graph extraction from a SystemInstance
+    description: >
+      System shall extract a typed network graph (nodes + links) from
+      a SystemInstance for downstream WCTT analysis. Nodes classify as
+      switches (bus components carrying Spar_Network::Switch_Type) or
+      end stations (devices/processors connected to a switched bus);
+      links carry the per-hop bandwidth, forwarding-latency range, and
+      queue-depth annotations from Spar_Network::*. The graph is the
+      bridge between the AADL ItemTree and the Network Calculus
+      primitives that follow in subsequent Track D commits.
+    status: planned
+    tags: [network, wctt, v080]
+
   # Research findings tracked separately in research/findings.yaml

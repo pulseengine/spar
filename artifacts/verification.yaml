@@ -1445,3 +1445,34 @@ artifacts:
         target: REQ-MIGRATION-001
       - type: satisfies
         target: REQ-MIGRATION-002
+
+  - id: TEST-SPAR-NETWORK-GRAPH
+    type: feature
+    title: Network graph extraction tests
+    description: >
+      Integration tests in crates/spar-network/tests/extract_tests.rs
+      that drive small inline AADL fixtures through the spar-hir-def
+      pipeline and call extract_network_graph on the resulting
+      SystemInstance. Coverage includes a simple FIFO topology
+      (switch + two end stations), a Priority switch classification,
+      a TSN switch (classified but otherwise opaque per Phase 1), an
+      unannotated bus that must be skipped, and a Forwarding_Latency
+      range that must lower to a (BCET, WCET) tuple in picoseconds.
+      Backed by unit tests in spar-network's types and extract modules
+      that exercise the SwitchType enum parsing and the typed-first /
+      string-fallback property accessors.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network
+    status: passing
+    tags: [v0.8.0, network, wctt, tsn, extract]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-001
+      - type: satisfies
+        target: REQ-NETWORK-002
+      - type: satisfies
+        target: REQ-NETWORK-003
+      - type: satisfies
+        target: REQ-NETWORK-004
