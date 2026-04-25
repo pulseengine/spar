@@ -1,0 +1,3 @@
+[
+  "processor 'cpu1' is ISR-overloaded: utilization 35% >= threshold 30%"
+]

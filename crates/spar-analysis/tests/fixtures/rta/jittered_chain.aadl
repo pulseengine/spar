@@ -1,0 +1,57 @@
+-- Sporadic chain with minimum inter-arrival time plus Dispatch_Jitter,
+-- demonstrating the Tindell-Clark jitter extension. Two sporadic
+-- threads share one CPU. Both deadlines are met; the lower-priority
+-- thread's response time reflects the higher-priority thread's
+-- jitter inside the fixed-point recurrence.
+
+package Jittered
+public
+
+  processor cpu
+  end cpu;
+  processor implementation cpu.basic
+  end cpu.basic;
+
+  thread th
+    properties
+      Thread_Properties::Dispatch_Protocol => Sporadic;
+      Timing_Properties::Period            => 10 ms;
+      Timing_Properties::Deadline          => 10 ms;
+      Timing_Properties::Compute_Execution_Time => 1 ms;
+      Timing_Properties::Dispatch_Jitter   => 2 ms;
+      Deployment_Properties::Priority      => 1;
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end th;
+  thread implementation th.impl
+  end th.impl;
+
+  thread tl
+    properties
+      Thread_Properties::Dispatch_Protocol => Sporadic;
+      Timing_Properties::Period            => 100 ms;
+      Timing_Properties::Deadline          => 100 ms;
+      Timing_Properties::Compute_Execution_Time => 10 ms;
+      Deployment_Properties::Priority      => 2;
+      Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
+  end tl;
+  thread implementation tl.impl
+  end tl.impl;
+
+  process p
+  end p;
+  process implementation p.impl
+    subcomponents
+      t_hi : thread th.impl;
+      t_lo : thread tl.impl;
+  end p.impl;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.impl
+    subcomponents
+      cpu1 : processor cpu.basic;
+      proc : process p.impl;
+  end Sys.impl;
+
+end Jittered;

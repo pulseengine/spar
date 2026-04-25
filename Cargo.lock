@@ -1232,6 +1232,8 @@ dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
  "serde",
+ "serde_json",
+ "spar-base-db",
  "spar-hir-def",
 ]
 
