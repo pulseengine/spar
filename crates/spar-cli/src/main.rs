@@ -1,6 +1,7 @@
 mod assertion;
 mod diff;
 mod lsp;
+mod moves;
 mod refactor;
 mod sarif;
 mod verify;
@@ -41,6 +42,7 @@ fn main() {
         "extract" => cmd_sysml2_extract(&args[2..]),
         "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
+        "moves" => moves::cmd_moves_dispatch(&args[2..]),
         other => {
             eprintln!("Unknown command: {other}");
             process::exit(1);
@@ -62,6 +64,9 @@ fn print_usage() {
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
+    eprintln!(
+        "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
+    );
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -82,6 +87,9 @@ fn print_usage() {
     );
     eprintln!(
         "  codegen  --root Package::Type.Impl [--output dir] [--format rust|wit|both] [--verify all|build|test|proof] [--rivet] [--dry-run] <file...>"
+    );
+    eprintln!(
+        "  moves    verify --root Package::Type.Impl --component <fqn> --to <processor> [--format text|json] <file...>"
     );
 }
 
