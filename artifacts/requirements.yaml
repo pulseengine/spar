@@ -1186,4 +1186,22 @@ artifacts:
     status: planned
     tags: [network, wctt, v080]
 
+  # ── Track B: rivet ↔ spar variant binding (v0.7.x) ─────────────────
+
+  - id: REQ-VARIANT-001
+    type: requirement
+    title: Consume rivet's variant context blob (v1) and filter HIR
+    description: >
+      System shall consume rivet's variant context blob (v1 contract per
+      docs/contracts/rivet-spar-variant-v1.md) and filter HIR items by
+      intersection-semantics binding rules. The reader strictly accepts
+      rivet_spar_context_version "1" only — v2+ blobs are refused per
+      the contract's compatibility section. File-scoped (artifact) and
+      symbol-scoped bindings are honoured; an item is kept iff every
+      matching binding has its requires-set satisfied by the variant's
+      active features. Items with no matching binding are kept
+      unconditionally as variant-independent infrastructure.
+    status: planned
+    tags: [variants, track-b, v07x]
+
   # Research findings tracked separately in research/findings.yaml
