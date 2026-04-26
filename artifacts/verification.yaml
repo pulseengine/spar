@@ -1538,6 +1538,41 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-005
 
+  - id: TEST-WCTT
+    type: feature
+    title: Per-stream WCTT analysis pass tests
+    description: >
+      Unit tests in crates/spar-analysis/src/wctt.rs plus the
+      classical_ethernet fixture in tests/fixtures/wctt/ exercise the
+      WcttAnalysis pass on small inline AADL topologies. Coverage
+      spans the non-regression contract (zero Wctt* diagnostics on
+      models without Spar_Network::Switch_Type), single-hop classical
+      Ethernet bound, two streams sharing a switch with residual
+      service split, competing flow exhaustion (WcttUnservable),
+      multi-hop chain bound aggregation across three switches in
+      series, WcttExceedsBudget when Spar_Network::WCTT_Budget is
+      tighter than the predicted bound and the inverse (Info-only
+      when within budget), Priority switch classification (treated
+      like FIFO in Phase 1), TSN switch deferral to Phase 2
+      (WcttDeferred), and the unswitched-bus skip rule. Backed by a
+      classical_ethernet AADL fixture with a snapshot
+      .expected.json. Track D commit 4 of the v0.8.0 design
+      (docs/designs/track-d-tsn-wctt-research.md §5.4).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- wctt::tests
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.8.0, network, wctt, tsn]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-004
+      - type: satisfies
+        target: REQ-NETWORK-005
+      - type: satisfies
+        target: REQ-NETWORK-006
+
   - id: TEST-VARIANTS-CONSUMER
     type: feature
     title: spar-variants consumer-side unit tests

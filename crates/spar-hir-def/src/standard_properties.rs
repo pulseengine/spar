@@ -385,6 +385,13 @@ const SPAR_NETWORK: &[(&str, &str)] = &[
     // human-readable form. Proper unit-aware parsing of `Data_Rate`
     // is deferred to the WCTT analysis pass (Track D commit 4).
     ("Output_Rate", "Data_Rate"),
+    // Per-bus end-to-end WCTT budget. When set on a switched bus, the
+    // Track D commit 4 `wctt.rs` analysis pass compares each predicted
+    // per-stream end-to-end traversal-time bound against this budget
+    // and emits a `WcttExceedsBudget` Error when the prediction
+    // exceeds it. Modeled as Time so it lowers to picoseconds via the
+    // existing AADL time-unit machinery.
+    ("WCTT_Budget", "Time"),
 ];
 
 // ── Spar_Migration ──────────────────────────────────────────────────
@@ -795,11 +802,12 @@ mod tests {
         assert!(is_standard_property_set("Spar_Network"));
 
         let props = standard_properties_in_set("Spar_Network");
-        assert_eq!(props.len(), 4);
+        assert_eq!(props.len(), 5);
         assert!(props.contains(&"Switch_Type"));
         assert!(props.contains(&"Queue_Depth"));
         assert!(props.contains(&"Forwarding_Latency"));
         assert!(props.contains(&"Output_Rate"));
+        assert!(props.contains(&"WCTT_Budget"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -817,6 +825,10 @@ mod tests {
         assert_eq!(
             standard_property_type("Spar_Network", "Output_Rate"),
             Some("Data_Rate")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Network", "WCTT_Budget"),
+            Some("Time")
         );
 
         // Case-insensitive.
@@ -1001,13 +1013,14 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 4 + 4 = 120
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 = 121
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration)
         // Thread_Properties: +1 for Locking_Protocol (v0.7.1 PIP/PCP).
         // Spar_Timing: +1 for Critical_Section_Blocking (v0.7.1 PIP/PCP).
-        assert_eq!(all.len(), 120);
+        // Spar_Network: +1 for WCTT_Budget (Track D commit 4).
+        assert_eq!(all.len(), 121);
     }
 
     #[test]

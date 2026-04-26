@@ -1251,6 +1251,7 @@ dependencies = [
  "serde_json",
  "spar-base-db",
  "spar-hir-def",
+ "spar-network",
 ]
 
 [[package]]
