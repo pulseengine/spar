@@ -410,9 +410,5 @@ theorem compose_delays_zero_latency
   have hne1 : β1.rate_bps ≠ 0 := Nat.pos_iff_ne_zero.mp h_rate1_pos
   have hne2 : β2.rate_bps ≠ 0 := Nat.pos_iff_ne_zero.mp h_rate2_pos
   simp [hne1, hne2, h1, h2]
-  -- TODO(v1.0.0): finalise normalisation; the residual goal differs
-  -- only in associativity/commutativity of natural-number addition
-  -- inside the div_ceil numerator.
-  sorry
 
 end Spar.Network.MinPlus
