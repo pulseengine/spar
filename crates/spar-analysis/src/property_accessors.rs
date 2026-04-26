@@ -450,6 +450,73 @@ pub fn get_dispatch_jitter(props: &PropertyMap) -> Option<u64> {
     get_timing_property(props, "Dispatch_Jitter")
 }
 
+/// AS5506D §5.4.4 `Thread_Properties::Locking_Protocol` enumeration.
+///
+/// Drives the PIP/PCP blocking-term selection in the v0.7.1
+/// hierarchical RTA. `StopForLock` and `None` opt out of blocking
+/// analysis (treated as no blocking term).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockingProtocol {
+    /// `Priority_Inheritance_Protocol` — Sha-Rajkumar-Lehoczky 1990.
+    Pip,
+    /// `Priority_Ceiling_Protocol` — Sha-Rajkumar-Lehoczky 1990.
+    Pcp,
+    /// `Stop_For_Lock` — coarse stop-the-world lock; no inheritance.
+    StopForLock,
+    /// `None` — no shared resources / no blocking term.
+    None,
+}
+
+/// Get `Thread_Properties::Locking_Protocol`.
+///
+/// Returns `None` when the property is not set; otherwise returns
+/// `Some(LockingProtocol)` parsed from the enum value (case-insensitive).
+/// An unrecognised string returns `None`.
+pub fn get_locking_protocol(props: &PropertyMap) -> Option<LockingProtocol> {
+    // Typed path
+    let typed_str = get_typed_qualified(props, "Thread_Properties", "Locking_Protocol")
+        .and_then(extract_string);
+    let raw_str = typed_str.or_else(|| {
+        props
+            .get("Thread_Properties", "Locking_Protocol")
+            .or_else(|| props.get("", "Locking_Protocol"))
+            .map(|s| s.trim().to_string())
+    })?;
+    parse_locking_protocol(&raw_str)
+}
+
+/// Parse a `Locking_Protocol` enum string (case-insensitive).
+fn parse_locking_protocol(s: &str) -> Option<LockingProtocol> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "priority_inheritance_protocol" => Some(LockingProtocol::Pip),
+        "priority_ceiling_protocol" => Some(LockingProtocol::Pcp),
+        "stop_for_lock" => Some(LockingProtocol::StopForLock),
+        "none" => Some(LockingProtocol::None),
+        _ => None,
+    }
+}
+
+/// Get `Spar_Timing::Critical_Section_Blocking` in picoseconds.
+///
+/// User-supplied bound on how long a higher-priority task can be
+/// blocked by lower-priority tasks holding shared resources, under
+/// the configured `Thread_Properties::Locking_Protocol` (PIP/PCP).
+/// When absent, the v0.7.1 RTA treats the blocking term as 0.
+pub fn get_critical_section_blocking(props: &PropertyMap) -> Option<u64> {
+    // Typed path
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "Critical_Section_Blocking")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "Critical_Section_Blocking")
+        .or_else(|| props.get("", "Critical_Section_Blocking"))?;
+    parse_time_value(raw)
+}
+
 /// Get `Thread_Properties::Dispatch_Protocol` as a string (e.g. "Sporadic", "Periodic").
 ///
 /// Falls back to `Timing_Properties::Dispatch_Protocol` for legacy models.
@@ -1202,5 +1269,98 @@ mod tests {
         let inner = PropertyExpr::Real("2.5".to_string(), None);
         let expr = PropertyExpr::UnitValue(Box::new(inner), Name::new("ms"));
         assert_eq!(extract_time_ps(&expr), Some(2_500_000_000));
+    }
+
+    // ── Locking_Protocol / Critical_Section_Blocking (v0.7.1) ───
+
+    #[test]
+    fn locking_protocol_pip_string() {
+        let props = make_props(&[(
+            "Thread_Properties",
+            "Locking_Protocol",
+            "Priority_Inheritance_Protocol",
+        )]);
+        assert_eq!(get_locking_protocol(&props), Some(LockingProtocol::Pip));
+    }
+
+    #[test]
+    fn locking_protocol_pcp_string() {
+        let props = make_props(&[(
+            "Thread_Properties",
+            "Locking_Protocol",
+            "Priority_Ceiling_Protocol",
+        )]);
+        assert_eq!(get_locking_protocol(&props), Some(LockingProtocol::Pcp));
+    }
+
+    #[test]
+    fn locking_protocol_stop_for_lock() {
+        let props = make_props(&[("Thread_Properties", "Locking_Protocol", "Stop_For_Lock")]);
+        assert_eq!(
+            get_locking_protocol(&props),
+            Some(LockingProtocol::StopForLock)
+        );
+    }
+
+    #[test]
+    fn locking_protocol_none_string() {
+        let props = make_props(&[("Thread_Properties", "Locking_Protocol", "None")]);
+        assert_eq!(get_locking_protocol(&props), Some(LockingProtocol::None));
+    }
+
+    #[test]
+    fn locking_protocol_case_insensitive() {
+        let props = make_props(&[(
+            "Thread_Properties",
+            "Locking_Protocol",
+            "priority_ceiling_protocol",
+        )]);
+        assert_eq!(get_locking_protocol(&props), Some(LockingProtocol::Pcp));
+    }
+
+    #[test]
+    fn locking_protocol_typed_enum() {
+        let props = make_typed_props(
+            "Thread_Properties",
+            "Locking_Protocol",
+            "Priority_Inheritance_Protocol",
+            PropertyExpr::Enum(Name::new("Priority_Inheritance_Protocol")),
+        );
+        assert_eq!(get_locking_protocol(&props), Some(LockingProtocol::Pip));
+    }
+
+    #[test]
+    fn locking_protocol_unrecognised_returns_none() {
+        let props = make_props(&[("Thread_Properties", "Locking_Protocol", "Spinlock")]);
+        assert_eq!(get_locking_protocol(&props), None);
+    }
+
+    #[test]
+    fn locking_protocol_missing_returns_none() {
+        let props = PropertyMap::new();
+        assert_eq!(get_locking_protocol(&props), None);
+    }
+
+    #[test]
+    fn critical_section_blocking_parses_us() {
+        let props = make_props(&[("Spar_Timing", "Critical_Section_Blocking", "100 us")]);
+        assert_eq!(get_critical_section_blocking(&props), Some(100_000_000));
+    }
+
+    #[test]
+    fn critical_section_blocking_typed() {
+        let props = make_typed_props(
+            "Spar_Timing",
+            "Critical_Section_Blocking",
+            "100 us",
+            PropertyExpr::Integer(100, Some(Name::new("us"))),
+        );
+        assert_eq!(get_critical_section_blocking(&props), Some(100_000_000));
+    }
+
+    #[test]
+    fn critical_section_blocking_missing_returns_none() {
+        let props = PropertyMap::new();
+        assert_eq!(get_critical_section_blocking(&props), None);
     }
 }

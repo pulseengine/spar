@@ -1532,3 +1532,29 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-VARIANT-001
+
+  - id: TEST-RTA-BLOCKING
+    type: feature
+    title: PIP/PCP blocking-term unit tests
+    description: >
+      Unit tests in crates/spar-analysis/src/rta.rs and
+      crates/spar-analysis/src/scheduling_verified.rs covering the
+      v0.7.1 blocking-term extension to the hierarchical IRQ-aware RTA.
+      Coverage includes: the no_locking_matches_v070 byte-for-byte
+      non-regression gate; PIP and PCP blocking inflating response
+      times by exactly the configured Spar_Timing::Critical_Section_Blocking
+      magnitude; the BlockingInflated Info diagnostic emitted only when
+      blocking > 0; ISR + blocking and jitter + blocking compositions;
+      blocking-induced deadline misses; and the Stop_For_Lock / None
+      Locking_Protocol values opting out of blocking analysis (B_i = 0).
+      Backed by scheduling_verified tests for the new
+      compute_response_time_jittered_blocking fixed-point function.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta::tests scheduling_verified property_accessors
+    status: passing
+    tags: [v0.7.1, timing, irq, rta, pip, pcp, blocking]
+    links:
+      - type: satisfies
+        target: REQ-TIMING-PIP-001

@@ -177,6 +177,14 @@ const THREAD_PROPERTIES: &[(&str, &str)] = &[
         "Active_Thread_Queue_Handling_Protocol",
         "enumeration (flush, hold)",
     ),
+    // AS5506D §5.4.4: concurrency control protocol used for shared
+    // resources accessed by this thread. `Priority_Inheritance_Protocol`
+    // and `Priority_Ceiling_Protocol` enable PIP/PCP blocking analysis
+    // in the v0.7.1 hierarchical RTA; `Stop_For_Lock` and `None` opt out.
+    (
+        "Locking_Protocol",
+        "enumeration (Priority_Ceiling_Protocol, Priority_Inheritance_Protocol, Stop_For_Lock, None)",
+    ),
 ];
 
 // ── Programming_Properties ──────────────────────────────────────────
@@ -313,6 +321,12 @@ const SPAR_TIMING: &[(&str, &str)] = &[
     // Reference to the thread that handles deferred ISR work (classic
     // top-half / bottom-half split). Applies to thread and device.
     ("Bottom_Half_Server", "reference (thread)"),
+    // User-supplied bound on how long a higher-priority task can be
+    // blocked by lower-priority tasks holding shared resources, under
+    // the configured Thread_Properties::Locking_Protocol (PIP/PCP).
+    // Drives the B_i term in the v0.7.1 hierarchical RTA recurrence.
+    // Applies to thread.
+    ("Critical_Section_Blocking", "Time"),
 ];
 
 // ── Spar_Trace ──────────────────────────────────────────────────────
@@ -619,7 +633,7 @@ mod tests {
     #[test]
     fn test_standard_properties_in_thread() {
         let props = standard_properties_in_set("Thread_Properties");
-        assert_eq!(props.len(), 7);
+        assert_eq!(props.len(), 8);
         assert!(props.contains(&"Dispatch_Protocol"));
         assert!(props.contains(&"Dispatch_Trigger"));
         assert!(props.contains(&"Priority"));
@@ -627,6 +641,7 @@ mod tests {
         assert!(props.contains(&"POSIX_Scheduling_Policy"));
         assert!(props.contains(&"Active_Thread_Handling_Protocol"));
         assert!(props.contains(&"Active_Thread_Queue_Handling_Protocol"));
+        assert!(props.contains(&"Locking_Protocol"));
     }
 
     #[test]
@@ -695,11 +710,12 @@ mod tests {
         assert!(is_standard_property_set("Spar_Timing"));
 
         let props = standard_properties_in_set("Spar_Timing");
-        assert_eq!(props.len(), 4);
+        assert_eq!(props.len(), 5);
         assert!(props.contains(&"ISR_Priority"));
         assert!(props.contains(&"ISR_Execution_Time"));
         assert!(props.contains(&"Interrupt_Latency_Bound"));
         assert!(props.contains(&"Bottom_Half_Server"));
+        assert!(props.contains(&"Critical_Section_Blocking"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -717,6 +733,10 @@ mod tests {
         assert_eq!(
             standard_property_type("Spar_Timing", "Bottom_Half_Server"),
             Some("reference (thread)")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Timing", "Critical_Section_Blocking"),
+            Some("Time")
         );
 
         // Deliberately-wrong name returns None.
@@ -981,11 +1001,13 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 7 + 25 + 4 + 13 + 4 + 4 + 4 + 4 = 118
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 4 + 4 = 120
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration)
-        assert_eq!(all.len(), 118);
+        // Thread_Properties: +1 for Locking_Protocol (v0.7.1 PIP/PCP).
+        // Spar_Timing: +1 for Critical_Section_Blocking (v0.7.1 PIP/PCP).
+        assert_eq!(all.len(), 120);
     }
 
     #[test]
