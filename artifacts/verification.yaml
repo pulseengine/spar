@@ -1476,3 +1476,29 @@ artifacts:
         target: REQ-NETWORK-003
       - type: satisfies
         target: REQ-NETWORK-004
+
+  - id: TEST-NC-CURVES
+    type: feature
+    title: Network Calculus curve and operator unit tests
+    description: >
+      Unit tests in crates/spar-network/src/curves.rs that exercise
+      the affine ArrivalCurve and rate-latency ServiceCurve evaluators
+      plus the four closed-form min-plus operators (backlog_bound,
+      delay_bound, residual_service, output_bound). Coverage spans
+      α(0) = burst, β below latency = 0, β linear growth above latency,
+      affine arrival evaluation, peak-rate cap, classical backlog and
+      delay closed-forms (σ + ρ·T and T + σ/R), residual service for
+      two flows sharing a server (rate split), unservable competing
+      flow error, output burst inflation by ρ·T, output rate
+      preservation, and a two-server compose smoke test that
+      accumulates per-hop delays end to end. Track D commit 3 of the
+      v0.8.0 design (docs/designs/track-d-tsn-wctt-research.md §4).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- curves::tests
+    status: passing
+    tags: [v0.8.0, network, wctt, network-calculus]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-005
