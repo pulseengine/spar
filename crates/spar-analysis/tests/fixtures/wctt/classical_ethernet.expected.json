@@ -1,0 +1,4 @@
+[
+  "WcttBound: stream 'data_a (ecu_a → ecu_sink)' end-to-end WCTT 31666668 ps (1 hop)",
+  "WcttBound: stream 'data_b (ecu_b → ecu_sink)' end-to-end WCTT 31666668 ps (1 hop)"
+]

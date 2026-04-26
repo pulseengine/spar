@@ -1,0 +1,71 @@
+-- Classical (FIFO) Ethernet WCTT fixture: three ECUs and one switch.
+--
+-- Topology:
+--   ecu_a, ecu_b are senders (Spar_Network::Output_Rate annotated)
+--   ecu_sink is the receiver
+--   eth_switch is a 1 Gbps FIFO Ethernet switch with 5 us forwarding latency
+--
+-- Two streams, each of which crosses one switch hop. The expected
+-- per-stream bound is the rate-latency closed form:
+--
+--   D = T + σ_residual / (R - ρ_competing)
+--
+-- with T = 5 us. The fixture lets the WCTT pass exercise residual
+-- service computation while keeping the model small enough that the
+-- expected diagnostics file remains hand-auditable.
+
+package WcttClassical
+public
+
+  bus eth_switch
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 8;
+  end eth_switch;
+
+  bus implementation eth_switch.impl
+  end eth_switch.impl;
+
+  device sender
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end sender;
+
+  device implementation sender.impl
+  end sender.impl;
+
+  device receiver
+    features
+      net  : requires bus access;
+      in_p : in data port;
+  end receiver;
+
+  device implementation receiver.impl
+  end receiver.impl;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.impl
+    subcomponents
+      sw       : bus eth_switch.impl;
+      ecu_a    : device sender.impl;
+      ecu_b    : device sender.impl;
+      ecu_sink : device receiver.impl;
+    connections
+      cb_a    : bus access sw -> ecu_a.net;
+      cb_b    : bus access sw -> ecu_b.net;
+      cb_sink : bus access sw -> ecu_sink.net;
+      data_a  : port ecu_a.out_p -> ecu_sink.in_p;
+      data_b  : port ecu_b.out_p -> ecu_sink.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+
+end WcttClassical;

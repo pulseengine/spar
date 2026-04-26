@@ -1208,6 +1208,29 @@ artifacts:
     status: planned
     tags: [network, wctt, v080]
 
+  - id: REQ-NETWORK-006
+    type: requirement
+    title: Per-stream end-to-end WCTT analysis pass
+    description: >
+      System shall compute per-stream end-to-end WCTT bounds across
+      switched-bus topologies via the NC primitives. The wctt analysis
+      pass extracts the network graph (REQ-NETWORK-004), discovers
+      AADL data-port streams whose Actual_Connection_Binding traverses
+      one or more switched buses, and composes per-hop residual
+      service / delay / output bounds (REQ-NETWORK-005) into an
+      end-to-end traversal-time bound for each stream. Phase 1 covers
+      FIFO + Priority switches with classical residual-service splits;
+      TSN-shaped service curves (TAS / CBS / preemption) are deferred
+      to Phase 2. New diagnostic kinds: WcttBound (Info per stream),
+      WcttExceedsBudget (Error when Spar_Network::WCTT_Budget is set
+      and exceeded), WcttUnservable (Error when competing flows
+      exhaust server rate), WcttSwitchOverloaded (Error when port
+      utilisation > 100%), WcttDeferred (Info note for TSN switches).
+      Track D commit 4 of the v0.8.0 design
+      (docs/designs/track-d-tsn-wctt-research.md §5.4).
+    status: planned
+    tags: [network, wctt, v080]
+
   # ── Track B: rivet ↔ spar variant binding (v0.7.x) ─────────────────
 
   - id: REQ-VARIANT-001

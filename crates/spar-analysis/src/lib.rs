@@ -48,8 +48,11 @@ pub mod rta;
 pub mod scheduling;
 pub mod scheduling_verified;
 pub mod subcomponent_rules;
+pub mod wctt;
 pub mod weight_power;
 pub mod wrpc_binding;
+
+pub use wctt::WcttAnalysis;
 
 use serde::Serialize;
 use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
@@ -159,6 +162,7 @@ impl AnalysisRunner {
         use rta::RtaAnalysis;
         use scheduling::SchedulingAnalysis;
         use subcomponent_rules::SubcomponentRuleAnalysis;
+        use wctt::WcttAnalysis;
         use weight_power::WeightPowerAnalysis;
         use wrpc_binding::WrpcBindingAnalysis;
 
@@ -191,6 +195,7 @@ impl AnalysisRunner {
         self.register(Box::new(WeightPowerAnalysis));
         self.register(Box::new(BusBandwidthAnalysis));
         self.register(Box::new(FeatureGroupCheckAnalysis));
+        self.register(Box::new(WcttAnalysis));
     }
 
     /// Return the number of registered analyses.
