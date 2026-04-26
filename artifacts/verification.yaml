@@ -1521,6 +1521,53 @@ artifacts:
       - type: satisfies
         target: REQ-MIGRATION-004
 
+  - id: TEST-MOVES-ENUMERATE
+    type: feature
+    title: spar moves enumerate CLI integration tests
+    description: >
+      Integration tests in crates/spar-cli/tests/moves_enumerate.rs
+      that shell out to the `spar` binary and exercise the
+      `spar moves enumerate` subcommand (Track E commit 4/8). Coverage:
+      (1) when no Allowed_Targets is set, all processors in the
+          instance appear as candidates (cpu1 + cpu2 in the two-CPU
+          fixture);
+      (2) Allowed_Targets => (cpu1, cpu2) limits the candidate set
+          even when cpu3 exists in the instance;
+      (3) Spar_Migration::Frozen forces ok=false and a Frozen violation
+          on every candidate; valid=0 yields exit 1;
+      (4) --target-filter with a name not present in Allowed_Targets
+          (cpu3 vs Allowed_Targets => (cpu1, cpu2)) yields zero
+          candidates;
+      (5) RTA-fail fixture (Compute_Execution_Time > Period) makes
+          every candidate ok=false with diagnostics_count > 0;
+      (6) --target-filter cpu_x86 narrows a 3-processor model to two
+          candidates without altering per-candidate evaluation;
+      (7) text format ends with a `total=N valid=K` summary line;
+      (8) JSON output deserializes into the documented schema
+          (component / total / valid / candidates[] with target / ok /
+          violations / diagnostics_count / slack_ns);
+      (9) unknown --component name exits non-zero with the offending
+          name on stderr;
+      (10) running `spar moves enumerate` does not mutate the
+           underlying model — `spar analyze` returns identical output
+           before and after, and the AADL file on disk is unchanged.
+      Plus four unit tests in moves.rs::enumerate_tests covering
+      format-time round-trip, response-deadline pair extraction, and
+      violation-summary grouping.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test moves_enumerate
+    status: passing
+    tags: [migration, track-e, v080, cli]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-006
+      - type: satisfies
+        target: REQ-MIGRATION-005
+      - type: satisfies
+        target: REQ-MIGRATION-004
+
   - id: TEST-SPAR-NETWORK-GRAPH
     type: feature
     title: Network graph extraction tests

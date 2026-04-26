@@ -37,7 +37,7 @@ pub use item_tree::ItemTree;
 pub use name::{ClassifierRef, Name, PropertyRef};
 pub use overlay::{
     AllowedTargetsViolation, BindingOverlay, FrozenViolation, OverlayDiagnostic,
-    actual_processor_binding_with_overlay,
+    actual_processor_binding_with_overlay, read_allowed_targets,
 };
 pub use resolver::{GlobalScope, ItemLoc, ResolvedClassifier, ResolvedProperty};
 

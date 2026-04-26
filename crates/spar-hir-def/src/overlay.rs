@@ -297,7 +297,11 @@ fn pinned_reason(props: &PropertyMap) -> Option<String> {
 /// `PropertyExpr::ReferenceValue`) and the raw-string fallback
 /// (`(reference (a), reference (b))`-style text). An absent or empty
 /// property returns an empty vector.
-fn read_allowed_targets(props: &PropertyMap) -> Vec<String> {
+///
+/// Exposed publicly so callers (notably `spar moves enumerate` in
+/// commit 4) can derive the candidate-target set without having to
+/// stage a single-move overlay just to ask "what's allowed for X?".
+pub fn read_allowed_targets(props: &PropertyMap) -> Vec<String> {
     // Typed path: a list of ReferenceValue items.
     if let Some(expr) = props.get_typed(SPAR_MIGRATION, "Allowed_Targets") {
         let mut out = Vec::new();

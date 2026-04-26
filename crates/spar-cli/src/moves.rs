@@ -1,11 +1,20 @@
-//! `spar moves verify` — hypothetical-rebinding oracle (Track E commit 3/8).
+//! `spar moves verify` and `spar moves enumerate` — hypothetical-rebinding
+//! oracle (Track E commits 3/8 and 4/8).
 //!
 //! Per the v0.8.0 migration design research §6.3, this module exposes the
-//! first user-facing surface of the migration oracle: a CLI that takes a
-//! parsed AADL model, a component to (hypothetically) move, and a target
-//! processor, and returns a structured pass/fail report describing whether
-//! the move is admissible under the platform/application split and the
-//! existing analysis-pass suite.
+//! first two user-facing surfaces of the migration oracle:
+//!
+//! - `spar moves verify --component X --to Y` (commit 3): single
+//!   hypothetical-move pass/fail report.
+//! - `spar moves enumerate --component X` (commit 4): design-space
+//!   exploration listing every legal target with verification status
+//!   and an optional slack-rank metric.
+//!
+//! Both subcommands share the same parse / resolve / overlay / validate
+//! / render scaffolding. Verify is the canonical single-shot pipeline;
+//! enumerate fans the same pipeline out across a candidate-target set
+//! (either `Spar_Migration::Allowed_Targets` or every Processor /
+//! VirtualProcessor in the instance).
 //!
 //! # Pipeline
 //!
@@ -593,9 +602,11 @@ pub fn print_moves_usage() {
     eprintln!("Usage: spar moves <subcommand> [options]");
     eprintln!();
     eprintln!("Subcommands:");
-    eprintln!("  verify   Verify a hypothetical component move under the migration overlay.");
+    eprintln!("  verify     Verify a hypothetical component move under the migration overlay.");
+    eprintln!("  enumerate  List every valid hypothetical rebinding target for a component, with");
+    eprintln!("             per-candidate verification status and optional slack ranking.");
     eprintln!();
-    eprintln!("`spar moves enumerate` and `spar moves optimize` land in later commits.");
+    eprintln!("`spar moves optimize` lands in a later commit.");
 }
 
 /// Print `spar moves verify` usage to stderr and exit non-zero.
@@ -628,6 +639,7 @@ pub fn cmd_moves(args: &[String]) -> i32 {
     }
     match args[0].as_str() {
         "verify" => cmd_moves_verify(&args[1..]),
+        "enumerate" => cmd_moves_enumerate(&args[1..]),
         other => {
             eprintln!("Unknown moves subcommand: {other}");
             print_moves_usage();
@@ -734,4 +746,620 @@ fn cmd_moves_verify(args: &[String]) -> i32 {
 /// that all end with `process::exit`.
 pub fn cmd_moves_dispatch(args: &[String]) {
     process::exit(cmd_moves(args));
+}
+
+// ── enumerate (Track E commit 4/8) ──────────────────────────────────
+
+/// Parsed CLI arguments for `spar moves enumerate`.
+///
+/// Same shape as [`VerifyArgs`] minus `--to` (the target is *derived*
+/// per-candidate, not supplied by the user) plus an optional
+/// `--target-filter` to narrow the candidate set when the model has
+/// many processors and `Spar_Migration::Allowed_Targets` is absent.
+#[derive(Debug)]
+pub struct EnumerateArgs {
+    /// Path(s) to the AADL model file(s) to load.
+    pub model_files: Vec<String>,
+    /// Root system implementation in `Pkg::Type.Impl` form.
+    pub root: String,
+    /// FQN (or suffix / bare name) of the component to enumerate
+    /// candidates for.
+    pub component: String,
+    /// Optional substring (case-insensitive) that a candidate's FQN
+    /// must contain to be included. Useful when `Allowed_Targets` is
+    /// absent and the model has many processors.
+    pub target_filter: Option<String>,
+    /// Output format: `text` (default) or `json`.
+    pub format: String,
+}
+
+/// Per-candidate verification record produced by `spar moves enumerate`.
+///
+/// One [`MoveCandidate`] is emitted per (component, target) pair the
+/// algorithm considers — the target list comes from
+/// `Spar_Migration::Allowed_Targets` when set or from every Processor /
+/// VirtualProcessor in the instance otherwise. The fields capture
+/// whether the move would be admissible (`ok`), the structured
+/// violation list, and an optional slack metric for ranking.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MoveCandidate {
+    /// Fully-qualified name of the candidate target processor.
+    pub target: String,
+    /// True if the move is admissible: no overlay violations and no
+    /// error-severity diagnostics from the analysis suite.
+    pub ok: bool,
+    /// Overlay + analysis violations. Same shape as
+    /// [`MoveVerifyReport::violations`] for one-to-one round-trip
+    /// with `spar moves verify` output.
+    pub violations: Vec<Violation>,
+    /// Total error-severity analysis diagnostics for this candidate
+    /// (kept separately from the violation count so consumers can
+    /// rank "worst offenders" without traversing `violations`).
+    pub diagnostics_count: usize,
+    /// Optional slack metric: minimum (deadline − response_time) in
+    /// picoseconds across threads bound to the candidate target.
+    /// Higher is better; negative values indicate a deadline miss.
+    /// `None` when RTA produced no usable info-level diagnostics.
+    pub slack_ns: Option<i64>,
+}
+
+/// Output shape for `spar moves enumerate --format json`.
+///
+/// The canonical JSON contract for the v0.9.0 MCP
+/// `spar.enumerate_moves` tool surface; consumers downstream of the
+/// LLM tool will sort `candidates` by `slack_ns` descending (with
+/// `ok=true` first) to surface the most attractive moves.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MoveEnumerateReport {
+    /// FQN of the component being enumerated.
+    pub component: String,
+    /// All candidate targets considered (post target-filter).
+    pub candidates: Vec<MoveCandidate>,
+    /// Total candidates evaluated.
+    pub total: usize,
+    /// Number of `ok=true` candidates (admissible moves).
+    pub valid: usize,
+}
+
+/// Run `spar moves enumerate`, returning the desired process exit code.
+///
+/// Pipeline:
+///
+/// 1. Parse + instantiate the model (mirrors `run_verify`).
+/// 2. Resolve `--component` to a [`ComponentInstanceIdx`].
+/// 3. Build the candidate-target set from
+///    `Spar_Migration::Allowed_Targets` (when set) or from every
+///    Processor / VirtualProcessor in the instance otherwise.
+/// 4. Apply the optional `--target-filter` substring (case-insensitive
+///    against the candidate's FQN).
+/// 5. For each candidate: build a [`BindingOverlay::add_move`] overlay,
+///    run [`BindingOverlay::validate`], run the analysis suite, and
+///    derive a slack metric from RTA's info diagnostics.
+/// 6. Emit a [`MoveEnumerateReport`] in `text` or `json` form.
+///
+/// Exit codes mirror `verify` semantics:
+///
+/// | Code | Meaning |
+/// |---|---|
+/// | 0 | At least one admissible candidate (`valid >= 1`) |
+/// | 1 | All candidates failed analysis or produced no admissible move |
+/// | 2 | Input resolution failed (component / model / format) |
+pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
+    if args.format != "text" && args.format != "json" {
+        return Err(MovesError::UnknownFormat(args.format));
+    }
+    if args.model_files.is_empty() {
+        return Err(MovesError::Parse(
+            "(no files)".to_string(),
+            "spar moves enumerate requires at least one .aadl file".to_string(),
+        ));
+    }
+
+    // 1. Parse + instantiate.
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+    for file_path in &args.model_files {
+        let source =
+            fs::read_to_string(file_path).map_err(|e| MovesError::Io(file_path.clone(), e))?;
+        let parsed = spar_syntax::parse(&source);
+        if !parsed.ok() {
+            let mut msg = String::new();
+            for err in parsed.errors() {
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                msg.push_str(&format!("{file_path}:{line}:{col}: {}\n", err.msg));
+            }
+            return Err(MovesError::Parse(file_path.clone(), msg));
+        }
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&args.root)?;
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+    if inst.component_count() == 0 {
+        return Err(MovesError::UnknownRoot(args.root.clone()));
+    }
+
+    // 2. Resolve --component.
+    let comp_idx = resolve_component(&inst, &args.component)
+        .ok_or_else(|| MovesError::UnknownComponent(args.component.clone()))?;
+
+    // 3. Build the candidate-target set.
+    let candidates = candidate_targets(&inst, comp_idx, args.target_filter.as_deref());
+
+    // 4-5. Verify each candidate.
+    let mut report = MoveEnumerateReport {
+        component: fqn(&inst, comp_idx),
+        candidates: Vec::with_capacity(candidates.len()),
+        total: 0,
+        valid: 0,
+    };
+
+    for target_idx in candidates {
+        let candidate = verify_candidate(&inst, comp_idx, target_idx);
+        if candidate.ok {
+            report.valid += 1;
+        }
+        report.candidates.push(candidate);
+    }
+    report.total = report.candidates.len();
+
+    // Sort: ok=true first, then by slack desc (None last), then by FQN.
+    report.candidates.sort_by(|a, b| {
+        b.ok.cmp(&a.ok)
+            .then_with(|| match (a.slack_ns, b.slack_ns) {
+                (Some(sa), Some(sb)) => sb.cmp(&sa),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+            .then_with(|| a.target.cmp(&b.target))
+    });
+
+    // 6. Render.
+    match args.format.as_str() {
+        "json" => render_enumerate_json(&report),
+        _ => render_enumerate_text(&report),
+    }
+
+    // Exit code: 0 if any admissible, 1 otherwise. (2 is reserved for
+    // input-resolution errors, returned via MovesError above.)
+    Ok(if report.valid > 0 { 0 } else { 1 })
+}
+
+/// Build the candidate-target index list for an enumerate run.
+///
+/// Resolution order:
+///
+/// 1. If the component declares a non-empty
+///    `Spar_Migration::Allowed_Targets` list, resolve each name to a
+///    component index via [`resolve_component`] and keep those.
+///    Names that don't resolve are silently dropped (the model would
+///    have already produced a property-rule warning).
+/// 2. Otherwise: collect every component with category Processor or
+///    VirtualProcessor.
+///
+/// The optional `target_filter` is applied as a case-insensitive
+/// substring match against each candidate's FQN.
+fn candidate_targets(
+    inst: &SystemInstance,
+    comp_idx: ComponentInstanceIdx,
+    target_filter: Option<&str>,
+) -> Vec<ComponentInstanceIdx> {
+    let props = inst.properties_for(comp_idx);
+    let allowed_names = spar_hir_def::read_allowed_targets(props);
+
+    let mut targets: Vec<ComponentInstanceIdx> = if !allowed_names.is_empty() {
+        allowed_names
+            .iter()
+            .filter_map(|n| resolve_component(inst, n))
+            .collect()
+    } else {
+        inst.all_components()
+            .filter(|(_, c)| {
+                matches!(
+                    c.category,
+                    ComponentCategory::Processor | ComponentCategory::VirtualProcessor
+                )
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    };
+
+    // De-duplicate while preserving order (Allowed_Targets may list
+    // the same processor twice, however unlikely).
+    let mut seen = std::collections::HashSet::new();
+    targets.retain(|idx| seen.insert(*idx));
+
+    if let Some(filter) = target_filter {
+        let needle = filter.to_ascii_lowercase();
+        targets.retain(|&idx| fqn(inst, idx).to_ascii_lowercase().contains(&needle));
+    }
+
+    targets
+}
+
+/// Run the verify pipeline for a single (component, target) pair and
+/// return a [`MoveCandidate`] record.
+///
+/// The implementation is structurally identical to the per-move portion
+/// of [`run_verify`] — overlay -> validate -> analyses -> build_report
+/// — but returns a candidate-shaped record instead of printing a
+/// per-move document.
+fn verify_candidate(
+    inst: &SystemInstance,
+    comp_idx: ComponentInstanceIdx,
+    target_idx: ComponentInstanceIdx,
+) -> MoveCandidate {
+    let mut overlay = BindingOverlay::new();
+    overlay.add_move(comp_idx, target_idx);
+    let overlay_diags = overlay.validate(inst);
+    let analysis_diags = run_all_analyses(inst);
+
+    let report = build_report(inst, comp_idx, target_idx, &overlay_diags, &analysis_diags);
+    let diagnostics_count = analysis_diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+
+    // Slack ranking: scan RTA info diagnostics for "thread '...' on
+    // processor '<TARGET>': response time <X> <= deadline <Y>" and
+    // compute min(Y - X) across threads bound to TARGET. If the
+    // analysis stream contains an RTA error-severity diagnostic for a
+    // thread bound to TARGET, slack is forced negative.
+    let target_name = inst.component(target_idx).name.as_str();
+    let slack_ns = compute_slack_ns(&analysis_diags, target_name);
+
+    let ok = overlay_diags.is_empty()
+        && !report.violations.iter().any(|v| {
+            matches!(
+                v,
+                Violation::AnalysisError {
+                    severity: SerSeverity::Error,
+                    ..
+                }
+            )
+        });
+
+    MoveCandidate {
+        target: fqn(inst, target_idx),
+        ok,
+        violations: report.violations,
+        diagnostics_count,
+        slack_ns,
+    }
+}
+
+/// Compute the slack metric for a candidate target.
+///
+/// Walks the analysis-diagnostic stream looking for RTA messages of the
+/// form `"thread '...' on processor '<target>': response time <X> <=
+/// deadline <Y>"`, parses the formatted times back into picoseconds,
+/// and returns the minimum `Y - X` across threads bound to `target`.
+///
+/// Returns:
+///
+/// - `Some(slack_ps)` (positive) when at least one matching info
+///   diagnostic was successfully parsed and no error was found.
+/// - `Some(negative)` when at least one matching error diagnostic
+///   reports a deadline miss for a thread on `target` (we encode the
+///   miss as -1 ps; the consumer cares about sign, not magnitude).
+/// - `None` when no RTA diagnostic mentions this target.
+fn compute_slack_ns(diags: &[AnalysisDiagnostic], target_name: &str) -> Option<i64> {
+    let target_lower = target_name.to_ascii_lowercase();
+    let mut min_slack: Option<i64> = None;
+    let mut had_miss = false;
+    let mut had_match = false;
+
+    for d in diags {
+        if d.analysis != "RtaAnalysis" {
+            continue;
+        }
+        let msg_lower = d.message.to_ascii_lowercase();
+        let needle = format!("on processor '{}'", target_lower);
+        if !msg_lower.contains(&needle) {
+            continue;
+        }
+        had_match = true;
+
+        if d.severity == Severity::Error && msg_lower.contains("misses deadline") {
+            had_miss = true;
+            continue;
+        }
+
+        // Parse "response time <X> <= deadline <Y>".
+        if let Some((rt, dl)) = parse_response_deadline(&d.message) {
+            let slack = dl as i64 - rt as i64;
+            min_slack = Some(min_slack.map(|m| m.min(slack)).unwrap_or(slack));
+        }
+    }
+
+    if had_miss {
+        // Deadline miss dominates: report a negative sentinel. The
+        // consumer just checks the sign for "is this candidate
+        // schedulable?".
+        return Some(-1);
+    }
+    if !had_match {
+        return None;
+    }
+    min_slack
+}
+
+/// Parse the `"response time <X> <= deadline <Y>"` substring from an
+/// RTA info-level diagnostic message.
+///
+/// Returns `(response_time_ps, deadline_ps)` if both formatted-time
+/// values parse cleanly; `None` otherwise. Parsing the formatted form
+/// is intentional — RTA does not currently expose its raw picosecond
+/// values via the diagnostic struct, and committing a parser here is
+/// cheaper than expanding the AnalysisDiagnostic shape just for the
+/// commit-4 ranking metric.
+fn parse_response_deadline(msg: &str) -> Option<(u64, u64)> {
+    let after_rt = msg.find("response time ")?;
+    let rest = &msg[after_rt + "response time ".len()..];
+    let le_pos = rest.find("<=")?;
+    let rt_str = rest[..le_pos].trim();
+    let after_dl = rest[le_pos + 2..].find("deadline ")?;
+    let dl_rest = &rest[le_pos + 2 + after_dl + "deadline ".len()..];
+    let dl_str = dl_rest.trim_end_matches(['.', ',']).trim();
+    Some((parse_format_time(rt_str)?, parse_format_time(dl_str)?))
+}
+
+/// Inverse of `spar_analysis::rta::format_time`: parse a `"<num> <unit>"`
+/// string back into picoseconds. Unit suffixes recognised: `ps`, `us`,
+/// `ms`, `sec`. Whitespace-tolerant; returns `None` on parse failure.
+fn parse_format_time(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let space = s.rfind(char::is_whitespace)?;
+    let num_str = s[..space].trim();
+    let unit = s[space..].trim();
+
+    let scale: u64 = match unit {
+        "ps" => 1,
+        "us" => 1_000_000,
+        "ms" => 1_000_000_000,
+        "sec" | "s" => 1_000_000_000_000,
+        _ => return None,
+    };
+
+    if let Ok(n) = num_str.parse::<u64>() {
+        return Some(n.saturating_mul(scale));
+    }
+    let f = num_str.parse::<f64>().ok()?;
+    if f.is_nan() || f.is_sign_negative() {
+        return None;
+    }
+    Some((f * scale as f64) as u64)
+}
+
+/// Render a [`MoveEnumerateReport`] as canonical pretty-printed JSON.
+fn render_enumerate_json(report: &MoveEnumerateReport) {
+    println!("{}", serde_json::to_string_pretty(report).unwrap());
+}
+
+/// Render a [`MoveEnumerateReport`] in human-readable tabular form.
+///
+/// Layout: a one-line component header, a fixed-width row per
+/// candidate (status / target / slack / violation summary), and a
+/// `total=N valid=K` summary footer mirroring the JSON shape.
+fn render_enumerate_text(report: &MoveEnumerateReport) {
+    println!(
+        "Enumerate {} ({} candidates)",
+        report.component, report.total
+    );
+    if report.candidates.is_empty() {
+        println!("  (no candidate targets)");
+    } else {
+        println!(
+            "  {:<6} {:<40} {:>14} {:>6}  violations",
+            "ok", "target", "slack", "errs",
+        );
+        for c in &report.candidates {
+            let status = if c.ok { "OK" } else { "FAIL" };
+            let slack = match c.slack_ns {
+                Some(n) if n < 0 => "<missed>".to_string(),
+                Some(n) => format!("{n} ps"),
+                None => "-".to_string(),
+            };
+            let viol_summary = summarise_violations(&c.violations);
+            println!(
+                "  {:<6} {:<40} {:>14} {:>6}  {}",
+                status, c.target, slack, c.diagnostics_count, viol_summary,
+            );
+        }
+    }
+    println!("total={} valid={}", report.total, report.valid);
+}
+
+/// Compress a [`Violation`] vector into a one-line summary for the
+/// text-format renderer (so a wide table stays one row per candidate).
+fn summarise_violations(violations: &[Violation]) -> String {
+    if violations.is_empty() {
+        return "none".to_string();
+    }
+    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for v in violations {
+        let key = match v {
+            Violation::Frozen { .. } => "Frozen",
+            Violation::AllowedTargets { .. } => "AllowedTargets",
+            Violation::AnalysisError { .. } => "AnalysisError",
+        };
+        *counts.entry(key).or_default() += 1;
+    }
+    counts
+        .iter()
+        .map(|(k, n)| format!("{k}×{n}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Print `spar moves enumerate` usage to stderr.
+pub fn print_enumerate_usage() {
+    eprintln!("Usage: spar moves enumerate --root Pkg::Type.Impl --component <fqn> \\");
+    eprintln!("                            [--target-filter <substring>] [--format text|json] \\");
+    eprintln!("                            <model.aadl>...");
+    eprintln!();
+    eprintln!("Options:");
+    eprintln!("  --root           Root system implementation in Pkg::Type.Impl form");
+    eprintln!("  --component      FQN (or suffix / bare name) of the component to enumerate");
+    eprintln!("  --target-filter  Optional case-insensitive substring filter on candidate FQNs");
+    eprintln!("  --format         Output format: text (default) or json");
+    eprintln!();
+    eprintln!("Candidate-target set:");
+    eprintln!(
+        "  - If the component declares Spar_Migration::Allowed_Targets, those names are used."
+    );
+    eprintln!("  - Otherwise every Processor / VirtualProcessor in the instance is a candidate.");
+    eprintln!();
+    eprintln!("Exit codes:");
+    eprintln!("  0  at least one candidate is admissible (valid >= 1)");
+    eprintln!("  1  no admissible candidate (or input-resolution error)");
+}
+
+/// Manual-arg parser for `spar moves enumerate`.
+fn cmd_moves_enumerate(args: &[String]) -> i32 {
+    let mut root = None;
+    let mut component = None;
+    let mut target_filter: Option<String> = None;
+    let mut format: Option<String> = None;
+    let mut model_files = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    return 1;
+                }
+                root = Some(args[i].clone());
+            }
+            "--component" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--component requires a value");
+                    return 1;
+                }
+                component = Some(args[i].clone());
+            }
+            "--target-filter" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--target-filter requires a value");
+                    return 1;
+                }
+                target_filter = Some(args[i].clone());
+            }
+            "--format" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--format requires a value (text|json)");
+                    return 1;
+                }
+                format = Some(args[i].clone());
+            }
+            "--help" | "-h" => {
+                print_enumerate_usage();
+                return 0;
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                print_enumerate_usage();
+                return 1;
+            }
+            s => model_files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let Some(root) = root else {
+        eprintln!("--root Package::Type.Impl is required");
+        return 1;
+    };
+    let Some(component) = component else {
+        eprintln!("--component is required");
+        return 1;
+    };
+    if model_files.is_empty() {
+        eprintln!("at least one .aadl file is required");
+        return 1;
+    }
+
+    let args = EnumerateArgs {
+        model_files,
+        root,
+        component,
+        target_filter,
+        format: format.unwrap_or_else(|| "text".to_string()),
+    };
+
+    match run_enumerate(args) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("error: {e}");
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod enumerate_tests {
+    use super::*;
+
+    #[test]
+    fn parse_format_time_roundtrips_units() {
+        assert_eq!(parse_format_time("10 ms"), Some(10_000_000_000));
+        assert_eq!(parse_format_time("1.50 ms"), Some(1_500_000_000));
+        assert_eq!(parse_format_time("500 us"), Some(500_000_000));
+        assert_eq!(parse_format_time("100 ps"), Some(100));
+        assert_eq!(parse_format_time("2.00 sec"), Some(2_000_000_000_000));
+        assert_eq!(parse_format_time(""), None);
+        assert_eq!(parse_format_time("not a time"), None);
+        assert_eq!(parse_format_time("10 fortnights"), None);
+    }
+
+    #[test]
+    fn parse_response_deadline_extracts_pair() {
+        let msg = "thread 't1' on processor 'cpu1': response time 5 ms <= deadline 10 ms";
+        let pair = parse_response_deadline(msg).expect("expected to parse");
+        assert_eq!(pair, (5_000_000_000, 10_000_000_000));
+    }
+
+    #[test]
+    fn parse_response_deadline_returns_none_on_unrelated_message() {
+        let msg = "ARINC653 partition X has no period";
+        assert!(parse_response_deadline(msg).is_none());
+    }
+
+    #[test]
+    fn summarise_violations_groups_by_kind() {
+        let v = vec![
+            Violation::Frozen {
+                component: "t1".to_string(),
+                reason: "x".to_string(),
+            },
+            Violation::Frozen {
+                component: "t2".to_string(),
+                reason: "y".to_string(),
+            },
+            Violation::AnalysisError {
+                pass: "RTA".to_string(),
+                message: "miss".to_string(),
+                severity: SerSeverity::Error,
+                path: vec![],
+            },
+        ];
+        let s = summarise_violations(&v);
+        // Order is BTreeMap so AnalysisError comes before Frozen alphabetically.
+        assert!(s.contains("AnalysisError×1"));
+        assert!(s.contains("Frozen×2"));
+    }
 }
