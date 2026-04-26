@@ -8,11 +8,24 @@
 //! Follows the OSATE flow latency analysis approach:
 //! - Best case: sum of execution times only
 //! - Worst case: sum of execution times + sum of periods (sampling delays)
+//!
+//! # WCET + WCTT alternation (Track D, v0.8.0)
+//!
+//! When a connection segment crosses a switched bus annotated with
+//! `Spar_Network::*`, the per-hop contribution comes from the WCTT
+//! analysis (NC-derived bound on the bus) instead of the sampling-delay
+//! placeholder. The chain therefore alternates RTA-derived WCET on
+//! compute hops (thread-to-thread on the same processor) with
+//! WCTT-derived bounds on network hops (connections bound to a switched
+//! bus). Models with no `Spar_Network::*` annotations fall back to the
+//! existing scalar `Bus_Properties::Latency` / `Transmission_Time` path
+//! and produce byte-identical output to v0.7.0.
 
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
+use crate::wctt::compute_network_hop_latency;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 /// End-to-end flow latency analysis.
@@ -46,14 +59,73 @@ impl Analysis for LatencyAnalysis {
             let mut prev_processor: Option<String> = None;
 
             // Read inter-processor overhead from the owner (applied at each
-            // processor boundary crossing).
+            // processor boundary crossing — only when the connection is
+            // *not* served by a Spar_Network-annotated switched bus).
             let owner_props_for_overhead = instance.properties_for(e2e.owner);
             let inter_proc_overhead_ps = get_inter_processor_overhead(owner_props_for_overhead);
 
+            // Track per-chain hop typology for the LatencyHopMixed marker.
+            // We deliberately count compute hops only on chains that *also*
+            // see a network hop, because in the no-network case the
+            // existing v0.7.0 traces don't distinguish hop kinds — keeping
+            // the chain-level diagnostic byte-identical when no
+            // `Spar_Network::*` is set is the v0.7.0 non-regression
+            // contract.
+            let mut network_hops: Vec<NetworkHopAnnotation> = Vec::new();
+            let mut compute_hops: Vec<ComputeHopAnnotation> = Vec::new();
+            let mut chain_unservable = false;
+            // The last network hop's worst-case bound (picoseconds) — used
+            // to gate the legacy sampling-delay / inter-processor-overhead
+            // code paths on the *next* component segment so we never
+            // double-count the network contribution.
+            let mut suppress_next_legacy_overhead = false;
+
             for (i, seg) in e2e.segments.iter().enumerate() {
                 if i % 2 == 1 {
-                    // Connection segment — adds sampling delay in worst case.
+                    // Connection segment.
                     connection_count += 1;
+                    let conn_name = seg.as_str();
+
+                    // Try the WCTT-derived bound first. When the
+                    // connection has no `Actual_Connection_Binding` to a
+                    // Spar_Network-annotated switched bus, this returns
+                    // None and we fall through to the legacy
+                    // sampling-delay + inter-processor-overhead path on
+                    // the next component segment.
+                    if let Some(hop_lat) =
+                        compute_network_hop_latency(instance, e2e.owner, conn_name)
+                    {
+                        if hop_lat.unservable {
+                            // Mirror wctt.rs's `WcttUnservable` Error and
+                            // stop aggregating this chain — we cannot
+                            // honestly compose a finite end-to-end bound
+                            // when one of the network hops is starved.
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Error,
+                                message: format!(
+                                    "end-to-end flow '{}': network hop '{}' is unservable \
+                                     (competing flows saturate the residual service); \
+                                     latency aggregation aborted [network hop]",
+                                    e2e.name, conn_name,
+                                ),
+                                path: owner_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            chain_unservable = true;
+                            break;
+                        }
+                        best_case_ps = best_case_ps.saturating_add(hop_lat.min_ps);
+                        worst_case_ps = worst_case_ps.saturating_add(hop_lat.max_ps);
+                        network_hops.push(NetworkHopAnnotation {
+                            connection_name: conn_name.to_string(),
+                            min_ps: hop_lat.min_ps,
+                            max_ps: hop_lat.max_ps,
+                        });
+                        suppress_next_legacy_overhead = true;
+                    } else {
+                        suppress_next_legacy_overhead = false;
+                    }
+
                     continue;
                 }
 
@@ -86,8 +158,13 @@ impl Analysis for LatencyAnalysis {
                         missing_timing.push(child_comp.name.as_str().to_string());
                     }
 
-                    // Add sampling delay for connections after the first component
+                    // Add sampling delay for connections after the first
+                    // component, *unless* the preceding connection was
+                    // already accounted for by a WCTT bound (network hop):
+                    // adding the sampling period on top of the NC bound
+                    // would double-count the queuing component.
                     if connection_count > 0
+                        && !suppress_next_legacy_overhead
                         && let Some(period) = period_ps
                     {
                         worst_case_ps = worst_case_ps.saturating_add(period);
@@ -95,21 +172,49 @@ impl Analysis for LatencyAnalysis {
 
                     // Track processor binding for inter-processor overhead.
                     let cur_binding = get_processor_binding(child_props);
+                    let mut crossed_boundary = false;
                     if let Some(ref cur) = cur_binding
                         && let Some(ref prev) = prev_processor
                         && !cur.eq_ignore_ascii_case(prev)
                     {
-                        // Processor boundary crossing — add overhead.
-                        if let Some(overhead) = inter_proc_overhead_ps {
+                        crossed_boundary = true;
+                        // Processor boundary crossing — add overhead only
+                        // when we did *not* already account for the
+                        // crossing through a WCTT-derived network hop.
+                        if !suppress_next_legacy_overhead
+                            && let Some(overhead) = inter_proc_overhead_ps
+                        {
                             worst_case_ps = worst_case_ps.saturating_add(overhead);
                         }
                     }
+
+                    // Compute-hop annotation: a flow segment whose
+                    // component shares a processor with its predecessor
+                    // (or is the first segment with a binding). Only
+                    // tracked here for `LatencyHopMixed` — the per-hop
+                    // diagnostic is emitted only on chains that also see
+                    // a network hop.
+                    if !crossed_boundary && prev_processor.is_some() {
+                        compute_hops.push(ComputeHopAnnotation {
+                            component_name: child_comp.name.as_str().to_string(),
+                            exec_ps: exec_ps.unwrap_or(0),
+                        });
+                    }
+
                     if cur_binding.is_some() {
                         prev_processor = cur_binding;
                     }
                 } else {
                     missing_timing.push(subcomp_name.to_string());
                 }
+
+                // Reset the WCTT-suppression latch now that the next
+                // component has consumed it.
+                suppress_next_legacy_overhead = false;
+            }
+
+            if chain_unservable {
+                continue;
             }
 
             // Report missing timing properties
@@ -139,6 +244,57 @@ impl Analysis for LatencyAnalysis {
                 path: owner_path.clone(),
                 analysis: self.name().to_string(),
             });
+
+            // Per-hop diagnostics and the mixed-hop marker only fire on
+            // chains that exercised at least one network hop. Without a
+            // network hop the chain is byte-identical to v0.7.0.
+            if !network_hops.is_empty() {
+                for hop in &network_hops {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "end-to-end flow '{}': connection '{}' [network hop] [{:.3} ms .. {:.3} ms]",
+                            e2e.name,
+                            hop.connection_name,
+                            hop.min_ps as f64 / 1_000_000_000.0,
+                            hop.max_ps as f64 / 1_000_000_000.0,
+                        ),
+                        path: owner_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+                for hop in &compute_hops {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "end-to-end flow '{}': component '{}' [compute hop] {:.3} ms",
+                            e2e.name,
+                            hop.component_name,
+                            hop.exec_ps as f64 / 1_000_000_000.0,
+                        ),
+                        path: owner_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+
+                if !compute_hops.is_empty() {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "LatencyHopMixed: end-to-end flow '{}' alternates RTA-derived \
+                             WCET on {} compute hop{} with WCTT-derived bounds on {} \
+                             network hop{}",
+                            e2e.name,
+                            compute_hops.len(),
+                            if compute_hops.len() == 1 { "" } else { "s" },
+                            network_hops.len(),
+                            if network_hops.len() == 1 { "" } else { "s" },
+                        ),
+                        path: owner_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+            }
 
             // Check against Latency property if set on the E2E flow
             // The Latency property might be on the owner component for the flow
@@ -263,6 +419,20 @@ impl Analysis for LatencyAnalysis {
     }
 }
 
+/// Per-hop bookkeeping for chains that mix WCET and WCTT contributions.
+#[derive(Debug, Clone)]
+struct NetworkHopAnnotation {
+    connection_name: String,
+    min_ps: u64,
+    max_ps: u64,
+}
+
+#[derive(Debug, Clone)]
+struct ComputeHopAnnotation {
+    component_name: String,
+    exec_ps: u64,
+}
+
 /// Read inter-processor communication overhead in picoseconds.
 ///
 /// Checks `SPAR_Properties::Inter_Processor_Overhead`,
@@ -371,6 +541,37 @@ mod tests {
                 owner,
                 src: None,
                 dst: None,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+        }
+
+        /// Add a connection instance with named source/destination
+        /// subcomponent endpoints — needed by the WCTT integration tests
+        /// because `compute_network_hop_latency` walks the connection's
+        /// `src` / `dst` to identify the source end station.
+        fn add_connection_with_endpoints(
+            &mut self,
+            name: &str,
+            owner: ComponentInstanceIdx,
+            src_sub: &str,
+            src_feat: &str,
+            dst_sub: &str,
+            dst_feat: &str,
+        ) {
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                owner,
+                src: Some(ConnectionEnd {
+                    subcomponent: Some(Name::new(src_sub)),
+                    feature: Name::new(src_feat),
+                }),
+                dst: Some(ConnectionEnd {
+                    subcomponent: Some(Name::new(dst_sub)),
+                    feature: Name::new(dst_feat),
+                }),
                 in_modes: Vec::new(),
             });
             self.components[owner].connections.push(idx);
@@ -1277,5 +1478,707 @@ mod tests {
             "no overhead property = no overhead in latency: {}",
             infos[0].message
         );
+    }
+
+    // ── Track D commit 6: WCTT integration tests ─────────────────────
+    //
+    // The next block of tests verifies that `LatencyAnalysis::analyze`
+    // alternates RTA-derived WCET on compute hops with WCTT-derived
+    // bounds on network hops, and that models without `Spar_Network::*`
+    // annotations stay byte-identical to v0.7.0 (the non-regression
+    // contract on which Track D Phase 1 stands).
+
+    /// Build a compute-thread-on-cpu1 → connection → compute-thread-on-cpu2
+    /// chain wrapping a single switched bus. Used by tests 3, 4, 6, 7.
+    /// Parameters select whether the bus is annotated as a
+    /// `Spar_Network::Switch_Type` switch and whether a
+    /// `Bus_Properties::Latency` scalar fallback is set.
+    fn build_two_hop_chain(annotate_switch: bool) -> SystemInstance {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, ctrl]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        if annotate_switch {
+            b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+            b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+            b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+            b.set_property(sw, "Spar_Network", "Queue_Depth", "1");
+
+            // Owner-level connection binding: c1 binds to switch sw.
+            b.set_property(
+                root,
+                "Deployment_Properties",
+                "Actual_Connection_Binding",
+                "(reference (sw))",
+            );
+        }
+
+        b.build(root)
+    }
+
+    /// Test 1: non-regression — model without `Spar_Network::*` produces
+    /// byte-identical latency output to current main.
+    #[test]
+    fn no_spar_network_models_unchanged_v07() {
+        // Reuse the existing inter_processor_overhead model: cross-CPU
+        // chain with a `SPAR_Properties::Inter_Processor_Overhead`
+        // annotation but *no* `Spar_Network::Switch_Type`. Output must
+        // include neither a `[network hop]` nor a `LatencyHopMixed`
+        // marker — that is the byte-level non-regression contract.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+        b.set_property(root, "SPAR_Properties", "Inter_Processor_Overhead", "5 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        // No network-hop annotations and no LatencyHopMixed marker.
+        for d in &diags {
+            assert!(
+                !d.message.contains("[network hop]"),
+                "non-regression: should not emit `[network hop]` without Spar_Network: {}",
+                d.message
+            );
+            assert!(
+                !d.message.contains("[compute hop]"),
+                "non-regression: should not emit `[compute hop]` without Spar_Network: {}",
+                d.message
+            );
+            assert!(
+                !d.message.contains("LatencyHopMixed"),
+                "non-regression: should not emit `LatencyHopMixed` without Spar_Network: {}",
+                d.message
+            );
+        }
+
+        // Existing v0.7.0 output is preserved.
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .collect();
+        assert_eq!(infos.len(), 1, "should still report one chain: {:?}", diags);
+        // 1 + 2 exec + 20 sampling + 5 overhead = 28 ms (matches the
+        // existing `inter_processor_overhead_added_to_worst_case` test).
+        assert!(
+            infos[0].message.contains("28.000 ms"),
+            "non-regression: worst case must still be 28ms: {}",
+            infos[0].message
+        );
+    }
+
+    /// Test 2: chain entirely on one CPU; no network hop. Even if other
+    /// components in the model declare `Spar_Network::*`, a chain whose
+    /// connection is unbound to any switched bus must not emit any
+    /// network-hop annotation.
+    #[test]
+    fn compute_only_chain_unchanged() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        // A switched bus exists in the model but is *not* bound by c1.
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, sw, sensor, ctrl]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_e2e(
+            "e2e_same_cpu",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        // No Actual_Connection_Binding on owner — c1 is unbound to sw.
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        for d in &diags {
+            assert!(
+                !d.message.contains("[network hop]"),
+                "no binding to sw → no network hop: {}",
+                d.message
+            );
+        }
+        assert!(
+            !diags.iter().any(|d| d.message.contains("LatencyHopMixed")),
+            "no network hops → no LatencyHopMixed marker"
+        );
+    }
+
+    /// Test 3: chain crosses a switched bus → the per-hop network bound
+    /// matches what `wctt::compute_network_hop_latency` returns.
+    #[test]
+    fn single_network_hop_uses_wctt() {
+        let inst = build_two_hop_chain(true);
+
+        let diags = LatencyAnalysis.analyze(&inst);
+        // Helper invocation result must equal the per-hop annotation
+        // emitted by latency.rs.
+        let owner = inst.root;
+        let hop = compute_network_hop_latency(&inst, owner, "c1")
+            .expect("c1 binds to switch sw → Some(NetworkHopLatency)");
+        // Expected: forwarding latency 0 + σ/R, where σ = MTU = 1500 B,
+        // R = 1 Gbps → 12_000_000 ps = 12 us = 0.012 ms.
+        assert_eq!(hop.max_ps, 12_000_000, "12 us per-hop bound expected");
+        assert!(
+            !hop.unservable,
+            "single-stream model is not unservable: {:?}",
+            hop
+        );
+
+        let net_hop_diag = diags
+            .iter()
+            .find(|d| d.message.contains("[network hop]"))
+            .unwrap_or_else(|| panic!("expected [network hop] diag, got: {:?}", diags));
+        // 12 us = 0.012 ms — formatted with 3 decimals.
+        assert!(
+            net_hop_diag.message.contains("0.012 ms"),
+            "[network hop] must report 0.012 ms WCTT bound: {}",
+            net_hop_diag.message
+        );
+    }
+
+    /// Test 4: three-stage chain demonstrating WCET+WCTT alternation.
+    /// sensor (cpu1) → switched-bus connection → controller (cpu2) →
+    /// switched-bus connection → actuator (cpu2). Both connections
+    /// inherit the owner-level `Actual_Connection_Binding` to `sw`
+    /// (canonical AADL behaviour — bindings inherit unless overridden
+    /// per-connection), so both are network hops; actuator on the
+    /// same CPU as controller is a compute hop. We therefore expect
+    /// `2 network hop` + `1 compute hop` in the LatencyHopMixed marker.
+    /// This is the canonical "WCET+WCTT alternation is live" model.
+    #[test]
+    fn compute_then_network_then_compute() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let actuator = b.add_component("actuator", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, ctrl, actuator]);
+
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_connection_with_endpoints("c2", root, "controller", "out_p", "actuator", "in_p");
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.pass", "c2", "actuator.sink"],
+        );
+
+        for (comp, cpu) in [(sensor, "cpu1"), (ctrl, "cpu2"), (actuator, "cpu2")] {
+            b.set_property(comp, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(comp, "Timing_Properties", "Period", "10 ms");
+            b.set_property(
+                comp,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                &format!("reference ({})", cpu),
+            );
+        }
+
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        // Chain has both kinds of hops → LatencyHopMixed Info emitted.
+        let mixed = diags
+            .iter()
+            .find(|d| d.message.contains("LatencyHopMixed"))
+            .unwrap_or_else(|| panic!("expected LatencyHopMixed: {:?}", diags));
+        assert_eq!(mixed.severity, Severity::Info);
+        assert!(
+            mixed.message.contains("1 compute hop"),
+            "actuator shares cpu2 with controller = 1 compute hop: {}",
+            mixed.message
+        );
+        assert!(
+            mixed.message.contains("2 network hops"),
+            "c1 + c2 inherit owner-level binding to sw = 2 network hops: {}",
+            mixed.message
+        );
+    }
+
+    /// Test 5: bus has `Bus_Properties::Latency`-style scalar but no
+    /// `Spar_Network::*` annotations → fallback to legacy scalar
+    /// (Inter_Processor_Overhead) preserves v0.7.0 behaviour.
+    #[test]
+    fn network_hop_falls_back_to_bus_latency_when_no_switch_type() {
+        // Smoke-check the helper: an unannotated `build_two_hop_chain`
+        // must not produce any network-hop annotation, and the chain
+        // must fall through to the legacy v0.7.0 path.
+        let inst_smoke = build_two_hop_chain(false /* unannotated */);
+        let smoke = LatencyAnalysis.analyze(&inst_smoke);
+        assert!(
+            smoke.iter().all(|d| !d.message.contains("[network hop]")),
+            "unannotated bus must not produce a [network hop] diag: {:?}",
+            smoke
+        );
+
+        // Now build the cross-CPU chain again with the legacy
+        // `SPAR_Properties::Inter_Processor_Overhead` scalar set, which
+        // is the "scalar Bus_Properties::Latency placeholder" the
+        // integration design refers to. Verify the worst-case bound
+        // reproduces the v0.7.0 number (28 ms — same as the existing
+        // `inter_processor_overhead_added_to_worst_case` test).
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, ctrl]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+        // Legacy scalar fallback — applied because there's no
+        // Spar_Network::Switch_Type on `sw`.
+        b.set_property(root, "SPAR_Properties", "Inter_Processor_Overhead", "5 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        // Same number as `inter_processor_overhead_added_to_worst_case`.
+        let info = diags
+            .iter()
+            .find(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .unwrap();
+        assert!(
+            info.message.contains("28.000 ms"),
+            "fallback to scalar overhead: 1+2 exec + 20 sampling + 5 overhead = 28ms, got: {}",
+            info.message
+        );
+        for d in &diags {
+            assert!(
+                !d.message.contains("[network hop]"),
+                "no Spar_Network::Switch_Type → no network hop: {}",
+                d.message
+            );
+        }
+    }
+
+    /// Test 6: same model as test 5 but with `Spar_Network::Switch_Type`
+    /// added → the bound becomes NC-derived (12 us) instead of the
+    /// scalar `Inter_Processor_Overhead` (5 ms).
+    #[test]
+    fn network_hop_uses_wctt_when_switch_type_present() {
+        let inst = build_two_hop_chain(true);
+
+        let diags = LatencyAnalysis.analyze(&inst);
+        let info = diags
+            .iter()
+            .find(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .unwrap();
+        // 1 + 2 exec + 0.012 ms WCTT + 0 sampling delay (suppressed
+        // because the connection consumed the WCTT bound) = 3.012 ms.
+        assert!(
+            info.message.contains("3.012 ms"),
+            "WCTT-derived bound: 1+2 exec + 0.012 ms WCTT = 3.012 ms, got: {}",
+            info.message
+        );
+        let net_hop = diags
+            .iter()
+            .find(|d| d.message.contains("[network hop]"))
+            .unwrap();
+        assert!(net_hop.message.contains("0.012 ms"));
+    }
+
+    /// Test 7: chain with both hop types → `LatencyHopMixed` Info appears.
+    #[test]
+    fn latency_hop_mixed_diagnostic_emitted() {
+        // Same fixture as compute_then_network_then_compute. Verify
+        // explicitly that the LatencyHopMixed string is the unique
+        // marker for chains that exercise both hop types.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let a = b.add_component("a", ComponentCategory::Thread, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, a, bb]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "a", "in_p");
+        b.add_connection_with_endpoints("c2", root, "a", "out_p", "b", "in_p");
+        b.add_e2e(
+            "mixed",
+            root,
+            vec!["sensor.src", "c1", "a.pass", "c2", "b.sink"],
+        );
+
+        for (comp, cpu) in [(sensor, "cpu1"), (a, "cpu2"), (bb, "cpu2")] {
+            b.set_property(comp, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(comp, "Timing_Properties", "Period", "10 ms");
+            b.set_property(
+                comp,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                &format!("reference ({})", cpu),
+            );
+        }
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let mixed: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("LatencyHopMixed"))
+            .collect();
+        assert_eq!(mixed.len(), 1, "exactly one LatencyHopMixed: {:?}", diags);
+        assert_eq!(mixed[0].severity, Severity::Info);
+    }
+
+    /// Test 8: `compute_network_hop_latency` returns `unservable = true`
+    /// → `latency.rs` emits an error and stops aggregating.
+    #[test]
+    fn wctt_unservable_propagates_to_latency() {
+        // Two streams whose sustained rates each equal the server rate
+        // (so the residual service for each is exhausted by the other).
+        // The wctt unit tests cover the same model under the name
+        // `competing_flow_exceeds_rate_emits_unservable`.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let other_src = b.add_component("hot_src", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let other_dst = b.add_component("hot_dst", ComponentCategory::Device, Some(root));
+        b.set_children(
+            root,
+            vec![_cpu1, _cpu2, sw, sensor, other_src, ctrl, other_dst],
+        );
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_connection_with_endpoints("c2", root, "hot_src", "out_p", "hot_dst", "in_p");
+        b.add_e2e(
+            "saturated",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+
+        for comp in [sensor, ctrl, other_src, other_dst] {
+            b.set_property(comp, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(comp, "Timing_Properties", "Period", "10 ms");
+        }
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+
+        // Saturate the 1 kbps switch with two 1 kbps sources.
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        b.set_property(sensor, "Spar_Network", "Output_Rate", "1000 bitsps");
+        b.set_property(sensor, "Spar_Network", "Queue_Depth", "1");
+        b.set_property(other_src, "Spar_Network", "Output_Rate", "1000 bitsps");
+        b.set_property(other_src, "Spar_Network", "Queue_Depth", "1");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let err = diags
+            .iter()
+            .find(|d| d.severity == Severity::Error && d.message.contains("unservable"))
+            .unwrap_or_else(|| panic!("expected unservable Error: {:?}", diags));
+        assert!(
+            err.message.contains("[network hop]"),
+            "unservable error annotates the offending hop: {}",
+            err.message
+        );
+        // Aggregation aborted — no chain-level "latency: [..]" Info for
+        // the saturated chain.
+        let info_count = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .count();
+        assert_eq!(
+            info_count, 0,
+            "unservable chain must not emit a latency range: {:?}",
+            diags
+        );
+    }
+
+    /// Test 9: middle hop has no `Spar_Network::*` annotations →
+    /// fall back to scalar without crashing.
+    #[test]
+    fn unannotated_bus_in_chain_falls_back() {
+        // Single chain with a connection that names an unannotated
+        // bus in its binding. `compute_network_hop_latency` returns
+        // `None` and the analysis falls through to the legacy
+        // sampling-delay path. No panic, no `[network hop]` annotation.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let plain_bus = b.add_component("plain_bus", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, plain_bus, sensor, ctrl]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_e2e(
+            "fallback",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(
+            sensor,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            ctrl,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (plain_bus))",
+        );
+        // plain_bus has no Spar_Network::Switch_Type — the binding
+        // resolves to a non-switch and the helper returns None.
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        for d in &diags {
+            assert!(
+                !d.message.contains("[network hop]"),
+                "unannotated bus → no network hop: {}",
+                d.message
+            );
+        }
+        // Latency is still produced (legacy path).
+        let info = diags
+            .iter()
+            .find(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .unwrap_or_else(|| panic!("expected latency Info, got {:?}", diags));
+        assert!(info.message.contains("ms"));
+    }
+
+    /// Test 10: existing fixture-style chain stays unchanged. We
+    /// re-exercise the seven main pre-Track-D scenarios in one assert
+    /// block to guard against accidental drift in chains the v0.7.0
+    /// suite already covers.
+    #[test]
+    fn existing_latency_fixtures_unchanged() {
+        // Re-uses the pattern of `latency_simple_flow_best_worst_case`
+        // and asserts the headline numbers (4 ms best, 34 ms worst) plus
+        // the absence of any Track-D-specific markers.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let actuator = b.add_component("actuator", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![sensor, ctrl, actuator]);
+        b.add_connection_inst("c1", root);
+        b.add_connection_inst("c2", root);
+        b.add_e2e(
+            "e2e_control",
+            root,
+            vec!["sensor.src", "c1", "controller.pass", "c2", "actuator.sink"],
+        );
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        b.set_property(
+            actuator,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "1 ms",
+        );
+        b.set_property(actuator, "Timing_Properties", "Period", "10 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let info = diags
+            .iter()
+            .find(|d| d.severity == Severity::Info && d.message.contains("latency:"))
+            .unwrap();
+        assert!(info.message.contains("4.000 ms"), "best case 4ms preserved");
+        assert!(
+            info.message.contains("34.000 ms"),
+            "worst case 34ms preserved"
+        );
+        for d in &diags {
+            assert!(
+                !d.message.contains("LatencyHopMixed"),
+                "existing fixture must not gain LatencyHopMixed: {}",
+                d.message
+            );
+        }
     }
 }

@@ -214,7 +214,7 @@
 
 ---
 
-## In progress / v0.7.0
+## v0.7.0 (delivered) / v0.8.0 (in progress)
 
 **Track A — IRQ-aware RTA (4/4 commits delivered)**
 
@@ -236,6 +236,27 @@
 - Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
 - Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
 - Track D and Track E research design docs landed (#152, #153) anchoring v0.8.0+ scope.
+
+**Track D — TSN/Ethernet WCTT analysis (Phase 1, 5/6 commits delivered)**
+
+- Foundation: Spar_Network property set + spar-network crate skeleton (#155)
+- NetworkGraph extraction from SystemInstance (#157)
+- NC primitives — arrival/service curves + min-plus operators (#161)
+- WcttAnalysis pass with per-stream end-to-end bounds (#168)
+- Lean theorems for NC primitives (commit 5; in flight as a sibling to this PR)
+- latency.rs integration — RTA-derived WCET on compute hops + wctt-derived WCTT
+  on network hops, end-to-end. Bus_Properties::Latency scalar remains the
+  fallback for unannotated buses, preserving v0.7.0 behaviour. (this commit)
+
+Phase 2 (TSN-shaped service curves with TAS, CBS, frame preemption) is
+v0.8.x scope.
+
+**Track E — Frozen-platform / mobile-application split (commit 3 delivered)**
+
+- `spar moves verify` CLI subcommand for hypothetical-rebinding oracle
+  is live; the deterministic-apply path is v0.8.x. The MCP read-only
+  surface (`spar.verify_move`, `spar.enumerate_moves`) remains v0.9.0
+  scope per Track E roadmap.
 
 ---
 

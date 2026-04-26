@@ -1291,6 +1291,31 @@ artifacts:
     status: planned
     tags: [network, wctt, v080]
 
+  - id: REQ-NETWORK-008
+    type: requirement
+    title: Unified WCET+WCTT end-to-end latency analysis
+    description: >
+      System orchestrates RTA-derived WCET on compute hops and
+      WCTT-derived bounds on network hops in a unified end-to-end
+      latency analysis, replacing the placeholder Bus_Properties::Latency
+      scalar when Spar_Network::* annotations are present. The
+      latency.rs analysis pass walks each end-to-end flow's segments
+      and, for every connection segment, invokes the
+      wctt::compute_network_hop_latency helper. When the connection
+      binds to a bus carrying Spar_Network::Switch_Type, the per-hop
+      contribution comes from the NC-derived bound (forwarding latency
+      + queuing) rather than from the legacy sampling-delay /
+      Inter_Processor_Overhead heuristic, and the chain emits the new
+      LatencyHopMixed Info diagnostic to confirm WCET+WCTT alternation
+      is live. Models without Spar_Network::* annotations fall back to
+      the v0.7.0 scalar overhead path and produce byte-identical
+      output, satisfying the non-regression contract that gates Phase
+      1 close-out. WcttUnservable in any hop propagates to the chain
+      as an Error and aborts aggregation. Track D commit 6 of the
+      v0.8.0 design (docs/designs/track-d-tsn-wctt-research.md §6.1).
+    status: planned
+    tags: [network, wctt, latency, v080]
+
   # ── Track B: rivet ↔ spar variant binding (v0.7.x) ─────────────────
 
   - id: REQ-VARIANT-001

@@ -377,6 +377,239 @@ impl WcttAnalysis {
     }
 }
 
+/// End-to-end traversal-time bound computed by
+/// [`compute_network_hop_latency`].
+///
+/// All times are picoseconds. `min_ps` is the optimistic
+/// (forwarding-latency-floor-only) estimate and `max_ps` is the NC-derived
+/// worst-case bound across the bound switches.
+///
+/// `unservable` is set when one of the bound switches' residual service
+/// is exhausted by competing traffic (mirrors the
+/// [`Severity::Error`]-emitting `WcttUnservable` diagnostic in
+/// [`WcttAnalysis::analyze`]). Callers — chiefly
+/// `latency.rs` — surface this state with their own diagnostic instead of
+/// blindly accumulating the bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetworkHopLatency {
+    /// Best-case bound, picoseconds. Sum of the per-hop forwarding-latency
+    /// floors (BCET side of `Spar_Network::Forwarding_Latency`) — no
+    /// queuing contribution.
+    pub min_ps: u64,
+    /// Worst-case bound, picoseconds. Sum of the per-hop NC delay bounds
+    /// (forwarding latency + queuing).
+    pub max_ps: u64,
+    /// `true` when at least one hop's residual service is saturated by
+    /// competing flows; `max_ps` is then a placeholder (caller should
+    /// emit an explicit error and stop aggregating that chain).
+    pub unservable: bool,
+}
+
+/// Compute the per-hop end-to-end network traversal-time bound for a
+/// single AADL connection that crosses one or more switched buses.
+///
+/// Returns `None` when the connection is *not* a network hop, namely:
+/// - the connection has no `Actual_Connection_Binding` to any bus
+///   declared with `Spar_Network::Switch_Type`; or
+/// - the connection cannot be resolved in the owner.
+///
+/// When a binding to a switched bus is found, the helper walks every
+/// bound switch in order, summing the per-hop NC delay bound (using the
+/// same residual-service / aggregate-competing-flows decomposition as
+/// [`WcttAnalysis::analyze`]). Competing flows are inferred from every
+/// other connection in the owner that binds to the same switch.
+///
+/// This is the public entry point for the v0.8.0 latency-analysis
+/// integration (Track D commit 6) — `latency.rs` invokes it for each
+/// connection segment in an end-to-end flow and substitutes the result
+/// for the legacy scalar `Bus_Properties::Latency` placeholder when the
+/// model carries `Spar_Network::*` annotations.
+pub fn compute_network_hop_latency(
+    instance: &SystemInstance,
+    owner_idx: ComponentInstanceIdx,
+    connection_name: &str,
+) -> Option<NetworkHopLatency> {
+    // Build the network graph and the bus-name lookup. We extract the
+    // graph fresh on each call: callers in `latency.rs` already iterate
+    // O(segments) per chain, so the cost is bounded and avoids leaking
+    // a cache across the public API. (A salsa-cached variant is the
+    // natural follow-up when this becomes a hotspot.)
+    let graph = extract_network_graph(instance);
+    if graph.switches().count() == 0 {
+        return None;
+    }
+
+    let mut bus_by_name: FxHashMap<String, ComponentInstanceIdx> = FxHashMap::default();
+    for node in graph.switches() {
+        bus_by_name.insert(node.name.to_ascii_lowercase(), node.idx);
+    }
+
+    let owner = instance.component(owner_idx);
+    let conn_idx = owner.connections.iter().copied().find(|&idx| {
+        instance.connections[idx]
+            .name
+            .as_str()
+            .eq_ignore_ascii_case(connection_name)
+    })?;
+    let conn = &instance.connections[conn_idx];
+    if matches!(conn.kind, spar_hir_def::item_tree::ConnectionKind::Access) {
+        return None;
+    }
+
+    // Connection-level binding takes precedence over owner-level.
+    // `latency.rs` calls don't currently distinguish; we only check the
+    // owner's properties (matches `collect_streams`'s behaviour).
+    let owner_props = instance.properties_for(owner_idx);
+    let bound_buses = resolve_connection_binding(owner_props, conn.name.as_str(), &bus_by_name);
+
+    let hops: Vec<ComponentInstanceIdx> = bound_buses
+        .into_iter()
+        .filter(|idx| {
+            graph
+                .node(*idx)
+                .map(|n| matches!(n.kind, NodeKind::Switch { .. }))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if hops.is_empty() {
+        return None;
+    }
+
+    // Resolve source endpoint to drive the source-side arrival curve.
+    // For non-end-station endpoints (typically threads on a CPU), we
+    // fall back to the conservative Ethernet-MTU burst.
+    let src_idx = conn
+        .src
+        .as_ref()
+        .and_then(|end| resolve_subcomponent(instance, owner_idx, &end.subcomponent));
+
+    let (rate_bps, burst_bytes) = if let Some(idx) = src_idx {
+        let src_props = instance.properties_for(idx);
+        let rate = read_output_rate_bps(src_props).unwrap_or(0);
+        let burst = read_queue_depth(src_props)
+            .map(|q| q.saturating_mul(FRAME_BYTES))
+            .unwrap_or(DEFAULT_BURST_BYTES);
+        (rate, burst)
+    } else {
+        (0, DEFAULT_BURST_BYTES)
+    };
+
+    let mut alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
+
+    // Aggregate competing flows per-switch in advance — every other
+    // connection in the same owner whose binding includes the same
+    // switch is a competitor.
+    let mut comp_alpha_by_sw: FxHashMap<ComponentInstanceIdx, (u128, u128)> = FxHashMap::default();
+    for &other_conn_idx in &owner.connections {
+        if other_conn_idx == conn_idx {
+            continue;
+        }
+        let other_conn = &instance.connections[other_conn_idx];
+        if matches!(
+            other_conn.kind,
+            spar_hir_def::item_tree::ConnectionKind::Access
+        ) {
+            continue;
+        }
+        let other_buses =
+            resolve_connection_binding(owner_props, other_conn.name.as_str(), &bus_by_name);
+        let other_src_idx = other_conn
+            .src
+            .as_ref()
+            .and_then(|end| resolve_subcomponent(instance, owner_idx, &end.subcomponent));
+        let (o_rate, o_burst) = if let Some(idx) = other_src_idx {
+            let p = instance.properties_for(idx);
+            let r = read_output_rate_bps(p).unwrap_or(0);
+            let b = read_queue_depth(p)
+                .map(|q| q.saturating_mul(FRAME_BYTES))
+                .unwrap_or(DEFAULT_BURST_BYTES);
+            (r, b)
+        } else {
+            (0, DEFAULT_BURST_BYTES)
+        };
+        for sw_idx in other_buses {
+            let entry = comp_alpha_by_sw.entry(sw_idx).or_insert((0, 0));
+            entry.0 = entry.0.saturating_add(o_burst as u128);
+            entry.1 = entry.1.saturating_add(o_rate as u128);
+        }
+    }
+
+    let mut total_max_ps: u64 = 0;
+    let mut total_min_ps: u64 = 0;
+    let mut unservable = false;
+
+    for sw_idx in &hops {
+        let bus_props = instance.properties_for(*sw_idx);
+        let rate = read_output_rate_bps(bus_props).unwrap_or(0);
+        let (bcet_ps, wcet_ps) = read_forwarding_latency_ps(bus_props).unwrap_or((0, 0));
+        let svc = ServiceCurve::rate_latency(rate, wcet_ps);
+
+        // The min (best-case) bound is the BCET forwarding latency for
+        // this hop — purely the propagation/forwarding floor, no
+        // queuing. We deliberately ignore competing traffic here since
+        // BCET is a lower bound.
+        total_min_ps = total_min_ps.saturating_add(bcet_ps);
+
+        if svc.rate_bps == 0 {
+            // Without a finite service rate we cannot compute a worst-
+            // case bound for this hop. Skip the queuing contribution
+            // and trust BCET == WCET on the propagation floor.
+            total_max_ps = total_max_ps.saturating_add(wcet_ps);
+            continue;
+        }
+
+        // TSN switches: opaque in Phase 1. Skip queuing contribution
+        // (propagate the WCET floor only) — the WcttAnalysis pass also
+        // emits a `WcttDeferred` Info on the same switch.
+        if let Some(node) = graph.node(*sw_idx)
+            && let NodeKind::Switch { switch_type } = node.kind
+            && matches!(switch_type, SwitchType::Tsn)
+        {
+            total_max_ps = total_max_ps.saturating_add(wcet_ps);
+            continue;
+        }
+
+        // Build the competing arrival curve for this hop.
+        let (comp_burst_u128, comp_rate_u128) =
+            comp_alpha_by_sw.get(sw_idx).copied().unwrap_or((0, 0));
+        let comp_alpha = ArrivalCurve::affine(
+            saturate_u128_to_u64(comp_burst_u128),
+            saturate_u128_to_u64(comp_rate_u128),
+        );
+
+        let residual = if comp_alpha.sustained_rate_bps == 0 && comp_alpha.burst_bytes == 0 {
+            svc
+        } else {
+            match residual_service(&svc, &comp_alpha) {
+                Ok(r) => r,
+                Err(_) => {
+                    unservable = true;
+                    break;
+                }
+            }
+        };
+
+        match delay_bound(&alpha, &residual) {
+            Ok(d) => total_max_ps = total_max_ps.saturating_add(d),
+            Err(_) => {
+                unservable = true;
+                break;
+            }
+        }
+
+        if let Ok(out) = output_bound(&alpha, &residual) {
+            alpha = out;
+        }
+    }
+
+    Some(NetworkHopLatency {
+        min_ps: total_min_ps,
+        max_ps: total_max_ps,
+        unservable,
+    })
+}
+
 /// Read `Spar_Network::WCTT_Budget` (Time) in picoseconds. Mirrors the
 /// typed-first / string-fallback idiom used by the network extractor's
 /// other accessors.
