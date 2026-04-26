@@ -1613,6 +1613,50 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-006
 
+  - id: TEST-LATENCY-WCTT-INTEGRATION
+    type: feature
+    title: WCET+WCTT alternation in end-to-end latency analysis
+    description: >
+      Unit tests in crates/spar-analysis/src/latency.rs::tests verify
+      that LatencyAnalysis::analyze alternates RTA-derived WCET on
+      compute hops with wctt::compute_network_hop_latency-derived
+      bounds on network hops. Coverage spans: the v0.7.0
+      non-regression contract (no_spar_network_models_unchanged_v07)
+      where models without Spar_Network::* annotations produce
+      byte-identical output to v0.7.0; a same-CPU compute-only chain
+      that ignores nearby switched buses (compute_only_chain_unchanged);
+      single-hop NC-derived bound matching the helper's return value
+      (single_network_hop_uses_wctt); a three-stage chain
+      demonstrating WCET+WCTT alternation
+      (compute_then_network_then_compute); fallback to scalar
+      Inter_Processor_Overhead when no Spar_Network::* annotations are
+      set (network_hop_falls_back_to_bus_latency_when_no_switch_type);
+      switching the same fixture to use NC-derived bounds when
+      Spar_Network::Switch_Type is added
+      (network_hop_uses_wctt_when_switch_type_present); the
+      LatencyHopMixed Info marker on chains exercising both hop types
+      (latency_hop_mixed_diagnostic_emitted); WcttUnservable
+      propagation to the latency chain
+      (wctt_unservable_propagates_to_latency); graceful fallback when
+      the binding resolves to an unannotated bus
+      (unannotated_bus_in_chain_falls_back); and a regression check
+      on the simple-flow fixture (existing_latency_fixtures_unchanged).
+      Track D commit 6 of the v0.8.0 design
+      (docs/designs/track-d-tsn-wctt-research.md §6.1).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- latency::tests
+    status: passing
+    tags: [v0.8.0, network, wctt, latency]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-006
+      - type: satisfies
+        target: REQ-NETWORK-008
+      - type: satisfies
+        target: REQ-ANALYSIS-003
+
   - id: TEST-VARIANTS-CONSUMER
     type: feature
     title: spar-variants consumer-side unit tests
