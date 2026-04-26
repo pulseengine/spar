@@ -1446,6 +1446,41 @@ artifacts:
       - type: satisfies
         target: REQ-MIGRATION-002
 
+  - id: TEST-OVERLAY
+    type: feature
+    title: BindingOverlay tentative-binding overlay unit tests
+    description: >
+      Unit tests in crates/spar-hir-def/src/overlay.rs that exercise
+      the hypothetical-binding overlay surface (Track E commit 2/8).
+      Covers ten cases: (1) empty overlay matches the declared binding
+      (None-overlay vs. Some(empty) parity); (2) a single staged move
+      returns the overlay's hypothetical target regardless of declared
+      binding; (3) overlay entries on one component leave unrelated
+      components' lookups untouched; (4) moving a Spar_Migration::Frozen
+      component yields a structured FrozenViolation carrying the
+      Pinned_Reason; (5) non-frozen components raise no FrozenViolation;
+      (6) overlay targets within Spar_Migration::Allowed_Targets pass
+      validation; (7) targets outside the Allowed_Targets list raise an
+      AllowedTargetsViolation citing the declared allowed indices;
+      (8) an empty (or absent) Allowed_Targets is treated as "no
+      restriction" per §6.1; (9) three independent moves are validated
+      independently — one violation does not poison the others; (10)
+      BindingOverlay::clone() round-trips the staged moves and produces
+      an independent overlay.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- overlay::tests
+    status: passing
+    tags: [migration, track-e, v080]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-004
+      - type: satisfies
+        target: REQ-MIGRATION-001
+      - type: satisfies
+        target: REQ-MIGRATION-002
+
   - id: TEST-SPAR-NETWORK-GRAPH
     type: feature
     title: Network graph extraction tests
