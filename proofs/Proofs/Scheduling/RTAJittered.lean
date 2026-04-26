@@ -1,36 +1,37 @@
-/-! # Jittered Response Time Analysis — convergence theorems
+/-
+  Jittered Response Time Analysis — Fixed-Point Convergence
 
-Mirrors `compute_response_time_jittered` in
-`crates/spar-analysis/src/scheduling_verified.rs` (PR #147).
-The Rust implementation is checked against this spec via property tests
-in that file's `#[cfg(test)] mod tests`.
+  Mirrors `compute_response_time_jittered` in
+  `crates/spar-analysis/src/scheduling_verified.rs` (PR #147).
+  The Rust implementation is checked against this spec via property tests
+  in that file's `#[cfg(test)] mod tests`.
 
-Reference: Tindell & Clark, "Holistic schedulability analysis for
-distributed hard real-time systems", Microprocessing & Microprogramming,
-1994.  Joseph & Pandya 1986 for the un-jittered baseline.
+  Reference: Tindell & Clark, "Holistic schedulability analysis for
+  distributed hard real-time systems", Microprocessing & Microprogramming,
+  1994.  Joseph & Pandya 1986 for the un-jittered baseline.
 
-We extend the RTA recurrence in `RTA.lean` with three new ingredients:
-  1. The task under analysis has a release jitter `J_i` added as a
-     constant offset to its response window.
-  2. Each higher-priority task `j` has its own release jitter `J_j`
-     which inflates the ceiling count: ⌈(R + J_j) / T_j⌉ × C_j.
-  3. Periodic ISR overhead enters as an extra monotone term
-     `IsrOverhead : Nat → Nat`.
+  We extend the RTA recurrence in `RTA.lean` with three new ingredients:
+    1. The task under analysis has a release jitter `J_i` added as a
+       constant offset to its response window.
+    2. Each higher-priority task `j` has its own release jitter `J_j`
+       which inflates the ceiling count: ⌈(R + J_j) / T_j⌉ × C_j.
+    3. Periodic ISR overhead enters as an extra monotone term
+       `IsrOverhead : Nat → Nat`.
 
-Recurrence:
+  Recurrence:
+    R(0)   = C_i + J_i
+    R(n+1) = C_i + J_i
+           + Σ_j ⌈(R(n) + J_j) / T_j⌉ × C_j
+           + IsrOverhead(R(n))
 
-  R(0)   = C_i + J_i
-  R(n+1) = C_i + J_i
-         + Σ_j ⌈(R(n) + J_j) / T_j⌉ × C_j
-         + IsrOverhead(R(n))
+  When all `J_j = 0`, `J_i = 0`, and `IsrOverhead = fun _ => 0`, this
+  reduces to `Spar.Scheduling.RTA.rtaStep` modulo packaging.
 
-When all `J_j = 0`, `J_i = 0`, and `IsrOverhead = fun _ => 0`, this
-reduces to `Spar.Scheduling.RTA.rtaStep` modulo packaging.
-
-This file states the theorems anchoring the Rust implementation in
-`compute_response_time_jittered`.  Convergence is established under
-the same termination argument as the un-jittered case — monotone
-non-decreasing sequence bounded by the deadline. -/
+  This file states the theorems anchoring the Rust implementation in
+  `compute_response_time_jittered`.  Convergence is established under
+  the same termination argument as the un-jittered case — monotone
+  non-decreasing sequence bounded by the deadline.
+-/
 
 import Mathlib.Tactic
 import Proofs.Scheduling.RTA
