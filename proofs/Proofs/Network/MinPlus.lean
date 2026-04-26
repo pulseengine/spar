@@ -107,7 +107,8 @@ theorem arrival_at_mono (α : ArrivalCurve) {t1 t2 : Nat} (h : t1 ≤ t2) :
       apply Nat.div_le_div_right
       exact Nat.mul_le_mul_left _ h
     simp only [hp]
-    exact Nat.min_le_min hsust hpeak
+    -- `min` is monotone in both arguments separately (Mathlib's `min_le_min`).
+    exact min_le_min hsust hpeak
 
 /-! ## Theorem 2 — Monotonicity of β(t) -/
 
