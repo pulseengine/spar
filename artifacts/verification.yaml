@@ -1481,6 +1481,46 @@ artifacts:
       - type: satisfies
         target: REQ-MIGRATION-002
 
+  - id: TEST-MOVES-VERIFY
+    type: feature
+    title: spar moves verify CLI integration tests
+    description: >
+      Integration tests in crates/spar-cli/tests/moves_verify.rs that
+      shell out to the `spar` binary and exercise the
+      `spar moves verify` subcommand (Track E commit 3/8). Coverage:
+      (1) admissible move emits ok=true and exit 0;
+      (2) unknown --to argument exits non-zero with the offending name
+          mentioned on stderr;
+      (3) unknown --component argument behaves the same way;
+      (4) Spar_Migration::Frozen component yields exit 2 and a
+          structured Frozen violation carrying the Pinned_Reason;
+      (5) target outside Spar_Migration::Allowed_Targets yields exit 2
+          and an AllowedTargets violation citing the offending target;
+      (6) error-severity analysis diagnostics are surfaced into the
+          per-pass diagnostic stream and (when present) raised as
+          AnalysisError violations with exit 1;
+      (7) --format text emits a single OK/FAIL summary line plus
+          human-readable violation lines;
+      (8) --format json emits a JSON document with the documented
+          schema (ok / component / target / violations /
+          diagnostics_by_pass);
+      (9) running `spar moves verify` does not mutate the underlying
+          model — `spar analyze` returns identical output before and
+          after, and the AADL file on disk is unchanged;
+      (10) a trivial move whose target equals the declared binding is
+           reported as ok with no violations.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test moves_verify
+    status: passing
+    tags: [migration, track-e, v080, cli]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-005
+      - type: satisfies
+        target: REQ-MIGRATION-004
+
   - id: TEST-SPAR-NETWORK-GRAPH
     type: feature
     title: Network graph extraction tests

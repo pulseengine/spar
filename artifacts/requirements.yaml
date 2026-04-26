@@ -1175,6 +1175,34 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080]
 
+  - id: REQ-MIGRATION-005
+    type: requirement
+    title: spar moves verify CLI — hypothetical-rebinding oracle
+    description: >
+      System shall expose a `spar moves verify --component X --to Y`
+      CLI subcommand that returns a structured pass/fail report with
+      violations, using the BindingOverlay from REQ-MIGRATION-004.
+      The pipeline parses the AADL model, instantiates the requested
+      root, resolves --component and --to to ComponentInstanceIdx
+      values via FQN matching against the instance hierarchy, builds a
+      single-move overlay, runs overlay validation (frozen /
+      allowed-targets), and runs the standard analysis-pass suite
+      (RTA, latency, bandwidth, EMV2, ARINC653, …) against the
+      un-overlayed instance for commit 3. The report carries `ok`,
+      component / target FQNs, a Violation list (Frozen /
+      AllowedTargets / AnalysisError variants), and a per-pass
+      diagnostic stream keyed by analysis name. Output is rendered as
+      either text (developer-friendly) or JSON (canonical
+      machine-readable contract for the v0.9.0 MCP `spar.verify_move`
+      tool surface). Exit codes: 0 = ok, 1 = analysis errors, 2 =
+      overlay violations. For commit 3 only the HIR-level
+      property-lookup helper (`actual_processor_binding_with_overlay`)
+      is overlay-aware; widening the analysis suite itself to consume
+      the overlay is commit 4. Per Track E commit 3/8 of the v0.8.0
+      migration design research (§6.3).
+    status: planned
+    tags: [migration, track-e, v080, cli]
+
   - id: REQ-NETWORK-004
     type: requirement
     title: Typed network graph extraction from a SystemInstance
