@@ -1,0 +1,97 @@
+name: Lean Proofs
+
+# Type-check the spar scheduling-theory proofs (proofs/Proofs/Scheduling/*).
+#
+# These are the load-bearing mathematical theorems behind spar-analysis:
+#   * Liu & Layland 1973 — RM utilization bound        (RMBound.lean)
+#   * Joseph & Pandya 1986 — RTA fixed-point convergence (RTA.lean)
+#   * Dertouzos 1974 — EDF optimality for implicit deadlines (EDF.lean)
+#
+# Lean toolchain is pinned by `proofs/lean-toolchain`
+# (currently `leanprover/lean4:v4.29.0-rc6`). `leanprover/lean-action`
+# reads that file and installs the matching elan/lake/lean toolchain;
+# bumping the file is the one place you change the pinned version.
+#
+# Mathlib is the slow dependency. We cache the Lake build directory
+# (`proofs/.lake`) keyed on `lake-manifest.json`, so warm runs only
+# rebuild the in-tree proof modules.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Avoid duplicate runs on PR + push for the same SHA.
+concurrency:
+  group: proofs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lean:
+    name: Lean proof typecheck (lake build)
+    runs-on: ubuntu-latest
+    # 90 min covers cold-cache Mathlib fetches via `lake exe cache get`
+    # plus our in-tree proof compile. Warm runs land in well under 10 min.
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: proofs
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the Lake build outputs (Mathlib + transitive deps + our proofs).
+      # Warm runs reuse this and only recompile changed in-tree modules.
+      # Cold runs fall through to the Mathlib precompiled cache fetched by
+      # lean-action's `use-mathlib-cache: true` below — that pulls
+      # ~2 GB of `.olean` files from Mathlib's cloud cache instead of
+      # rebuilding them from source (30+ min compile vs ~5 min download).
+      - name: Cache Lake build (.lake)
+        uses: actions/cache@v4
+        with:
+          path: |
+            proofs/.lake
+            ~/.elan
+          key: lake-${{ runner.os }}-${{ hashFiles('proofs/lean-toolchain', 'proofs/lake-manifest.json') }}
+          restore-keys: |
+            lake-${{ runner.os }}-
+
+      # leanprover/lean-action reads `proofs/lean-toolchain` and installs the
+      # matching toolchain via elan, runs `lake exe cache get` to pull
+      # precompiled Mathlib `.olean`s from the cloud cache, then runs
+      # `lake build`. The action fails the job on any Lean error or `sorry`.
+      - name: Build proofs (lake build)
+        id: lake_build
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: proofs
+          # Pull Mathlib's precompiled .olean files instead of rebuilding
+          # from source. Without this, the cold-cache build hits the 1h
+          # GH Actions timeout at ~98% Mathlib (saw this on the first run
+          # of #151 — module 2796/2845 cancelled by timeout).
+          use-mathlib-cache: true
+          build-args: ""
+
+      # Capture the Lake log on failure for forensic review. The action
+      # streams output to the GH log already; this preserves a downloadable
+      # copy in the run artifacts so reviewers don't have to scrape logs.
+      - name: Collect lake build log
+        if: failure()
+        run: |
+          mkdir -p ../lake-artifacts
+          # Lake stores per-target logs under .lake/build/.
+          if [ -d .lake/build ]; then
+            find .lake/build -name '*.log' -print0 | xargs -0 -I{} cp -v {} ../lake-artifacts/ || true
+          fi
+          # Also copy the manifest so reviewers see exactly which Mathlib
+          # rev was in use when the build broke.
+          cp -v lake-manifest.json ../lake-artifacts/ || true
+          cp -v lean-toolchain ../lake-artifacts/ || true
+
+      - name: Upload lake build artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lake-build-log
+          path: lake-artifacts/
+          if-no-files-found: ignore

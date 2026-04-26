@@ -12,6 +12,8 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square&labelColor=1a1b27)
 
 [![CI](https://github.com/pulseengine/spar/actions/workflows/ci.yml/badge.svg)](https://github.com/pulseengine/spar/actions/workflows/ci.yml)
+[![Lean Proofs](https://github.com/pulseengine/spar/actions/workflows/proofs.yml/badge.svg)](https://github.com/pulseengine/spar/actions/workflows/proofs.yml)
+[![Rivet validate](https://img.shields.io/github/actions/workflow/status/pulseengine/spar/ci.yml?branch=main&label=rivet%20validate&logo=githubactions&logoColor=white)](https://github.com/pulseengine/spar/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/pulseengine/spar/graph/badge.svg)](https://codecov.io/gh/pulseengine/spar)
 
 &nbsp;
