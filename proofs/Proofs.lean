@@ -11,8 +11,10 @@
 --   2. RM utilization bound soundness (Liu & Layland 1973)
 --   3. EDF optimality for implicit-deadline systems (Dertouzos 1974)
 --   4. Jittered RTA convergence (Tindell & Clark 1994) — PR #147
+--   5. Network Calculus min-plus closed-forms (Le Boudec & Thiran 2001)
 
 import Proofs.Scheduling.RTA
 import Proofs.Scheduling.RMBound
 import Proofs.Scheduling.EDF
 import Proofs.Scheduling.RTAJittered
+import Proofs.Network.MinPlus

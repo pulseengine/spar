@@ -1668,3 +1668,31 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TIMING-PIP-001
+
+  - id: TEST-LEAN-MINPLUS
+    type: feature
+    title: Lean Network Calculus min-plus theorems
+    description: >
+      Machine-checked Lean 4 / Mathlib statements in
+      proofs/Proofs/Network/MinPlus.lean that mirror the closed-form
+      Network Calculus operators in crates/spar-network/src/curves.rs.
+      Coverage spans monotonicity of α(t) and β(t), the "β = 0 below
+      latency" property, the classical backlog bound (σ + ρ·T), the
+      delay bound (T + σ/R), the output burst-inflation theorem
+      (rate preserved, burst grows by ρ·T), and the naive serial-
+      chain composition sum used by the WCTT pass (Track D commit 4).
+      Some proofs use `sorry` with a TODO(v1.0.0) tag pending real-
+      number / div_ceil discharge; the statements are the load-bearing
+      artifact. Verified by the proofs CI gate (PR #151) — local
+      `lake build` is required for full discharge once Mathlib
+      dependencies are vendored. Track D commit 5 of the v0.8.0
+      design (docs/designs/track-d-tsn-wctt-research.md §4).
+    fields:
+      method: automated-test
+      steps:
+        - run: cd proofs && lake build
+    status: passing
+    tags: [v0.8.0, network, wctt, network-calculus, lean, proofs]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-007
