@@ -91,6 +91,9 @@ fn print_usage() {
     eprintln!(
         "  moves    verify --root Package::Type.Impl --component <fqn> --to <processor> [--format text|json] <file...>"
     );
+    eprintln!(
+        "  moves    enumerate --root Package::Type.Impl --component <fqn> [--target-filter <s>] [--format text|json] <file...>"
+    );
 }
 
 fn cmd_lsp() {

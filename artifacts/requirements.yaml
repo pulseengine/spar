@@ -1203,6 +1203,38 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080, cli]
 
+  - id: REQ-MIGRATION-006
+    type: requirement
+    title: spar moves enumerate CLI — design-space exploration
+    description: >
+      System shall expose a `spar moves enumerate --component X
+      [--target-filter <substring>] [--format text|json]` CLI
+      subcommand that returns all valid hypothetical rebinding targets
+      for a component. The candidate-target set is derived from
+      `Spar_Migration::Allowed_Targets` (when set on the component) or
+      from every Processor / VirtualProcessor in the instance
+      otherwise. An optional `--target-filter` substring narrows the
+      candidate set when Allowed_Targets is absent and the model has
+      many processors. For each candidate the same overlay-validation
+      and analysis-pass pipeline as `spar moves verify`
+      (REQ-MIGRATION-005) is run, producing a per-candidate
+      `MoveCandidate` record with `ok` / `violations` /
+      `diagnostics_count` / `slack_ns`. The slack metric is the
+      simplest defensible v0.8.0 ranking: minimum (deadline −
+      response_time) across threads on the candidate target, parsed
+      from RTA's info-level diagnostics; `None` when RTA produced no
+      usable info diagnostics; negative-sentinel when RTA reports a
+      deadline miss. The full multi-objective ranking (weight, power,
+      EMV2 cost) lands in commits 5-6 with the solver-driven enumerator.
+      JSON output is the canonical machine-readable shape consumed by
+      the v0.9.0 MCP `spar.enumerate_moves` tool surface; text output
+      is a sortable table with a `total=N valid=K` summary footer.
+      Exit codes: 0 = at least one admissible candidate, 1 = no
+      admissible candidate (or input-resolution error). Per Track E
+      commit 4/8 of the v0.8.0 migration design research (§6.3).
+    status: planned
+    tags: [migration, track-e, v080, cli]
+
   - id: REQ-NETWORK-004
     type: requirement
     title: Typed network graph extraction from a SystemInstance
