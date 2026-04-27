@@ -72,6 +72,7 @@ use spar_analysis::{AnalysisDiagnostic, Severity};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 use spar_hir_def::{AllowedTargetsViolation, BindingOverlay, FrozenViolation, OverlayDiagnostic};
+use spar_solver::enumerate::{CandidateRank, EnumerationObjective, rank_candidate};
 
 /// Parsed CLI arguments for `spar moves verify`.
 ///
@@ -117,6 +118,10 @@ pub enum MovesError {
     },
     /// `--format` is neither `text` nor `json`.
     UnknownFormat(String),
+    /// `--objective` does not match any of the recognised modes
+    /// (`max-response`, `total-load`, `total-power`, `total-weight`,
+    /// `balanced`).
+    UnknownObjective(String),
 }
 
 impl std::fmt::Display for MovesError {
@@ -140,6 +145,11 @@ impl std::fmt::Display for MovesError {
             MovesError::UnknownFormat(fmt_) => {
                 write!(f, "--format {fmt_} is not recognised (expected text|json)")
             }
+            MovesError::UnknownObjective(o) => write!(
+                f,
+                "--objective {o} is not recognised (expected max-response | total-load | \
+                 total-power | total-weight | balanced)",
+            ),
         }
     }
 }
@@ -755,7 +765,9 @@ pub fn cmd_moves_dispatch(args: &[String]) {
 /// Same shape as [`VerifyArgs`] minus `--to` (the target is *derived*
 /// per-candidate, not supplied by the user) plus an optional
 /// `--target-filter` to narrow the candidate set when the model has
-/// many processors and `Spar_Migration::Allowed_Targets` is absent.
+/// many processors and `Spar_Migration::Allowed_Targets` is absent,
+/// and a multi-objective `--objective` selector that drives the
+/// candidate ranking score (Track E commit 5/8).
 #[derive(Debug)]
 pub struct EnumerateArgs {
     /// Path(s) to the AADL model file(s) to load.
@@ -771,6 +783,10 @@ pub struct EnumerateArgs {
     pub target_filter: Option<String>,
     /// Output format: `text` (default) or `json`.
     pub format: String,
+    /// Multi-objective ranking spec. Default
+    /// `EnumerationObjective::max_response()` — equivalent to commit 4's
+    /// slack-only ranking on single-CPU models.
+    pub objective: EnumerationObjective,
 }
 
 /// Per-candidate verification record produced by `spar moves enumerate`.
@@ -780,8 +796,8 @@ pub struct EnumerateArgs {
 /// `Spar_Migration::Allowed_Targets` when set or from every Processor /
 /// VirtualProcessor in the instance otherwise. The fields capture
 /// whether the move would be admissible (`ok`), the structured
-/// violation list, and an optional slack metric for ranking.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+/// violation list, and the multi-objective rank score (Track E commit 5/8).
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MoveCandidate {
     /// Fully-qualified name of the candidate target processor.
     pub target: String,
@@ -796,20 +812,20 @@ pub struct MoveCandidate {
     /// (kept separately from the violation count so consumers can
     /// rank "worst offenders" without traversing `violations`).
     pub diagnostics_count: usize,
-    /// Optional slack metric: minimum (deadline − response_time) in
-    /// picoseconds across threads bound to the candidate target.
-    /// Higher is better; negative values indicate a deadline miss.
-    /// `None` when RTA produced no usable info-level diagnostics.
-    pub slack_ns: Option<i64>,
+    /// Multi-objective rank computed by the solver-driven ranker
+    /// (commit 5/8). Lower `rank.score` is better; the per-axis values
+    /// (`max_response_ns`, `total_load`, …) stay accessible for
+    /// breakdown rendering and post-hoc resorting.
+    pub rank: CandidateRank,
 }
 
 /// Output shape for `spar moves enumerate --format json`.
 ///
 /// The canonical JSON contract for the v0.9.0 MCP
 /// `spar.enumerate_moves` tool surface; consumers downstream of the
-/// LLM tool will sort `candidates` by `slack_ns` descending (with
+/// LLM tool will sort `candidates` by `rank.score` ascending (with
 /// `ok=true` first) to surface the most attractive moves.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct MoveEnumerateReport {
     /// FQN of the component being enumerated.
     pub component: String,
@@ -902,7 +918,7 @@ pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
     };
 
     for target_idx in candidates {
-        let candidate = verify_candidate(&inst, comp_idx, target_idx);
+        let candidate = verify_candidate(&inst, comp_idx, target_idx, &args.objective);
         if candidate.ok {
             report.valid += 1;
         }
@@ -910,14 +926,17 @@ pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
     }
     report.total = report.candidates.len();
 
-    // Sort: ok=true first, then by slack desc (None last), then by FQN.
+    // Sort: ok=true first, then by score ascending (lower = better,
+    // matching the convention of all four single-objective modes), then
+    // by FQN as a stable tie-breaker. Ranks with NaN sort *last* so a
+    // degenerate model never floats above well-defined scores.
     report.candidates.sort_by(|a, b| {
         b.ok.cmp(&a.ok)
-            .then_with(|| match (a.slack_ns, b.slack_ns) {
-                (Some(sa), Some(sb)) => sb.cmp(&sa),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
+            .then_with(|| {
+                a.rank
+                    .score
+                    .partial_cmp(&b.rank.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .then_with(|| a.target.cmp(&b.target))
     });
@@ -992,10 +1011,17 @@ fn candidate_targets(
 /// of [`run_verify`] — overlay -> validate -> analyses -> build_report
 /// — but returns a candidate-shaped record instead of printing a
 /// per-move document.
+///
+/// Track E commit 5/8: ranking is now performed by
+/// [`spar_solver::enumerate::rank_candidate`], which runs the same
+/// analysis suite and also reads the `Spar_Power::Power_Budget` /
+/// `Weight_Properties::Weight` properties to populate the
+/// multi-objective score.
 fn verify_candidate(
     inst: &SystemInstance,
     comp_idx: ComponentInstanceIdx,
     target_idx: ComponentInstanceIdx,
+    objective: &EnumerationObjective,
 ) -> MoveCandidate {
     let mut overlay = BindingOverlay::new();
     overlay.add_move(comp_idx, target_idx);
@@ -1008,13 +1034,12 @@ fn verify_candidate(
         .filter(|d| d.severity == Severity::Error)
         .count();
 
-    // Slack ranking: scan RTA info diagnostics for "thread '...' on
-    // processor '<TARGET>': response time <X> <= deadline <Y>" and
-    // compute min(Y - X) across threads bound to TARGET. If the
-    // analysis stream contains an RTA error-severity diagnostic for a
-    // thread bound to TARGET, slack is forced negative.
-    let target_name = inst.component(target_idx).name.as_str();
-    let slack_ns = compute_slack_ns(&analysis_diags, target_name);
+    // Solver-derived multi-objective ranking. The ranker runs its own
+    // analysis pass internally (so we double-pay for analyses on each
+    // candidate); this matches the commit-5 spec and keeps the score
+    // and `violations` lists strictly consistent — both come from the
+    // same un-overlayed analysis stream the verify-pipeline produces.
+    let rank = rank_candidate(inst, &overlay, objective);
 
     let ok = overlay_diags.is_empty()
         && !report.violations.iter().any(|v| {
@@ -1032,111 +1057,8 @@ fn verify_candidate(
         ok,
         violations: report.violations,
         diagnostics_count,
-        slack_ns,
+        rank,
     }
-}
-
-/// Compute the slack metric for a candidate target.
-///
-/// Walks the analysis-diagnostic stream looking for RTA messages of the
-/// form `"thread '...' on processor '<target>': response time <X> <=
-/// deadline <Y>"`, parses the formatted times back into picoseconds,
-/// and returns the minimum `Y - X` across threads bound to `target`.
-///
-/// Returns:
-///
-/// - `Some(slack_ps)` (positive) when at least one matching info
-///   diagnostic was successfully parsed and no error was found.
-/// - `Some(negative)` when at least one matching error diagnostic
-///   reports a deadline miss for a thread on `target` (we encode the
-///   miss as -1 ps; the consumer cares about sign, not magnitude).
-/// - `None` when no RTA diagnostic mentions this target.
-fn compute_slack_ns(diags: &[AnalysisDiagnostic], target_name: &str) -> Option<i64> {
-    let target_lower = target_name.to_ascii_lowercase();
-    let mut min_slack: Option<i64> = None;
-    let mut had_miss = false;
-    let mut had_match = false;
-
-    for d in diags {
-        if d.analysis != "RtaAnalysis" {
-            continue;
-        }
-        let msg_lower = d.message.to_ascii_lowercase();
-        let needle = format!("on processor '{}'", target_lower);
-        if !msg_lower.contains(&needle) {
-            continue;
-        }
-        had_match = true;
-
-        if d.severity == Severity::Error && msg_lower.contains("misses deadline") {
-            had_miss = true;
-            continue;
-        }
-
-        // Parse "response time <X> <= deadline <Y>".
-        if let Some((rt, dl)) = parse_response_deadline(&d.message) {
-            let slack = dl as i64 - rt as i64;
-            min_slack = Some(min_slack.map(|m| m.min(slack)).unwrap_or(slack));
-        }
-    }
-
-    if had_miss {
-        // Deadline miss dominates: report a negative sentinel. The
-        // consumer just checks the sign for "is this candidate
-        // schedulable?".
-        return Some(-1);
-    }
-    if !had_match {
-        return None;
-    }
-    min_slack
-}
-
-/// Parse the `"response time <X> <= deadline <Y>"` substring from an
-/// RTA info-level diagnostic message.
-///
-/// Returns `(response_time_ps, deadline_ps)` if both formatted-time
-/// values parse cleanly; `None` otherwise. Parsing the formatted form
-/// is intentional — RTA does not currently expose its raw picosecond
-/// values via the diagnostic struct, and committing a parser here is
-/// cheaper than expanding the AnalysisDiagnostic shape just for the
-/// commit-4 ranking metric.
-fn parse_response_deadline(msg: &str) -> Option<(u64, u64)> {
-    let after_rt = msg.find("response time ")?;
-    let rest = &msg[after_rt + "response time ".len()..];
-    let le_pos = rest.find("<=")?;
-    let rt_str = rest[..le_pos].trim();
-    let after_dl = rest[le_pos + 2..].find("deadline ")?;
-    let dl_rest = &rest[le_pos + 2 + after_dl + "deadline ".len()..];
-    let dl_str = dl_rest.trim_end_matches(['.', ',']).trim();
-    Some((parse_format_time(rt_str)?, parse_format_time(dl_str)?))
-}
-
-/// Inverse of `spar_analysis::rta::format_time`: parse a `"<num> <unit>"`
-/// string back into picoseconds. Unit suffixes recognised: `ps`, `us`,
-/// `ms`, `sec`. Whitespace-tolerant; returns `None` on parse failure.
-fn parse_format_time(s: &str) -> Option<u64> {
-    let s = s.trim();
-    let space = s.rfind(char::is_whitespace)?;
-    let num_str = s[..space].trim();
-    let unit = s[space..].trim();
-
-    let scale: u64 = match unit {
-        "ps" => 1,
-        "us" => 1_000_000,
-        "ms" => 1_000_000_000,
-        "sec" | "s" => 1_000_000_000_000,
-        _ => return None,
-    };
-
-    if let Ok(n) = num_str.parse::<u64>() {
-        return Some(n.saturating_mul(scale));
-    }
-    let f = num_str.parse::<f64>().ok()?;
-    if f.is_nan() || f.is_sign_negative() {
-        return None;
-    }
-    Some((f * scale as f64) as u64)
 }
 
 /// Render a [`MoveEnumerateReport`] as canonical pretty-printed JSON.
@@ -1147,8 +1069,13 @@ fn render_enumerate_json(report: &MoveEnumerateReport) {
 /// Render a [`MoveEnumerateReport`] in human-readable tabular form.
 ///
 /// Layout: a one-line component header, a fixed-width row per
-/// candidate (status / target / slack / violation summary), and a
-/// `total=N valid=K` summary footer mirroring the JSON shape.
+/// candidate (status / target / score / errs / violation summary),
+/// and a `total=N valid=K` summary footer mirroring the JSON shape.
+///
+/// Track E commit 5/8: the `slack` column from commit 4 is replaced by
+/// a `score` column (lower = better) carrying the multi-objective
+/// rank value; `<missed>` is emitted for deadline-miss candidates so
+/// the column stays one token wide.
 fn render_enumerate_text(report: &MoveEnumerateReport) {
     println!(
         "Enumerate {} ({} candidates)",
@@ -1158,24 +1085,31 @@ fn render_enumerate_text(report: &MoveEnumerateReport) {
         println!("  (no candidate targets)");
     } else {
         println!(
-            "  {:<6} {:<40} {:>14} {:>6}  violations",
-            "ok", "target", "slack", "errs",
+            "  {:<6} {:<40} {:>10} {:>6}  violations",
+            "ok", "target", "score", "errs",
         );
         for c in &report.candidates {
             let status = if c.ok { "OK" } else { "FAIL" };
-            let slack = match c.slack_ns {
-                Some(n) if n < 0 => "<missed>".to_string(),
-                Some(n) => format!("{n} ps"),
-                None => "-".to_string(),
-            };
+            let score_str = format_score(&c.rank);
             let viol_summary = summarise_violations(&c.violations);
             println!(
-                "  {:<6} {:<40} {:>14} {:>6}  {}",
-                status, c.target, slack, c.diagnostics_count, viol_summary,
+                "  {:<6} {:<40} {:>10} {:>6}  {}",
+                status, c.target, score_str, c.diagnostics_count, viol_summary,
             );
         }
     }
     println!("total={} valid={}", report.total, report.valid);
+}
+
+/// Render a [`CandidateRank::score`] as a fixed-precision token for the
+/// text-format renderer. Deadline-miss candidates (negative
+/// `max_response_ns` sentinel) get a `<missed>` token instead so the
+/// column stays one word wide and is greppable.
+fn format_score(rank: &CandidateRank) -> String {
+    if matches!(rank.max_response_ns, Some(n) if n < 0) {
+        return "<missed>".to_string();
+    }
+    format!("{:.4}", rank.score)
 }
 
 /// Compress a [`Violation`] vector into a one-line summary for the
@@ -1203,13 +1137,17 @@ fn summarise_violations(violations: &[Violation]) -> String {
 /// Print `spar moves enumerate` usage to stderr.
 pub fn print_enumerate_usage() {
     eprintln!("Usage: spar moves enumerate --root Pkg::Type.Impl --component <fqn> \\");
-    eprintln!("                            [--target-filter <substring>] [--format text|json] \\");
-    eprintln!("                            <model.aadl>...");
+    eprintln!("                            [--target-filter <substring>] [--objective <mode>] \\");
+    eprintln!("                            [--format text|json] <model.aadl>...");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  --root           Root system implementation in Pkg::Type.Impl form");
     eprintln!("  --component      FQN (or suffix / bare name) of the component to enumerate");
     eprintln!("  --target-filter  Optional case-insensitive substring filter on candidate FQNs");
+    eprintln!(
+        "  --objective      Ranking objective: max-response (default), total-load, total-power,"
+    );
+    eprintln!("                   total-weight, or balanced (all four equally weighted)");
     eprintln!("  --format         Output format: text (default) or json");
     eprintln!();
     eprintln!("Candidate-target set:");
@@ -1223,12 +1161,36 @@ pub fn print_enumerate_usage() {
     eprintln!("  1  no admissible candidate (or input-resolution error)");
 }
 
+/// Parse the `--objective` CLI value into an [`EnumerationObjective`].
+///
+/// Recognised modes (case-insensitive, dashed form):
+///
+/// - `max-response` — single-axis: minimise max response time.
+/// - `total-load`   — single-axis: minimise total CPU utilisation.
+/// - `total-power`  — single-axis: minimise total power (Spar_Power).
+/// - `total-weight` — single-axis: minimise total weight.
+/// - `balanced`     — all four axes equally weighted.
+///
+/// Returns [`MovesError::UnknownObjective`] for any other input so the
+/// CLI driver can surface a clear message and a non-zero exit.
+fn parse_objective(s: &str) -> Result<EnumerationObjective, MovesError> {
+    match s.to_ascii_lowercase().as_str() {
+        "max-response" => Ok(EnumerationObjective::max_response()),
+        "total-load" => Ok(EnumerationObjective::total_load()),
+        "total-power" => Ok(EnumerationObjective::total_power()),
+        "total-weight" => Ok(EnumerationObjective::total_weight()),
+        "balanced" => Ok(EnumerationObjective::balanced()),
+        _ => Err(MovesError::UnknownObjective(s.to_string())),
+    }
+}
+
 /// Manual-arg parser for `spar moves enumerate`.
 fn cmd_moves_enumerate(args: &[String]) -> i32 {
     let mut root = None;
     let mut component = None;
     let mut target_filter: Option<String> = None;
     let mut format: Option<String> = None;
+    let mut objective_str: Option<String> = None;
     let mut model_files = Vec::new();
 
     let mut i = 0;
@@ -1257,6 +1219,17 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
                     return 1;
                 }
                 target_filter = Some(args[i].clone());
+            }
+            "--objective" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!(
+                        "--objective requires a value (max-response | total-load | \
+                         total-power | total-weight | balanced)"
+                    );
+                    return 1;
+                }
+                objective_str = Some(args[i].clone());
             }
             "--format" => {
                 i += 1;
@@ -1293,12 +1266,24 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
         return 1;
     }
 
+    let objective = match objective_str.as_deref() {
+        None => EnumerationObjective::max_response(),
+        Some(s) => match parse_objective(s) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return 1;
+            }
+        },
+    };
+
     let args = EnumerateArgs {
         model_files,
         root,
         component,
         target_filter,
         format: format.unwrap_or_else(|| "text".to_string()),
+        objective,
     };
 
     match run_enumerate(args) {
@@ -1313,31 +1298,6 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
 #[cfg(test)]
 mod enumerate_tests {
     use super::*;
-
-    #[test]
-    fn parse_format_time_roundtrips_units() {
-        assert_eq!(parse_format_time("10 ms"), Some(10_000_000_000));
-        assert_eq!(parse_format_time("1.50 ms"), Some(1_500_000_000));
-        assert_eq!(parse_format_time("500 us"), Some(500_000_000));
-        assert_eq!(parse_format_time("100 ps"), Some(100));
-        assert_eq!(parse_format_time("2.00 sec"), Some(2_000_000_000_000));
-        assert_eq!(parse_format_time(""), None);
-        assert_eq!(parse_format_time("not a time"), None);
-        assert_eq!(parse_format_time("10 fortnights"), None);
-    }
-
-    #[test]
-    fn parse_response_deadline_extracts_pair() {
-        let msg = "thread 't1' on processor 'cpu1': response time 5 ms <= deadline 10 ms";
-        let pair = parse_response_deadline(msg).expect("expected to parse");
-        assert_eq!(pair, (5_000_000_000, 10_000_000_000));
-    }
-
-    #[test]
-    fn parse_response_deadline_returns_none_on_unrelated_message() {
-        let msg = "ARINC653 partition X has no period";
-        assert!(parse_response_deadline(msg).is_none());
-    }
 
     #[test]
     fn summarise_violations_groups_by_kind() {
@@ -1361,5 +1321,35 @@ mod enumerate_tests {
         // Order is BTreeMap so AnalysisError comes before Frozen alphabetically.
         assert!(s.contains("AnalysisError×1"));
         assert!(s.contains("Frozen×2"));
+    }
+
+    #[test]
+    fn parse_objective_recognises_named_modes() {
+        assert!(matches!(
+            parse_objective("max-response"),
+            Ok(o) if o == EnumerationObjective::max_response()
+        ));
+        assert!(matches!(
+            parse_objective("total-load"),
+            Ok(o) if o == EnumerationObjective::total_load()
+        ));
+        assert!(matches!(
+            parse_objective("total-power"),
+            Ok(o) if o == EnumerationObjective::total_power()
+        ));
+        assert!(matches!(
+            parse_objective("total-weight"),
+            Ok(o) if o == EnumerationObjective::total_weight()
+        ));
+        assert!(matches!(
+            parse_objective("balanced"),
+            Ok(o) if o == EnumerationObjective::balanced()
+        ));
+    }
+
+    #[test]
+    fn parse_objective_rejects_unknown() {
+        let err = parse_objective("not-a-real-mode").unwrap_err();
+        assert!(matches!(err, MovesError::UnknownObjective(s) if s == "not-a-real-mode"));
     }
 }

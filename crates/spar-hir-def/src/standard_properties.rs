@@ -38,6 +38,7 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Spar_Trace",
     "Spar_Network",
     "Spar_Migration",
+    "Spar_Power",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -430,6 +431,32 @@ const SPAR_MIGRATION: &[(&str, &str)] = &[
     ("Pinned_Reason", "aadlstring"),
 ];
 
+// ── Spar_Power ──────────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// by the v0.8.0 Track E commit 5/8 multi-objective enumeration ranker
+// (`spar moves enumerate --objective total-power`). Sits alongside the
+// existing `SEI::PowerBudget` / `Physical_Properties::Power_Budget`
+// vocabulary read by `spar-analysis::weight_power` so users with neither
+// of those upstream sets in scope can still annotate per-component
+// power consumption for design-space ranking.
+//
+// Modeled as `Time` so the value lowers to picoseconds via the existing
+// AADL time-unit machinery — semantically the value carries milliwatts
+// and is read with [`crate::power::read_power_budget_mw`], but using
+// `Time` for the declarative type lets us reuse the time-aware lowerer
+// without inventing a new "Power" base type for v0.8.0. The `mw`
+// suffix is documented in the helper, not enforced at the
+// property-set level.
+
+const SPAR_POWER: &[(&str, &str)] = &[
+    // Per-component power-budget annotation in milliwatts. Read by the
+    // multi-objective ranker so users can score candidate bindings on
+    // total power. Optional — when absent the candidate's power
+    // contribution to the score is zero.
+    ("Power_Budget", "Time"),
+];
+
 /// Helper: collect properties from a table into the result vector.
 fn collect_properties(
     table: &[(&'static str, &'static str)],
@@ -469,6 +496,7 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     collect_properties(SPAR_TRACE, "Spar_Trace", &mut result);
     collect_properties(SPAR_NETWORK, "Spar_Network", &mut result);
     collect_properties(SPAR_MIGRATION, "Spar_Migration", &mut result);
+    collect_properties(SPAR_POWER, "Spar_Power", &mut result);
 
     result
 }
@@ -498,6 +526,7 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "spar_trace" => Some(SPAR_TRACE),
         "spar_network" => Some(SPAR_NETWORK),
         "spar_migration" => Some(SPAR_MIGRATION),
+        "spar_power" => Some(SPAR_POWER),
         _ => None,
     }
 }
@@ -546,6 +575,7 @@ mod tests {
         assert!(is_standard_property_set("Spar_Trace"));
         assert!(is_standard_property_set("Spar_Network"));
         assert!(is_standard_property_set("Spar_Migration"));
+        assert!(is_standard_property_set("Spar_Power"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -1013,14 +1043,15 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 = 121
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 = 122
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
-        //  + Spar_Migration)
+        //  + Spar_Migration + Spar_Power)
         // Thread_Properties: +1 for Locking_Protocol (v0.7.1 PIP/PCP).
         // Spar_Timing: +1 for Critical_Section_Blocking (v0.7.1 PIP/PCP).
         // Spar_Network: +1 for WCTT_Budget (Track D commit 4).
-        assert_eq!(all.len(), 121);
+        // Spar_Power: +1 for Power_Budget (Track E commit 5/8 ranker).
+        assert_eq!(all.len(), 122);
     }
 
     #[test]
