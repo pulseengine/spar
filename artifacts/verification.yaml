@@ -1568,6 +1568,64 @@ artifacts:
       - type: satisfies
         target: REQ-MIGRATION-004
 
+  - id: TEST-MOVES-ENUMERATE-OBJECTIVES
+    type: feature
+    title: spar moves enumerate multi-objective ranking integration tests
+    description: >
+      Integration tests in
+      crates/spar-cli/tests/moves_enumerate_objectives.rs that shell out
+      to the `spar` binary and exercise the new `--objective` ranking
+      option (Track E commit 5/8). Coverage:
+      (1) without --objective, the JSON shape carries the new
+          `rank.score` and `rank.max_response_ns` fields (max-response
+          is the default mode);
+      (2) `--objective total-load` sorts the candidate that lands t1 on
+          an empty CPU ahead of the one that lands it on an already-
+          loaded CPU;
+      (3) `--objective total-power` reads `Spar_Power::Power_Budget`
+          off the candidate processor and sorts low-power ahead of
+          high-power;
+      (4) `--objective total-weight` reads `Weight_Properties::Weight`
+          and sorts light ahead of heavy;
+      (5) `--objective balanced` aggregates all four axes (each at 1/4
+          weight) and still distinguishes high-power from low-power;
+      (6) `--objective <bogus>` exits non-zero with a clear error message
+          mentioning the offending value;
+      (7) the set of admissible (`ok=true`) candidates is identical
+          across all five objective modes for the same model;
+      (8) when the model carries no rankable data, every candidate's
+          score collapses to 0.0;
+      (9) the deadline-miss sentinel inflates the score (>= 9.99 under
+          --objective max-response) and the offending candidate sorts
+          last;
+      (10) the text-format header uses a `score` column instead of the
+           commit-4 `slack` column.
+      Plus 11 unit tests in spar-solver::enumerate covering objective
+      flag presets, score aggregation under each mode, the
+      Spar_Power-first / SEI-fallback chain on `read_power_budget_mw`,
+      power and weight value parsers (mW/W/kW/uW; kg/g/mg/lb; bare =
+      mW or kg), the typed-expression numeric extractor, and degenerate
+      empty-overlay rank behaviour. Plus 2 unit tests in
+      spar-cli::moves::enumerate_tests covering --objective parser
+      coverage of the named modes and rejection of unknown values.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test moves_enumerate_objectives
+        - run: cargo test -p spar-solver enumerate::
+        - run: cargo test -p spar moves::enumerate_tests
+    status: passing
+    tags: [migration, track-e, v080, cli, solver]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-007
+      - type: satisfies
+        target: REQ-MIGRATION-006
+      - type: satisfies
+        target: REQ-MIGRATION-005
+      - type: satisfies
+        target: REQ-MIGRATION-004
+
   - id: TEST-SPAR-NETWORK-GRAPH
     type: feature
     title: Network graph extraction tests

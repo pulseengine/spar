@@ -1235,6 +1235,34 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080, cli]
 
+  - id: REQ-MIGRATION-007
+    type: requirement
+    title: Multi-objective candidate ranking for `spar moves enumerate`
+    description: >
+      System shall rank hypothetical-binding candidates via a configurable
+      multi-objective score (max-response | total-load | total-power |
+      total-weight | balanced) using the same RTA / property-accessor
+      machinery as direct verification. The score (lower = better)
+      aggregates per-axis values: max response time across overlay-bound
+      threads parsed from RTA Info-level diagnostics; total CPU load
+      summed from `Compute_Execution_Time / Period` over overlay-bound
+      threads; total power from `Spar_Power::Power_Budget` (with
+      compatible upstream fallbacks via SEI / Physical_Properties); total
+      weight from `Weight_Properties::Weight` (with upstream fallbacks).
+      Each enabled axis contributes 1/k of the total score where k is
+      the count of enabled axes; `balanced` enables all four equally.
+      Exposed via the new `spar moves enumerate --objective <mode>` CLI
+      option; default mode is `max-response` so commit-4 single-CPU
+      slack semantics are preserved. The ranker lives in
+      `spar-solver::enumerate` so verify/enumerate output stays in
+      lock-step. Adds the `Spar_Power::Power_Budget` standard property
+      (numeric milliwatts) so models without SEI in scope can still
+      participate. Does NOT alter the validity (`ok`) judgement —
+      objective changes only re-order the candidate list. Per Track E
+      commit 5/8 of the v0.8.0 migration design research (§6.4).
+    status: planned
+    tags: [migration, track-e, v080, cli, solver]
+
   - id: REQ-NETWORK-004
     type: requirement
     title: Typed network graph extraction from a SystemInstance
