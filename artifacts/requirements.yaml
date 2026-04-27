@@ -1263,6 +1263,36 @@ artifacts:
     status: planned
     tags: [migration, track-e, v080, cli, solver]
 
+  - id: REQ-MIGRATION-008
+    type: requirement
+    title: spar moves verify/enumerate variant scoping (rivet v1 contract)
+    description: >
+      System shall accept `--variant NAME` (implicit form; spar shells
+      out to `rivet resolve --variant <name> --format spar-context-json`
+      per docs/contracts/rivet-spar-variant-v1.md) and
+      `--variant-context PATH` (explicit form; PATH is `-` for stdin or
+      a filesystem path) on both `spar moves verify` and
+      `spar moves enumerate`. The two flags are mutually exclusive. When
+      a variant is in play the move-oracle scopes its analysis to the
+      resolved-variant subset of HIR: components dropped by
+      keep_in_variant are unreachable as `--component` / `--to` targets
+      and are excluded from the candidate-target set in enumerate.
+      Resolution failures map to typed CLI errors — RivetNotFound
+      points at the explicit form, ComponentNotInVariant /
+      TargetNotInVariant identify dropped-by-variant inputs, and
+      VariantContextSchema surfaces the v1 reader's strict-version
+      refusal of v2+ blobs. The variant scope is non-mutating:
+      [`crate::variants_bridge::VariantScope`] wraps the SystemInstance
+      and exposes lookup-time accessors that hide dropped components
+      without touching the parsed model. JSON output adds top-level
+      `variant` and `feature_model_hash` fields; text output prefixes
+      the summary line with `(variant=<name>)`. Track E commit 6/8 of
+      the v0.8.0 migration design research, wiring the spar-variants
+      consumer crate (REQ-VARIANT-001) into the verify/enumerate
+      pipelines (REQ-MIGRATION-005, REQ-MIGRATION-006).
+    status: planned
+    tags: [migration, variants, track-e, track-b, v080, cli]
+
   - id: REQ-NETWORK-004
     type: requirement
     title: Typed network graph extraction from a SystemInstance

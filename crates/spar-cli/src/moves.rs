@@ -64,15 +64,20 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::process;
+use std::sync::Arc;
 
 use serde::Serialize;
 
 use spar_analysis::{AnalysisDiagnostic, Severity};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
-use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::item_tree::{ComponentCategory, ItemTree};
 use spar_hir_def::{AllowedTargetsViolation, BindingOverlay, FrozenViolation, OverlayDiagnostic};
 use spar_solver::enumerate::{CandidateRank, EnumerationObjective, rank_candidate};
+use spar_variants::{ContextError, VariantContext};
+
+use crate::variants_bridge::{SourcePathMap, VariantScope};
 
 /// Parsed CLI arguments for `spar moves verify`.
 ///
@@ -80,7 +85,7 @@ use spar_solver::enumerate::{CandidateRank, EnumerationObjective, rank_candidate
 /// the design-research-style clap struct in track-e-migration-research §6.3
 /// without dragging clap into spar-cli (which still uses hand-rolled
 /// `args[i]` matching for every other subcommand).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VerifyArgs {
     /// Path(s) to the AADL model file(s) to load.
     pub model_files: Vec<String>,
@@ -92,6 +97,15 @@ pub struct VerifyArgs {
     pub target: String,
     /// Output format: `text` (default) or `json`.
     pub format: String,
+    /// Implicit-form variant name. When set (and `variant_context` is
+    /// not), spar shells out to `rivet resolve --variant <name>
+    /// --format spar-context-json` per the v1 contract. Mutually
+    /// exclusive with [`Self::variant_context`].
+    pub variant: Option<String>,
+    /// Explicit-form variant-context source. `Some("-")` reads stdin;
+    /// any other path is read from the filesystem. Mutually exclusive
+    /// with [`Self::variant`].
+    pub variant_context: Option<String>,
 }
 
 /// All ways `spar moves verify` can fail before producing a report.
@@ -122,6 +136,31 @@ pub enum MovesError {
     /// (`max-response`, `total-load`, `total-power`, `total-weight`,
     /// `balanced`).
     UnknownObjective(String),
+    /// `--variant` and `--variant-context` were both supplied. The v1
+    /// contract specifies they are mutually exclusive.
+    VariantArgsConflict,
+    /// `--variant-context` could not be read from the named file or stdin.
+    VariantContextIo(String, std::io::Error),
+    /// The variant context blob failed schema validation. Wrapped from
+    /// [`spar_variants::ContextError`] so unknown-version refusal and
+    /// JSON-parse failures are reported with their original message.
+    VariantContextSchema(ContextError),
+    /// `--variant NAME` was supplied but rivet could not be located on
+    /// `$PATH` (and `$RIVET_BIN` was unset). Per the v1 contract we
+    /// point the user at the explicit form.
+    RivetNotFound,
+    /// rivet was located but exited non-zero. The captured stderr is
+    /// surfaced to the user.
+    RivetFailed { stderr: String, code: Option<i32> },
+    /// rivet emitted output we could not capture or decode.
+    RivetIo(std::io::Error),
+    /// A user-supplied `--component` value resolves to a component that
+    /// the variant filter dropped. Per the contract — and the
+    /// commit-spec — the move-oracle scopes its analysis to the kept
+    /// subset only.
+    ComponentNotInVariant { name: String, variant: String },
+    /// As above but for `--to`.
+    TargetNotInVariant { name: String, variant: String },
 }
 
 impl std::fmt::Display for MovesError {
@@ -150,6 +189,37 @@ impl std::fmt::Display for MovesError {
                 "--objective {o} is not recognised (expected max-response | total-load | \
                  total-power | total-weight | balanced)",
             ),
+            MovesError::VariantArgsConflict => write!(
+                f,
+                "--variant and --variant-context are mutually exclusive (see docs/contracts/rivet-spar-variant-v1.md)",
+            ),
+            MovesError::VariantContextIo(path, err) => {
+                write!(f, "Cannot read variant context from {path}: {err}")
+            }
+            MovesError::VariantContextSchema(err) => {
+                write!(f, "Variant context: {err}")
+            }
+            MovesError::RivetNotFound => write!(
+                f,
+                "rivet not found on $PATH and $RIVET_BIN is unset; \
+                 either install rivet or use the explicit form: \
+                 `rivet resolve --variant <name> --format spar-context-json > ctx.json` \
+                 then pass `--variant-context ctx.json` \
+                 (see docs/contracts/rivet-spar-variant-v1.md)",
+            ),
+            MovesError::RivetFailed { stderr, code } => {
+                let suffix = code
+                    .map(|c| format!("exit {c}"))
+                    .unwrap_or_else(|| "killed".into());
+                write!(f, "rivet resolve failed ({suffix}): {stderr}")
+            }
+            MovesError::RivetIo(err) => write!(f, "Cannot run rivet: {err}"),
+            MovesError::ComponentNotInVariant { name, variant } => {
+                write!(f, "--component {name} is not part of variant {variant}",)
+            }
+            MovesError::TargetNotInVariant { name, variant } => {
+                write!(f, "--to {name} is not part of variant {variant}",)
+            }
         }
     }
 }
@@ -236,6 +306,19 @@ pub struct MoveVerifyReport {
     /// Per-pass diagnostic stream from the analysis suite, keyed by pass
     /// name. Empty when there were no analysis diagnostics for a pass.
     pub diagnostics_by_pass: BTreeMap<String, Vec<DiagnosticOut>>,
+    /// Resolved-variant name when the run was scoped by a rivet
+    /// variant context per the v1 contract, otherwise `None`.
+    /// Promoted to a top-level field so MCP consumers can route a
+    /// follow-up call back to the same variant without parsing the
+    /// audit trail.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// Stable hash of the feature model that produced the variant
+    /// resolution. Used as a salsa cache key; surfaced here so audit
+    /// trails can pin the exact feature model the analysis was run
+    /// against. `None` when no variant was applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_model_hash: Option<String>,
 }
 
 /// Wire-format mirror of [`AnalysisDiagnostic`].
@@ -284,41 +367,25 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
     // 1. Parse + instantiate. We mirror the path used by `spar analyze`,
     //    short-circuiting the same way on parse errors so users see a
     //    diagnostic rather than a stack trace.
-    let db = spar_hir_def::HirDefDatabase::default();
-    let mut trees = Vec::new();
-    for file_path in &args.model_files {
-        let source =
-            fs::read_to_string(file_path).map_err(|e| MovesError::Io(file_path.clone(), e))?;
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            let mut msg = String::new();
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                msg.push_str(&format!("{file_path}:{line}:{col}: {}\n", err.msg));
-            }
-            return Err(MovesError::Parse(file_path.clone(), msg));
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
-        trees.push(spar_hir_def::file_item_tree(&db, sf));
-    }
+    let (inst, source_paths) = parse_and_instantiate(&args.model_files, &args.root)?;
 
-    let (pkg_name, type_name, impl_name) = parse_root_ref(&args.root)?;
-    let scope = spar_hir_def::GlobalScope::from_trees(trees);
-    let inst = SystemInstance::instantiate(
-        &scope,
-        &spar_hir_def::Name::new(&pkg_name),
-        &spar_hir_def::Name::new(&type_name),
-        &spar_hir_def::Name::new(&impl_name),
-    );
-    if inst.component_count() == 0 {
-        return Err(MovesError::UnknownRoot(args.root.clone()));
-    }
+    // 2. Optional variant scope. Variant filtering happens *before*
+    //    overlay validation so dropped components can never appear as
+    //    `--component` or `--to` resolution targets — matching the
+    //    contract's intersection semantics. The scope itself is non-
+    //    mutating; the analysis suite still sees the full instance and
+    //    is expected to remain monotonic w.r.t. the kept subset.
+    let variant_ctx =
+        load_variant_context(args.variant.as_deref(), args.variant_context.as_deref())?;
+    let scope_holder = variant_ctx
+        .as_ref()
+        .map(|ctx| VariantScope::new(&inst, ctx, &source_paths));
 
-    // 2. Resolve component + target FQNs.
-    let comp_idx = resolve_component(&inst, &args.component)
-        .ok_or_else(|| MovesError::UnknownComponent(args.component.clone()))?;
-    let target_idx = resolve_component(&inst, &args.target)
-        .ok_or_else(|| MovesError::UnknownTarget(args.target.clone()))?;
+    // 3. Resolve component + target FQNs (variant-aware).
+    let comp_idx = resolve_component_in_scope(&inst, scope_holder.as_ref(), &args.component)
+        .ok_or_else(|| component_not_found_error(&args.component, scope_holder.as_ref()))?;
+    let target_idx = resolve_component_in_scope(&inst, scope_holder.as_ref(), &args.target)
+        .ok_or_else(|| target_not_found_error(&args.target, scope_holder.as_ref()))?;
     let target_cat = inst.component(target_idx).category;
     if target_cat != ComponentCategory::Processor
         && target_cat != ComponentCategory::VirtualProcessor
@@ -329,12 +396,12 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
         });
     }
 
-    // 3. Build the overlay and validate against the platform / application split.
+    // 4. Build the overlay and validate against the platform / application split.
     let mut overlay = BindingOverlay::new();
     overlay.add_move(comp_idx, target_idx);
     let overlay_diags = overlay.validate(&inst);
 
-    // 4. Run the analysis suite.
+    // 5. Run the analysis suite.
     //
     //    Per commit 3 scope: the suite reads the un-overlayed instance.
     //    The overlay still surfaces its own constraint-layer
@@ -346,16 +413,20 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
     //    binding rather than the declared one.
     let analysis_diags = run_all_analyses(&inst);
 
-    // 5. Build the structured report.
-    let report = build_report(&inst, comp_idx, target_idx, &overlay_diags, &analysis_diags);
+    // 6. Build the structured report.
+    let mut report = build_report(&inst, comp_idx, target_idx, &overlay_diags, &analysis_diags);
+    if let Some(scope) = scope_holder.as_ref() {
+        report.variant = Some(scope.variant_name().to_string());
+        report.feature_model_hash = Some(scope.feature_model_hash().to_string());
+    }
 
-    // 6. Render.
+    // 7. Render.
     match args.format.as_str() {
         "json" => render_json(&report),
         _ => render_text(&report),
     }
 
-    // 7. Compute exit code.
+    // 8. Compute exit code.
     Ok(exit_code_for(&report, &overlay_diags))
 }
 
@@ -432,6 +503,8 @@ fn build_report(
         target: fqn(instance, target_idx),
         violations,
         diagnostics_by_pass: by_pass,
+        variant: None,
+        feature_model_hash: None,
     }
 }
 
@@ -448,7 +521,14 @@ fn render_json(report: &MoveVerifyReport) {
 /// analysis output when an `AnalysisError` is reported.
 fn render_text(report: &MoveVerifyReport) {
     let status = if report.ok { "OK" } else { "FAIL" };
-    println!("{} move {} -> {}", status, report.component, report.target);
+    let variant_prefix = match &report.variant {
+        Some(v) => format!("(variant={v}) "),
+        None => String::new(),
+    };
+    println!(
+        "{}{} move {} -> {}",
+        variant_prefix, status, report.component, report.target,
+    );
 
     if report.violations.is_empty() {
         println!("  no violations");
@@ -605,6 +685,238 @@ fn run_all_analyses(inst: &SystemInstance) -> Vec<AnalysisDiagnostic> {
     runner.run_all(inst)
 }
 
+/// Parse the model files, build the global scope, instantiate the root,
+/// and return the instance plus a `(package, type) -> path` map for the
+/// variant-bridge layer.
+///
+/// Centralised so verify and enumerate share the exact same parse +
+/// instantiate pipeline; differences live in the variant scope and the
+/// candidate-target enumeration respectively.
+fn parse_and_instantiate(
+    model_files: &[String],
+    root: &str,
+) -> Result<(SystemInstance, SourcePathMap), MovesError> {
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+    let mut path_pairs: Vec<(String, Arc<ItemTree>)> = Vec::new();
+    for file_path in model_files {
+        let source =
+            fs::read_to_string(file_path).map_err(|e| MovesError::Io(file_path.clone(), e))?;
+        let parsed = spar_syntax::parse(&source);
+        if !parsed.ok() {
+            let mut msg = String::new();
+            for err in parsed.errors() {
+                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
+                msg.push_str(&format!("{file_path}:{line}:{col}: {}\n", err.msg));
+            }
+            return Err(MovesError::Parse(file_path.clone(), msg));
+        }
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        path_pairs.push((file_path.clone(), tree.clone()));
+        trees.push(tree);
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(root)?;
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+    if inst.component_count() == 0 {
+        return Err(MovesError::UnknownRoot(root.to_string()));
+    }
+    let source_paths = SourcePathMap::from_trees(&path_pairs);
+    Ok((inst, source_paths))
+}
+
+/// Resolve the variant-context source — either implicit (`--variant
+/// NAME`, shells out to rivet) or explicit (`--variant-context PATH`,
+/// where `PATH` is `-` for stdin or a filesystem path) — and return
+/// the parsed [`VariantContext`].
+///
+/// `None` is returned when neither flag was supplied, in which case
+/// the run is a no-op variant-pass-through (the legacy v0.7.x path).
+///
+/// Mutual exclusion is enforced: passing both flags is a hard error
+/// per the v1 contract's CLI section.
+///
+/// # Test override
+///
+/// The `SPAR_VARIANT_TEST_RIVET_OUTPUT` environment variable, if set
+/// when `--variant NAME` is in play, replaces the rivet shell-out with
+/// a direct read of the variable's value. This is the seam the
+/// integration test uses to exercise the implicit-form path without
+/// requiring a real rivet binary on the test runner.
+fn load_variant_context(
+    variant: Option<&str>,
+    variant_context: Option<&str>,
+) -> Result<Option<VariantContext>, MovesError> {
+    match (variant, variant_context) {
+        (Some(_), Some(_)) => Err(MovesError::VariantArgsConflict),
+        (None, None) => Ok(None),
+        (None, Some(path)) => {
+            let blob = read_variant_context_file(path)?;
+            VariantContext::from_json(&blob)
+                .map(Some)
+                .map_err(MovesError::VariantContextSchema)
+        }
+        (Some(name), None) => {
+            // Test seam: the integration tests set this to the JSON
+            // payload they want spar to read. In production this is
+            // never set, so we fall through to shelling out.
+            if let Ok(payload) = std::env::var("SPAR_VARIANT_TEST_RIVET_OUTPUT") {
+                return VariantContext::from_json(&payload)
+                    .map(Some)
+                    .map_err(MovesError::VariantContextSchema);
+            }
+            let blob = shell_out_to_rivet(name)?;
+            VariantContext::from_json(&blob)
+                .map(Some)
+                .map_err(MovesError::VariantContextSchema)
+        }
+    }
+}
+
+/// Read a `--variant-context` payload from the named source.
+///
+/// The path `-` reads stdin to EOF. Any other path is a filesystem
+/// path; failures are reported with a context-rich error.
+fn read_variant_context_file(path: &str) -> Result<String, MovesError> {
+    if path == "-" {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| MovesError::VariantContextIo("<stdin>".to_string(), e))?;
+        Ok(buf)
+    } else {
+        fs::read_to_string(path).map_err(|e| MovesError::VariantContextIo(path.to_string(), e))
+    }
+}
+
+/// Shell out to `rivet resolve --variant NAME --format spar-context-json`
+/// and return its stdout.
+///
+/// The rivet binary is located via `$RIVET_BIN` first, then via the
+/// host `$PATH`. Failures map to typed [`MovesError`] variants so the
+/// CLI surface emits actionable messages rather than raw OS errors.
+fn shell_out_to_rivet(variant: &str) -> Result<String, MovesError> {
+    let bin = match std::env::var_os("RIVET_BIN") {
+        Some(v) => std::path::PathBuf::from(v),
+        None => match which_rivet() {
+            Some(p) => p,
+            None => return Err(MovesError::RivetNotFound),
+        },
+    };
+
+    let output = process::Command::new(&bin)
+        .args([
+            "resolve",
+            "--variant",
+            variant,
+            "--format",
+            "spar-context-json",
+        ])
+        .output()
+        .map_err(|e| {
+            // `not found` -> RivetNotFound; everything else -> IO error
+            // bubble.
+            if e.kind() == std::io::ErrorKind::NotFound {
+                MovesError::RivetNotFound
+            } else {
+                MovesError::RivetIo(e)
+            }
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(MovesError::RivetFailed {
+            stderr,
+            code: output.status.code(),
+        });
+    }
+    String::from_utf8(output.stdout).map_err(|e| {
+        MovesError::RivetIo(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("rivet stdout was not UTF-8: {e}"),
+        ))
+    })
+}
+
+/// Best-effort lookup of `rivet` on `$PATH`. Returns `None` when no
+/// `rivet` (or `rivet.exe`) is found in any `$PATH` entry.
+fn which_rivet() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        for name in ["rivet", "rivet.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Variant-aware component resolution.
+///
+/// When a [`VariantScope`] is supplied, the resolver first tries to
+/// match against the kept subset only — so `--component X` resolving to
+/// a dropped component is reported as "not in variant" rather than
+/// silently snapping to a same-named-but-kept sibling. When no scope is
+/// in play we fall through to the v0.7.x [`resolve_component`] path
+/// untouched.
+fn resolve_component_in_scope(
+    inst: &SystemInstance,
+    scope: Option<&VariantScope<'_>>,
+    name: &str,
+) -> Option<ComponentInstanceIdx> {
+    let raw = resolve_component(inst, name)?;
+    if let Some(scope) = scope {
+        if scope.is_kept(raw) {
+            Some(raw)
+        } else {
+            // Dropped by the variant. The resolver's caller turns this
+            // into a typed error (`ComponentNotInVariant` /
+            // `TargetNotInVariant`) — we just signal "not findable".
+            None
+        }
+    } else {
+        Some(raw)
+    }
+}
+
+/// Lift a "name not found" failure into the right [`MovesError`]
+/// variant: when a variant scope is active the dropped-by-variant case
+/// gets a more specific diagnostic so users know to check the variant
+/// definition rather than the model.
+fn component_not_found_error(name: &str, scope: Option<&VariantScope<'_>>) -> MovesError {
+    match scope {
+        Some(scope) if resolve_component(scope.instance, name).is_some() => {
+            MovesError::ComponentNotInVariant {
+                name: name.to_string(),
+                variant: scope.variant_name().to_string(),
+            }
+        }
+        _ => MovesError::UnknownComponent(name.to_string()),
+    }
+}
+
+/// As [`component_not_found_error`] but for `--to`.
+fn target_not_found_error(name: &str, scope: Option<&VariantScope<'_>>) -> MovesError {
+    match scope {
+        Some(scope) if resolve_component(scope.instance, name).is_some() => {
+            MovesError::TargetNotInVariant {
+                name: name.to_string(),
+                variant: scope.variant_name().to_string(),
+            }
+        }
+        _ => MovesError::UnknownTarget(name.to_string()),
+    }
+}
+
 // ── CLI dispatch helpers ─────────────────────────────────────────────
 
 /// Print top-level `spar moves` usage to stderr and exit non-zero.
@@ -624,15 +936,24 @@ pub fn print_verify_usage() {
     eprintln!(
         "Usage: spar moves verify --root Pkg::Type.Impl --component <fqn> --to <processor> \\"
     );
-    eprintln!("                         [--format text|json] <model.aadl>...");
+    eprintln!(
+        "                         [--variant NAME | --variant-context PATH] [--format text|json] \\"
+    );
+    eprintln!("                         <model.aadl>...");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --root        Root system implementation in Pkg::Type.Impl form");
+    eprintln!("  --root             Root system implementation in Pkg::Type.Impl form");
     eprintln!(
-        "  --component   FQN (or suffix / bare name) of the component to (hypothetically) move"
+        "  --component        FQN (or suffix / bare name) of the component to (hypothetically) move"
     );
-    eprintln!("  --to          FQN (or suffix / bare name) of the target processor");
-    eprintln!("  --format      Output format: text (default) or json");
+    eprintln!("  --to               FQN (or suffix / bare name) of the target processor");
+    eprintln!("  --format           Output format: text (default) or json");
+    eprintln!(
+        "  --variant          Variant NAME; spar shells out to `rivet resolve` (see contract docs)"
+    );
+    eprintln!(
+        "  --variant-context  PATH (or '-' for stdin) of an explicit rivet variant-context blob"
+    );
     eprintln!();
     eprintln!("Exit codes:");
     eprintln!("  0  move is admissible (no violations, no analysis errors)");
@@ -664,6 +985,8 @@ fn cmd_moves_verify(args: &[String]) -> i32 {
     let mut component = None;
     let mut target = None;
     let mut format: Option<String> = None;
+    let mut variant: Option<String> = None;
+    let mut variant_context: Option<String> = None;
     let mut model_files = Vec::new();
 
     let mut i = 0;
@@ -700,6 +1023,22 @@ fn cmd_moves_verify(args: &[String]) -> i32 {
                     return 1;
                 }
                 format = Some(args[i].clone());
+            }
+            "--variant" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--variant requires a value (variant name)");
+                    return 1;
+                }
+                variant = Some(args[i].clone());
+            }
+            "--variant-context" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--variant-context requires a value (path or '-' for stdin)");
+                    return 1;
+                }
+                variant_context = Some(args[i].clone());
             }
             "--help" | "-h" => {
                 print_verify_usage();
@@ -738,6 +1077,8 @@ fn cmd_moves_verify(args: &[String]) -> i32 {
         component,
         target,
         format: format.unwrap_or_else(|| "text".to_string()),
+        variant,
+        variant_context,
     };
 
     match run_verify(args) {
@@ -787,6 +1128,11 @@ pub struct EnumerateArgs {
     /// `EnumerationObjective::max_response()` — equivalent to commit 4's
     /// slack-only ranking on single-CPU models.
     pub objective: EnumerationObjective,
+    /// Implicit-form variant name. See [`VerifyArgs::variant`].
+    pub variant: Option<String>,
+    /// Explicit-form variant-context source. See
+    /// [`VerifyArgs::variant_context`].
+    pub variant_context: Option<String>,
 }
 
 /// Per-candidate verification record produced by `spar moves enumerate`.
@@ -835,6 +1181,14 @@ pub struct MoveEnumerateReport {
     pub total: usize,
     /// Number of `ok=true` candidates (admissible moves).
     pub valid: usize,
+    /// Resolved-variant name when the run was scoped by a rivet
+    /// variant context per the v1 contract, otherwise `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    /// Stable hash of the feature model that produced the variant
+    /// resolution. `None` when no variant was applied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_model_hash: Option<String>,
 }
 
 /// Run `spar moves enumerate`, returning the desired process exit code.
@@ -872,49 +1226,36 @@ pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
     }
 
     // 1. Parse + instantiate.
-    let db = spar_hir_def::HirDefDatabase::default();
-    let mut trees = Vec::new();
-    for file_path in &args.model_files {
-        let source =
-            fs::read_to_string(file_path).map_err(|e| MovesError::Io(file_path.clone(), e))?;
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            let mut msg = String::new();
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                msg.push_str(&format!("{file_path}:{line}:{col}: {}\n", err.msg));
-            }
-            return Err(MovesError::Parse(file_path.clone(), msg));
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
-        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    let (inst, source_paths) = parse_and_instantiate(&args.model_files, &args.root)?;
+
+    // 2. Optional variant scope (see verify pipeline notes).
+    let variant_ctx =
+        load_variant_context(args.variant.as_deref(), args.variant_context.as_deref())?;
+    let scope_holder = variant_ctx
+        .as_ref()
+        .map(|ctx| VariantScope::new(&inst, ctx, &source_paths));
+
+    // 3. Resolve --component (variant-aware).
+    let comp_idx = resolve_component_in_scope(&inst, scope_holder.as_ref(), &args.component)
+        .ok_or_else(|| component_not_found_error(&args.component, scope_holder.as_ref()))?;
+
+    // 4. Build the candidate-target set, intersecting with the kept
+    //    subset when a variant is in play.
+    let mut candidates = candidate_targets(&inst, comp_idx, args.target_filter.as_deref());
+    if let Some(scope) = scope_holder.as_ref() {
+        candidates.retain(|idx| scope.is_kept(*idx));
     }
 
-    let (pkg_name, type_name, impl_name) = parse_root_ref(&args.root)?;
-    let scope = spar_hir_def::GlobalScope::from_trees(trees);
-    let inst = SystemInstance::instantiate(
-        &scope,
-        &spar_hir_def::Name::new(&pkg_name),
-        &spar_hir_def::Name::new(&type_name),
-        &spar_hir_def::Name::new(&impl_name),
-    );
-    if inst.component_count() == 0 {
-        return Err(MovesError::UnknownRoot(args.root.clone()));
-    }
-
-    // 2. Resolve --component.
-    let comp_idx = resolve_component(&inst, &args.component)
-        .ok_or_else(|| MovesError::UnknownComponent(args.component.clone()))?;
-
-    // 3. Build the candidate-target set.
-    let candidates = candidate_targets(&inst, comp_idx, args.target_filter.as_deref());
-
-    // 4-5. Verify each candidate.
+    // 5-6. Verify each candidate.
     let mut report = MoveEnumerateReport {
         component: fqn(&inst, comp_idx),
         candidates: Vec::with_capacity(candidates.len()),
         total: 0,
         valid: 0,
+        variant: scope_holder.as_ref().map(|s| s.variant_name().to_string()),
+        feature_model_hash: scope_holder
+            .as_ref()
+            .map(|s| s.feature_model_hash().to_string()),
     };
 
     for target_idx in candidates {
@@ -1077,9 +1418,13 @@ fn render_enumerate_json(report: &MoveEnumerateReport) {
 /// rank value; `<missed>` is emitted for deadline-miss candidates so
 /// the column stays one token wide.
 fn render_enumerate_text(report: &MoveEnumerateReport) {
+    let variant_prefix = match &report.variant {
+        Some(v) => format!("(variant={v}) "),
+        None => String::new(),
+    };
     println!(
-        "Enumerate {} ({} candidates)",
-        report.component, report.total
+        "{}Enumerate {} ({} candidates)",
+        variant_prefix, report.component, report.total,
     );
     if report.candidates.is_empty() {
         println!("  (no candidate targets)");
@@ -1138,17 +1483,25 @@ fn summarise_violations(violations: &[Violation]) -> String {
 pub fn print_enumerate_usage() {
     eprintln!("Usage: spar moves enumerate --root Pkg::Type.Impl --component <fqn> \\");
     eprintln!("                            [--target-filter <substring>] [--objective <mode>] \\");
-    eprintln!("                            [--format text|json] <model.aadl>...");
+    eprintln!("                            [--format text|json] \\");
+    eprintln!("                            [--variant NAME | --variant-context PATH] \\");
+    eprintln!("                            <model.aadl>...");
     eprintln!();
     eprintln!("Options:");
-    eprintln!("  --root           Root system implementation in Pkg::Type.Impl form");
-    eprintln!("  --component      FQN (or suffix / bare name) of the component to enumerate");
-    eprintln!("  --target-filter  Optional case-insensitive substring filter on candidate FQNs");
+    eprintln!("  --root             Root system implementation in Pkg::Type.Impl form");
+    eprintln!("  --component        FQN (or suffix / bare name) of the component to enumerate");
+    eprintln!("  --target-filter    Optional case-insensitive substring filter on candidate FQNs");
     eprintln!(
-        "  --objective      Ranking objective: max-response (default), total-load, total-power,"
+        "  --objective        Ranking objective: max-response (default), total-load, total-power,"
     );
-    eprintln!("                   total-weight, or balanced (all four equally weighted)");
-    eprintln!("  --format         Output format: text (default) or json");
+    eprintln!("                     total-weight, or balanced (all four equally weighted)");
+    eprintln!("  --format           Output format: text (default) or json");
+    eprintln!(
+        "  --variant          Variant NAME; spar shells out to `rivet resolve` (see contract docs)"
+    );
+    eprintln!(
+        "  --variant-context  PATH (or '-' for stdin) of an explicit rivet variant-context blob"
+    );
     eprintln!();
     eprintln!("Candidate-target set:");
     eprintln!(
@@ -1191,6 +1544,8 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
     let mut target_filter: Option<String> = None;
     let mut format: Option<String> = None;
     let mut objective_str: Option<String> = None;
+    let mut variant: Option<String> = None;
+    let mut variant_context: Option<String> = None;
     let mut model_files = Vec::new();
 
     let mut i = 0;
@@ -1239,6 +1594,22 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
                 }
                 format = Some(args[i].clone());
             }
+            "--variant" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--variant requires a value (variant name)");
+                    return 1;
+                }
+                variant = Some(args[i].clone());
+            }
+            "--variant-context" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("--variant-context requires a value (path or '-' for stdin)");
+                    return 1;
+                }
+                variant_context = Some(args[i].clone());
+            }
             "--help" | "-h" => {
                 print_enumerate_usage();
                 return 0;
@@ -1284,6 +1655,8 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
         target_filter,
         format: format.unwrap_or_else(|| "text".to_string()),
         objective,
+        variant,
+        variant_context,
     };
 
     match run_enumerate(args) {

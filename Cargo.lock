@@ -1238,6 +1238,7 @@ dependencies = [
  "spar-solver",
  "spar-syntax",
  "spar-sysml2",
+ "spar-variants",
  "toml",
 ]
 
