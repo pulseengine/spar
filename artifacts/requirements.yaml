@@ -1356,4 +1356,26 @@ artifacts:
     status: implemented
     tags: [timing, rta, pip, pcp, blocking, v071]
 
+  - id: REQ-NETWORK-007
+    type: requirement
+    title: Lean-formalized Network Calculus closed-form statements
+    description: >
+      System provides Lean-formalized statements of classical Network
+      Calculus closed-forms anchoring the spar-network/curves.rs
+      implementation. Statements cover monotonicity of the affine
+      arrival curve α(t) and the rate-latency service curve β(t),
+      the "β = 0 below latency" property, the closed-form backlog
+      bound (σ + ρ·T) and delay bound (T + σ/R) for stable affine
+      flow, the output-curve burst inflation theorem (rate preserved,
+      burst grows by ρ·T), and the serial-chain naive composition
+      sum. Discharges Le Boudec & Thiran "Network Calculus" (Springer
+      2001) chapter 1 closed-forms 1.4.1–1.4.3 as machine-checked
+      Lean specs, mirroring the Rust min-plus kernel in
+      crates/spar-network/src/curves.rs. Some proofs use `sorry` with
+      a TODO(v1.0.0) tag; statements are the load-bearing artifact.
+      Track D commit 5 of the v0.8.0 design
+      (docs/designs/track-d-tsn-wctt-research.md §4.3-4.4).
+    status: planned
+    tags: [network, wctt, lean, proofs, v080]
+
   # Research findings tracked separately in research/findings.yaml
