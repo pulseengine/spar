@@ -1626,6 +1626,53 @@ artifacts:
       - type: satisfies
         target: REQ-MIGRATION-004
 
+  - id: TEST-MOVES-VARIANT
+    type: feature
+    title: spar moves verify/enumerate variant integration tests
+    description: >
+      Integration tests in crates/spar-cli/tests/moves_variant.rs that
+      shell out to the `spar` binary and exercise the variant-aware
+      flags on `spar moves verify` and `spar moves enumerate` (Track E
+      commit 6/8). Coverage:
+      (1) verify with --variant-context filters the analysis surface to
+          the kept subset and emits ok=true plus a top-level
+          `variant` field for the petrol-only fixture;
+      (2) --component pointing at a dropped-by-variant subcomponent
+          yields a "not part of variant <name>" diagnostic and
+          non-zero exit;
+      (3) enumerate with --variant-context excludes processors gated
+          on a missing feature from the candidate list;
+      (4) --variant-context accepts both a filesystem path and `-`
+          (stdin) per the v1 contract's CLI section;
+      (5) --variant NAME shells out to rivet via $RIVET_BIN / $PATH;
+          a test seam (SPAR_VARIANT_TEST_RIVET_OUTPUT env var)
+          short-circuits the shell-out so CI runners without rivet
+          can still cover the implicit-form code path end-to-end;
+      (6) --variant NAME with no rivet on PATH and no $RIVET_BIN
+          emits the documented diagnostic that points back to the
+          explicit form and the contract doc;
+      (7) any rivet_spar_context_version other than "1" is refused
+          with a clear error message, satisfying the contract's
+          strict-version-rejection clause;
+      (8) JSON output includes both `variant` and `feature_model_hash`
+          top-level fields when a variant context is active, supplying
+          the audit-trail metadata MCP / rivet downstream consume.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test moves_variant
+    status: passing
+    tags: [migration, variants, track-e, track-b, v080, cli]
+    links:
+      - type: satisfies
+        target: REQ-MIGRATION-008
+      - type: satisfies
+        target: REQ-VARIANT-001
+      - type: satisfies
+        target: REQ-MIGRATION-005
+      - type: satisfies
+        target: REQ-MIGRATION-006
+
   - id: TEST-SPAR-NETWORK-GRAPH
     type: feature
     title: Network graph extraction tests

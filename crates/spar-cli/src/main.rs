@@ -4,6 +4,7 @@ mod lsp;
 mod moves;
 mod refactor;
 mod sarif;
+mod variants_bridge;
 mod verify;
 
 use std::{env, fs, process};
