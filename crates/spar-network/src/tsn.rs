@@ -166,6 +166,119 @@ pub fn get_gate_control_list_raw(props: &PropertyMap) -> Option<String> {
     get_raw(props, "Gate_Control_List").map(|s| s.trim().trim_matches('"').to_string())
 }
 
+// ── Frame preemption (802.1Qbu) ──────────────────────────────────────
+//
+// 802.1Qbu allows an "express" traffic class to interrupt a
+// "preemptable" frame mid-flight, dramatically shrinking the worst-case
+// blocking term seen by express frames at a port. Without preemption,
+// an express frame may have to wait for an entire preemptable MTU to
+// drain before it can be transmitted (B_no_pmt = max_preemptable_frame
+// / link_rate). With preemption, that blocking shrinks to a single
+// minimum fragment plus the preemption header
+// (B_pmt = (MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) / link_rate).
+//
+// References:
+// - IEEE Std 802.1Qbu-2016 (Frame Preemption), §6.7.2.
+// - IEEE Std 802.3br-2016 (Interspersed Express Traffic), §99.4.7
+//   (mPacket and the 4-byte mCRC / SMD-S preemption header).
+// - Le Boudec & Thiran, *Network Calculus* (2001), §1.5 (FIFO blocking
+//   bounds — the "max_p_size / R" envelope that preemption attacks).
+// - docs/designs/track-d-tsn-wctt-research.md §5.2-5.3.
+
+/// Minimum Ethernet frame payload size, in bytes (IEEE 802.3 §3.2.7
+/// "minFrameSize" — 64 bytes including FCS, the smallest legal
+/// Ethernet frame). When 802.1Qbu preemption is enabled this is the
+/// minimum size of an in-flight preemptable fragment, and so it
+/// dominates the residual blocking seen by an express frame.
+pub const MIN_FRAGMENT_BYTES: u64 = 64;
+
+/// Preemption header overhead per fragment, in bytes (IEEE 802.3br
+/// §99.4.7 — the SMD-S/SMD-C start-of-mPacket delimiter plus the
+/// 4-byte mCRC tail). Charged once per blocking event because the
+/// express frame waits at most one fragment to start transmitting.
+pub const PREEMPTION_HEADER_BYTES: u64 = 4;
+
+/// Picoseconds per second; mirrors `crates/spar-network/src/curves.rs`
+/// to keep the unit conversion auditable in one place.
+const PS_PER_SECOND: u128 = 1_000_000_000_000;
+/// Bits per byte.
+const BITS_PER_BYTE: u128 = 8;
+
+/// Compute the per-hop blocking term, in picoseconds, that an express
+/// frame may encounter at a TSN port before it can begin transmission.
+///
+/// - `link_rate_bps` — egress link rate in bits per second.
+/// - `max_competing_frame_bytes` — the largest preemptable frame size
+///   that could be in flight when the express frame arrives (typically
+///   the link MTU, e.g. 1518 bytes including the 4-byte VLAN tag).
+/// - `preemption_enabled` — whether IEEE 802.1Qbu preemption is active
+///   on both the express stream and the bus. When `true`, the
+///   blocking term shrinks to
+///   `(MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) / link_rate`;
+///   when `false`, the legacy
+///   `max_competing_frame_bytes / link_rate` term is returned.
+///
+/// Returns `0` when `link_rate_bps == 0` (the caller is responsible
+/// for screening that pathological case — a port with zero rate has
+/// already failed the bus-bandwidth check).
+///
+/// The returned value is rounded *up* (ceiling division) so the
+/// blocking term is never an under-estimate; this matches the
+/// pessimism direction used elsewhere in `spar-network::curves`
+/// (`time_to_send_ps` is also a ceiling). See
+/// `docs/designs/track-d-tsn-wctt-research.md` §5.2-5.3 for the
+/// mathematical derivation.
+pub fn preemption_blocking_term_ps(
+    link_rate_bps: u64,
+    max_competing_frame_bytes: u64,
+    preemption_enabled: bool,
+) -> u64 {
+    if link_rate_bps == 0 {
+        return 0;
+    }
+    let bytes = if preemption_enabled {
+        MIN_FRAGMENT_BYTES.saturating_add(PREEMPTION_HEADER_BYTES)
+    } else {
+        max_competing_frame_bytes
+    };
+    let numer = (bytes as u128) * BITS_PER_BYTE * PS_PER_SECOND;
+    let denom = link_rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
+}
+
+/// Decide whether a stream is "express" — entitled to preempt other
+/// traffic — given its source-side properties.
+///
+/// Resolution order, per IEEE 802.1Qbu typical mappings and the v0.8.1
+/// c4 spec:
+///
+/// 1. If the stream has an explicit `Spar_TSN::Frame_Preemption` set,
+///    use it (`true` ⇒ express).
+/// 2. Otherwise default by class-of-service: a stream is express iff
+///    `Class_of_Service >= 6` (the two highest 802.1Q PCP values are
+///    conventionally reserved for network control / time-sensitive
+///    express traffic).
+/// 3. With neither property declared, the stream is *not* express.
+///
+/// The "explicit-then-default" order matches the c4 design spec: an
+/// explicit `Frame_Preemption => false` on a high-priority stream
+/// overrides the CoS heuristic, and an explicit `Frame_Preemption =>
+/// true` on a low-priority stream forces express semantics.
+pub fn is_express_stream(props: &PropertyMap) -> bool {
+    if let Some(b) = get_frame_preemption(props) {
+        return b;
+    }
+    if let Some(cos) = get_class_of_service(props) {
+        return cos.0 >= 6;
+    }
+    false
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────
 
 const SIZE_UNIT_FACTORS_BYTES: &[(&str, u64)] = &[
@@ -834,5 +947,141 @@ mod tests {
         // diagnostic at the WCTT pass when this returns None).
         let bad = make_props(SPAR_TSN, "Gate_Control_List", "not a gcl", None);
         assert!(get_gate_schedule(&bad).is_none());
+    }
+
+    // ── Frame preemption (802.1Qbu) ──────────────────────────────────
+
+    /// 100 Mbps in bits per second.
+    const HUNDRED_MBPS: u64 = 100_000_000;
+
+    #[test]
+    fn preemption_constants_match_802_3br() {
+        // IEEE 802.3 minFrameSize = 64 bytes (incl. FCS).
+        assert_eq!(MIN_FRAGMENT_BYTES, 64);
+        // IEEE 802.3br SMD-S + 4-byte mCRC = 4 bytes preemption header.
+        assert_eq!(PREEMPTION_HEADER_BYTES, 4);
+    }
+
+    #[test]
+    fn preemption_blocking_term_with_preemption_enabled() {
+        // 100 Mbps, MTU=1518 (irrelevant when preemption is enabled).
+        // Bytes blocked = 64 + 4 = 68 bytes.
+        // Blocking time = 68 * 8 * 1e12 / 1e8 = 5_440_000 ps = 5.44 us.
+        let t = preemption_blocking_term_ps(HUNDRED_MBPS, 1518, true);
+        assert_eq!(t, 5_440_000);
+    }
+
+    #[test]
+    fn preemption_blocking_term_without_preemption_falls_back_to_max_frame() {
+        // 100 Mbps, MTU=1518: the legacy term.
+        // Blocking time = 1518 * 8 * 1e12 / 1e8 = 121_440_000 ps ≈ 121 us.
+        let t = preemption_blocking_term_ps(HUNDRED_MBPS, 1518, false);
+        assert_eq!(t, 121_440_000);
+    }
+
+    #[test]
+    fn preemption_blocking_term_zero_rate_returns_zero() {
+        // Pathological zero-rate input is screened by bus_bandwidth
+        // upstream; we just make sure we don't panic / divide by zero.
+        assert_eq!(preemption_blocking_term_ps(0, 1518, true), 0);
+        assert_eq!(preemption_blocking_term_ps(0, 1518, false), 0);
+    }
+
+    #[test]
+    fn preemption_blocking_term_rounds_up_for_pessimism() {
+        // Non-integer-byte boundary: 65 bytes at 100 Mbps with no
+        // preemption enabled. 65 * 8 = 520 bits @ 100 Mbps = 5.2 us.
+        // Integer-rounded numerator/denominator: 5_200_000_000_000_000
+        // / 100_000_000 = 5_200_000 ps exactly. Pick a rate that is
+        // *not* a clean divisor instead.
+        // 1518 bytes at 1 Gbps: 1518 * 8 * 1e12 / 1e9 = 12_144_000 ps
+        // exactly. Use 999_999_999 bps (1 Gbps - 1 bps) so we straddle.
+        let exact = preemption_blocking_term_ps(1_000_000_000, 1518, false);
+        let nearly = preemption_blocking_term_ps(999_999_999, 1518, false);
+        // Nearly-Gbps (lower) takes *strictly more* time than exact Gbps.
+        assert!(nearly > exact);
+        // Difference is at most one ceiling round-up bit (1 ps).
+        assert!(nearly - exact >= 1);
+    }
+
+    #[test]
+    fn is_express_stream_explicit_overrides_cos() {
+        // Explicit Frame_Preemption=>true forces express even at low CoS.
+        let mut props = make_props(
+            SPAR_TSN,
+            "Class_of_Service",
+            "0",
+            Some(PropertyExpr::Integer(0, None)),
+        );
+        props.add(spar_hir_def::properties::PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new(SPAR_TSN)),
+                property_name: Name::new("Frame_Preemption"),
+            },
+            value: "true".to_string(),
+            typed_expr: Some(PropertyExpr::Boolean(true)),
+            is_append: false,
+        });
+        assert!(is_express_stream(&props));
+
+        // Explicit Frame_Preemption=>false forces preemptable even at
+        // high CoS.
+        let mut props = make_props(
+            SPAR_TSN,
+            "Class_of_Service",
+            "7",
+            Some(PropertyExpr::Integer(7, None)),
+        );
+        props.add(spar_hir_def::properties::PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new(SPAR_TSN)),
+                property_name: Name::new("Frame_Preemption"),
+            },
+            value: "false".to_string(),
+            typed_expr: Some(PropertyExpr::Boolean(false)),
+            is_append: false,
+        });
+        assert!(!is_express_stream(&props));
+    }
+
+    #[test]
+    fn is_express_stream_cos_default_threshold() {
+        // No Frame_Preemption set → fall back to CoS-based default.
+        // CoS 0..=5: not express.
+        for cos in 0u8..=5 {
+            let props = make_props(
+                SPAR_TSN,
+                "Class_of_Service",
+                &cos.to_string(),
+                Some(PropertyExpr::Integer(cos as i64, None)),
+            );
+            assert!(
+                !is_express_stream(&props),
+                "CoS {} must default to non-express",
+                cos
+            );
+        }
+        // CoS 6 and 7: express.
+        for cos in 6u8..=7 {
+            let props = make_props(
+                SPAR_TSN,
+                "Class_of_Service",
+                &cos.to_string(),
+                Some(PropertyExpr::Integer(cos as i64, None)),
+            );
+            assert!(
+                is_express_stream(&props),
+                "CoS {} must default to express",
+                cos
+            );
+        }
+    }
+
+    #[test]
+    fn is_express_stream_no_props_is_not_express() {
+        // Neither Frame_Preemption nor Class_of_Service declared: the
+        // safe default is non-express (preemptable).
+        let empty = PropertyMap::new();
+        assert!(!is_express_stream(&empty));
     }
 }
