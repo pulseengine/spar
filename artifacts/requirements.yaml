@@ -1459,4 +1459,40 @@ artifacts:
     status: planned
     tags: [network, tsn, wctt, v081]
 
+  # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
+
+  - id: REQ-INSIGHT-001
+    type: requirement
+    title: Tier 1 CTF ingestion + per-probe timing distributions
+    description: >
+      spar-insight ingests Tier 1 CTF traces from Zephyr (`k_sem_give`,
+      `k_sem_take`, `k_timer_expiry` plus `probe_point_enter` /
+      `probe_point_exit` markers) and produces a per-probe-point timing
+      distribution (min / max / mean over the observed
+      enter→exit durations) comparable to the
+      `Spar_Trace::Expected_BCET` / `Expected_WCET` / `Expected_Mean`
+      predictions declared on AADL components. Tier 1 of the Gale
+      tracing strategy in the project memory; full binary CTF +
+      babeltrace2 ingestion is a v0.9.x follow-up.
+    status: implemented
+    tags: [insight, trace, ctf, tier1, v090]
+
+  - id: REQ-INSIGHT-002
+    type: requirement
+    title: Rules-based discrepancy detection (5 kinds)
+    description: >
+      Rules-based discrepancy detection emits structured diagnostics
+      keyed by probe id: `WcetViolated` (Error,
+      observed.max > Expected_WCET), `BcetUnderestimated` (Warn,
+      observed.min < Expected_BCET), `MeanDrift` (Info,
+      |observed.mean − Expected_Mean| > 20% of Expected_Mean),
+      `MissingProbe` (Info, trace samples for an undeclared probe),
+      and `UnobservedProbe` (Warn, declared `Expected_*` with no trace
+      samples). Wired into the CLI as
+      `spar insight verify-trace --root Pkg::Sys.Impl --trace trace.ctf
+      model.aadl`. The formal-statistics layer (Hoeffding bounds, etc.)
+      is deferred per project memory's R3 proof-assistant deferral.
+    status: implemented
+    tags: [insight, trace, cli, v090]
+
   # Research findings tracked separately in research/findings.yaml

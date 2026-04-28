@@ -1233,6 +1233,7 @@ dependencies = [
  "spar-codegen",
  "spar-hir",
  "spar-hir-def",
+ "spar-insight",
  "spar-parser",
  "spar-render",
  "spar-solver",
@@ -1311,6 +1312,18 @@ dependencies = [
  "serde",
  "smol_str",
  "spar-base-db",
+ "spar-syntax",
+]
+
+[[package]]
+name = "spar-insight"
+version = "0.8.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "spar-base-db",
+ "spar-hir-def",
  "spar-syntax",
 ]
 

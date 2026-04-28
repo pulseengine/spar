@@ -23,6 +23,7 @@ spar-solver.workspace = true
 spar-render.workspace = true
 spar-codegen.workspace = true
 spar-variants.workspace = true
+spar-insight.workspace = true
 etch.workspace = true
 la-arena.workspace = true
 rowan.workspace = true
