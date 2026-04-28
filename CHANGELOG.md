@@ -4,6 +4,99 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-04-28
+
+This release promotes the Track D Phase 1 (TSN/Ethernet WCTT analysis) and
+Track E (frozen-platform / mobile-application + hypothetical-rebinding
+oracle) features that have been on `main` since v0.7.1. Also adds the
+`spar moves verify` and `spar moves enumerate` user-facing CLIs.
+
+### Added — Track D Phase 1: TSN/Ethernet WCTT analysis (6/6 commits)
+
+- **New crate `spar-network`** — Network Calculus primitives, NetworkGraph
+  extraction from `SystemInstance`, and supporting types. All values in
+  `u64` picoseconds / bytes / bits-per-second — no floating-point drift.
+- **`Spar_Network::*` property set** — `Switch_Type` (FIFO / Priority /
+  TSN), `Queue_Depth`, `Forwarding_Latency` (Time_Range), `Output_Rate`,
+  `WCTT_Budget`. Switches are modelled as `bus implementation` carrying
+  the `Switch_Type` discriminator (Option C of the design — AADL-spec-
+  conformant, no grammar extension).
+- **NC primitives** — `ArrivalCurve`, `ServiceCurve`, `backlog_bound`,
+  `delay_bound`, `residual_service`, `output_bound`. Closed-form for
+  the affine + rate-latency case.
+- **`WcttAnalysis` pass** — per-stream end-to-end traversal-time bounds
+  across the device/bus graph. New diagnostics: `WcttBound`,
+  `WcttExceedsBudget`, `WcttUnservable`, `WcttSwitchOverloaded`.
+- **`latency.rs` integration** — RTA-derived WCET on compute hops
+  alternates with WCTT-derived bounds on network hops, end-to-end.
+  `Bus_Properties::Latency` scalar remains the fallback for unannotated
+  buses, preserving v0.7.x behaviour.
+- **Lean theorems** — `proofs/Proofs/Network/MinPlus.lean` mirrors classical
+  NC closed-forms with monotonicity proved + `sorry`-with-`TODO(v1.0.0)` for
+  the universally-quantified arithmetic statements.
+
+Phase 2 (TSN-shaped service curves: TAS, CBS, frame preemption) is
+deferred to v0.8.x.
+
+### Added — Track E: hypothetical-rebinding oracle (7/8 commits)
+
+- **`Spar_Migration::*` property set** — `Frozen`, `Mobile`,
+  `Allowed_Targets`, `Pinned_Reason`. Plus `is_frozen` / `is_mobile`
+  helpers for HIR-level mobility queries.
+- **`BindingOverlay`** — HIR-level overlay so any analysis can run on a
+  hypothetical binding without mutating the `SystemInstance`. Validates
+  against Frozen / Allowed_Targets returning structured `FrozenViolation` /
+  `AllowedTargetsViolation` diagnostics.
+- **`spar moves verify --component X --to Y`** — first user-facing
+  surface of the migration oracle. Builds a `BindingOverlay`, runs
+  validation + analyses, returns structured pass/fail JSON. Exit codes
+  0/1/2 distinguish ok / analysis-error / binding-violation.
+- **`spar moves enumerate --component X`** — design-space exploration.
+  Lists every valid hypothetical rebinding target within `Allowed_Targets`
+  with verification status and a multi-objective ranking metric.
+- **Multi-objective ranking** — `--objective max-response | total-load |
+  total-power | total-weight | balanced`. Adds `Spar_Power::Power_Budget`
+  property. Score uses the same RTA + property-accessor machinery as
+  direct verification, so `verify` and `enumerate` stay consistent.
+- **Rivet variant integration** — both `verify` and `enumerate` accept
+  `--variant NAME` (implicit; shells out to `rivet`) or
+  `--variant-context PATH` (explicit; reads JSON blob). Variant filter
+  applies before overlay validation per the v1 contract's intersection
+  semantics.
+- **Documentation** — `docs/cli/moves.md` with flags, exit codes,
+  output schemas, candidate-set derivation, ranking semantics, worked
+  example.
+
+Commit 8 (MCP tool surface for `spar.verify_move` / `spar.enumerate_moves`)
+is v0.9.0 scope by design — read-only / idempotent only, deterministic
+apply stays CLI-exclusive.
+
+### Added — Track F: SysML v2 / KerML community engagement strategy
+
+- `docs/designs/track-f-sysml-kerml-engagement.md` — research-backed
+  engagement plan for the OMG SysML v2 ecosystem. Anchors on the
+  `Systems-Modeling/SysML-v2-AADL-Release` repo + named contacts at
+  Galois / CMU-SEI / Ellidiss. Includes verified `spar-sysml2` audit
+  (production-grade with full requirements roundtrip) + Rust ecosystem
+  positioning (`syster`, `Sysand`, `tree-sitter-sysml`).
+
+### Changed
+
+- COMPLIANCE.md narrative updated for v0.8.0 release; v0.9.0 horizon
+  noted (Track E commit 8 MCP, spar-insight, Track D Phase 2 conditional
+  on demand, syster license clarification).
+- Test count: ~2200+ across 18 crates (previously ~1900+ across 17).
+
+### Documentation
+
+- `docs/cli/moves.md` — comprehensive `spar moves verify` / `enumerate` reference.
+- `docs/designs/v0.7.0-hierarchical-rta.md`, `track-d-tsn-wctt-research.md`,
+  `track-e-migration-research.md`, `track-f-sysml-kerml-engagement.md`.
+- `docs/contracts/rivet-spar-variant-v1.md` — variant interchange contract.
+- `proofs/README.md` — proof tree overview.
+
+---
+
 ## [0.7.1] — 2026-04-27
 
 This release closes the v0.7.x line. Headline: full IRQ-aware response-time
