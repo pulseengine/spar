@@ -74,7 +74,8 @@ use spar_analysis::{AnalysisDiagnostic, Severity};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, ItemTree};
 use spar_hir_def::{AllowedTargetsViolation, BindingOverlay, FrozenViolation, OverlayDiagnostic};
-use spar_solver::enumerate::{CandidateRank, EnumerationObjective, rank_candidate};
+use spar_solver::enumerate::rank_candidate;
+pub use spar_solver::enumerate::{CandidateRank, EnumerationObjective};
 use spar_variants::{ContextError, VariantContext};
 
 use crate::variants_bridge::{SourcePathMap, VariantScope};
@@ -347,15 +348,21 @@ impl From<&AnalysisDiagnostic> for DiagnosticOut {
     }
 }
 
-/// Run `spar moves verify`, returning the desired process exit code.
+/// Run the verify pipeline and return the structured report plus the
+/// desired CLI exit code, without printing anything.
 ///
-/// See module docs for the full pipeline; a zero return from this
-/// function means the move is admissible. The caller in `main.rs`
-/// passes the return through `process::exit` directly so behaviour is
-/// observable to a shell or harness.
-pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
+/// This is the load-bearing function shared between the CLI driver
+/// (`run_verify`, which prints + exits) and the MCP `spar.verify_move`
+/// tool (which returns the report as JSON over stdio). The pure-data
+/// shape is documented under [`MoveVerifyReport`]; the exit code follows
+/// the table in the module docs.
+///
+/// The function is `#[allow(clippy::result_large_err)]` because the
+/// error type is shared with [`run_verify`] and downstream callers
+/// expect the same type.
+pub fn verify_pipeline(args: &VerifyArgs) -> Result<(MoveVerifyReport, i32), MovesError> {
     if args.format != "text" && args.format != "json" {
-        return Err(MovesError::UnknownFormat(args.format));
+        return Err(MovesError::UnknownFormat(args.format.clone()));
     }
     if args.model_files.is_empty() {
         return Err(MovesError::Parse(
@@ -364,17 +371,10 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
         ));
     }
 
-    // 1. Parse + instantiate. We mirror the path used by `spar analyze`,
-    //    short-circuiting the same way on parse errors so users see a
-    //    diagnostic rather than a stack trace.
+    // 1. Parse + instantiate.
     let (inst, source_paths) = parse_and_instantiate(&args.model_files, &args.root)?;
 
-    // 2. Optional variant scope. Variant filtering happens *before*
-    //    overlay validation so dropped components can never appear as
-    //    `--component` or `--to` resolution targets — matching the
-    //    contract's intersection semantics. The scope itself is non-
-    //    mutating; the analysis suite still sees the full instance and
-    //    is expected to remain monotonic w.r.t. the kept subset.
+    // 2. Optional variant scope.
     let variant_ctx =
         load_variant_context(args.variant.as_deref(), args.variant_context.as_deref())?;
     let scope_holder = variant_ctx
@@ -396,21 +396,12 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
         });
     }
 
-    // 4. Build the overlay and validate against the platform / application split.
+    // 4. Overlay + validate.
     let mut overlay = BindingOverlay::new();
     overlay.add_move(comp_idx, target_idx);
     let overlay_diags = overlay.validate(&inst);
 
-    // 5. Run the analysis suite.
-    //
-    //    Per commit 3 scope: the suite reads the un-overlayed instance.
-    //    The overlay still surfaces its own constraint-layer
-    //    diagnostics (frozen / allowed-targets) so a user moving a
-    //    pinned component sees an immediate red flag rather than a
-    //    silent green from analyses that are not overlay-aware yet.
-    //    Commit 4 widens overlay awareness to RTA + bandwidth + latency
-    //    + EMV2 + ARINC653 so the diagnostics reflect the hypothetical
-    //    binding rather than the declared one.
+    // 5. Analysis suite.
     let analysis_diags = run_all_analyses(&inst);
 
     // 6. Build the structured report.
@@ -420,14 +411,27 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
         report.feature_model_hash = Some(scope.feature_model_hash().to_string());
     }
 
-    // 7. Render.
-    match args.format.as_str() {
+    let code = exit_code_for(&report, &overlay_diags);
+    Ok((report, code))
+}
+
+/// Run `spar moves verify`, returning the desired process exit code.
+///
+/// See module docs for the full pipeline; a zero return from this
+/// function means the move is admissible. The caller in `main.rs`
+/// passes the return through `process::exit` directly so behaviour is
+/// observable to a shell or harness.
+pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
+    let format = args.format.clone();
+    let (report, code) = verify_pipeline(&args)?;
+
+    // Render.
+    match format.as_str() {
         "json" => render_json(&report),
         _ => render_text(&report),
     }
 
-    // 8. Compute exit code.
-    Ok(exit_code_for(&report, &overlay_diags))
+    Ok(code)
 }
 
 /// Translate a populated [`MoveVerifyReport`] back into the Unix exit
@@ -1215,8 +1219,22 @@ pub struct MoveEnumerateReport {
 /// | 1 | All candidates failed analysis or produced no admissible move |
 /// | 2 | Input resolution failed (component / model / format) |
 pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
+    let format = args.format.clone();
+    let report = enumerate_pipeline(&args)?;
+    let code = if report.valid > 0 { 0 } else { 1 };
+    match format.as_str() {
+        "json" => render_enumerate_json(&report),
+        _ => render_enumerate_text(&report),
+    }
+    Ok(code)
+}
+
+/// Run the enumerate pipeline and return the structured report without
+/// printing anything. Shared between the CLI driver and the MCP
+/// `spar.enumerate_moves` tool.
+pub fn enumerate_pipeline(args: &EnumerateArgs) -> Result<MoveEnumerateReport, MovesError> {
     if args.format != "text" && args.format != "json" {
-        return Err(MovesError::UnknownFormat(args.format));
+        return Err(MovesError::UnknownFormat(args.format.clone()));
     }
     if args.model_files.is_empty() {
         return Err(MovesError::Parse(
@@ -1282,15 +1300,7 @@ pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
             .then_with(|| a.target.cmp(&b.target))
     });
 
-    // 6. Render.
-    match args.format.as_str() {
-        "json" => render_enumerate_json(&report),
-        _ => render_enumerate_text(&report),
-    }
-
-    // Exit code: 0 if any admissible, 1 otherwise. (2 is reserved for
-    // input-resolution errors, returned via MovesError above.)
-    Ok(if report.valid > 0 { 0 } else { 1 })
+    Ok(report)
 }
 
 /// Build the candidate-target index list for an enumerate run.
@@ -1526,7 +1536,7 @@ pub fn print_enumerate_usage() {
 ///
 /// Returns [`MovesError::UnknownObjective`] for any other input so the
 /// CLI driver can surface a clear message and a non-zero exit.
-fn parse_objective(s: &str) -> Result<EnumerationObjective, MovesError> {
+pub fn parse_objective(s: &str) -> Result<EnumerationObjective, MovesError> {
     match s.to_ascii_lowercase().as_str() {
         "max-response" => Ok(EnumerationObjective::max_response()),
         "total-load" => Ok(EnumerationObjective::total_load()),

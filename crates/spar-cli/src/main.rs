@@ -2,11 +2,17 @@ mod assertion;
 mod diff;
 mod insight;
 mod lsp;
-mod moves;
 mod refactor;
 mod sarif;
-mod variants_bridge;
 mod verify;
+
+// Re-export shared modules from the library so the binary keeps using
+// the `crate::moves::…` / `crate::variants_bridge::…` paths in its
+// existing call sites without duplicating module bodies. The lib
+// (spar_cli) is the canonical home; spar-mcp consumes the same surface.
+use spar_cli::moves;
+#[allow(unused_imports)]
+use spar_cli::variants_bridge;
 
 use std::{env, fs, process};
 
@@ -44,6 +50,7 @@ fn main() {
         "extract" => cmd_sysml2_extract(&args[2..]),
         "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
+        "mcp" => cmd_mcp(&args[2..]),
         "moves" => moves::cmd_moves_dispatch(&args[2..]),
         "insight" => insight::cmd_insight(&args[2..]),
         other => {
@@ -72,6 +79,9 @@ fn print_usage() {
     );
     eprintln!("  insight    Discrepancy assistant: compare CTF traces to Expected_BCET/WCET/Mean");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
+    eprintln!(
+        "  mcp        Start MCP server (read-only verification oracles for AI agent integration)"
+    );
     eprintln!();
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
@@ -105,6 +115,102 @@ fn print_usage() {
 
 fn cmd_lsp() {
     lsp::run_lsp_server();
+}
+
+/// `spar mcp serve` — start the spar-mcp stdio JSON-RPC server.
+///
+/// The actual server lives in the sibling `spar-mcp` crate. To avoid a
+/// Cargo cycle (spar -> spar-mcp -> spar-cli (lib) -> spar binary), we
+/// exec the standalone `spar-mcp` binary that ships alongside `spar`.
+/// We resolve it via:
+///
+/// 1. `$SPAR_MCP_BIN` if set;
+/// 2. a sibling of the current executable (`<dir>/spar-mcp[.exe]`);
+/// 3. the host `$PATH`.
+fn cmd_mcp(args: &[String]) {
+    let usage = || {
+        eprintln!("Usage: spar mcp serve");
+        eprintln!();
+        eprintln!("Subcommands:");
+        eprintln!(
+            "  serve   Start the MCP stdio JSON-RPC server (read-only / idempotent oracle tools)"
+        );
+    };
+
+    let sub = match args.first().map(String::as_str) {
+        None | Some("--help") | Some("-h") => {
+            usage();
+            process::exit(if args.is_empty() { 1 } else { 0 });
+        }
+        Some("serve") => "serve",
+        Some(other) => {
+            eprintln!("Unknown mcp subcommand: {other}");
+            usage();
+            process::exit(1);
+        }
+    };
+
+    if sub != "serve" {
+        // Defensive: should be unreachable given the match above.
+        usage();
+        process::exit(1);
+    }
+
+    let bin = match locate_spar_mcp_binary() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "spar-mcp binary not found (searched $SPAR_MCP_BIN, the directory of the \
+                 current spar binary, and $PATH). Build the workspace with `cargo build -p \
+                 spar-mcp` and re-run."
+            );
+            process::exit(1);
+        }
+    };
+
+    // Replace the current process so stdio is shared 1:1 with the
+    // child — no buffering layer between the JSON-RPC client and the
+    // server loop.
+    let err = std::process::Command::new(&bin).args(&args[1..]).status();
+    match err {
+        Ok(status) => process::exit(status.code().unwrap_or(1)),
+        Err(e) => {
+            eprintln!("failed to execute {}: {e}", bin.display());
+            process::exit(1);
+        }
+    }
+}
+
+/// Locate the `spar-mcp` binary on disk. See [`cmd_mcp`] for the
+/// resolution order.
+fn locate_spar_mcp_binary() -> Option<std::path::PathBuf> {
+    if let Some(v) = std::env::var_os("SPAR_MCP_BIN") {
+        let p = std::path::PathBuf::from(v);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    if let Ok(self_exe) = std::env::current_exe()
+        && let Some(dir) = self_exe.parent()
+    {
+        for name in ["spar-mcp", "spar-mcp.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in ["spar-mcp", "spar-mcp.exe"] {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn cmd_parse(args: &[String]) {

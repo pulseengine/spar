@@ -12,6 +12,7 @@ members = [
     "crates/spar-transform",
     "crates/spar-variants",
     "crates/spar-cli",
+    "crates/spar-mcp",
     "crates/spar-codegen",
     "crates/spar-render",
     "crates/spar-solver",

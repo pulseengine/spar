@@ -1952,3 +1952,50 @@ artifacts:
         target: REQ-INSIGHT-001
       - type: satisfies
         target: REQ-INSIGHT-002
+
+  # ── Track E commit 8/8 — MCP oracle tool surface (v0.9.0) ────────────
+
+  - id: TEST-MCP-TOOLS
+    type: feature
+    title: spar-mcp read-only verification-oracle tool surface tests
+    description: >
+      Integration tests in crates/spar-mcp/tests covering the v0.9.0
+      MCP tool surface (Track E commit 8/8). Eleven tests split between
+      an in-process Rust API path (5) and a stdio JSON-RPC envelope path
+      (6). Coverage:
+      (1) `spar.verify_move` returns ok=true and exit_code=0 on an
+          admissible mobile-component move;
+      (2) `spar.enumerate_moves` enumerates every Processor /
+          VirtualProcessor in the instance when no Allowed_Targets is
+          set;
+      (3) `spar.check_chain` returns the latency-pass diagnostic stream
+          (best/worst-case bounds plus per-hop annotations) for a chain
+          spanning one compute hop and one connection hop;
+      (4) variant scoping (`--variant NAME` over the
+          SPAR_VARIANT_TEST_RIVET_OUTPUT seam) populates the report's
+          `variant` and `feature_model_hash` audit fields;
+      (5) the `--objective` selector accepts the five recognised modes
+          and rejects unknown values with a BAD_INPUT error;
+      (6) `tools/list` returns exactly three tools with
+          `readOnlyHint: true` / `idempotentHint: true`;
+      (7-9) `tools/call` for each tool returns valid JSON with the
+          documented `structuredContent` shape and `isError: false`;
+      (10) an unknown tool name returns the JSON-RPC MethodNotFound
+          error code (-32601);
+      plus one bonus test confirming unknown JSON-RPC methods (e.g.
+      `sampling/createMessage`) also return -32601.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-mcp
+    status: passing
+    tags: [mcp, migration, track-e, v090, integration]
+    links:
+      - type: satisfies
+        target: REQ-MCP-002
+      - type: satisfies
+        target: REQ-MIGRATION-005
+      - type: satisfies
+        target: REQ-MIGRATION-006
+      - type: satisfies
+        target: REQ-MIGRATION-008

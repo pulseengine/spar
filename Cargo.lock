@@ -1328,6 +1328,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-mcp"
+version = "0.8.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "spar",
+ "spar-analysis",
+ "spar-base-db",
+ "spar-hir-def",
+ "spar-network",
+ "spar-syntax",
+ "tempfile",
+]
+
+[[package]]
 name = "spar-network"
 version = "0.8.0"
 dependencies = [

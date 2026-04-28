@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "AADL toolchain CLI"
 
+[lib]
+name = "spar_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "spar"
 path = "src/main.rs"
