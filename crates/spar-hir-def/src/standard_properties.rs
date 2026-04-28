@@ -500,6 +500,14 @@ const SPAR_TSN: &[(&str, &str)] = &[
     // Whether frames in this class can be pre-empted by Express
     // traffic (802.1Qbu). Applies to port and connection.
     ("Frame_Preemption", "aadlboolean"),
+    // Per-class reserved bandwidth (CBS idleSlope) for the 802.1Qav
+    // Credit-Based Shaper. Expressed as `aadlinteger units
+    // Data_Rate_Units` so it lowers via the same data-rate machinery
+    // as `Spar_Network::Output_Rate`. The CBS analysis (v0.8.1
+    // commit 3) uses this as the reserved bps for a class — the full
+    // hi/lo credit slope arithmetic is computed inside the analysis.
+    // Applies to bus and port.
+    ("Bandwidth_Reservation", "aadlinteger units Data_Rate_Units"),
 ];
 
 /// Helper: collect properties from a table into the result vector.
@@ -1081,12 +1089,13 @@ mod tests {
         assert!(is_standard_property_set("Spar_TSN"));
 
         let props = standard_properties_in_set("Spar_TSN");
-        assert_eq!(props.len(), 5);
+        assert_eq!(props.len(), 6);
         assert!(props.contains(&"Stream_ID"));
         assert!(props.contains(&"Class_of_Service"));
         assert!(props.contains(&"Gate_Control_List"));
         assert!(props.contains(&"Max_Frame_Size"));
         assert!(props.contains(&"Frame_Preemption"));
+        assert!(props.contains(&"Bandwidth_Reservation"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -1108,6 +1117,10 @@ mod tests {
         assert_eq!(
             standard_property_type("Spar_TSN", "Frame_Preemption"),
             Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Bandwidth_Reservation"),
+            Some("aadlinteger units Data_Rate_Units")
         );
 
         // Deliberately-wrong name returns None.
@@ -1138,6 +1151,7 @@ mod tests {
             "Gate_Control_List",
             "Max_Frame_Size",
             "Frame_Preemption",
+            "Bandwidth_Reservation",
         ] {
             let result = scope.resolve_property(&Name::new("Spar_TSN"), &Name::new(prop_name));
             assert!(
@@ -1181,7 +1195,7 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 5 = 127
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 6 = 128
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration + Spar_Power + Spar_TSN)
@@ -1190,8 +1204,9 @@ mod tests {
         // Spar_Network: +1 for WCTT_Budget (Track D commit 4).
         // Spar_Power: +1 for Power_Budget (Track E commit 5/8 ranker).
         // Spar_TSN: +5 for Stream_ID, Class_of_Service, Gate_Control_List,
-        //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1).
-        assert_eq!(all.len(), 127);
+        //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1)
+        //   +1 for Bandwidth_Reservation (Track D Phase 2 v0.8.1 c3, CBS).
+        assert_eq!(all.len(), 128);
     }
 
     #[test]

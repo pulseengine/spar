@@ -72,6 +72,183 @@ pub struct CreditPool {
     pub send_slope_bps: u64,
 }
 
+/// 802.1Qav CBS reservation parameters for one class.
+///
+/// Derived from the per-class properties (`Spar_TSN::Bandwidth_Reservation`
+/// for the idle slope, plus the bus's `Spar_Network::Output_Rate` for the
+/// link rate that determines the send slope and the credit bounds).
+///
+/// All slopes are stored in bits per second. By the standard:
+/// - `idle_slope_bps > 0` (the reserved bps for this class)
+/// - `send_slope_bps == idle_slope_bps - link_rate_bps` (always negative
+///   for a stable reservation; we keep the signed form so the analysis
+///   does not need to remember the convention)
+/// - `hi_credit_bytes` and `lo_credit_bytes` bound the credit pool;
+///   `lo_credit_bytes` is the magnitude of the credit floor (always a
+///   non-negative byte count here, the spec's `loCredit` is its negation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CbsReservation {
+    /// Reserved bandwidth for this class (`idleSlope`), bits per second.
+    pub idle_slope_bps: u64,
+    /// Drain rate while the class is transmitting (`sendSlope`), bits
+    /// per second; conventionally negative in the standard
+    /// (= idleSlope − linkRate).
+    pub send_slope_bps: i64,
+    /// Upper credit bound (`hiCredit`), bytes.
+    pub hi_credit_bytes: u64,
+    /// Magnitude of the lower credit bound (`|loCredit|`), bytes. The
+    /// classical CBS service-curve closed form drains credit to this
+    /// value during the worst-case other-class burst.
+    pub lo_credit_bytes: u64,
+}
+
+impl CbsReservation {
+    /// Construct a [`CbsReservation`] from the four primary parameters.
+    ///
+    /// `idle_slope_bps` is the reserved bandwidth; `link_rate_bps` is
+    /// the underlying link rate. `send_slope_bps` is computed as
+    /// `idleSlope − linkRate` and is therefore non-positive when the
+    /// reservation is feasible (idleSlope ≤ linkRate). Returns `None`
+    /// when the reservation is infeasible (idleSlope > linkRate) or
+    /// the link rate is zero.
+    pub fn new(
+        idle_slope_bps: u64,
+        link_rate_bps: u64,
+        hi_credit_bytes: u64,
+        lo_credit_bytes: u64,
+    ) -> Option<Self> {
+        if link_rate_bps == 0 || idle_slope_bps > link_rate_bps {
+            return None;
+        }
+        // sendSlope = idleSlope − linkRate; always ≤ 0 here.
+        let send_slope_bps = (idle_slope_bps as i128) - (link_rate_bps as i128);
+        // Above bounds make this fit in i64 safely (link_rate ≤ u64::MAX
+        // means the difference is in [-(2^63), 0]; clamp defensively).
+        let send_slope_bps = if send_slope_bps < i64::MIN as i128 {
+            i64::MIN
+        } else {
+            send_slope_bps as i64
+        };
+        Some(Self {
+            idle_slope_bps,
+            send_slope_bps,
+            hi_credit_bytes,
+            lo_credit_bytes,
+        })
+    }
+
+    /// Reserved-bandwidth fraction `idleSlope / link_rate` as a
+    /// rational `(num, den)`. Convenience for diagnostics.
+    pub fn reserved_fraction(&self) -> (u64, u64) {
+        // The link rate is recoverable as idle − send (since
+        // sendSlope = idleSlope − linkRate ⇒ linkRate = idleSlope −
+        // sendSlope; sendSlope is non-positive here).
+        let link = (self.idle_slope_bps as i128) - (self.send_slope_bps as i128);
+        let link = if link < 0 { 0 } else { link as u64 };
+        (self.idle_slope_bps, link)
+    }
+}
+
+/// 802.1Qav CBS service curve for a class.
+///
+/// Implements the Le Boudec/Thiran (§1.4.3) rate-latency closed-form
+/// from the AVB/TSN literature (Lim et al., "Delay analysis in CBS for
+/// AVB"):
+///
+/// ```text
+/// β_class(t) = idleSlope · max(0, t − T)
+/// ```
+///
+/// where the service latency T captures the worst-case credit drain
+/// caused by other-class traffic:
+///
+/// ```text
+/// T = max_competing_frame / link_rate
+///     + lo_credit / |sendSlope|
+/// ```
+///
+/// The first term is the maximum-frame blocking from a non-CBS class
+/// (the frame that started transmitting just before the CBS class
+/// became eligible, holding the link until completion). The second term
+/// is the additional credit-recovery time once the CBS queue starts
+/// being serviced — `lo_credit` bytes have to be replenished before
+/// service can resume, at the (positive) recovery rate `|sendSlope|`.
+///
+/// Both terms are converted to picoseconds with rounding *up* so the
+/// returned latency is never an under-estimate, matching the pessimism
+/// direction of `delay_bound` and `residual_service` in `curves.rs`.
+///
+/// `max_competing_frame_bytes` is the maximum frame size of any
+/// non-CBS competing class (in bytes). When unknown, callers default to
+/// the Ethernet MTU (1518 bytes); see [`crate::curves`] for unit
+/// conventions.
+pub fn cbs_residual_service(
+    reservation: &CbsReservation,
+    link_rate_bps: u64,
+    max_competing_frame_bytes: u64,
+) -> ServiceCurve {
+    // The reservation is the service rate. The latency T captures the
+    // worst-case time the credit pool needs to refill from `loCredit`
+    // back to zero, including blocking by other classes.
+    let rate_bps = reservation.idle_slope_bps;
+
+    // Term 1: maximum-frame blocking from non-CBS classes.
+    //
+    //   blocking_ps = max_competing_frame · 8 · 10^12 / link_rate
+    //
+    // Rounded up; saturates to u64::MAX if link_rate is zero (which the
+    // CBS analysis path already guards against, but we keep the
+    // helper safe in isolation).
+    let blocking_ps = if link_rate_bps == 0 {
+        0
+    } else {
+        cbs_time_to_send_ps_rounded_up(max_competing_frame_bytes, link_rate_bps)
+    };
+
+    // Term 2: credit recovery from loCredit. We need to replenish
+    // `lo_credit_bytes` worth of credit at the recovery rate, which is
+    // the *send-slope magnitude*. By the standard sendSlope ≤ 0 here;
+    // we take its absolute value.
+    //
+    // When |sendSlope| == 0 the formula is degenerate (idleSlope ==
+    // link_rate, no other class can take the link, so the CBS class is
+    // never blocked). In that boundary case the credit-recovery term
+    // is zero.
+    let send_slope_abs = if reservation.send_slope_bps >= 0 {
+        0u64
+    } else {
+        // sendSlope is negative; magnitude fits in u64 because sendSlope
+        // = idleSlope − linkRate where both are u64-bounded.
+        reservation.send_slope_bps.unsigned_abs()
+    };
+    let recovery_ps = if send_slope_abs == 0 {
+        0
+    } else {
+        cbs_time_to_send_ps_rounded_up(reservation.lo_credit_bytes, send_slope_abs)
+    };
+
+    let latency_ps = blocking_ps.saturating_add(recovery_ps);
+    ServiceCurve::rate_latency(rate_bps, latency_ps)
+}
+
+/// Internal helper: time in picoseconds to transmit `bytes` at
+/// `rate_bps`, rounding up. Mirrors `curves::time_to_send_ps` (which is
+/// crate-private) so the CBS path does not need to expose that helper.
+fn cbs_time_to_send_ps_rounded_up(bytes: u64, rate_bps: u64) -> u64 {
+    if rate_bps == 0 {
+        return u64::MAX;
+    }
+    // 8 bits per byte · 10^12 ps per second.
+    let numer = (bytes as u128) * 8u128 * 1_000_000_000_000u128;
+    let denom = rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
+}
+
 // ── Property accessors ───────────────────────────────────────────────
 //
 // Mirrors the typed-first / string-fallback idiom from
@@ -150,6 +327,25 @@ pub fn get_frame_preemption(props: &PropertyMap) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
+}
+
+/// Read [`Spar_TSN::Bandwidth_Reservation`] as the CBS idleSlope, in
+/// bits per second.
+///
+/// This is the per-class reserved bandwidth used by the 802.1Qav
+/// Credit-Based Shaper. AADL declares the property as `aadlinteger
+/// units Data_Rate_Units`, so we accept the standard project units
+/// (`bitsps`, `Bytesps`, `KBytesps`, `MBytesps`, `GBytesps`)
+/// case-insensitively. A bare integer is interpreted as bits per
+/// second, matching `Spar_Network::Output_Rate`.
+pub fn get_bandwidth_reservation_bps(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Bandwidth_Reservation")
+        && let Some(bps) = extract_data_rate_bps_local(expr)
+    {
+        return Some(bps);
+    }
+    let raw = get_raw(props, "Bandwidth_Reservation")?;
+    parse_data_rate_bps_local(raw)
 }
 
 /// Read [`Spar_TSN::Gate_Control_List`] as the raw string blob.
@@ -330,6 +526,79 @@ fn extract_size_bytes(expr: &PropertyExpr) -> Option<u64> {
         }
         _ => None,
     }
+}
+
+// ── Data-rate helpers (local) ────────────────────────────────────────
+//
+// We mirror the parsing logic from `extract.rs` instead of cross-importing
+// because those helpers are crate-private to that module's call sites
+// (the Output_Rate accessor) and CBS reads its own property under
+// `Spar_TSN`. Keeping a small local copy avoids exposing internals.
+
+const DATA_RATE_UNIT_FACTORS_BPS: &[(&str, u64)] = &[
+    ("bitsps", 1),
+    ("Bytesps", 8),
+    ("KBytesps", 8 * 1024),
+    ("MBytesps", 8 * 1024 * 1024),
+    ("GBytesps", 8 * 1024 * 1024 * 1024),
+];
+
+fn data_rate_unit_factor_bps(unit: &str) -> Option<u64> {
+    DATA_RATE_UNIT_FACTORS_BPS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(unit))
+        .map(|(_, f)| *f)
+}
+
+fn extract_data_rate_bps_local(expr: &PropertyExpr) -> Option<u64> {
+    match expr {
+        PropertyExpr::Integer(v, Some(unit)) if *v >= 0 => {
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            (*v as u64).checked_mul(factor)
+        }
+        PropertyExpr::Integer(v, None) if *v >= 0 => Some(*v as u64),
+        PropertyExpr::Real(s, Some(unit)) => {
+            let v: f64 = s.parse().ok()?;
+            if v < 0.0 {
+                return None;
+            }
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            Some((v * factor as f64) as u64)
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            match inner.as_ref() {
+                PropertyExpr::Integer(v, _) if *v >= 0 => (*v as u64).checked_mul(factor),
+                PropertyExpr::Real(s, _) => {
+                    let v: f64 = s.parse().ok()?;
+                    if v < 0.0 {
+                        return None;
+                    }
+                    Some((v * factor as f64) as u64)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_data_rate_bps_local(s: &str) -> Option<u64> {
+    let s = s.trim();
+    for &(unit, factor) in DATA_RATE_UNIT_FACTORS_BPS {
+        if let Some(num_str) = s.strip_suffix(unit).map(|s| s.trim()) {
+            if let Ok(v) = num_str.parse::<u64>() {
+                return v.checked_mul(factor);
+            }
+            if let Ok(v) = num_str.parse::<f64>() {
+                if v < 0.0 {
+                    return None;
+                }
+                return Some((v * factor as f64) as u64);
+            }
+        }
+    }
+    s.parse::<u64>().ok()
 }
 
 fn parse_size_bytes(s: &str) -> Option<u64> {
@@ -734,6 +1003,162 @@ mod tests {
         // Missing returns None.
         let empty = PropertyMap::new();
         assert_eq!(get_stream_id(&empty), None);
+    }
+
+    // ── CBS (802.1Qav) — v0.8.1 commit 3 ─────────────────────────────
+
+    /// 1 Gbps in bits/second — link rate used by the CBS unit tests.
+    const GBPS: u64 = 1_000_000_000;
+
+    #[test]
+    fn cbs_reservation_construct_basic() {
+        // 30% reservation on a 1 Gbps link: idleSlope = 300 Mbps,
+        // sendSlope = 300 Mbps − 1 Gbps = −700 Mbps.
+        let r = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        assert_eq!(r.idle_slope_bps, 300_000_000);
+        assert_eq!(r.send_slope_bps, -700_000_000);
+        assert_eq!(r.hi_credit_bytes, 12_000);
+        assert_eq!(r.lo_credit_bytes, 1500);
+    }
+
+    #[test]
+    fn cbs_reservation_rejects_oversubscription() {
+        // Reservation > link rate is infeasible.
+        assert_eq!(CbsReservation::new(GBPS + 1, GBPS, 0, 0), None);
+        // Zero link rate is also rejected (guards the divisions).
+        assert_eq!(CbsReservation::new(0, 0, 0, 0), None);
+    }
+
+    #[test]
+    fn cbs_reservation_at_link_rate_has_zero_send_slope() {
+        // idleSlope == linkRate ⇒ sendSlope = 0 (boundary, no other
+        // class can use the link).
+        let r = CbsReservation::new(GBPS, GBPS, 0, 0).unwrap();
+        assert_eq!(r.idle_slope_bps, GBPS);
+        assert_eq!(r.send_slope_bps, 0);
+    }
+
+    #[test]
+    fn cbs_reservation_reserved_fraction_recovers_link_rate() {
+        let r = CbsReservation::new(250_000_000, GBPS, 0, 0).unwrap();
+        let (num, den) = r.reserved_fraction();
+        assert_eq!(num, 250_000_000);
+        assert_eq!(den, GBPS);
+    }
+
+    #[test]
+    fn cbs_residual_service_rate_equals_idle_slope() {
+        let r = CbsReservation::new(300_000_000, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(
+            beta.rate_bps, 300_000_000,
+            "service rate must equal idleSlope (the reserved bps)"
+        );
+    }
+
+    #[test]
+    fn cbs_residual_service_blocking_term_dominates_when_lo_credit_zero() {
+        // With lo_credit = 0 the recovery term is 0; latency is purely
+        // the worst-case blocking from the largest competing frame.
+        // 1518-byte frame at 1 Gbps:
+        //   blocking_ps = 1518 · 8 · 10^12 / 10^9
+        //               = 12_144 · 10^3 ps
+        //               = 12_144_000 ps (rounded up — exact here).
+        let r = CbsReservation::new(300_000_000, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(beta.latency_ps, 12_144_000);
+    }
+
+    #[test]
+    fn cbs_residual_service_credit_recovery_term() {
+        // Closed-form latency = blocking + lo_credit / |sendSlope|.
+        //
+        // 1 Gbps link, idleSlope 300 Mbps ⇒ |sendSlope| = 700 Mbps.
+        //
+        //   blocking = 1518 · 8 · 10^12 / 10^9 = 12_144_000 ps.
+        //
+        //   recovery = 1500 · 8 · 10^12 / 7·10^8
+        //            = 12_000 · 10^12 / 7·10^8
+        //            = 17_142_857.14 ps → 17_142_858 (rounded up).
+        //
+        //   total = 12_144_000 + 17_142_858 = 29_286_858 ps.
+        let r = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(beta.rate_bps, 300_000_000);
+        // Rounding-up on the recovery term is required for safe
+        // pessimism direction.
+        let blocking = 12_144_000u64;
+        let recovery = (1500u128 * 8u128 * 1_000_000_000_000u128).div_ceil(700_000_000u128) as u64;
+        assert_eq!(beta.latency_ps, blocking + recovery);
+    }
+
+    #[test]
+    fn cbs_residual_service_idle_slope_equals_link_rate_no_blocking() {
+        // Boundary: idleSlope == linkRate ⇒ sendSlope == 0. The
+        // closed-form's recovery term is zero, and any "competing
+        // class" cannot exist (the class has the link to itself).
+        // Latency is just the configured blocking term, which we
+        // expect callers to set to zero in this case.
+        let r = CbsReservation::new(GBPS, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 0);
+        assert_eq!(beta.rate_bps, GBPS);
+        assert_eq!(beta.latency_ps, 0);
+    }
+
+    #[test]
+    fn cbs_two_classes_each_30pct_get_each_their_idle_slope() {
+        // Two classes, each reserving 30% of a 1 Gbps link. Both must
+        // see 300 Mbps service rate; the latency captures the same
+        // worst-case blocking (the largest competing frame).
+        let class_a = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let class_b = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let beta_a = cbs_residual_service(&class_a, GBPS, 1518);
+        let beta_b = cbs_residual_service(&class_b, GBPS, 1518);
+        assert_eq!(beta_a.rate_bps, 300_000_000);
+        assert_eq!(beta_b.rate_bps, 300_000_000);
+        assert_eq!(beta_a.latency_ps, beta_b.latency_ps);
+        // 30% + 30% = 60%, leaving 40% for best-effort and the other
+        // CBS class. Reservation feasibility is preserved (both
+        // succeeded above).
+    }
+
+    #[test]
+    fn read_bandwidth_reservation_typed_and_string_paths() {
+        // Typed integer with explicit unit.
+        let props = make_props(
+            SPAR_TSN,
+            "Bandwidth_Reservation",
+            "1000000",
+            Some(PropertyExpr::Integer(
+                1000,
+                Some(spar_hir_def::name::Name::new("KBytesps")),
+            )),
+        );
+        // 1000 KBytesps = 1000 · 8 · 1024 = 8_192_000 bps.
+        assert_eq!(get_bandwidth_reservation_bps(&props), Some(8_192_000));
+
+        // Bare integer (interpreted as bps).
+        let props_bare = make_props(
+            SPAR_TSN,
+            "Bandwidth_Reservation",
+            "300000000",
+            Some(PropertyExpr::Integer(300_000_000, None)),
+        );
+        assert_eq!(
+            get_bandwidth_reservation_bps(&props_bare),
+            Some(300_000_000)
+        );
+
+        // String fallback path — `100 MBytesps` → 100 · 8 · 1024^2.
+        let props_str = make_props(SPAR_TSN, "Bandwidth_Reservation", "100 MBytesps", None);
+        assert_eq!(
+            get_bandwidth_reservation_bps(&props_str),
+            Some(100u64 * 8 * 1024 * 1024)
+        );
+
+        // Missing returns None.
+        let empty = PropertyMap::new();
+        assert_eq!(get_bandwidth_reservation_bps(&empty), None);
     }
 
     #[test]

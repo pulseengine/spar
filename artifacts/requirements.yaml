@@ -1485,6 +1485,32 @@ artifacts:
     status: planned
     tags: [network, tsn, wctt, v081]
 
+  - id: REQ-TSN-003
+    type: requirement
+    title: 802.1Qav CBS credit-pool service curve
+    description: >
+      Per-class CBS (Credit-Based Shaper, IEEE 802.1Qav) service curve
+      for TSN-switched buses. Adds property
+      Spar_TSN::Bandwidth_Reservation (aadlinteger units
+      Data_Rate_Units; bus and port) declaring per-class idleSlope (the
+      reserved bps for that class). The spar-network::tsn module exposes
+      `CbsReservation` (idle_slope_bps, send_slope_bps, hi_credit_bytes,
+      lo_credit_bytes) plus `cbs_residual_service`, the rate-latency
+      closed-form β_class(t) = idleSlope · max(0, t − T) where the
+      service latency T = max_competing_frame / link_rate
+      + lo_credit / |sendSlope| (Le Boudec & Thiran §1.4.3 plus AVB/TSN
+      AVB delay analysis literature, Lim et al. "Delay analysis in CBS
+      for AVB"). The wctt analysis dispatches CBS service curves at
+      hops where Switch_Type=>TSN and the stream's source declares
+      Bandwidth_Reservation; on those hops the per-class service curve
+      replaces the FIFO residual decomposition and emits a
+      `WcttCbsShaped` Info diagnostic carrying the stream id, CoS,
+      idle_slope, and service-latency. Per
+      docs/designs/track-d-tsn-wctt-research.md §5.2-5.3 and Track D
+      Phase 2 v0.8.1 commit 3.
+    status: implemented
+    tags: [network, tsn, cbs, qav, wctt, v081]
+
   - id: REQ-TSN-004
     type: requirement
     title: 802.1Qbu frame-preemption blocking term in WCTT analysis
