@@ -1923,3 +1923,32 @@ artifacts:
         target: REQ-TSN-001
       - type: satisfies
         target: REQ-NETWORK-001
+
+  - id: TEST-INSIGHT-DISCREPANCY
+    type: feature
+    title: spar-insight CTF parser + 5-kind discrepancy detection
+    description: >
+      Unit + integration tests in crates/spar-insight covering Tier 1
+      CTF text parsing (timestamp / event-name / payload, blank +
+      comment lines, malformed-line rejection), Zephyr event
+      classification (`k_sem_give`, `k_sem_take`, `k_timer_expiry`,
+      `probe_point_enter` / `probe_point_exit`, fallthrough to
+      `Custom`), enter/exit pairing for per-probe timing extraction
+      (clean pairing, orphan dropping, independent probes), and the
+      rules-based discrepancy detector (`WcetViolated`,
+      `BcetUnderestimated`, `MeanDrift`, `UnobservedProbe`,
+      `MissingProbe`) end-to-end against an instantiated
+      `SystemInstance` whose Brake.Impl declares
+      `Spar_Trace::Expected_BCET / Expected_WCET / Expected_Mean`.
+      Also exercises `DiscrepancyReport::to_json` / `to_text`.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-insight
+    status: passing
+    tags: [v0.9.0, insight, trace, ctf, tier1]
+    links:
+      - type: satisfies
+        target: REQ-INSIGHT-001
+      - type: satisfies
+        target: REQ-INSIGHT-002

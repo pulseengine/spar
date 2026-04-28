@@ -1,5 +1,6 @@
 mod assertion;
 mod diff;
+mod insight;
 mod lsp;
 mod moves;
 mod refactor;
@@ -44,6 +45,7 @@ fn main() {
         "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
         "moves" => moves::cmd_moves_dispatch(&args[2..]),
+        "insight" => insight::cmd_insight(&args[2..]),
         other => {
             eprintln!("Unknown command: {other}");
             process::exit(1);
@@ -68,6 +70,7 @@ fn print_usage() {
     eprintln!(
         "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
     );
+    eprintln!("  insight    Discrepancy assistant: compare CTF traces to Expected_BCET/WCET/Mean");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
     eprintln!();
     eprintln!("Options:");
@@ -94,6 +97,9 @@ fn print_usage() {
     );
     eprintln!(
         "  moves    enumerate --root Package::Type.Impl --component <fqn> [--target-filter <s>] [--format text|json] <file...>"
+    );
+    eprintln!(
+        "  insight  verify-trace --root Package::Type.Impl --trace trace.ctf [--format text|json] <file...>"
     );
 }
 
@@ -1680,7 +1686,7 @@ fn is_safe_generated_path(path: &str) -> bool {
         && !path.starts_with('\\')
 }
 
-fn parse_root_ref(s: &str) -> (String, String, String) {
+pub(crate) fn parse_root_ref(s: &str) -> (String, String, String) {
     // Expected format: Package::Type.Impl
     let parts: Vec<&str> = s.splitn(2, "::").collect();
     if parts.len() != 2 {
