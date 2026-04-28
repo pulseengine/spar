@@ -1495,4 +1495,30 @@ artifacts:
     status: implemented
     tags: [insight, trace, cli, v090]
 
+  # ── Track E commit 8/8 — MCP oracle surface (v0.9.0) ──────────────────
+
+  - id: REQ-MCP-002
+    type: requirement
+    title: spar-mcp read-only verification-oracle tool surface
+    description: >
+      System exposes read-only / idempotent MCP (Model Context Protocol)
+      tools `spar.verify_move`, `spar.enumerate_moves`, and
+      `spar.check_chain` for AI agent integration. The three tools wrap
+      the existing `spar moves verify`, `spar moves enumerate`, and
+      end-to-end latency-analysis pipelines without printing — each tool
+      returns the same structured JSON shape the equivalent CLI
+      subcommand emits with `--format json`. The deterministic apply
+      path stays CLI-exclusive: there is no `spar.apply_move` tool over
+      MCP, ever, by certification design (per Track E migration research
+      §6.5). LLM agents propose moves; spar deterministically verifies;
+      certification chain stays in spar. The transport is JSON-RPC 2.0
+      over stdio per MCP 2025-11-25; the server is reachable as either a
+      standalone `spar-mcp` binary or via the `spar mcp serve`
+      subcommand. All three tools declare `readOnlyHint: true` and
+      `idempotentHint: true` in their MCP annotations and refuse to
+      mutate the model file on disk. Track E commit 8/8 of the v0.9.0
+      design.
+    status: implemented
+    tags: [mcp, migration, track-e, v090, integration]
+
   # Research findings tracked separately in research/findings.yaml
