@@ -1892,3 +1892,34 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-NETWORK-007
+
+  - id: TEST-TSN-PROPS
+    type: feature
+    title: Spar_TSN property-set + spar-network::tsn surface
+    description: >
+      Verifies that the v0.8.1 commit 1 TSN property surface is
+      registered and reachable. Asserts that Spar_TSN appears in
+      STANDARD_PROPERTY_SET_NAMES with the expected five properties
+      (Stream_ID, Class_of_Service, Gate_Control_List, Max_Frame_Size,
+      Frame_Preemption), that each resolves via GlobalScope without
+      explicit `with` imports, and that the total predeclared property
+      count is 127 (was 122 before this commit). Verifies the
+      spar-network::tsn placeholder types (GateWindow, ClassOfService,
+      CreditPool) construct, that ClassOfService enforces the 0..=7
+      range and orders by 802.1Q priority, and that the property
+      accessors (get_stream_id, get_class_of_service,
+      get_max_frame_size_bytes, get_frame_preemption,
+      get_gate_control_list_raw) read both typed PropertyExpr values
+      and string-fallback values from a PropertyMap.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-network --lib -- tsn
+    status: passing
+    tags: [v0.8.1, network, tsn, properties]
+    links:
+      - type: satisfies
+        target: REQ-TSN-001
+      - type: satisfies
+        target: REQ-NETWORK-001
