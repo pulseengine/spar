@@ -53,5 +53,8 @@ pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };
 pub use extract::extract_network_graph;
-pub use tsn::{ClassOfService, CreditPool, GateWindow};
+pub use tsn::{
+    ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow, get_gate_schedule,
+    tas_residual_service,
+};
 pub use types::{NetworkGraph, NetworkLink, NetworkNode, NodeKind, SwitchType};
