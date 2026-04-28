@@ -1,8 +1,8 @@
 # AS5506 AADL v2.2 Compliance Gap Analysis
 
-**Updated**: 2026-04-25 (v0.7.0 in progress)
+**Updated**: 2026-04-27 (v0.7.1 released; v0.8.0 in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (1900+ tests passing across 17 crates)
+**Toolchain**: spar (2200+ tests passing across 18 crates)
 
 ---
 
@@ -214,7 +214,10 @@
 
 ---
 
-## v0.7.0 (delivered) / v0.8.0 (in progress)
+## v0.7.1 (released 2026-04-27)
+
+Headline release for the v0.7.x line. Tagged `v0.7.1`. Binary release
+artifacts at github.com/pulseengine/spar/releases/tag/v0.7.1.
 
 **Track A — IRQ-aware RTA (4/4 commits delivered)**
 
@@ -225,48 +228,67 @@
 
 **Out of scope for v0.7.0, deferred to v0.7.1+**: priority inheritance (PIP) / priority ceiling (PCP) blocking; multi-processor ISR migration; cache-aware interference inflation (research-grade, v1.0+).
 
-**Track B — Variants (foundation only)**
+**Track B — Variants foundation**
 
-- Variant binding contract v1 (#144): `docs/contracts/rivet-spar-variant-v1.md` — rivet owns the PLE truth (feature model, variant configs, bindings, SAT), spar consumes a JSON context blob and filters HIR. Implementation of the consumer crate (`spar-variants`) waits for rivet to emit its first context blob; tracked separately.
+- Variant binding contract v1 (#144): `docs/contracts/rivet-spar-variant-v1.md` — rivet owns the PLE truth (feature model, variant configs, bindings, SAT), spar consumes a JSON context blob and filters HIR.
+- spar-variants consumer crate (#162): reads the v1 context blob, applies intersection-semantics binding rules, exposes `keep_in_variant` predicate.
 
-**v0.7.x infrastructure landed alongside Track A**
+**v0.7.x infrastructure**
 
 - Kani harnesses for spar-solver and spar-codegen invariants (#141, closes #136).
 - cargo-fuzz scaffolding for parser, solver, codegen-roundtrip targets (#142, closes #138).
 - Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
 - Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
-- Track D and Track E research design docs landed (#152, #153) anchoring v0.8.0+ scope.
-
-**Track D — TSN/Ethernet WCTT analysis (Phase 1, 5/6 commits delivered)**
-
-- Foundation: Spar_Network property set + spar-network crate skeleton (#155)
-- NetworkGraph extraction from SystemInstance (#157)
-- NC primitives — arrival/service curves + min-plus operators (#161)
-- WcttAnalysis pass with per-stream end-to-end bounds (#168)
-- Lean theorems for NC primitives (commit 5; in flight as a sibling to this PR)
-- latency.rs integration — RTA-derived WCET on compute hops + wctt-derived WCTT
-  on network hops, end-to-end. Bus_Properties::Latency scalar remains the
-  fallback for unannotated buses, preserving v0.7.0 behaviour. (this commit)
-
-Phase 2 (TSN-shaped service curves with TAS, CBS, frame preemption) is
-v0.8.x scope.
-
-**Track E — Frozen-platform / mobile-application split (commit 3 delivered)**
-
-- `spar moves verify` CLI subcommand for hypothetical-rebinding oracle
-  is live; the deterministic-apply path is v0.8.x. The MCP read-only
-  surface (`spar.verify_move`, `spar.enumerate_moves`) remains v0.9.0
-  scope per Track E roadmap.
+- Track D and Track E research design docs (#152, #153) and Track F engagement strategy (#160) anchoring v0.8.0+ scope.
 
 ---
 
-## v0.8.0 planning
+## v0.8.0 (in progress on main)
 
-Two parallel tracks scoped from the v0.7.0 research:
+**Track D — TSN/Ethernet WCTT analysis, Phase 1 (6/6 commits delivered)**
 
-**Track D — TSN/Ethernet WCTT analysis (#149)**: WCTT is a foundational primitive for honest end-to-end timing, not a TSN-specific feature. Phase 1 (v0.8.0) ships a Network Calculus engine for FIFO+priority networks (classical Ethernet, CAN, FlexRay) and replaces `latency.rs`'s scalar bus-latency lookup with per-stream NC-derived bounds. Phase 2 (v0.8.x) adds TSN-specific service curves (TAS, CBS, frame preemption). Roadmap: 7 weeks across 6 commits.
+- Foundation: `Spar_Network::{Switch_Type, Queue_Depth, Forwarding_Latency, Output_Rate}` property set + `spar-network` crate skeleton (#155).
+- NetworkGraph extraction from SystemInstance (#157).
+- Network Calculus primitives (#161): `ArrivalCurve`, `ServiceCurve`, `backlog_bound`, `delay_bound`, `residual_service`, `output_bound`. All values in `u64` picoseconds / bytes / bits-per-second — no floating-point drift.
+- `WcttAnalysis` pass (#168): per-stream end-to-end traversal-time bounds. New diagnostics `WcttBound`, `WcttExceedsBudget`, `WcttUnservable`, `WcttSwitchOverloaded`. New `Spar_Network::WCTT_Budget` property.
+- Lean theorems for NC primitives (#169): `proofs/Proofs/Network/MinPlus.lean` mirrors classical NC closed-forms with monotonicity proved + `sorry`-with-`TODO(v1.0.0)` for the universally-quantified arithmetic statements.
+- `latency.rs` integration (#171): RTA-derived WCET on compute hops alternates with WCTT-derived bounds on network hops, end-to-end, replacing the placeholder `Bus_Properties::Latency` scalar when `Spar_Network::*` is annotated. Models without `Spar_Network::*` keep the scalar — non-regression.
 
-**Track E — Frozen-platform / mobile-application split + hypothetical-rebinding oracle (#150)**: Adds `Spar_Migration::{Frozen, Mobile, Allowed_Targets, Pinned_Reason}` plus a verification mode (`spar moves verify`) and an enumeration mode (`spar moves enumerate`). The MCP tool surface (`spar.verify_move`, `spar.enumerate_moves`) ships in v0.9.0 — read-only / idempotent only, deterministic apply via CLI. LLM agents propose moves; spar deterministically verifies; certification chain stays in spar. Roadmap: 8 weeks across 8 commits for v0.8.0; another 8.5 weeks across the v0.9.0 MCP surface.
+Phase 2 (TSN-shaped service curves: TAS, CBS, frame preemption) is v0.8.x scope.
+
+**Track E — Frozen-platform / mobile-application + hypothetical-rebinding oracle (6/8 commits delivered)**
+
+- Foundation: `Spar_Migration::{Frozen, Mobile, Allowed_Targets, Pinned_Reason}` property set + `is_frozen` / `is_mobile` helpers (#156).
+- `BindingOverlay` (#164): HIR-level overlay so any analysis can run on a hypothetical binding without mutating the SystemInstance. Validates against Frozen / Allowed_Targets returning structured `FrozenViolation` / `AllowedTargetsViolation` diagnostics.
+- `spar moves verify` (#166): CLI command — first user-facing surface of the migration oracle. Builds a `BindingOverlay`, runs validation + analyses, returns structured pass/fail JSON with violations. Exit codes 0/1/2 distinguish ok / analysis-error / binding-violation.
+- `spar moves enumerate` (#170): CLI command — design-space exploration. Lists every valid hypothetical rebinding target for a component within `Allowed_Targets` (or every processor if `Allowed_Targets` is absent), each with verification status and an optional ranking metric.
+- Multi-objective enumeration ranking (#174): replaces the simple slack metric with a configurable score across `max-response | total-load | total-power | total-weight | balanced`. Adds `Spar_Power::Power_Budget` property. Score uses the same RTA + property-accessor machinery as direct verification, so verify/enumerate stay consistent.
+- Rivet variant integration (#173): `spar moves verify --variant NAME` and `--variant-context PATH` accepted by both `verify` and `enumerate`. Variant filter applies before overlay validation; non-variant components dropped from the analysis surface per the v1 contract's intersection semantics.
+
+Remaining v0.8.0 work:
+- Commit 7 (this commit): documentation + COMPLIANCE close-out narrative
+- Commit 8 (v0.9.0 territory): MCP tool surface (`spar.verify_move`, `spar.enumerate_moves`) — read-only / idempotent only, deterministic apply stays CLI-exclusive
+
+**Track F — SysML v2 / KerML community engagement (strategy doc on main)**
+
+- `docs/designs/track-f-sysml-kerml-engagement.md` (#160): research-backed engagement plan for the OMG SysML v2 ecosystem. Anchors on the `Systems-Modeling/SysML-v2-AADL-Release` repo + named contacts at Galois/CMU-SEI/Ellidiss. Includes verified spar-sysml2 audit (production-grade with full requirements roundtrip) + Rust ecosystem positioning (`syster`, `Sysand`, `tree-sitter-sysml`).
+
+**v0.8.0 release readiness criteria**
+
+- Track D Phase 1 complete ✅
+- Track E commits 1-6 complete ✅
+- Track E commit 7 (docs + this close-out) ⏳ in this commit
+- Track E commit 8 (MCP) deferred to v0.9.0
+- Tag `v0.8.0` once Track E commit 7 lands and Phase 2 TSN scope is decided.
+
+---
+
+## v0.9.0 horizon
+
+- Track E commit 8: MCP tool surface (`spar.verify_move`, `spar.enumerate_moves`) per Track E research §6.5. Read-only and idempotent only; deterministic apply stays CLI-exclusive. LLM agents propose moves; spar deterministically verifies; certification chain stays in spar.
+- spar-insight (statistical discrepancy assistant): rules-based first; Lean-foundation statistical methods (proof-assistant choice still parked per project memory). Per Track F's R2/R1 discussion.
+- Track D Phase 2 if user demand surfaces: TSN-shaped service curves (TAS, CBS, frame preemption).
+- syster license-clarification issue (per Track F amendments) — minimum-viable engagement only, conditional on strategic value.
 
 ---
 
