@@ -1436,4 +1436,27 @@ artifacts:
     status: planned
     tags: [network, wctt, lean, proofs, v080]
 
+  - id: REQ-TSN-001
+    type: requirement
+    title: Spar_TSN property surface for Time-Sensitive Networking
+    description: >
+      Spar_TSN property surface declares stream identification,
+      class-of-service, gate-control-list (raw string in v0.8.1,
+      structured in v0.9.x), max frame size, and frame preemption
+      hooks. Properties are: Stream_ID (aadlinteger 0..2**32-1; port,
+      connection), Class_of_Service (aadlinteger 0..7; port,
+      connection), Gate_Control_List (aadlstring; bus —
+      v0.8.1 raw blob, v0.9.x structured GateWindow record),
+      Max_Frame_Size (aadlinteger units Size_Units; port, connection),
+      and Frame_Preemption (aadlboolean; port, connection). Foundation
+      for Track D Phase 2 TSN-shaped service curves: TAS gate-window
+      (802.1Qbv), CBS credit-pool (802.1Qav), and frame preemption
+      (802.1Qbu). v0.8.1 commit 1 ships the property surface and the
+      spar-network::tsn module skeleton (GateWindow, ClassOfService,
+      CreditPool types plus property accessors); subsequent commits
+      add the analysis math. Per
+      docs/designs/track-d-tsn-wctt-research.md §5.1.
+    status: planned
+    tags: [network, tsn, wctt, v081]
+
   # Research findings tracked separately in research/findings.yaml

@@ -46,10 +46,12 @@
 
 pub mod curves;
 pub mod extract;
+pub mod tsn;
 pub mod types;
 
 pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };
 pub use extract::extract_network_graph;
+pub use tsn::{ClassOfService, CreditPool, GateWindow};
 pub use types::{NetworkGraph, NetworkLink, NetworkNode, NodeKind, SwitchType};

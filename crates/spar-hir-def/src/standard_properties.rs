@@ -39,6 +39,7 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Spar_Network",
     "Spar_Migration",
     "Spar_Power",
+    "Spar_TSN",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -457,6 +458,50 @@ const SPAR_POWER: &[(&str, &str)] = &[
     ("Power_Budget", "Time"),
 ];
 
+// ── Spar_TSN ────────────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for Time-Sensitive Networking (TSN) WCTT analysis (Track D Phase 2,
+// v0.8.1+). Provides the AADL vocabulary for TSN-shaped service
+// curves: TAS gate-control schedules (802.1Qbv), CBS credit-pool
+// classes (802.1Qav), and frame preemption (802.1Qbu). Sits alongside
+// `Spar_Network::*` (Phase 1, switch-discriminator + classical
+// FIFO/Priority disciplines).
+//
+// v0.8.1 commit 1 ships the property surface only; subsequent commits
+// in the v0.8.1 series add the analysis math (TAS gate-window service
+// curves, CBS credit accounting, frame-preemption hooks). See
+// `docs/designs/track-d-tsn-wctt-research.md` §5.1 (property design)
+// and §5.2 (switch modeling).
+
+const SPAR_TSN: &[(&str, &str)] = &[
+    // Per-stream identifier required by TAS gate-control lists and
+    // by stream reservation (802.1Qcc). Applies to port and connection.
+    ("Stream_ID", "aadlinteger 0..2**32-1"),
+    // 802.1Q priority class (0-7). Drives queue selection at switches
+    // and gate-mask matching in the TAS gate-control list.
+    // Applies to port and connection.
+    ("Class_of_Service", "aadlinteger 0..7"),
+    // Time-aware-shaper gate schedule — 802.1Qbv gate-control list.
+    // For v0.8.1 commit 1 the value is parsed only as an opaque string
+    // blob (the structured form lands in v0.8.1 commit 2 once the TAS
+    // service-curve math is wired up).
+    //
+    // Future v0.9.x: structured form via Gate_Window record.
+    //
+    // Applies to bus.
+    ("Gate_Control_List", "aadlstring"),
+    // Maximum frame size in bytes (typed as `aadlinteger units
+    // Size_Units` so it lowers to bytes via the existing AADL
+    // size-unit machinery). Frame-preemption (802.1Qbu) and
+    // serialization-time terms read this. Applies to port and
+    // connection.
+    ("Max_Frame_Size", "aadlinteger units Size_Units"),
+    // Whether frames in this class can be pre-empted by Express
+    // traffic (802.1Qbu). Applies to port and connection.
+    ("Frame_Preemption", "aadlboolean"),
+];
+
 /// Helper: collect properties from a table into the result vector.
 fn collect_properties(
     table: &[(&'static str, &'static str)],
@@ -497,6 +542,7 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     collect_properties(SPAR_NETWORK, "Spar_Network", &mut result);
     collect_properties(SPAR_MIGRATION, "Spar_Migration", &mut result);
     collect_properties(SPAR_POWER, "Spar_Power", &mut result);
+    collect_properties(SPAR_TSN, "Spar_TSN", &mut result);
 
     result
 }
@@ -527,6 +573,7 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "spar_network" => Some(SPAR_NETWORK),
         "spar_migration" => Some(SPAR_MIGRATION),
         "spar_power" => Some(SPAR_POWER),
+        "spar_tsn" => Some(SPAR_TSN),
         _ => None,
     }
 }
@@ -576,6 +623,7 @@ mod tests {
         assert!(is_standard_property_set("Spar_Network"));
         assert!(is_standard_property_set("Spar_Migration"));
         assert!(is_standard_property_set("Spar_Power"));
+        assert!(is_standard_property_set("Spar_TSN"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -1028,6 +1076,96 @@ mod tests {
     }
 
     #[test]
+    fn test_standard_properties_in_spar_tsn() {
+        // Spar_TSN is a known property set.
+        assert!(is_standard_property_set("Spar_TSN"));
+
+        let props = standard_properties_in_set("Spar_TSN");
+        assert_eq!(props.len(), 5);
+        assert!(props.contains(&"Stream_ID"));
+        assert!(props.contains(&"Class_of_Service"));
+        assert!(props.contains(&"Gate_Control_List"));
+        assert!(props.contains(&"Max_Frame_Size"));
+        assert!(props.contains(&"Frame_Preemption"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Stream_ID"),
+            Some("aadlinteger 0..2**32-1")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Class_of_Service"),
+            Some("aadlinteger 0..7")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Gate_Control_List"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Max_Frame_Size"),
+            Some("aadlinteger units Size_Units")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Frame_Preemption"),
+            Some("aadlboolean")
+        );
+
+        // Deliberately-wrong name returns None.
+        assert_eq!(standard_property_type("Spar_TSN", "Nonexistent"), None);
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_tsn", "stream_id"),
+            Some("aadlinteger 0..2**32-1")
+        );
+        assert_eq!(
+            standard_property_type("SPAR_TSN", "FRAME_PREEMPTION"),
+            Some("aadlboolean")
+        );
+    }
+
+    #[test]
+    fn test_spar_tsn_property_set_resolved_via_global_scope() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        let scope = GlobalScope::from_trees(vec![]);
+
+        // Each Spar_TSN property is resolvable without explicit `with`.
+        for prop_name in [
+            "Stream_ID",
+            "Class_of_Service",
+            "Gate_Control_List",
+            "Max_Frame_Size",
+            "Frame_Preemption",
+        ] {
+            let result = scope.resolve_property(&Name::new("Spar_TSN"), &Name::new(prop_name));
+            assert!(
+                matches!(result, ResolvedProperty::PropertyDef { .. }),
+                "expected PropertyDef for Spar_TSN::{}, got {:?}",
+                prop_name,
+                result
+            );
+        }
+
+        // Deliberately-wrong name inside a known spar set is Unresolved.
+        let result = scope.resolve_property(&Name::new("Spar_TSN"), &Name::new("Nonexistent"));
+        assert!(
+            matches!(result, ResolvedProperty::Unresolved),
+            "expected Unresolved for Spar_TSN::Nonexistent, got {:?}",
+            result
+        );
+
+        // Case-insensitive resolution.
+        let result = scope.resolve_property(&Name::new("spar_tsn"), &Name::new("stream_id"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected case-insensitive match for Spar_TSN::Stream_ID, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_standard_properties_unknown_set() {
         let props = standard_properties_in_set("Nonexistent_Properties");
         assert!(props.is_empty());
@@ -1043,15 +1181,17 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 = 122
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 5 = 127
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
-        //  + Spar_Migration + Spar_Power)
+        //  + Spar_Migration + Spar_Power + Spar_TSN)
         // Thread_Properties: +1 for Locking_Protocol (v0.7.1 PIP/PCP).
         // Spar_Timing: +1 for Critical_Section_Blocking (v0.7.1 PIP/PCP).
         // Spar_Network: +1 for WCTT_Budget (Track D commit 4).
         // Spar_Power: +1 for Power_Budget (Track E commit 5/8 ranker).
-        assert_eq!(all.len(), 122);
+        // Spar_TSN: +5 for Stream_ID, Class_of_Service, Gate_Control_List,
+        //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1).
+        assert_eq!(all.len(), 127);
     }
 
     #[test]
