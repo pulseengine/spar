@@ -56,7 +56,8 @@ use spar_network::extract::{
     extract_network_graph, read_forwarding_latency_ps, read_output_rate_bps, read_queue_depth,
 };
 use spar_network::tsn::{
-    ClassOfService, GateSchedule, get_class_of_service, get_gate_schedule, tas_residual_service,
+    ClassOfService, GateSchedule, get_class_of_service, get_frame_preemption, get_gate_schedule,
+    is_express_stream, preemption_blocking_term_ps, tas_residual_service,
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
@@ -74,6 +75,16 @@ const DEFAULT_BURST_BYTES: u64 = 1500;
 /// Default frame size in bytes assumed by [`read_queue_depth`] when
 /// expressed in frames; we approximate one queue slot as one MTU.
 const FRAME_BYTES: u64 = 1500;
+
+/// Maximum preemptable Ethernet frame size in bytes used for the
+/// legacy blocking term (MTU + 14-byte Ethernet header + 4-byte FCS =
+/// 1518 bytes). This is the worst-case in-flight preemptable frame an
+/// express stream can be blocked behind on a TSN-capable port that
+/// has *not* enabled 802.1Qbu preemption — the value the legacy
+/// blocking term [`preemption_blocking_term_ps`] computes when called
+/// with `preemption_enabled = false`. See IEEE 802.1Qbu §6.7.2 and
+/// `docs/designs/track-d-tsn-wctt-research.md` §5.2-5.3.
+const FRAME_BYTES_PREEMPTION_LEGACY: u64 = 1518;
 
 /// WCTT analysis pass.
 ///
@@ -220,15 +231,32 @@ impl WcttAnalysis {
             for (hop_idx, sw_idx) in stream.hops.iter().enumerate() {
                 let st = switch_type.get(sw_idx).copied().unwrap_or(SwitchType::Fifo);
 
-                // TSN switches: prefer the TAS gate-window service
-                // curve when both the bus has a parsed Gate_Control_List
-                // and the stream carries a Spar_TSN::Class_of_Service.
-                // When either is missing, fall back to the v0.8.0
-                // WcttDeferred Info diagnostic and skip the hop's
-                // contribution.
+                // ── TSN switch dispatch ──────────────────────────
+                //
+                // Three-way dispatch order (see PR #180 + #181):
+                //   1. **TAS (802.1Qbv) gate-window service curve** —
+                //      when the bus has a parsed
+                //      `Spar_TSN::Gate_Control_List` *and* the stream
+                //      carries `Spar_TSN::Class_of_Service`. Use
+                //      `tas_residual_service` and emit `WcttTasGated`.
+                //   2. **Frame preemption (802.1Qbu) blocking term** —
+                //      when the bus has `Frame_Preemption => true` and
+                //      the stream is express (per `is_express_stream`).
+                //      Use the bus service curve with its forwarding
+                //      latency replaced by the fragment-blocking term;
+                //      emit `WcttPreemptionApplied` reporting the gain
+                //      relative to the legacy max-frame blocking.
+                //   3. **Deferred** — neither GCL+CoS nor (preemption +
+                //      express). Emit `WcttDeferred` once per stream
+                //      and skip the hop. v0.8.1 commits 2/3/4 are
+                //      filling in the per-shaper math; CBS is the next
+                //      milestone.
                 let svc = if matches!(st, SwitchType::Tsn) {
+                    let bus_props = instance.properties_for(*sw_idx);
+                    let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
                     match (gate_schedule_for_bus.get(sw_idx), stream.cos) {
                         (Some(schedule), Some(cos)) => {
+                            // Path 1: TAS service curve.
                             let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
                             let tas_svc = tas_residual_service(schedule, cos, link_rate);
                             let (open_ps, cycle_ps) = schedule.open_fraction(cos);
@@ -262,32 +290,73 @@ impl WcttAnalysis {
                             tas_svc
                         }
                         _ => {
-                            // No gate schedule or no CoS — fall back to
-                            // the v0.8.0 deferred path. We deliberately
-                            // emit at most one WcttDeferred per stream
-                            // (the diagnostic noise floor matches Phase
-                            // 1's behaviour).
-                            if !deferred_emitted {
+                            // Path 2: frame preemption when bus enables
+                            // it and the stream is express.
+                            if bus_preemption && stream.is_express {
+                                let svc_base = match service_for_bus.get(sw_idx) {
+                                    Some(s) => *s,
+                                    None => continue,
+                                };
+                                if svc_base.rate_bps == 0 {
+                                    continue;
+                                }
+                                let blocking_legacy_ps = preemption_blocking_term_ps(
+                                    svc_base.rate_bps,
+                                    FRAME_BYTES_PREEMPTION_LEGACY,
+                                    false,
+                                );
+                                let blocking_pmt_ps = preemption_blocking_term_ps(
+                                    svc_base.rate_bps,
+                                    FRAME_BYTES_PREEMPTION_LEGACY,
+                                    true,
+                                );
                                 diags.push(AnalysisDiagnostic {
                                     severity: Severity::Info,
                                     message: format!(
-                                        "WcttDeferred: stream '{}' traverses TSN switch '{}' at \
-                                         hop {}; TAS/CBS-shaped service curves are deferred to \
-                                         Phase 2 (tracked in \
-                                         docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                        "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
+                                         switch '{}': blocking shrinks from {} ns (legacy \
+                                         max-frame) to {} ns (802.1Qbu fragment + header)",
                                         stream_name,
+                                        hop_idx,
                                         graph
                                             .node(*sw_idx)
                                             .map(|n| n.name.as_str())
                                             .unwrap_or("<unknown>"),
-                                        hop_idx,
+                                        blocking_legacy_ps / 1_000,
+                                        blocking_pmt_ps / 1_000,
                                     ),
                                     path: stream_path.clone(),
                                     analysis: self.name().to_string(),
                                 });
-                                deferred_emitted = true;
+                                ServiceCurve::rate_latency(
+                                    svc_base.rate_bps,
+                                    svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                                )
+                            } else {
+                                // Path 3: deferred placeholder. Emit at
+                                // most one WcttDeferred per stream.
+                                if !deferred_emitted {
+                                    diags.push(AnalysisDiagnostic {
+                                        severity: Severity::Info,
+                                        message: format!(
+                                            "WcttDeferred: stream '{}' traverses TSN switch '{}' \
+                                             at hop {}; TAS/CBS-shaped service curves are \
+                                             deferred to Phase 2 (tracked in \
+                                             docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                            stream_name,
+                                            graph
+                                                .node(*sw_idx)
+                                                .map(|n| n.name.as_str())
+                                                .unwrap_or("<unknown>"),
+                                            hop_idx,
+                                        ),
+                                        path: stream_path.clone(),
+                                        analysis: self.name().to_string(),
+                                    });
+                                    deferred_emitted = true;
+                                }
+                                continue;
                             }
-                            continue;
                         }
                     }
                 } else {
@@ -551,15 +620,16 @@ pub fn compute_network_hop_latency(
         .as_ref()
         .and_then(|end| resolve_subcomponent(instance, owner_idx, &end.subcomponent));
 
-    let (rate_bps, burst_bytes) = if let Some(idx) = src_idx {
+    let (rate_bps, burst_bytes, src_is_express) = if let Some(idx) = src_idx {
         let src_props = instance.properties_for(idx);
         let rate = read_output_rate_bps(src_props).unwrap_or(0);
         let burst = read_queue_depth(src_props)
             .map(|q| q.saturating_mul(FRAME_BYTES))
             .unwrap_or(DEFAULT_BURST_BYTES);
-        (rate, burst)
+        let express = is_express_stream(src_props);
+        (rate, burst, express)
     } else {
-        (0, DEFAULT_BURST_BYTES)
+        (0, DEFAULT_BURST_BYTES, false)
     };
 
     let mut alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
@@ -610,7 +680,8 @@ pub fn compute_network_hop_latency(
         let bus_props = instance.properties_for(*sw_idx);
         let rate = read_output_rate_bps(bus_props).unwrap_or(0);
         let (bcet_ps, wcet_ps) = read_forwarding_latency_ps(bus_props).unwrap_or((0, 0));
-        let svc = ServiceCurve::rate_latency(rate, wcet_ps);
+        let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
+        let svc_base = ServiceCurve::rate_latency(rate, wcet_ps);
 
         // The min (best-case) bound is the BCET forwarding latency for
         // this hop — purely the propagation/forwarding floor, no
@@ -618,7 +689,7 @@ pub fn compute_network_hop_latency(
         // BCET is a lower bound.
         total_min_ps = total_min_ps.saturating_add(bcet_ps);
 
-        if svc.rate_bps == 0 {
+        if svc_base.rate_bps == 0 {
             // Without a finite service rate we cannot compute a worst-
             // case bound for this hop. Skip the queuing contribution
             // and trust BCET == WCET on the propagation floor.
@@ -626,15 +697,32 @@ pub fn compute_network_hop_latency(
             continue;
         }
 
-        // TSN switches: opaque in Phase 1. Skip queuing contribution
-        // (propagate the WCET floor only) — the WcttAnalysis pass also
-        // emits a `WcttDeferred` Info on the same switch.
+        // TSN switches: preemption-aware dispatch (v0.8.1 c4). When
+        // both the bus and the source stream declare
+        // `Frame_Preemption => true`, we replace the bus
+        // forwarding-latency floor with the small fragment-blocking
+        // term and continue with residual_service / delay_bound.
+        // Without preemption active we keep the v0.8.0 Phase 1 fallback
+        // (propagate the WCET floor only) — c2/c3 fill in TAS/CBS later.
+        let mut svc = svc_base;
         if let Some(node) = graph.node(*sw_idx)
             && let NodeKind::Switch { switch_type } = node.kind
             && matches!(switch_type, SwitchType::Tsn)
         {
-            total_max_ps = total_max_ps.saturating_add(wcet_ps);
-            continue;
+            if bus_preemption && src_is_express {
+                let blocking_pmt_ps = preemption_blocking_term_ps(
+                    svc_base.rate_bps,
+                    FRAME_BYTES_PREEMPTION_LEGACY,
+                    true,
+                );
+                svc = ServiceCurve::rate_latency(
+                    svc_base.rate_bps,
+                    svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                );
+            } else {
+                total_max_ps = total_max_ps.saturating_add(wcet_ps);
+                continue;
+            }
         }
 
         // Build the competing arrival curve for this hop.
@@ -754,6 +842,12 @@ struct Stream {
     /// without a CoS fall back to the [`Severity::Info`]-emitting
     /// `WcttDeferred` path.
     cos: Option<ClassOfService>,
+    /// Whether this stream qualifies as "express" for IEEE 802.1Qbu
+    /// preemption purposes (see [`is_express_stream`]). Express
+    /// streams pay only the preemption-fragment blocking at TSN ports
+    /// where the bus also enables `Frame_Preemption`; non-express
+    /// streams keep the legacy `max_frame / R` blocking term.
+    is_express: bool,
 }
 
 impl Stream {
@@ -863,6 +957,15 @@ fn collect_streams(
             // already use.
             let cos = get_class_of_service(src_props);
 
+            // Express-stream classification (IEEE 802.1Qbu). Read from
+            // the source-component's PropertyMap so that AADL fixtures
+            // can declare either `Spar_TSN::Frame_Preemption => true`
+            // explicitly or rely on the `Class_of_Service >= 6`
+            // default. A stream that is not express still walks TSN
+            // hops below; it just pays the legacy `max_frame / R`
+            // blocking term rather than the preemption-fragment term.
+            let is_express = is_express_stream(src_props);
+
             streams.push(Stream {
                 name: conn.name.as_str().to_string(),
                 src_idx,
@@ -870,6 +973,7 @@ fn collect_streams(
                 hops,
                 alpha,
                 cos,
+                is_express,
             });
         }
     }
@@ -1929,5 +2033,352 @@ end Net;
             .find(|d| d.message.starts_with("WcttDeferred"))
             .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
         assert!(deferred.severity == Severity::Info);
+    }
+
+    // ── Test 15: TSN preemption shrinks the per-hop blocking term ────
+    #[test]
+    fn tsn_preemption_emits_applied_diagnostic_and_computes_bound() {
+        // 1-switch TSN network. Bus = 100 Mbps with
+        // `Frame_Preemption => true`; one express stream
+        // (`Frame_Preemption => true` on the source) and one
+        // preemptable stream (no `Frame_Preemption`, CoS = 0).
+        // The express stream must:
+        //   - get a `WcttPreemptionApplied` Info diagnostic
+        //   - get a finite `WcttBound` (no `WcttDeferred`)
+        // The preemptable stream stays opaque (`WcttDeferred`).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device express_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Frame_Preemption => true;
+  end express_d;
+  device implementation express_d.impl
+  end express_d.impl;
+
+  device pre_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 0;
+  end pre_d;
+  device implementation pre_d.impl
+  end pre_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      ex : device express_d.impl;
+      pr : device pre_d.impl;
+      ex_dst : device d.impl;
+      pr_dst : device d.impl;
+    connections
+      c_sw_ex     : bus access sw -> ex.net;
+      c_sw_pr     : bus access sw -> pr.net;
+      c_sw_ex_dst : bus access sw -> ex_dst.net;
+      c_sw_pr_dst : bus access sw -> pr_dst.net;
+      data_ex     : port ex.out_p -> ex_dst.in_p;
+      data_pr     : port pr.out_p -> pr_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        // The express stream must produce a `WcttPreemptionApplied`
+        // Info diagnostic.
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert_eq!(
+            applied.len(),
+            1,
+            "expected exactly one WcttPreemptionApplied for the express \
+             stream: {:#?}",
+            diags
+        );
+        assert!(applied[0].severity == Severity::Info);
+        // Numbers reported in nanoseconds in the diagnostic message.
+        // Legacy: 1518 B · 8 / 100 Mbps = 121_440 ns.
+        // With preemption: 68 B · 8 / 100 Mbps = 5_440 ns.
+        assert!(
+            applied[0].message.contains("121440 ns"),
+            "expected legacy blocking 121440 ns: {}",
+            applied[0].message
+        );
+        assert!(
+            applied[0].message.contains("5440 ns"),
+            "expected preempted blocking 5440 ns: {}",
+            applied[0].message
+        );
+
+        // The express stream gets a `WcttBound` (computed bound).
+        let express_bound = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound") && d.message.contains("data_ex"))
+            .unwrap_or_else(|| panic!("expected WcttBound for data_ex: {:#?}", diags));
+        assert!(express_bound.severity == Severity::Info);
+
+        // The preemptable stream still falls through to `WcttDeferred`.
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred") && d.message.contains("data_pr"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred for data_pr: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
+    }
+
+    // ── Test 16: bus without Frame_Preemption keeps deferred path ────
+    #[test]
+    fn tsn_without_bus_preemption_keeps_deferred() {
+        // Even a stream that declares `Frame_Preemption => true` on its
+        // source falls through to `WcttDeferred` when the bus has not
+        // opted in (`Frame_Preemption` unset on the bus). This matches
+        // the c4 spec's "explicit-then-default order" — both sides must
+        // explicitly say yes for the small fragment-blocking term to
+        // apply, and a missing bus property is the safe `false` default.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device express_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Frame_Preemption => true;
+  end express_d;
+  device implementation express_d.impl
+  end express_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      ex : device express_d.impl;
+      ex_dst : device d.impl;
+    connections
+      c_sw_ex     : bus access sw -> ex.net;
+      c_sw_ex_dst : bus access sw -> ex_dst.net;
+      data_ex     : port ex.out_p -> ex_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        // No `WcttPreemptionApplied` because the bus is silent.
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert!(
+            applied.is_empty(),
+            "WcttPreemptionApplied must not fire when the bus omits \
+             Frame_Preemption: {:#?}",
+            diags
+        );
+        // `WcttDeferred` fires instead.
+        assert!(
+            diags.iter().any(|d| d.message.starts_with("WcttDeferred")),
+            "expected WcttDeferred when bus has no Frame_Preemption: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 17: stream without Frame_Preemption keeps deferred ─────
+    #[test]
+    fn tsn_with_low_cos_stream_keeps_deferred() {
+        // Bus declares `Frame_Preemption => true` but the source
+        // stream is preemptable (CoS = 0). No `WcttPreemptionApplied`
+        // is emitted; the stream falls through to `WcttDeferred`.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device pre_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 0;
+  end pre_d;
+  device implementation pre_d.impl
+  end pre_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      pr : device pre_d.impl;
+      pr_dst : device d.impl;
+    connections
+      c_sw_pr     : bus access sw -> pr.net;
+      c_sw_pr_dst : bus access sw -> pr_dst.net;
+      data_pr     : port pr.out_p -> pr_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert!(
+            applied.is_empty(),
+            "WcttPreemptionApplied must not fire for non-express \
+             streams: {:#?}",
+            diags
+        );
+        let deferred: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttDeferred"))
+            .collect();
+        assert!(
+            !deferred.is_empty(),
+            "expected WcttDeferred for non-express stream: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 18: high-CoS stream is express by default ──────────────
+    #[test]
+    fn tsn_high_cos_stream_is_express_by_default() {
+        // No `Frame_Preemption` set on the source, but `Class_of_Service
+        // => 7` makes it express via the default heuristic. With the
+        // bus also declaring `Frame_Preemption => true`, preemption
+        // applies and `WcttPreemptionApplied` is emitted.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device cos_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end cos_d;
+  device implementation cos_d.impl
+  end cos_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      hi : device cos_d.impl;
+      hi_dst : device d.impl;
+    connections
+      c_sw_hi     : bus access sw -> hi.net;
+      c_sw_hi_dst : bus access sw -> hi_dst.net;
+      data_hi     : port hi.out_p -> hi_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttPreemptionApplied")),
+            "high-CoS stream must opt into preemption by default: {:#?}",
+            diags
+        );
     }
 }

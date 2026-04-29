@@ -54,7 +54,8 @@ pub use curves::{
 };
 pub use extract::extract_network_graph;
 pub use tsn::{
-    ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow, get_gate_schedule,
+    ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow, MIN_FRAGMENT_BYTES,
+    PREEMPTION_HEADER_BYTES, get_gate_schedule, is_express_stream, preemption_blocking_term_ps,
     tas_residual_service,
 };
 pub use types::{NetworkGraph, NetworkLink, NetworkNode, NodeKind, SwitchType};

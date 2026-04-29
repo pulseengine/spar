@@ -1485,6 +1485,32 @@ artifacts:
     status: planned
     tags: [network, tsn, wctt, v081]
 
+  - id: REQ-TSN-004
+    type: requirement
+    title: 802.1Qbu frame-preemption blocking term in WCTT analysis
+    description: >
+      System computes the IEEE 802.1Qbu frame-preemption blocking
+      term `B_pmt = (MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) /
+      link_rate` (with MIN_FRAGMENT_BYTES = 64 — IEEE 802.3 minimum
+      Ethernet frame — and PREEMPTION_HEADER_BYTES = 4 — IEEE 802.3br
+      §99.4.7 SMD-S/mCRC) and substitutes it for the legacy
+      `B_no_pmt = max_preemptable_frame_bytes / link_rate` blocking
+      term at TSN switches when both the bus and the source stream
+      declare `Spar_TSN::Frame_Preemption => true`. Express-stream
+      identification follows the explicit-then-default order:
+      `Spar_TSN::Frame_Preemption` on the stream port wins; otherwise
+      `Class_of_Service >= 6` defaults to express. The reduction in
+      blocking is surfaced via the `WcttPreemptionApplied` Info
+      diagnostic emitted per affected hop, carrying the legacy and
+      preempted blocking figures (in nanoseconds) so users can audit
+      the gain. Implemented as `preemption_blocking_term_ps` and
+      `is_express_stream` in `spar-network::tsn`, hooked into
+      `spar-analysis::wctt::WcttAnalysis` and
+      `compute_network_hop_latency`. Track D Phase 2 v0.8.1 commit 4.
+      Per docs/designs/track-d-tsn-wctt-research.md §5.2-5.3.
+    status: implemented
+    tags: [network, tsn, wctt, preemption, qbu, v081]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001

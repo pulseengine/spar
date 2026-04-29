@@ -1961,6 +1961,42 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-006
 
+  - id: TEST-TSN-PREEMPTION
+    type: feature
+    title: 802.1Qbu frame-preemption blocking term in WCTT analysis
+    description: >
+      Unit + integration tests covering v0.8.1 commit 4's
+      frame-preemption (802.1Qbu) hook into the WCTT analysis. The
+      spar-network::tsn module ships eight tests verifying the
+      preemption_blocking_term_ps helper (with-preemption fragment
+      term, without-preemption legacy max-frame term, zero-rate
+      pathology, ceiling-rounding pessimism) and the is_express_stream
+      classifier (explicit Frame_Preemption overrides the
+      Class_of_Service heuristic, CoS >= 6 defaults to express,
+      missing properties default to non-express). The
+      spar-analysis::wctt module ships four end-to-end fixtures
+      driving the WcttAnalysis pass against AADL models with TSN
+      switches: the express stream carrying explicit
+      `Spar_TSN::Frame_Preemption => true` on a bus that also enables
+      preemption produces a `WcttPreemptionApplied` Info diagnostic
+      reporting the legacy 1518 B blocking (≈121 µs at 100 Mbps) and
+      the preempted 68 B blocking (≈5.4 µs); a stream whose source
+      lacks Frame_Preemption and a bus that is silent both fall
+      through to the existing `WcttDeferred` Phase-1 placeholder; a
+      `Class_of_Service => 7` stream is express by default when the
+      bus enables preemption. Foundation for the c2/c3 sibling PRs
+      (TAS, CBS) which extend the same TSN dispatch.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.8.1, network, tsn, preemption, qbu, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-004
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
