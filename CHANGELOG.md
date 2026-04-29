@@ -4,6 +4,78 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-04-29
+
+Major: spar gains an MCP (Model Context Protocol) tool surface and a
+runtime-trace verification assistant. LLM agents can now drive spar's
+hypothetical-rebinding oracle through three read-only tools, and the
+new `spar-insight` crate compares Tier 1 CTF traces against AADL
+`Spar_Trace::Expected_*` predictions.
+
+### Added — Track E commit 8/8: `spar-mcp` (#179)
+
+- **New crate `spar-mcp`** — JSON-RPC 2.0 MCP server over stdio
+  exposing three read-only / idempotent tools. `spar-cli` was
+  promoted to lib + bin so verify / enumerate / check-chain logic is
+  shared in-process — no shell-out, no re-parsing of stdout.
+  Reachable as the standalone `spar-mcp` binary or via
+  `spar mcp serve`.
+- **`spar.verify_move`** — single hypothetical-rebinding check
+  (`{ component, target, ... }` → pass/fail report with violations).
+- **`spar.enumerate_moves`** — design-space exploration with
+  multi-objective ranking (`max-response | total-load | total-power
+  | total-weight | balanced`).
+- **`spar.check_chain`** — end-to-end latency breakdown for a
+  flow chain.
+- **All tools `readOnlyHint: true` and `idempotentHint: true`** per
+  MCP 2025-11-25. The deterministic-apply path stays CLI-exclusive
+  by design — no `spar.apply_move` over MCP, ever, so the
+  certification chain stays in spar (per Track E migration research
+  §6.5). LLM agents propose moves; spar deterministically verifies;
+  the apply path is replayable from the command line.
+
+### Added — Track G: `spar-insight` Tier 1 CTF (#178)
+
+- **New crate `spar-insight`** — runtime-trace discrepancy assistant.
+  Ingests Tier 1 textual CTF events from Zephyr (`k_sem_give`,
+  `k_sem_take`, `k_timer_expiry`, `probe_point_enter` /
+  `probe_point_exit`) and produces per-probe-point timing
+  distributions (min / max / mean over enter→exit pairs).
+- **5 discrepancy rules** keyed by probe id:
+  - `WcetViolated` (Error) — `observed.max > Expected_WCET`
+  - `BcetUnderestimated` (Warn) — `observed.min < Expected_BCET`
+  - `MeanDrift` (Info) — `|observed.mean − Expected_Mean| > 20%`
+  - `MissingProbe` (Info) — trace samples for an undeclared probe
+  - `UnobservedProbe` (Warn) — declared `Expected_*` with no trace
+    samples
+- **`spar insight verify-trace --root Pkg::Sys.Impl --trace
+  trace.ctf model.aadl`** — CLI subcommand wiring.
+- The formal-statistics layer (Hoeffding bounds, etc.) is deferred
+  per the v0.9.0 R3 proof-assistant deferral; full binary CTF +
+  babeltrace2 ingestion ships in a v0.9.x follow-up.
+
+### Note on v0.8.1
+
+Track D Phase 2 (TSN-shaped service curves: TAS / CBS / frame
+preemption) shipped as v0.8.1 during v0.9.0 development. See the
+v0.8.1 changelog entry below for details. v0.9.0 includes those
+changes by virtue of being on the same `main`.
+
+### Changed
+
+- COMPLIANCE.md narrative for v0.9.0 with per-PR breakdown.
+- Test count: 2780+ across 19 crates (was 2759+ across 18 at v0.8.1).
+- Workspace member count: 19 (added `spar-insight`, `spar-mcp`).
+
+### Deferred
+
+- spar-insight Tier 2 (binary CTF via babeltrace2) — v0.9.x.
+- spar-insight Tier 3 (ITM/SWO trace ingestion) — v0.9.x.
+- Additional MCP tools (`spar.analyze_rta`, `spar.analyze_latency`,
+  `spar.analyze_bandwidth`) — v0.9.x.
+
+---
+
 ## [0.8.1] — 2026-04-29
 
 Track D Phase 2: TSN-shaped service curves. Implements the three
