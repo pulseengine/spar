@@ -508,6 +508,15 @@ const SPAR_TSN: &[(&str, &str)] = &[
     // hi/lo credit slope arithmetic is computed inside the analysis.
     // Applies to bus and port.
     ("Bandwidth_Reservation", "aadlinteger units Data_Rate_Units"),
+    // Per-hop gPTP (IEEE 802.1AS) synchronization-error budget ε. In
+    // a real TSN deployment the gate-control list is enforced against
+    // the local synchronized clock, which differs from the master
+    // clock by at most ε per hop; v0.9.1 NC soundness pass subtracts
+    // ε from the effective TAS open time and adds ε to the worst-case
+    // gate latency so the bounds remain sound under realistic clock
+    // accuracy. Default unset = 0 (legacy v0.8.1 behaviour).
+    // Applies to bus and processor.
+    ("Sync_Error", "aadlinteger units Time_Units"),
 ];
 
 /// Helper: collect properties from a table into the result vector.
@@ -1089,13 +1098,14 @@ mod tests {
         assert!(is_standard_property_set("Spar_TSN"));
 
         let props = standard_properties_in_set("Spar_TSN");
-        assert_eq!(props.len(), 6);
+        assert_eq!(props.len(), 7);
         assert!(props.contains(&"Stream_ID"));
         assert!(props.contains(&"Class_of_Service"));
         assert!(props.contains(&"Gate_Control_List"));
         assert!(props.contains(&"Max_Frame_Size"));
         assert!(props.contains(&"Frame_Preemption"));
         assert!(props.contains(&"Bandwidth_Reservation"));
+        assert!(props.contains(&"Sync_Error"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -1121,6 +1131,10 @@ mod tests {
         assert_eq!(
             standard_property_type("Spar_TSN", "Bandwidth_Reservation"),
             Some("aadlinteger units Data_Rate_Units")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Sync_Error"),
+            Some("aadlinteger units Time_Units")
         );
 
         // Deliberately-wrong name returns None.
@@ -1152,6 +1166,7 @@ mod tests {
             "Max_Frame_Size",
             "Frame_Preemption",
             "Bandwidth_Reservation",
+            "Sync_Error",
         ] {
             let result = scope.resolve_property(&Name::new("Spar_TSN"), &Name::new(prop_name));
             assert!(
@@ -1195,7 +1210,7 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 6 = 128
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 7 = 129
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration + Spar_Power + Spar_TSN)
@@ -1206,7 +1221,8 @@ mod tests {
         // Spar_TSN: +5 for Stream_ID, Class_of_Service, Gate_Control_List,
         //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1)
         //   +1 for Bandwidth_Reservation (Track D Phase 2 v0.8.1 c3, CBS).
-        assert_eq!(all.len(), 128);
+        //   +1 for Sync_Error (v0.9.1 NC soundness, gPTP ε budget).
+        assert_eq!(all.len(), 129);
     }
 
     #[test]

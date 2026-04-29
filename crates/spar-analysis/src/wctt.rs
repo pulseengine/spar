@@ -56,9 +56,10 @@ use spar_network::extract::{
     extract_network_graph, read_forwarding_latency_ps, read_output_rate_bps, read_queue_depth,
 };
 use spar_network::tsn::{
-    CbsReservation, ClassOfService, GateSchedule, cbs_residual_service,
+    CbsReservation, ClassOfService, GateSchedule, cbs_residual_service, frame_quantization_ps,
     get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
-    get_max_frame_size_bytes, is_express_stream, preemption_blocking_term_ps, tas_residual_service,
+    get_max_frame_size_bytes, get_sync_error_ps, is_express_stream, preemption_blocking_term_ps,
+    tas_residual_service_with_sync_error,
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
@@ -275,15 +276,39 @@ impl WcttAnalysis {
                 // about *when* class-K can transmit, not about
                 // ownership of bandwidth across competing streams.
                 let mut cbs_service: Option<ServiceCurve> = None;
+                // v0.9.1 NC soundness: a hop is "quantizable" iff its
+                // service curve does not already account for the
+                // atomic-frame max-MTU blocking term. The TAS arm and
+                // the FIFO/Priority fallback arm do not — they undercount
+                // the per-hop bound by up to one MTU because the
+                // bytes-level NC kernel treats packets as continuous.
+                // The CBS arm's `cbs_residual_service` already absorbs
+                // max-frame blocking via its closed-form latency; the
+                // preemption arm's `preemption_blocking_term_ps`
+                // *replaces* the same term with the much smaller
+                // fragment-time. Both of those leave `quantization_ps = 0`.
+                let mut quantization_ps: u64 = 0;
                 let svc = if matches!(st, SwitchType::Tsn) {
                     let bus_props = instance.properties_for(*sw_idx);
                     let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
                     if let (Some(schedule), Some(cos)) =
                         (gate_schedule_for_bus.get(sw_idx), stream.cos)
                     {
-                        // Path 1: TAS service curve.
+                        // Path 1: TAS service curve, with the v0.9.1
+                        // gPTP synchronization-error budget ε applied
+                        // (subtracted from the effective open time,
+                        // added to the worst-case gate latency). When
+                        // `Spar_TSN::Sync_Error` is unset on the bus we
+                        // pass ε = 0, which reproduces the v0.8.1
+                        // service curve byte-identically.
                         let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
-                        let tas_svc = tas_residual_service(schedule, cos, link_rate);
+                        let sync_error_ps = get_sync_error_ps(bus_props).unwrap_or(0);
+                        let tas_svc = tas_residual_service_with_sync_error(
+                            schedule,
+                            cos,
+                            link_rate,
+                            sync_error_ps,
+                        );
                         let (open_ps, cycle_ps) = schedule.open_fraction(cos);
                         // open_fraction is reported as a percentage
                         // (integer-rounded toward zero) for human
@@ -298,7 +323,7 @@ impl WcttAnalysis {
                             severity: Severity::Info,
                             message: format!(
                                 "WcttTasGated: stream '{}' (CoS {}) on TSN switch '{}' at hop \
-                                 {}: open fraction {}% gate latency {} ps",
+                                 {}: open fraction {}% gate latency {} ps sync_error {} ps",
                                 stream_name,
                                 cos.0,
                                 graph
@@ -308,10 +333,16 @@ impl WcttAnalysis {
                                 hop_idx,
                                 open_pct,
                                 gate_latency_ps,
+                                sync_error_ps,
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
                         });
+                        // TAS service curve: rate = R_link · ρ_K, but the
+                        // link itself still serializes one max-frame per
+                        // hop. Apply atomic-frame quantization at link rate.
+                        let bus_max_frame = get_max_frame_size_bytes(bus_props).unwrap_or(1518);
+                        quantization_ps = frame_quantization_ps(bus_max_frame, link_rate);
                         tas_svc
                     } else if let Some(idle_slope_bps) = stream.cbs_idle_slope_bps {
                         // Path 2: CBS service curve. Stream declares
@@ -496,10 +527,16 @@ impl WcttAnalysis {
                         continue;
                     }
                 } else {
-                    match service_for_bus.get(sw_idx) {
+                    let s = match service_for_bus.get(sw_idx) {
                         Some(s) => *s,
                         None => continue,
-                    }
+                    };
+                    // FIFO / Priority hop: bytes-level NC undercounts by
+                    // up to one MTU; apply atomic-frame quantization.
+                    let bus_props = instance.properties_for(*sw_idx);
+                    let bus_max_frame = get_max_frame_size_bytes(bus_props).unwrap_or(1518);
+                    quantization_ps = frame_quantization_ps(bus_max_frame, s.rate_bps);
+                    s
                 };
 
                 if svc.rate_bps == 0 {
@@ -585,10 +622,32 @@ impl WcttAnalysis {
                 };
 
                 // Per-hop delay using the tagged stream's α and the
-                // residual service.
+                // residual service. Then add `quantization_ps` for
+                // atomic-frame correctness (zero on CBS / preemption arms,
+                // computed at link rate on TAS / FIFO arms).
                 match delay_bound(&alpha, &residual) {
                     Ok(d) => {
                         total_delay_ps = total_delay_ps.saturating_add(d);
+                        if quantization_ps > 0 {
+                            total_delay_ps = total_delay_ps.saturating_add(quantization_ps);
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttFrameQuantization: stream '{}' at hop {} on switch \
+                                     '{}': atomic-frame correction +{} ns (max-frame serialization \
+                                     at link rate)",
+                                    stream_name,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    quantization_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                        }
                     }
                     Err(NcError::UnservableFlow) | Err(NcError::UnstableServer) => {
                         // delay_bound also returns UnstableServer when
@@ -1357,9 +1416,11 @@ end Net;
             .filter(|d| d.message.starts_with("WcttBound"))
             .collect();
         assert_eq!(info.len(), 1, "exactly one stream expected: {:#?}", diags);
+        // v0.9.1 soundness: 12 µs (NC bytes-fluid) + 12.144 µs (atomic-frame
+        // quantization at 1 Gbps for 1518-byte MTU) = 24.144 µs.
         assert!(
-            info[0].message.contains("12000000 ps"),
-            "expected 12 us bound, got: {}",
+            info[0].message.contains("24144000 ps"),
+            "expected 24.144 us bound (12 us NC + 12.144 us frame quantization), got: {}",
             info[0].message
         );
     }
@@ -1585,9 +1646,11 @@ end Net;
             "expected 3 hops in: {}",
             info.message
         );
+        // v0.9.1 soundness: 51 µs (NC) + 3 × 12.144 µs (atomic-frame
+        // quantization, one per hop) = 87.432 µs.
         assert!(
-            info.message.contains("51000000 ps"),
-            "expected 51 us bound, got: {}",
+            info.message.contains("87432000 ps"),
+            "expected 87.432 us bound (51 us NC + 36.432 us quantization), got: {}",
             info.message
         );
     }
@@ -2083,8 +2146,8 @@ end Net;
             .find(|d| d.message.starts_with("WcttBound"))
             .unwrap_or_else(|| panic!("expected WcttBound: {:#?}", diags));
         assert!(
-            bound.message.contains("29000000 ps"),
-            "expected 29 us TAS bound, got: {}",
+            bound.message.contains("41144000 ps"),
+            "expected 41.144 us TAS bound (29 us gated + 12.144 us quantization), got: {}",
             bound.message
         );
     }
@@ -2143,8 +2206,9 @@ end Net;
             .iter()
             .find(|d| d.message.starts_with("WcttBound"))
             .unwrap();
-        // 12 us = 12_000_000 ps for the ungated single hop.
-        assert!(ungated_bound.message.contains("12000000 ps"));
+        // v0.9.1 soundness: 12 µs (NC) + 12.144 µs (atomic-frame
+        // quantization, 1518 B at 1 Gbps) = 24.144 µs.
+        assert!(ungated_bound.message.contains("24144000 ps"));
 
         // Same model, but with TSN+GCL applied (50% open for CoS 7).
         // The bound must exceed the ungated 12 us.
@@ -2204,10 +2268,11 @@ end Net;
             .iter()
             .find(|d| d.message.starts_with("WcttBound"))
             .unwrap();
-        assert!(gated_bound.message.contains("29000000 ps"));
+        // v0.9.1 soundness: 29 µs gated NC + 12.144 µs quantization = 41.144 µs.
+        assert!(gated_bound.message.contains("41144000 ps"));
 
-        // Strictly: 29 us > 12 us — the gated bound is more pessimistic
-        // (and correctly so) than the ungated line-rate bound.
+        // Strictly: 41.144 µs > 24.144 µs — the gated bound is more
+        // pessimistic (and correctly so) than the ungated line-rate bound.
     }
 
     // ── Test 13: TSN switch without GCL still defers ────────────────

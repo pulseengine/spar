@@ -2040,6 +2040,44 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-004
 
+  - id: TEST-NC-SOUNDNESS
+    type: feature
+    title: gPTP ε budget + atomic-frame quantization soundness tests
+    description: >
+      Unit + integration tests covering the v0.9.1 soundness pass:
+      (1) `Spar_TSN::Sync_Error` accessor handles unset / typed
+      PropertyExpr / string fallback paths and unit conversions
+      (ps, ns, us, ms);
+      (2) `tas_residual_service_with_sync_error` shrinks
+      open_fraction by ε/cycle and grows worst_case_latency by ε;
+      ε equal to or exceeding a window's open_time clamps to
+      zero (gate effectively closed); ε = 0 reproduces v0.8.1
+      byte-identically;
+      (3) `frame_quantization_ps` returns ceil(max_frame · 8e12 /
+      link_rate_bps) — 1518 B at 100 Mbps ≈ 121440 ns; 64 B at 1 Gbps
+      ≈ 512 ns; rate-divides-evenly vs ceil-rounding cases; zero-rate
+      guard;
+      (4) wctt dispatch integration: TAS / FIFO arms emit
+      `WcttFrameQuantization` Info per hop and add the correction
+      to the per-hop delay; CBS / preemption arms remain unchanged
+      (their service curves already absorb / replace the max-frame
+      term); the v0.8.0 `single_hop_classical_ethernet`,
+      `multi_hop_chain_aggregates`, and TSN/TAS bound assertions
+      were updated to the sound numbers.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.9.1, network, wctt, soundness, gptp, quantization]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-009
+      - type: satisfies
+        target: REQ-NETWORK-010
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection

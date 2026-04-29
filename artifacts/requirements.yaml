@@ -1537,6 +1537,39 @@ artifacts:
     status: implemented
     tags: [network, tsn, wctt, preemption, qbu, v081]
 
+  # ── v0.9.1 NC soundness pass ──────────────────────────────────────
+
+  - id: REQ-NETWORK-009
+    type: requirement
+    title: gPTP synchronization-error budget for TAS bounds
+    description: >
+      Spar_TSN::Sync_Error (Time, picoseconds; applies to bus,
+      processor) carries the per-hop 802.1AS-2020 synchronization
+      error ε. The TAS dispatch in wctt.rs subtracts ε from the
+      effective open time and adds ε to the worst-case gate latency,
+      restoring soundness — current TAS bounds are technically
+      unsound without ε because a frame can miss its window by ε in
+      silicon. ε = 0 (unset) reproduces v0.8.1 behaviour
+      byte-identically. Per the post-v0.9.0 reviewer's Tier 2 #5.
+    status: implemented
+    tags: [network, tsn, wctt, soundness, gptp, v091]
+
+  - id: REQ-NETWORK-010
+    type: requirement
+    title: Atomic-frame quantization in NC per-hop bound
+    description: >
+      Bytes-level NC undercounts each hop's bound by up to one MTU
+      because frames are atomic but the kernel treats packets as
+      continuous. wctt.rs adds `ceil(max_frame_bytes · 8e12 /
+      link_rate_bps)` picoseconds per hop on the TAS and FIFO/Priority
+      arms. The CBS arm's closed-form latency already absorbs the
+      max-frame term; the preemption arm replaces it with the
+      fragment-time. New `WcttFrameQuantization` Info diagnostic
+      records the correction per hop. Per the post-v0.9.0 reviewer's
+      Tier 2 #8.
+    status: implemented
+    tags: [network, wctt, soundness, v091]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
