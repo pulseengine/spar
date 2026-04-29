@@ -56,8 +56,9 @@ use spar_network::extract::{
     extract_network_graph, read_forwarding_latency_ps, read_output_rate_bps, read_queue_depth,
 };
 use spar_network::tsn::{
-    ClassOfService, GateSchedule, get_class_of_service, get_frame_preemption, get_gate_schedule,
-    is_express_stream, preemption_blocking_term_ps, tas_residual_service,
+    CbsReservation, ClassOfService, GateSchedule, cbs_residual_service,
+    get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
+    get_max_frame_size_bytes, is_express_stream, preemption_blocking_term_ps, tas_residual_service,
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
@@ -85,6 +86,12 @@ const FRAME_BYTES: u64 = 1500;
 /// with `preemption_enabled = false`. See IEEE 802.1Qbu §6.7.2 and
 /// `docs/designs/track-d-tsn-wctt-research.md` §5.2-5.3.
 const FRAME_BYTES_PREEMPTION_LEGACY: u64 = 1518;
+
+/// Default maximum competing-class frame size assumed by the CBS
+/// service-curve closed form when no `Spar_TSN::Max_Frame_Size` is
+/// declared on competing flows. Standard Ethernet MTU including the
+/// preamble — pessimistic but safe.
+const CBS_DEFAULT_COMPETING_FRAME_BYTES: u64 = 1518;
 
 /// WCTT analysis pass.
 ///
@@ -233,131 +240,260 @@ impl WcttAnalysis {
 
                 // ── TSN switch dispatch ──────────────────────────
                 //
-                // Three-way dispatch order (see PR #180 + #181):
+                // Four-way dispatch order (see PR #180 / #181 / #182
+                // and docs/designs/track-d-tsn-wctt-research.md §5.2):
                 //   1. **TAS (802.1Qbv) gate-window service curve** —
                 //      when the bus has a parsed
                 //      `Spar_TSN::Gate_Control_List` *and* the stream
                 //      carries `Spar_TSN::Class_of_Service`. Use
                 //      `tas_residual_service` and emit `WcttTasGated`.
-                //   2. **Frame preemption (802.1Qbu) blocking term** —
+                //   2. **CBS (802.1Qav) credit-pool service curve** —
+                //      when the stream carries
+                //      `Spar_TSN::Bandwidth_Reservation` (idle-slope).
+                //      The CBS curve absorbs other-class blocking
+                //      (including preemption blocking) into its
+                //      latency term, so we prefer it over the
+                //      preemption arm when both could fire. Emit
+                //      `WcttCbsShaped` and set `cbs_service` so the
+                //      downstream competing-flow residual subtraction
+                //      is suppressed.
+                //   3. **Frame preemption (802.1Qbu) blocking term** —
                 //      when the bus has `Frame_Preemption => true` and
                 //      the stream is express (per `is_express_stream`).
                 //      Use the bus service curve with its forwarding
                 //      latency replaced by the fragment-blocking term;
                 //      emit `WcttPreemptionApplied` reporting the gain
                 //      relative to the legacy max-frame blocking.
-                //   3. **Deferred** — neither GCL+CoS nor (preemption +
-                //      express). Emit `WcttDeferred` once per stream
-                //      and skip the hop. v0.8.1 commits 2/3/4 are
-                //      filling in the per-shaper math; CBS is the next
-                //      milestone.
+                //   4. **Deferred** — none of the above. Emit
+                //      `WcttDeferred` once per stream and skip the hop.
+                //
+                // CBS is class-isolated: its service-curve latency
+                // already absorbs blocking by other classes, so the
+                // per-hop residual subtraction below is suppressed when
+                // `cbs_service.is_some()` (`cbs_active`). TAS leaves
+                // the residual decomposition in place — the gate is
+                // about *when* class-K can transmit, not about
+                // ownership of bandwidth across competing streams.
+                let mut cbs_service: Option<ServiceCurve> = None;
                 let svc = if matches!(st, SwitchType::Tsn) {
                     let bus_props = instance.properties_for(*sw_idx);
                     let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
-                    match (gate_schedule_for_bus.get(sw_idx), stream.cos) {
-                        (Some(schedule), Some(cos)) => {
-                            // Path 1: TAS service curve.
-                            let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
-                            let tas_svc = tas_residual_service(schedule, cos, link_rate);
-                            let (open_ps, cycle_ps) = schedule.open_fraction(cos);
-                            // open_fraction is reported as a percentage
-                            // (integer-rounded toward zero) for human
-                            // readability in the diagnostic message.
-                            let open_pct = if cycle_ps == 0 {
-                                0
-                            } else {
-                                ((open_ps as u128) * 100 / (cycle_ps as u128)) as u64
-                            };
-                            let gate_latency_ps = schedule.worst_case_latency(cos);
+                    if let (Some(schedule), Some(cos)) =
+                        (gate_schedule_for_bus.get(sw_idx), stream.cos)
+                    {
+                        // Path 1: TAS service curve.
+                        let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
+                        let tas_svc = tas_residual_service(schedule, cos, link_rate);
+                        let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+                        // open_fraction is reported as a percentage
+                        // (integer-rounded toward zero) for human
+                        // readability in the diagnostic message.
+                        let open_pct = if cycle_ps == 0 {
+                            0
+                        } else {
+                            ((open_ps as u128) * 100 / (cycle_ps as u128)) as u64
+                        };
+                        let gate_latency_ps = schedule.worst_case_latency(cos);
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Info,
+                            message: format!(
+                                "WcttTasGated: stream '{}' (CoS {}) on TSN switch '{}' at hop \
+                                 {}: open fraction {}% gate latency {} ps",
+                                stream_name,
+                                cos.0,
+                                graph
+                                    .node(*sw_idx)
+                                    .map(|n| n.name.as_str())
+                                    .unwrap_or("<unknown>"),
+                                hop_idx,
+                                open_pct,
+                                gate_latency_ps,
+                            ),
+                            path: stream_path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                        tas_svc
+                    } else if let Some(idle_slope_bps) = stream.cbs_idle_slope_bps {
+                        // Path 2: CBS service curve. Stream declares
+                        // Spar_TSN::Bandwidth_Reservation. Build a
+                        // reservation against the bus link rate and
+                        // emit `WcttCbsShaped`. If the reservation
+                        // fails to validate (oversubscription / zero
+                        // link rate) we fall through to the preemption
+                        // / deferred path so the user is asked to fix
+                        // the model.
+                        let link_rate_bps = read_output_rate_bps(bus_props).unwrap_or(0);
+                        let max_competing_frame_bytes = get_max_frame_size_bytes(bus_props)
+                            .unwrap_or(CBS_DEFAULT_COMPETING_FRAME_BYTES);
+                        let reservation = CbsReservation::new(
+                            idle_slope_bps,
+                            link_rate_bps,
+                            max_competing_frame_bytes,
+                            max_competing_frame_bytes,
+                        );
+                        if let Some(reservation) = reservation {
+                            let beta = cbs_residual_service(
+                                &reservation,
+                                link_rate_bps,
+                                max_competing_frame_bytes,
+                            );
+                            cbs_service = Some(beta);
+                            let cos_str = stream
+                                .cos
+                                .map(|c| c.0.to_string())
+                                .unwrap_or_else(|| "?".to_string());
                             diags.push(AnalysisDiagnostic {
                                 severity: Severity::Info,
                                 message: format!(
-                                    "WcttTasGated: stream '{}' (CoS {}) on TSN switch '{}' at \
-                                     hop {}: open fraction {}% gate latency {} ps",
+                                    "WcttCbsShaped: stream '{}' (cos={}) at hop {} on switch \
+                                     '{}': CBS service curve idle_slope={} bps, \
+                                     service_latency={} ns",
                                     stream_name,
-                                    cos.0,
+                                    cos_str,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    idle_slope_bps,
+                                    beta.latency_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            beta
+                        } else if bus_preemption && stream.is_express {
+                            // CBS reservation invalid → fall back to
+                            // preemption when applicable.
+                            let svc_base = match service_for_bus.get(sw_idx) {
+                                Some(s) => *s,
+                                None => continue,
+                            };
+                            if svc_base.rate_bps == 0 {
+                                continue;
+                            }
+                            let blocking_legacy_ps = preemption_blocking_term_ps(
+                                svc_base.rate_bps,
+                                FRAME_BYTES_PREEMPTION_LEGACY,
+                                false,
+                            );
+                            let blocking_pmt_ps = preemption_blocking_term_ps(
+                                svc_base.rate_bps,
+                                FRAME_BYTES_PREEMPTION_LEGACY,
+                                true,
+                            );
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
+                                     switch '{}': blocking shrinks from {} ns (legacy \
+                                     max-frame) to {} ns (802.1Qbu fragment + header)",
+                                    stream_name,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    blocking_legacy_ps / 1_000,
+                                    blocking_pmt_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            ServiceCurve::rate_latency(
+                                svc_base.rate_bps,
+                                svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                            )
+                        } else {
+                            // CBS reservation invalid and no preemption
+                            // fallback — defer.
+                            if !deferred_emitted {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Info,
+                                    message: format!(
+                                        "WcttDeferred: stream '{}' traverses TSN switch '{}' \
+                                         at hop {}; TAS/CBS-shaped service curves are \
+                                         deferred to Phase 2 (tracked in \
+                                         docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                        stream_name,
+                                        graph
+                                            .node(*sw_idx)
+                                            .map(|n| n.name.as_str())
+                                            .unwrap_or("<unknown>"),
+                                        hop_idx,
+                                    ),
+                                    path: stream_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                                deferred_emitted = true;
+                            }
+                            continue;
+                        }
+                    } else if bus_preemption && stream.is_express {
+                        // Path 3: frame preemption when bus enables
+                        // it and the stream is express.
+                        let svc_base = match service_for_bus.get(sw_idx) {
+                            Some(s) => *s,
+                            None => continue,
+                        };
+                        if svc_base.rate_bps == 0 {
+                            continue;
+                        }
+                        let blocking_legacy_ps = preemption_blocking_term_ps(
+                            svc_base.rate_bps,
+                            FRAME_BYTES_PREEMPTION_LEGACY,
+                            false,
+                        );
+                        let blocking_pmt_ps = preemption_blocking_term_ps(
+                            svc_base.rate_bps,
+                            FRAME_BYTES_PREEMPTION_LEGACY,
+                            true,
+                        );
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Info,
+                            message: format!(
+                                "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
+                                 switch '{}': blocking shrinks from {} ns (legacy \
+                                 max-frame) to {} ns (802.1Qbu fragment + header)",
+                                stream_name,
+                                hop_idx,
+                                graph
+                                    .node(*sw_idx)
+                                    .map(|n| n.name.as_str())
+                                    .unwrap_or("<unknown>"),
+                                blocking_legacy_ps / 1_000,
+                                blocking_pmt_ps / 1_000,
+                            ),
+                            path: stream_path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                        ServiceCurve::rate_latency(
+                            svc_base.rate_bps,
+                            svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                        )
+                    } else {
+                        // Path 4: deferred placeholder. Emit at most
+                        // one WcttDeferred per stream.
+                        if !deferred_emitted {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttDeferred: stream '{}' traverses TSN switch '{}' at hop \
+                                     {}; TAS/CBS-shaped service curves are deferred to Phase 2 \
+                                     (tracked in docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                    stream_name,
                                     graph
                                         .node(*sw_idx)
                                         .map(|n| n.name.as_str())
                                         .unwrap_or("<unknown>"),
                                     hop_idx,
-                                    open_pct,
-                                    gate_latency_ps,
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
                             });
-                            tas_svc
+                            deferred_emitted = true;
                         }
-                        _ => {
-                            // Path 2: frame preemption when bus enables
-                            // it and the stream is express.
-                            if bus_preemption && stream.is_express {
-                                let svc_base = match service_for_bus.get(sw_idx) {
-                                    Some(s) => *s,
-                                    None => continue,
-                                };
-                                if svc_base.rate_bps == 0 {
-                                    continue;
-                                }
-                                let blocking_legacy_ps = preemption_blocking_term_ps(
-                                    svc_base.rate_bps,
-                                    FRAME_BYTES_PREEMPTION_LEGACY,
-                                    false,
-                                );
-                                let blocking_pmt_ps = preemption_blocking_term_ps(
-                                    svc_base.rate_bps,
-                                    FRAME_BYTES_PREEMPTION_LEGACY,
-                                    true,
-                                );
-                                diags.push(AnalysisDiagnostic {
-                                    severity: Severity::Info,
-                                    message: format!(
-                                        "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
-                                         switch '{}': blocking shrinks from {} ns (legacy \
-                                         max-frame) to {} ns (802.1Qbu fragment + header)",
-                                        stream_name,
-                                        hop_idx,
-                                        graph
-                                            .node(*sw_idx)
-                                            .map(|n| n.name.as_str())
-                                            .unwrap_or("<unknown>"),
-                                        blocking_legacy_ps / 1_000,
-                                        blocking_pmt_ps / 1_000,
-                                    ),
-                                    path: stream_path.clone(),
-                                    analysis: self.name().to_string(),
-                                });
-                                ServiceCurve::rate_latency(
-                                    svc_base.rate_bps,
-                                    svc_base.latency_ps.saturating_add(blocking_pmt_ps),
-                                )
-                            } else {
-                                // Path 3: deferred placeholder. Emit at
-                                // most one WcttDeferred per stream.
-                                if !deferred_emitted {
-                                    diags.push(AnalysisDiagnostic {
-                                        severity: Severity::Info,
-                                        message: format!(
-                                            "WcttDeferred: stream '{}' traverses TSN switch '{}' \
-                                             at hop {}; TAS/CBS-shaped service curves are \
-                                             deferred to Phase 2 (tracked in \
-                                             docs/designs/track-d-tsn-wctt-research.md §5.5)",
-                                            stream_name,
-                                            graph
-                                                .node(*sw_idx)
-                                                .map(|n| n.name.as_str())
-                                                .unwrap_or("<unknown>"),
-                                            hop_idx,
-                                        ),
-                                        path: stream_path.clone(),
-                                        analysis: self.name().to_string(),
-                                    });
-                                    deferred_emitted = true;
-                                }
-                                continue;
-                            }
-                        }
+                        continue;
                     }
                 } else {
                     match service_for_bus.get(sw_idx) {
@@ -380,17 +516,34 @@ impl WcttAnalysis {
                 // that also crosses this switch) into a single
                 // ArrivalCurve. We sum bursts and rates — a standard
                 // (loose but safe) NC aggregation for FIFO servers.
+                //
+                // For the CBS path (`cbs_service.is_some()`) the
+                // service curve is *already* class-isolated: its
+                // latency captures worst-case blocking by other
+                // classes via the closed-form `T = max_competing_frame
+                // / link_rate + lo_credit / |sendSlope|`. Streams in
+                // *other* classes therefore should not be subtracted
+                // again. For v0.8.1 commit 3 we make the conservative
+                // simplification of treating the CBS service curve as
+                // exclusive to the tagged stream — same-class sharing
+                // (residual decomposition between streams of one CBS
+                // class) is a follow-up. The competing-flow set below
+                // is suppressed to a no-op when CBS is active.
+                let cbs_active = cbs_service.is_some();
                 let mut comp_burst: u128 = 0;
                 let mut comp_rate: u128 = 0;
-                for other in &streams {
-                    if std::ptr::eq(other, stream) {
-                        continue;
+                if !cbs_active {
+                    for other in &streams {
+                        if std::ptr::eq(other, stream) {
+                            continue;
+                        }
+                        if !other.hops.contains(sw_idx) {
+                            continue;
+                        }
+                        comp_burst = comp_burst.saturating_add(other.alpha.burst_bytes as u128);
+                        comp_rate =
+                            comp_rate.saturating_add(other.alpha.sustained_rate_bps as u128);
                     }
-                    if !other.hops.contains(sw_idx) {
-                        continue;
-                    }
-                    comp_burst = comp_burst.saturating_add(other.alpha.burst_bytes as u128);
-                    comp_rate = comp_rate.saturating_add(other.alpha.sustained_rate_bps as u128);
                 }
                 let comp_alpha = ArrivalCurve::affine(
                     saturate_u128_to_u64(comp_burst),
@@ -837,10 +990,13 @@ struct Stream {
     hops: Vec<ComponentInstanceIdx>,
     /// Source-side arrival curve.
     alpha: ArrivalCurve,
-    /// Stream's `Spar_TSN::Class_of_Service` when annotated. Required
-    /// for the TAS service-curve dispatch on TSN switches; streams
-    /// without a CoS fall back to the [`Severity::Info`]-emitting
-    /// `WcttDeferred` path.
+    /// Stream's `Spar_TSN::Class_of_Service` (0..=7) when annotated on
+    /// the source end station. Required for the TAS service-curve
+    /// dispatch on TSN switches; also surfaced (when present) on
+    /// the CBS dispatch path for diagnostic readability. Streams
+    /// without a CoS that traverse a TSN switch with neither a TAS
+    /// schedule nor a CBS reservation fall back to the
+    /// [`Severity::Info`]-emitting `WcttDeferred` path.
     cos: Option<ClassOfService>,
     /// Whether this stream qualifies as "express" for IEEE 802.1Qbu
     /// preemption purposes (see [`is_express_stream`]). Express
@@ -848,6 +1004,11 @@ struct Stream {
     /// where the bus also enables `Frame_Preemption`; non-express
     /// streams keep the legacy `max_frame / R` blocking term.
     is_express: bool,
+    /// CBS reserved bandwidth (idleSlope) in bits per second when the
+    /// source declares `Spar_TSN::Bandwidth_Reservation`. The full
+    /// `CbsReservation` (with hi/lo credit and send slope) is built at
+    /// each TSN hop because it depends on the bus's link rate.
+    cbs_idle_slope_bps: Option<u64>,
 }
 
 impl Stream {
@@ -946,16 +1107,21 @@ fn collect_streams(
                 .unwrap_or(DEFAULT_BURST_BYTES);
 
             let alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
-            // Stream's class-of-service drives the TAS service-curve
-            // dispatch on TSN-typed switches. The lookup follows the
-            // same precedence as the typed/string accessor in
-            // spar-network::tsn — we read from the source end station
-            // because Spar_TSN::Class_of_Service applies to ports /
-            // connections; the closest reachable carrier in the
-            // current property model is the source device's
-            // PropertyMap, which the existing rate / queue-depth reads
-            // already use.
+            // TSN dispatch metadata read off the source end station.
+            // Spar_TSN::Class_of_Service drives the TAS gate-window
+            // service curve and is also surfaced on CBS-shaped
+            // diagnostics; Spar_TSN::Bandwidth_Reservation drives the
+            // CBS credit-pool service curve. The wctt walk only
+            // consults these when a hop's switch is classified as
+            // `SwitchType::Tsn`. The lookup follows the same precedence
+            // as the typed/string accessor in spar-network::tsn — we
+            // read from the source end station because these
+            // properties apply to ports / connections; the closest
+            // reachable carrier in the current property model is the
+            // source device's PropertyMap, which the existing rate /
+            // queue-depth reads already use.
             let cos = get_class_of_service(src_props);
+            let cbs_idle_slope_bps = get_bandwidth_reservation_bps(src_props);
 
             // Express-stream classification (IEEE 802.1Qbu). Read from
             // the source-component's PropertyMap so that AADL fixtures
@@ -974,6 +1140,7 @@ fn collect_streams(
                 alpha,
                 cos,
                 is_express,
+                cbs_idle_slope_bps,
             });
         }
     }
@@ -1655,7 +1822,131 @@ end Net;
         assert!(deferred.message.contains("Phase 2"));
     }
 
-    // ── Test 10: bus without Switch_Type is invisible to wctt ───────
+    // ── Test 11: CBS — single-switch, two CBS classes each 30% ──────
+    #[test]
+    fn cbs_dispatch_two_classes_each_get_idle_slope() {
+        // 1 Gbps TSN switch with two streams; each source declares a
+        // 30% Bandwidth_Reservation (300 Mbps) and a CoS. Per the CBS
+        // closed form, each class sees idleSlope = 300 Mbps service
+        // rate + a latency capturing other-class blocking. The
+        // analysis must emit `WcttCbsShaped` Info per stream and a
+        // `WcttBound` per stream, and *no* `WcttDeferred` (CBS
+        // dispatch supersedes the Phase-1 deferral on TSN switches).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device cbs_a
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service        => 6;
+      Spar_TSN::Bandwidth_Reservation   => 300000000 bitsps;
+      Spar_Network::Queue_Depth         => 1;
+  end cbs_a;
+  device implementation cbs_a.impl
+  end cbs_a.impl;
+
+  device cbs_b
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service        => 5;
+      Spar_TSN::Bandwidth_Reservation   => 300000000 bitsps;
+      Spar_Network::Queue_Depth         => 1;
+  end cbs_b;
+  device implementation cbs_b.impl
+  end cbs_b.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device cbs_a.impl;
+      b  : device cbs_b.impl;
+      x  : device d.impl;
+      y  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      c_sw_x : bus access sw -> x.net;
+      c_sw_y : bus access sw -> y.net;
+      data1  : port a.out_p -> x.in_p;
+      data2  : port b.out_p -> y.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        let cbs_shaped: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttCbsShaped"))
+            .collect();
+        assert_eq!(
+            cbs_shaped.len(),
+            2,
+            "expected one WcttCbsShaped per CBS stream: {:#?}",
+            diags
+        );
+        for d in &cbs_shaped {
+            assert!(d.severity == Severity::Info);
+            assert!(
+                d.message.contains("idle_slope=300000000 bps"),
+                "CBS shaped diagnostic must announce idle slope 300 Mbps: {}",
+                d.message
+            );
+        }
+
+        // No `WcttDeferred` — CBS dispatch supersedes deferral.
+        let deferred: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttDeferred"))
+            .collect();
+        assert!(
+            deferred.is_empty(),
+            "expected no WcttDeferred when CBS reservation is set: {:#?}",
+            deferred
+        );
+
+        // One WcttBound per stream.
+        let bounds: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttBound"))
+            .collect();
+        assert_eq!(
+            bounds.len(),
+            2,
+            "expected one WcttBound per stream: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 12: bus without Switch_Type is invisible to wctt ───────
     #[test]
     fn unannotated_bus_skipped() {
         // A regular AADL bus carrying no Spar_Network properties must

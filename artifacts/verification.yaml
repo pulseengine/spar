@@ -1961,6 +1961,49 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-006
 
+  - id: TEST-TSN-CBS
+    type: feature
+    title: 802.1Qav CBS credit-pool service curve + wctt dispatch
+    description: >
+      Verifies the v0.8.1 commit 3 CBS analysis. Unit tests in
+      crates/spar-network/src/tsn.rs cover (1) `CbsReservation::new`
+      construction with idle/link-rate validation, (2) rejection of
+      oversubscribed reservations and the zero-link-rate boundary,
+      (3) the boundary case where idleSlope == linkRate (sendSlope = 0),
+      (4) `reserved_fraction` recovers the link rate, (5)
+      `cbs_residual_service` rate equals idleSlope, (6) the blocking
+      term (max_competing_frame / link_rate) dominates when lo_credit
+      is zero, (7) the credit-recovery term (lo_credit / |sendSlope|)
+      adds correctly, (8) the idleSlope-equals-linkRate boundary is
+      latency-free, (9) two classes reserving 30% each both see their
+      own idleSlope as the service rate, and (10) the
+      `Bandwidth_Reservation` property reads via typed PropertyExpr,
+      bare integer, and string-fallback paths. Integration test in
+      crates/spar-analysis/src/wctt.rs (`cbs_dispatch_two_classes_*`)
+      asserts that on a 1 Gbps TSN switch with two streams each
+      declaring `Spar_TSN::Bandwidth_Reservation => 300000000 bitsps`,
+      the wctt pass emits one `WcttCbsShaped` Info per stream
+      (carrying idle_slope and service_latency), no `WcttDeferred`
+      (CBS dispatch supersedes Phase-1 deferral on TSN switches), and
+      one `WcttBound` per stream. Property registration is also
+      verified: Spar_TSN now exposes 6 properties (was 5),
+      Bandwidth_Reservation type is `aadlinteger units
+      Data_Rate_Units`, and the total predeclared property count is
+      128 (was 127 before this commit).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-network --lib -- tsn::tests::cbs
+        - run: cargo test -p spar-analysis --lib -- wctt::tests::cbs
+    status: passing
+    tags: [v0.8.1, network, tsn, cbs, qav, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-003
+      - type: satisfies
+        target: REQ-NETWORK-001
+
   - id: TEST-TSN-PREEMPTION
     type: feature
     title: 802.1Qbu frame-preemption blocking term in WCTT analysis
