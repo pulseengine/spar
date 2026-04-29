@@ -243,6 +243,28 @@ artifacts at github.com/pulseengine/spar/releases/tag/v0.7.1.
 
 ---
 
+## v0.9.1 (soundness pass, in progress)
+
+**Wave 3 Tier A #1 — honest "fail on sorry" gate (`.github/workflows/proofs.yml`)**
+
+The 12-persona Wave 3 audit (Lean reviewer + build engineer) confirmed that `lake build` does NOT fail the job on `sorry` warnings without explicit `warningAsError` configuration in `lakefile.toml`. Despite the workflow comment asserting otherwise, CI was passing green even though `proofs/Proofs/Network/MinPlus.lean` carried five active `sorry`s on load-bearing theorems. The README implied these proofs back the WCTT bounds; they did not. The previous gate was decorative.
+
+The v0.9.1 fix adds a post-build "fail on sorry" gate: a `grep` over `proofs/Proofs/` that turns CI red on any line that is bare `sorry` (modulo a same-line `-- TODO` comment exemption that none of the five tracked sorrys use). The grep is a deliberately Lean-version-independent enforcement that does not depend on threading `warningAsError` flags through Lake.
+
+Network calculus closed-form bounds in `MinPlus.lean` carry 5 unsorried theorems; tracked as TODO(v1.0.0) per file. The Lean tree is load-bearing for RTA / RTAJittered / EDF / RMBound but informational for NC bounds at v0.9.1. The five tracked sorrys are listed in `proofs/README.md` § "Known sorrys (tracked in COMPLIANCE.md)" with file:line + one-line context each:
+
+- `Proofs/Network/MinPlus.lean:169` — `backlog_bound_classical` (closed-form `B = σ + ρ·T`)
+- `Proofs/Network/MinPlus.lean:199` — `delay_bound_classical` (closed-form `D = T + σ/R`)
+- `Proofs/Network/MinPlus.lean:240` — `output_dominates_input` (`α'(t) ≥ α(t)`)
+- `Proofs/Network/MinPlus.lean:293` — `compose_delays_dominates` (naive serial-chain composition)
+- `Proofs/Network/MinPlus.lean:318` — `arrival_at_zero_is_burst` (peak-rate branch; real spec/impl mismatch — `min(σ, 0) = 0` per Lean spec vs `σ` per Rust short-circuit)
+
+Discharging the five sorrys is scoped to a separate v0.10 PR. The math is non-trivial Le Boudec & Thiran ch. 1 closed-form reasoning in min-plus algebra, and the `arrival_at_zero_is_burst` peak-rate branch needs spec-vs-impl reconciliation before a proof is even meaningful.
+
+Until the discharge lands, the v0.9.1 gate is **expected to fail on `main`** — that is the *point*: the previous green CI was decorative; the new red CI is honest. The Rust `crates/spar-network/src/curves.rs` integer-arithmetic implementation remains the load-bearing artifact for NC bounds at v0.9.1 and is validated by unit tests against published worked examples.
+
+---
+
 ## v0.8.1 (Track D Phase 2 close-out, in progress on main)
 
 **Track D — TSN/Ethernet WCTT analysis, Phase 2 (5/5 commits delivered)**
