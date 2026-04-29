@@ -4,6 +4,82 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-04-29
+
+Track D Phase 2: TSN-shaped service curves. Implements the three
+classical IEEE 802.1Q-suite shaping mechanisms — TAS gate-window
+scheduling (802.1Qbv), CBS credit-based shaping (802.1Qav), and frame
+preemption (802.1Qbu) — as residual service curves in the WCTT
+analysis pipeline. Models without `Spar_TSN::*` annotations produce
+byte-identical output to v0.8.0.
+
+### Added — Track D Phase 2: TSN service curves (5/5 commits)
+
+- **`Spar_TSN::*` property set** (#177) — six properties: `Stream_ID`,
+  `Class_of_Service` (0..=7 per 802.1Q PCP), `Gate_Control_List`
+  (raw blob in v0.8.1, structured `GateSchedule` from c2),
+  `Max_Frame_Size`, `Frame_Preemption`, and `Bandwidth_Reservation`
+  (added in c3 for CBS idleSlope). `crates/spar-network::tsn` skeleton
+  with `GateWindow`, `ClassOfService`, and `CreditPool` placeholder
+  types plus typed-first / string-fallback property accessors. Total
+  predeclared property count: 122 → 128.
+- **TAS — IEEE 802.1Qbv gate-window service curve** (#180) — parses
+  Gate_Control_List into a structured `GateSchedule` (`offset:duration:cos_mask`
+  triples that tile the cycle period). Computes ρ_K (open fraction
+  per CoS) and T_K (worst-case gate latency). `tas_residual_service`
+  emits a rate-latency `ServiceCurve` with rate = R_link · ρ_K and
+  latency = T_K. WCTT dispatch emits `WcttTasGated` per stream when
+  bus has GCL + stream has CoS.
+- **CBS — IEEE 802.1Qav credit-pool service curve** (#182) —
+  per-class `CbsReservation` from `Bandwidth_Reservation` (idleSlope).
+  `cbs_residual_service` produces rate-latency form: rate =
+  idleSlope, latency = (max_competing_frame / link_rate) +
+  (loCredit / |sendSlope|). Class isolation suppresses
+  competing-flow residual decomposition. Emits `WcttCbsShaped` per
+  stream when the dispatch routes through the CBS arm.
+- **Frame preemption — IEEE 802.1Qbu** (#181) — replaces the legacy
+  `max_frame_bytes / link_rate` blocking term with the preemption
+  fragment term `(MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) /
+  link_rate` (typically 68 B vs. 1518 B → 5.4 µs vs. 121 µs at 100
+  Mbps). Express-stream identification by explicit `Frame_Preemption =>
+  true` or default by CoS ≥ 6. Emits `WcttPreemptionApplied` per hop.
+- **Phase 2 integration** (#183) — end-to-end test
+  `phase2_dispatch_routes_each_stream_to_its_shaping_path` exercises
+  TAS + CBS + preemption arms in the same `WcttAnalysis::analyze`
+  run with three sub-systems, asserting all three diagnostics
+  (`WcttTasGated`, `WcttCbsShaped`, `WcttPreemptionApplied`) coexist.
+
+### Unified TSN dispatch
+
+The WCTT analysis pass now has a 4-arm priority cascade for TSN
+switches with orthogonal preconditions:
+
+1. **TAS** — bus has parsed GCL **AND** stream has CoS
+2. **CBS** — stream has `Bandwidth_Reservation` (idleSlope)
+3. **Preemption** — bus has `Frame_Preemption=>true` **AND** stream is
+   express
+4. **Deferred** — `WcttDeferred` Info diagnostic, hop skipped
+
+Orthogonal preconditions mean each arm fires only when its specific
+shaping is in play; models that mix TAS + CBS + preemption across
+different switches all work in the same analysis run.
+
+### Changed
+
+- COMPLIANCE.md narrative for v0.8.1 with per-PR breakdown.
+- Test count: 2759+ across 18 crates (was 2200+).
+- `docs/designs/track-d-tsn-wctt-research.md` §5.8 status table
+  marks Phase 2 DONE with PR refs.
+
+### Deferred (Phase 2 v0.8.x follow-ups)
+
+- Piecewise-affine NC composition for cascaded TSN switches.
+- Multi-stream sharing within one CBS class's reserved bandwidth.
+- Advanced TAS guards (GCL gap detection across cascaded switches,
+  modal GCL transients).
+
+---
+
 ## [0.8.0] — 2026-04-28
 
 This release promotes the Track D Phase 1 (TSN/Ethernet WCTT analysis) and
