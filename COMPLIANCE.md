@@ -1,8 +1,8 @@
 # AS5506 AADL v2.2 Compliance Gap Analysis
 
-**Updated**: 2026-04-27 (v0.7.1 released; v0.8.0 in progress)
+**Updated**: 2026-04-28 (v0.8.0 released; v0.8.1 Phase 2 TSN close-out in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (2200+ tests passing across 18 crates)
+**Toolchain**: spar (2759+ tests passing across 18 crates)
 
 ---
 
@@ -240,6 +240,28 @@ artifacts at github.com/pulseengine/spar/releases/tag/v0.7.1.
 - Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
 - Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
 - Track D and Track E research design docs (#152, #153) and Track F engagement strategy (#160) anchoring v0.8.0+ scope.
+
+---
+
+## v0.8.1 (Track D Phase 2 close-out, in progress on main)
+
+**Track D — TSN/Ethernet WCTT analysis, Phase 2 (5/5 commits delivered)**
+
+Phase 2 wires the TSN-shaped service curves the v0.8.0 close-out had explicitly deferred. The four-way dispatch in `crates/spar-analysis/src/wctt.rs` now selects the per-hop service curve based on bus + stream properties, with a deterministic precedence (TAS → CBS → preemption → deferred) so a model that only carries one shaping property gets the matching arm and nothing else.
+
+- Foundation: `Spar_TSN` property set (`Stream_ID`, `Class_of_Service`, `Gate_Control_List`, `Max_Frame_Size`, `Frame_Preemption`) + `spar-network::tsn` skeleton (#177).
+- TAS (802.1Qbv) gate-window service curve (#180): `GateSchedule` parser for the Gate_Control_List string, `tas_residual_service` closed form (`R_K = R_link · open_fraction(K)`, `T_K = max_closed_window(K) + max_frame / R_link`), and `WcttTasGated` Info diagnostic carrying open fraction + worst-case gate latency. Wctt dispatch routes streams whose source declares `Class_of_Service` matching a window in the bus's GCL.
+- CBS (802.1Qav) credit-pool service curve (#182): `CbsReservation::new` (validates idle/link rates, computes `sendSlope = idleSlope − linkRate`), `cbs_residual_service` per Le Boudec/Thiran §1.4.3 + Lim et al., and `WcttCbsShaped` Info diagnostic carrying idle slope + service latency in ns. New property `Spar_TSN::Bandwidth_Reservation`. Wctt dispatch routes streams whose source declares the reservation when no GCL is active.
+- Frame preemption (802.1Qbu) blocking term (#181): `preemption_blocking_term_ps` closed form (legacy `max_frame / R` vs. preempted `(MIN_FRAGMENT + PREEMPTION_HEADER) / R`), `is_express_stream` resolver (explicit `Frame_Preemption` overrides default `CoS >= 6`), and `WcttPreemptionApplied` Info diagnostic carrying both the legacy and preempted blocking terms in ns. Wctt dispatch routes express streams when the bus has `Frame_Preemption => true`.
+- Integration close-out (this commit): single-instance integration test in `crates/spar-analysis/tests/tsn_integration.rs` that exercises all three dispatch arms in one `WcttAnalysis::analyze` run (three sub-systems, one per shaping path; asserts `WcttTasGated`, `WcttCbsShaped`, and `WcttPreemptionApplied` co-exist and carry plausible numeric values; asserts no `WcttDeferred` slips through). COMPLIANCE.md + design-doc Phase 2 status block updated. Total predeclared property count: 128 (Spar_TSN: 6 properties).
+
+Deferred to v0.8.x (research-grade follow-ups, not blockers for the close-out):
+
+- Piecewise-affine NC composition: the v0.8.1 service curves are rate-latency closed forms; multi-class TAS schedules and chained CBS classes both benefit from the more general piecewise-affine min-plus convolution that v0.8.0 deliberately scoped to v0.9.0.
+- Multi-stream sharing of a CBS class: today the CBS service curve is treated as exclusive to the tagged stream (other-class blocking is absorbed into the latency term). Same-class residual decomposition lands when the second CBS-shaped stream model arrives.
+- Advanced TAS guards: GCL gap detection across cascaded switches (the "no-wait packet scheduling" problem) and modal GCL transients are scoped to v0.9.0.
+
+**Test count delta**: v0.8.0 closed at ~2200+ tests across 18 crates; v0.8.1 Phase 2 lands at 2759 passing tests across 18 crates (delta ~+550 tests, dominated by the new spar-mcp / spar-insight surfaces from the v0.9.0 foundations and the TSN unit + integration tests under spar-network::tsn and spar-analysis::wctt).
 
 ---
 
