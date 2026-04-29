@@ -362,6 +362,32 @@ pub fn get_gate_control_list_raw(props: &PropertyMap) -> Option<String> {
     get_raw(props, "Gate_Control_List").map(|s| s.trim().trim_matches('"').to_string())
 }
 
+/// Read [`Spar_TSN::Sync_Error`] — the per-hop gPTP (IEEE 802.1AS)
+/// synchronization-error budget ε, returned in picoseconds.
+///
+/// In a real TSN deployment the gate-control list is enforced against
+/// the local synchronized clock, which can differ from the master clock
+/// by up to ε per hop. The TAS service-curve math (v0.9.1 NC soundness
+/// pass) subtracts ε from the effective open time and adds ε to the
+/// worst-case gate latency so the bounds remain sound under realistic
+/// clock accuracy. When the property is unset this accessor returns
+/// `None`, callers treat that as ε = 0 (legacy v0.8.1 behaviour) so
+/// the non-regression contract holds byte-identically.
+///
+/// Accepts the standard AADL time units (`ps`, `ns`, `us`, `ms`, `sec`,
+/// etc.) on both the typed and string-fallback paths. A bare integer
+/// (or string) is interpreted as picoseconds, matching the canonical
+/// unit used elsewhere in the WCTT pass.
+pub fn get_sync_error_ps(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Sync_Error")
+        && let Some(ps) = extract_time_ps_local(expr)
+    {
+        return Some(ps);
+    }
+    let raw = get_raw(props, "Sync_Error")?;
+    parse_time_ps_local(raw)
+}
+
 // ── Frame preemption (802.1Qbu) ──────────────────────────────────────
 //
 // 802.1Qbu allows an "express" traffic class to interrupt a
@@ -613,6 +639,127 @@ fn parse_size_bytes(s: &str) -> Option<u64> {
         }
     }
     s.parse::<u64>().ok()
+}
+
+// ── Time-unit helpers (local) ────────────────────────────────────────
+//
+// Mirrors the time-unit table in `crates/spar-network/src/extract.rs`
+// (which is crate-private to that module's call sites). Used by the
+// `Sync_Error` accessor so the property can be declared in any of the
+// standard AADL Time_Units (ps/ns/us/ms/sec/min/hr).
+
+const TIME_UNIT_FACTORS_PS_LOCAL: &[(&str, u64)] = &[
+    ("ps", 1),
+    ("ns", 1_000),
+    ("us", 1_000_000),
+    ("ms", 1_000_000_000),
+    ("sec", 1_000_000_000_000),
+    ("min", 60_000_000_000_000),
+    ("hr", 3_600_000_000_000_000),
+];
+
+fn time_unit_factor_ps_local(unit: &str) -> Option<u64> {
+    TIME_UNIT_FACTORS_PS_LOCAL
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(unit))
+        .map(|(_, f)| *f)
+}
+
+fn extract_time_ps_local(expr: &PropertyExpr) -> Option<u64> {
+    match expr {
+        PropertyExpr::Integer(v, Some(unit)) if *v >= 0 => {
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            (*v as u64).checked_mul(factor)
+        }
+        PropertyExpr::Integer(v, None) if *v >= 0 => Some(*v as u64),
+        PropertyExpr::Real(s, Some(unit)) => {
+            let v: f64 = s.parse().ok()?;
+            if v < 0.0 {
+                return None;
+            }
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            Some((v * factor as f64) as u64)
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            match inner.as_ref() {
+                PropertyExpr::Integer(v, _) if *v >= 0 => (*v as u64).checked_mul(factor),
+                PropertyExpr::Real(s, _) => {
+                    let v: f64 = s.parse().ok()?;
+                    if v < 0.0 {
+                        return None;
+                    }
+                    Some((v * factor as f64) as u64)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_time_ps_local(s: &str) -> Option<u64> {
+    let s = s.trim();
+    for &(unit, factor) in TIME_UNIT_FACTORS_PS_LOCAL {
+        if let Some(num_str) = s.strip_suffix(unit).map(|s| s.trim()) {
+            if let Ok(v) = num_str.parse::<u64>() {
+                return v.checked_mul(factor);
+            }
+            if let Ok(v) = num_str.parse::<f64>() {
+                if v < 0.0 {
+                    return None;
+                }
+                return Some((v * factor as f64) as u64);
+            }
+        }
+    }
+    s.parse::<u64>().ok()
+}
+
+// ── Frame quantization (v0.9.1 NC soundness) ─────────────────────────
+//
+// Bytes-level NC undercounts by up to one MTU per hop because frames
+// are atomic — once a frame starts transmitting, the link is held
+// until the frame finishes, even if the tagged stream's α slope
+// suggests the link could be released earlier. Adding the per-hop
+// frame-quantization correction
+//
+//     q_ps = ceil(max_frame_bytes · 8 · 10^12 / link_rate_bps)
+//
+// turns a slightly-optimistic answer into a sound one. The correction
+// is applied in the non-preemption / non-CBS arms of the TSN dispatch
+// (preemption replaces this term with the much smaller fragment time;
+// CBS service curve already accounts for max-frame blocking via the
+// 1518-byte default in `cbs_residual_service`). See PR #186 / v0.9.1
+// soundness pass.
+
+/// Per-hop frame-quantization correction in picoseconds.
+///
+/// Returns `ceil(max_frame_bytes · 8 · 10^12 / link_rate_bps)` —
+/// the worst-case time it takes to drain one full preemptable Ethernet
+/// frame at the egress link rate, with rounding *up* so the term is
+/// never an under-estimate. `link_rate_bps == 0` returns `u64::MAX`
+/// (a safe pessimistic placeholder; the caller is responsible for
+/// screening that pathological case).
+///
+/// This is the atomic-frame correction for the bytes-level NC kernel:
+/// without it, the per-hop bound undercounts by up to one MTU because
+/// frames cannot be split mid-transmission. Apply once per hop in the
+/// TAS / FIFO arms of the WCTT dispatch; do *not* apply in the
+/// preemption arm (the fragment-blocking term replaces it) or the CBS
+/// arm (the closed-form latency already absorbs it).
+pub fn frame_quantization_ps(max_frame_bytes: u64, link_rate_bps: u64) -> u64 {
+    if link_rate_bps == 0 {
+        return u64::MAX;
+    }
+    let numer = (max_frame_bytes as u128) * BITS_PER_BYTE * PS_PER_SECOND;
+    let denom = link_rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
 }
 
 // ── TAS (802.1Qbv) gate-window service curve ─────────────────────────
@@ -886,6 +1033,55 @@ pub fn tas_residual_service(
         }
     };
     ServiceCurve::rate_latency(rate_bps, latency_ps)
+}
+
+/// Derive the rate-latency [`ServiceCurve`] offered to a single
+/// class-of-service by a TAS-gated egress port, accounting for the
+/// per-hop gPTP synchronization-error budget ε.
+///
+/// This is the v0.9.1 NC soundness wrapper around
+/// [`tas_residual_service`]. In a real TSN deployment the gate-control
+/// list is enforced against the local synchronized clock, which differs
+/// from the master clock by at most ε per hop (IEEE 802.1AS / gPTP).
+/// Without accounting for ε the TAS bound is *technically unsound* — a
+/// frame can miss its window by ε.
+///
+/// The correction is: subtract ε from the effective open time
+/// (clamped at 0 — once ε exceeds the open time, the gate is
+/// effectively closed for that hop) and add ε to the worst-case gate
+/// latency. Both adjustments tighten the envelope in the safe (more
+/// pessimistic) direction.
+///
+/// `sync_error_ps == 0` reproduces [`tas_residual_service`]
+/// byte-identically (legacy v0.8.1 behaviour, non-regression contract).
+pub fn tas_residual_service_with_sync_error(
+    schedule: &GateSchedule,
+    cos: ClassOfService,
+    link_rate_bps: u64,
+    sync_error_ps: u64,
+) -> ServiceCurve {
+    let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+    let latency_ps = schedule.worst_case_latency(cos);
+
+    // Effective open time shrinks by ε (clamped at 0). Once ε ≥ open
+    // time, the gate is effectively closed: rate = 0 with the worst-
+    // case-latency-plus-ε falling back to the closed-gate
+    // `(rate=0, latency=cycle_ps)` form via the saturating add below.
+    let effective_open_ps = open_ps.saturating_sub(sync_error_ps);
+    let effective_latency_ps = latency_ps.saturating_add(sync_error_ps);
+
+    let rate_bps = if cycle_ps == 0 || effective_open_ps == 0 {
+        0
+    } else {
+        let product = (link_rate_bps as u128).saturating_mul(effective_open_ps as u128);
+        let r = product / (cycle_ps as u128);
+        if r > u64::MAX as u128 {
+            u64::MAX
+        } else {
+            r as u64
+        }
+    };
+    ServiceCurve::rate_latency(rate_bps, effective_latency_ps)
 }
 
 /// Parse [`Spar_TSN::Gate_Control_List`] from a [`PropertyMap`] into a
@@ -1508,5 +1704,166 @@ mod tests {
         // safe default is non-express (preemptable).
         let empty = PropertyMap::new();
         assert!(!is_express_stream(&empty));
+    }
+
+    // ── Sync_Error / gPTP ε budget (v0.9.1 NC soundness) ─────────────
+
+    #[test]
+    fn read_sync_error_typed_path_picoseconds() {
+        // Bare integer — interpreted as picoseconds.
+        let props = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1000",
+            Some(PropertyExpr::Integer(1_000, None)),
+        );
+        assert_eq!(get_sync_error_ps(&props), Some(1_000));
+    }
+
+    #[test]
+    fn read_sync_error_typed_path_with_units() {
+        // 1 us with explicit Time_Units → 1_000_000 ps.
+        let props = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1us",
+            Some(PropertyExpr::Integer(1, Some(Name::new("us")))),
+        );
+        assert_eq!(get_sync_error_ps(&props), Some(1_000_000));
+
+        // 1 ms.
+        let props_ms = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1ms",
+            Some(PropertyExpr::Integer(1, Some(Name::new("ms")))),
+        );
+        assert_eq!(get_sync_error_ps(&props_ms), Some(1_000_000_000));
+    }
+
+    #[test]
+    fn read_sync_error_string_fallback_matches_typed() {
+        // The string-fallback path should agree with the typed-expr
+        // path for the same human-readable value.
+        let typed = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1us",
+            Some(PropertyExpr::Integer(1, Some(Name::new("us")))),
+        );
+        let stringy = make_props(SPAR_TSN, "Sync_Error", "1us", None);
+        assert_eq!(get_sync_error_ps(&typed), get_sync_error_ps(&stringy));
+        assert_eq!(get_sync_error_ps(&stringy), Some(1_000_000));
+    }
+
+    #[test]
+    fn read_sync_error_missing_returns_none() {
+        // Unset = legacy behaviour (callers treat as ε = 0).
+        let empty = PropertyMap::new();
+        assert_eq!(get_sync_error_ps(&empty), None);
+    }
+
+    // ── Frame quantization (v0.9.1 NC soundness) ─────────────────────
+
+    #[test]
+    fn frame_quantization_1518_at_100mbps() {
+        // 1518-byte MTU at 100 Mbps:
+        //   q_ps = ceil(1518 · 8 · 10^12 / 10^8) = 121_440_000 ps = 121.44 us.
+        // This matches the legacy preemption-disabled blocking term.
+        let q = frame_quantization_ps(1518, 100_000_000);
+        assert_eq!(q, 121_440_000);
+    }
+
+    #[test]
+    fn frame_quantization_64_at_1gbps() {
+        // 64-byte minimum frame at 1 Gbps:
+        //   q_ps = ceil(64 · 8 · 10^12 / 10^9) = 512_000 ps = 512 ns.
+        let q = frame_quantization_ps(64, 1_000_000_000);
+        assert_eq!(q, 512_000);
+    }
+
+    #[test]
+    fn frame_quantization_rounds_up() {
+        // Rate that does not divide evenly — ceiling rounding (pessimism)
+        // must produce a strict over-estimate vs. the exact-divisor case.
+        // 1518 bytes at 1 Gbps is exact (12_144_000 ps). At 999_999_999
+        // bps (1 bps slower) we should round *up*.
+        let exact = frame_quantization_ps(1518, 1_000_000_000);
+        let nearly = frame_quantization_ps(1518, 999_999_999);
+        assert_eq!(exact, 12_144_000);
+        assert!(
+            nearly > exact,
+            "ceiling rounding must over-estimate at non-exact divisors: \
+             exact={} nearly={}",
+            exact,
+            nearly
+        );
+    }
+
+    #[test]
+    fn frame_quantization_zero_rate_guard() {
+        // Pathological zero-rate input: returns u64::MAX so the caller
+        // can detect the unservable hop without panicking on division.
+        assert_eq!(frame_quantization_ps(1518, 0), u64::MAX);
+        assert_eq!(frame_quantization_ps(0, 0), u64::MAX);
+    }
+
+    #[test]
+    fn frame_quantization_zero_bytes_returns_zero() {
+        // Zero bytes is a degenerate but well-defined case: takes zero
+        // time to transmit. Used by tests that want to verify the
+        // correction is a strict additive overhead (i.e., setting it
+        // to zero recovers the v0.8.1 bound).
+        assert_eq!(frame_quantization_ps(0, 1_000_000_000), 0);
+    }
+
+    // ── TAS + gPTP ε budget (v0.9.1 NC soundness) ────────────────────
+
+    #[test]
+    fn tas_residual_service_with_sync_error_zero_matches_legacy() {
+        // ε = 0 must reproduce the legacy `tas_residual_service`
+        // byte-identically — this is the non-regression contract.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let legacy = tas_residual_service(&s, cos7, TAS_GBPS);
+        let with_eps = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 0);
+        assert_eq!(legacy.rate_bps, with_eps.rate_bps);
+        assert_eq!(legacy.latency_ps, with_eps.latency_ps);
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_shrinks_open_grows_latency() {
+        // 50% open (5 us out of 10 us), 1 Gbps. Apply ε = 1 us.
+        //   effective_open  = 5 us − 1 us = 4 us
+        //   rate = 1 Gbps · 4/10 = 400 Mbps
+        //   effective_lat  = 5 us + 1 us = 6 us
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 1_000_000);
+        assert_eq!(svc.rate_bps, 400_000_000);
+        assert_eq!(svc.latency_ps, 6_000_000);
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_clamps_when_eps_equals_open() {
+        // ε equal to the open time → gate is effectively closed
+        // (rate = 0); latency = open_window_latency + ε.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        // Open time for CoS 7 is 5 us = 5_000_000 ps.
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 5_000_000);
+        assert_eq!(svc.rate_bps, 0, "gate must close once ε ≥ open time");
+        assert_eq!(svc.latency_ps, 10_000_000, "5us legacy + 5us ε");
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_clamps_when_eps_exceeds_open() {
+        // ε strictly greater than open time → still closed; saturating
+        // sub clamps at 0 (the gate cannot have "negative open time").
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 10_000_000);
+        assert_eq!(svc.rate_bps, 0);
+        assert_eq!(svc.latency_ps, 15_000_000);
     }
 }
