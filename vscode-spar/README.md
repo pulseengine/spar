@@ -2,7 +2,7 @@
 
 AADL v2.2 language support with live interactive architecture diagrams.
 
-Powered by [spar](https://github.com/pulseengine/spar), an open-source AADL toolchain with 21 analysis passes, port-aware rendering, and orthogonal edge routing.
+Powered by [spar](https://github.com/pulseengine/spar), an open-source AADL toolchain with 30 analysis passes, port-aware rendering, and orthogonal edge routing.
 
 ## Features
 
@@ -10,7 +10,7 @@ Powered by [spar](https://github.com/pulseengine/spar), an open-source AADL tool
 Full TextMate grammar for AADL v2.2 — keywords, component categories, features, connections, properties, modes, and annexes.
 
 ### Language Server (10 IDE Features)
-- **Diagnostics** — parser errors + 21 analysis passes on save
+- **Diagnostics** — parser errors + 30 analysis passes on save
 - **Hover** — component types, features, keywords
 - **Go-to-Definition** — cross-file classifier references
 - **Completion** — keywords, classifiers, properties, packages

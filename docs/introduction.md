@@ -52,7 +52,7 @@ graph TB
 | `spar-base-db` | Salsa incremental computation database |
 | `spar-hir-def` | HIR definitions: item tree, instance model, properties |
 | `spar-hir` | Public HIR facade with serde serialization |
-| `spar-analysis` | 21 analysis passes (scheduling, latency, connectivity, etc.) |
+| `spar-analysis` | 30 analysis passes (scheduling, latency, connectivity, etc.) |
 | `spar-render` | SVG/HTML rendering via etch compound layout |
 | `spar-transform` | WIT/WAC/Rust crate transforms |
 | `spar-cli` | CLI (`spar parse/items/instance/analyze/render/modes/verify/lsp`) |
@@ -62,7 +62,7 @@ graph TB
 ## Key Features
 
 - **Full AADL v2.3 parser** (AS5506D) with error recovery and lossless syntax tree
-- **21 analysis passes** including RMA scheduling, latency, EMV2 fault trees, mode reachability
+- **30 analysis passes** including RMA scheduling, latency, EMV2 fault trees, mode reachability
 - **Port-aware rendering** with orthogonal edge routing and interactive HTML
 - **LSP server** with 10 IDE features (diagnostics, hover, completion, go-to-def, rename, etc.)
 - **WASM component** for browser-side rendering in rivet dashboard
