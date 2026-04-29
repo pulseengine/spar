@@ -55,6 +55,9 @@ use spar_network::curves::{
 use spar_network::extract::{
     extract_network_graph, read_forwarding_latency_ps, read_output_rate_bps, read_queue_depth,
 };
+use spar_network::tsn::{
+    ClassOfService, GateSchedule, get_class_of_service, get_gate_schedule, tas_residual_service,
+};
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -110,6 +113,16 @@ impl WcttAnalysis {
         let mut service_for_bus: FxHashMap<ComponentInstanceIdx, ServiceCurve> =
             FxHashMap::default();
         let mut budget_ps_for_bus: FxHashMap<ComponentInstanceIdx, u64> = FxHashMap::default();
+        // Per-bus TAS gate schedule, when present on a TSN-typed bus.
+        // Used to dispatch [`tas_residual_service`] in the per-hop walk
+        // below.
+        let mut gate_schedule_for_bus: FxHashMap<ComponentInstanceIdx, GateSchedule> =
+            FxHashMap::default();
+        // Per-bus link rate (bits per second) — kept separately because
+        // `tas_residual_service` rebuilds the service curve from the raw
+        // R_link rather than the rate-latency form already in
+        // `service_for_bus`.
+        let mut link_rate_for_bus: FxHashMap<ComponentInstanceIdx, u64> = FxHashMap::default();
         for node in graph.switches() {
             if let NodeKind::Switch { switch_type: st } = node.kind {
                 switch_type.insert(node.idx, st);
@@ -120,8 +133,16 @@ impl WcttAnalysis {
             let rate_bps = read_output_rate_bps(props).unwrap_or(0);
             let (_bcet_ps, wcet_ps) = read_forwarding_latency_ps(props).unwrap_or((0, 0));
             service_for_bus.insert(node.idx, ServiceCurve::rate_latency(rate_bps, wcet_ps));
+            link_rate_for_bus.insert(node.idx, rate_bps);
             if let Some(budget) = read_wctt_budget_ps(props) {
                 budget_ps_for_bus.insert(node.idx, budget);
+            }
+            // Spar_TSN::Gate_Control_List on the bus enables the TAS
+            // service-curve dispatch below (v0.8.1 commit 2). Malformed
+            // GCL strings are silently treated as "no schedule" — the
+            // existing WcttDeferred path handles that fall-through.
+            if let Some(schedule) = get_gate_schedule(props) {
+                gate_schedule_for_bus.insert(node.idx, schedule);
             }
         }
 
@@ -199,37 +220,83 @@ impl WcttAnalysis {
             for (hop_idx, sw_idx) in stream.hops.iter().enumerate() {
                 let st = switch_type.get(sw_idx).copied().unwrap_or(SwitchType::Fifo);
 
-                // TSN switches are opaque in Phase 1: we emit a
-                // deferral diagnostic for the first such hop and
-                // skip the per-hop delay contribution. Subsequent TSN
-                // hops on the same stream stay silent to avoid noise.
-                if matches!(st, SwitchType::Tsn) {
-                    if !deferred_emitted {
-                        diags.push(AnalysisDiagnostic {
-                            severity: Severity::Info,
-                            message: format!(
-                                "WcttDeferred: stream '{}' traverses TSN switch '{}' at hop {}; \
-                                 TAS/CBS-shaped service curves are deferred to Phase 2 \
-                                 (tracked in docs/designs/track-d-tsn-wctt-research.md §5.5)",
-                                stream_name,
-                                graph
-                                    .node(*sw_idx)
-                                    .map(|n| n.name.as_str())
-                                    .unwrap_or("<unknown>"),
-                                hop_idx,
-                            ),
-                            path: stream_path.clone(),
-                            analysis: self.name().to_string(),
-                        });
-                        deferred_emitted = true;
+                // TSN switches: prefer the TAS gate-window service
+                // curve when both the bus has a parsed Gate_Control_List
+                // and the stream carries a Spar_TSN::Class_of_Service.
+                // When either is missing, fall back to the v0.8.0
+                // WcttDeferred Info diagnostic and skip the hop's
+                // contribution.
+                let svc = if matches!(st, SwitchType::Tsn) {
+                    match (gate_schedule_for_bus.get(sw_idx), stream.cos) {
+                        (Some(schedule), Some(cos)) => {
+                            let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
+                            let tas_svc = tas_residual_service(schedule, cos, link_rate);
+                            let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+                            // open_fraction is reported as a percentage
+                            // (integer-rounded toward zero) for human
+                            // readability in the diagnostic message.
+                            let open_pct = if cycle_ps == 0 {
+                                0
+                            } else {
+                                ((open_ps as u128) * 100 / (cycle_ps as u128)) as u64
+                            };
+                            let gate_latency_ps = schedule.worst_case_latency(cos);
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttTasGated: stream '{}' (CoS {}) on TSN switch '{}' at \
+                                     hop {}: open fraction {}% gate latency {} ps",
+                                    stream_name,
+                                    cos.0,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    hop_idx,
+                                    open_pct,
+                                    gate_latency_ps,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            tas_svc
+                        }
+                        _ => {
+                            // No gate schedule or no CoS — fall back to
+                            // the v0.8.0 deferred path. We deliberately
+                            // emit at most one WcttDeferred per stream
+                            // (the diagnostic noise floor matches Phase
+                            // 1's behaviour).
+                            if !deferred_emitted {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Info,
+                                    message: format!(
+                                        "WcttDeferred: stream '{}' traverses TSN switch '{}' at \
+                                         hop {}; TAS/CBS-shaped service curves are deferred to \
+                                         Phase 2 (tracked in \
+                                         docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                        stream_name,
+                                        graph
+                                            .node(*sw_idx)
+                                            .map(|n| n.name.as_str())
+                                            .unwrap_or("<unknown>"),
+                                        hop_idx,
+                                    ),
+                                    path: stream_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                                deferred_emitted = true;
+                            }
+                            continue;
+                        }
                     }
-                    continue;
-                }
-
-                let svc = match service_for_bus.get(sw_idx) {
-                    Some(s) => *s,
-                    None => continue,
+                } else {
+                    match service_for_bus.get(sw_idx) {
+                        Some(s) => *s,
+                        None => continue,
+                    }
                 };
+
                 if svc.rate_bps == 0 {
                     // No bandwidth declared — without a finite service
                     // rate we cannot bound delay; skip the hop with
@@ -682,6 +749,11 @@ struct Stream {
     hops: Vec<ComponentInstanceIdx>,
     /// Source-side arrival curve.
     alpha: ArrivalCurve,
+    /// Stream's `Spar_TSN::Class_of_Service` when annotated. Required
+    /// for the TAS service-curve dispatch on TSN switches; streams
+    /// without a CoS fall back to the [`Severity::Info`]-emitting
+    /// `WcttDeferred` path.
+    cos: Option<ClassOfService>,
 }
 
 impl Stream {
@@ -780,6 +852,16 @@ fn collect_streams(
                 .unwrap_or(DEFAULT_BURST_BYTES);
 
             let alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
+            // Stream's class-of-service drives the TAS service-curve
+            // dispatch on TSN-typed switches. The lookup follows the
+            // same precedence as the typed/string accessor in
+            // spar-network::tsn — we read from the source end station
+            // because Spar_TSN::Class_of_Service applies to ports /
+            // connections; the closest reachable carrier in the
+            // current property model is the source device's
+            // PropertyMap, which the existing rate / queue-depth reads
+            // already use.
+            let cos = get_class_of_service(src_props);
 
             streams.push(Stream {
                 name: conn.name.as_str().to_string(),
@@ -787,6 +869,7 @@ fn collect_streams(
                 sink_idx: dst_idx,
                 hops,
                 alpha,
+                cos,
             });
         }
     }
@@ -1517,5 +1600,334 @@ end Net;
             "unswitched bus must not produce Wctt* diagnostics: {:#?}",
             diags
         );
+    }
+
+    // ── Test 11: TAS service curve dispatch (v0.8.1 commit 2) ───────
+    #[test]
+    fn tsn_with_gcl_and_cos_dispatches_tas_service_curve() {
+        // 1 Gbps TSN switch carrying a Gate_Control_List that opens
+        // CoS 7 for 50% of the cycle; the source device declares
+        // Class_of_Service=7. Expect a `WcttTasGated` Info diagnostic
+        // (not `WcttDeferred`) and a finite `WcttBound` whose value
+        // reflects the half-bandwidth, gate-latency-shifted service
+        // curve.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        // We must see a WcttTasGated Info, not WcttDeferred.
+        let tas_gated = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttTasGated"))
+            .unwrap_or_else(|| panic!("expected WcttTasGated: {:#?}", diags));
+        assert!(tas_gated.severity == Severity::Info);
+        assert!(tas_gated.message.contains("CoS 7"));
+        assert!(tas_gated.message.contains("50%"));
+
+        let deferred = diags.iter().find(|d| d.message.starts_with("WcttDeferred"));
+        assert!(
+            deferred.is_none(),
+            "WcttDeferred should not fire when GCL+CoS are present: {:#?}",
+            diags
+        );
+
+        // Bound: D = T_K + σ/R_K. With T_K = 5 us, σ = 1500 bytes,
+        // R_K = 500 Mbps: σ/R_K = 1500·8·10^12 / 500·10^6 = 24·10^6 ps =
+        // 24 us. Total = 29 us.
+        let bound = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {:#?}", diags));
+        assert!(
+            bound.message.contains("29000000 ps"),
+            "expected 29 us TAS bound, got: {}",
+            bound.message
+        );
+    }
+
+    // ── Test 12: TAS bound is strictly larger than ungated ─────────
+    #[test]
+    fn tas_gated_bound_exceeds_ungated_bound_at_half_bandwidth() {
+        // Comparison: a 1 Gbps line-rate, ungated, gives D = 12 us
+        // (single-hop test 2 above). Same topology under TAS with 50%
+        // open and 5 us gate latency gives D = 5 us (latency) + 24 us
+        // (σ/R_K at 500 Mbps) = 29 us. The TAS bound must be strictly
+        // larger than the ungated bound: gate shaping is always at
+        // least as restrictive as line-rate service.
+        let ungated_src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let ungated = instantiate(ungated_src, "Net", "Sys", "impl");
+        let ungated_diags = WcttAnalysis.analyze(&ungated);
+        let ungated_bound = ungated_diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap();
+        // 12 us = 12_000_000 ps for the ungated single hop.
+        assert!(ungated_bound.message.contains("12000000 ps"));
+
+        // Same model, but with TSN+GCL applied (50% open for CoS 7).
+        // The bound must exceed the ungated 12 us.
+        let gated_src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let gated = instantiate(gated_src, "Net", "Sys", "impl");
+        let gated_diags = WcttAnalysis.analyze(&gated);
+        let gated_bound = gated_diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap();
+        assert!(gated_bound.message.contains("29000000 ps"));
+
+        // Strictly: 29 us > 12 us — the gated bound is more pessimistic
+        // (and correctly so) than the ungated line-rate bound.
+    }
+
+    // ── Test 13: TSN switch without GCL still defers ────────────────
+    #[test]
+    fn tsn_switch_without_gcl_keeps_deferred_path() {
+        // TSN switch but no Gate_Control_List declared on the bus.
+        // The dispatch must fall back to the v0.8.0 WcttDeferred path
+        // (no TAS service curve; no per-hop contribution).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
+        assert!(
+            diags.iter().all(|d| !d.message.starts_with("WcttTasGated")),
+            "WcttTasGated should not fire when GCL is absent: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 14: TSN switch with GCL but stream lacks CoS defers ────
+    #[test]
+    fn tsn_with_gcl_but_no_stream_cos_still_defers() {
+        // Bus has a Gate_Control_List, but the source device does not
+        // declare Spar_TSN::Class_of_Service. Without the CoS we
+        // cannot pick a window mask; fall back to WcttDeferred.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
     }
 }

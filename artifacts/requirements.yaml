@@ -1459,6 +1459,32 @@ artifacts:
     status: planned
     tags: [network, tsn, wctt, v081]
 
+  - id: REQ-TSN-002
+    type: requirement
+    title: TAS (802.1Qbv) gate-window service curve in WCTT analysis
+    description: >
+      System provides a Time-Aware Shaper (IEEE 802.1Qbv) gate-window
+      service curve for TSN-typed switches and dispatches it from the
+      WCTT analysis when both the bus carries a parsed
+      Spar_TSN::Gate_Control_List and the stream carries a
+      Spar_TSN::Class_of_Service. spar-network::tsn parses the
+      gate-control list "offset_ns:duration_ns:cos_mask;..." blob into
+      a GateSchedule, validates that windows tile the cycle period
+      without gaps or overlaps, and exposes (a) the average open
+      fraction ρ_K = open_time_K / cycle_period and (b) the
+      worst-case gate latency T_K = longest contiguous closed run for
+      class K (with wrap-around). tas_residual_service then derives
+      β_K(t) = (R_link · ρ_K) · max(0, t − T_K) from those quantities.
+      Hops dispatched through the TAS curve emit a new Info
+      diagnostic, WcttTasGated, carrying stream id, class-of-service,
+      open fraction (percent) and gate latency (ps); when either the
+      Gate_Control_List or the Class_of_Service is missing the
+      analysis falls back to the v0.8.0 WcttDeferred path. Discharges
+      docs/designs/track-d-tsn-wctt-research.md §5.3 and the v0.8.1
+      Track D Phase 2 commit 2 milestone.
+    status: planned
+    tags: [network, tsn, wctt, v081]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001

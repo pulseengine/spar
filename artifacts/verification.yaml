@@ -1924,6 +1924,43 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-001
 
+  - id: TEST-TSN-TAS
+    type: feature
+    title: TAS (802.1Qbv) gate-window service curve dispatch in WCTT
+    description: >
+      Verifies the v0.8.1 commit 2 TAS service-curve math and its
+      dispatch from the WCTT analysis. spar-network::tsn unit tests
+      cover the Gate_Control_List parser (single-window, two-window
+      50/50 split, eight-window per-class round-robin, overlap
+      rejection, gap rejection, malformed entry rejection), the
+      ρ_K / T_K derivation (open fraction by mask, max contiguous
+      closed run including wrap-around, permanently-closed gates),
+      the tas_residual_service helper (50%-open at 1 Gbps gives
+      500 Mbps and the cycle's worst-case gate latency, full-open
+      preserves link rate with zero latency, never-open gives rate=0
+      latency=cycle), and the get_gate_schedule property-map
+      accessor. spar-analysis WCTT tests cover the dispatch into the
+      TAS service curve when both Spar_TSN::Gate_Control_List and
+      Spar_TSN::Class_of_Service are present (single-hop bound matches
+      T_K + σ/(R_link·ρ_K) closed-form), the strict ordering between
+      the gated and ungated bounds at the same line rate (29 us > 12
+      us at 50% open), and the two negative paths where the analysis
+      falls back to the existing WcttDeferred Info diagnostic
+      (Gate_Control_List missing on the bus; Class_of_Service missing
+      on the stream).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.8.1, network, tsn, wctt, tas]
+    links:
+      - type: satisfies
+        target: REQ-TSN-002
+      - type: satisfies
+        target: REQ-NETWORK-006
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
