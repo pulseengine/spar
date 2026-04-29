@@ -134,6 +134,7 @@ A first-party VS Code extension lives in [`vscode-spar/`](vscode-spar/). It pair
 
 ## Documentation
 
+- [Quickstart](docs/quickstart.md) -- build spar, parse + analyze the sample model in ~30 minutes
 - [`spar moves` reference](docs/cli/moves.md) -- hypothetical-rebinding oracle (verify + enumerate)
 - [WASM-as-architecture design](docs/plans/2026-03-10-wasm-as-architecture-design.md) -- WIT/WAC/wRPC transforms
 - [VS Code extension design](docs/plans/2026-03-18-vscode-extension-design.md) -- editor integration
