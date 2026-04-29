@@ -4,6 +4,52 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] — 2026-04-29
+
+NC kernel soundness pass. Fixes two pure-soundness gaps flagged by an
+external reviewer of v0.9.0. Both turn slightly-optimistic NC output
+into sound output. Models without `Spar_TSN::Sync_Error` and with the
+same `Spar_TSN::Max_Frame_Size` defaults will see *larger* WCTT
+numbers — the v0.8.1 bounds were under-counting.
+
+### Added — NC soundness (Tier 2 reviewer items)
+
+- **gPTP synchronization-error budget (#186)** — new
+  `Spar_TSN::Sync_Error` (Time, picoseconds; applies to bus,
+  processor) carries the per-hop 802.1AS-2020 sync error ε. The TAS
+  dispatch in `wctt.rs` now subtracts ε from the effective open
+  time and adds ε to the worst-case gate latency. Without ε, v0.8.1
+  TAS bounds were *technically unsound* — a frame can miss its
+  window by ε in silicon. ε = 0 (unset) reproduces v0.8.1
+  byte-identically.
+- **Atomic-frame quantization (#186)** — wctt.rs now adds
+  `ceil(max_frame_bytes · 8e12 / link_rate_bps)` ps per hop on the
+  TAS and FIFO/Priority arms. Bytes-level NC under-counts by up to
+  one MTU per hop because frames are atomic. CBS arm unchanged
+  (closed-form latency absorbs the term). Preemption arm unchanged
+  (replaces with fragment-time). New `WcttFrameQuantization` Info
+  diagnostic.
+
+### Changed
+
+- Property count: 128 → 129; Spar_TSN per-set count: 6 → 7.
+- Test count: 2772 (was 2759 at v0.9.0).
+- Test bounds in `wctt::tests` updated from optimistic to sound:
+  single-hop 1 Gbps 12 µs → 24.144 µs; 3-hop chain 51 µs →
+  87.432 µs; gated TAS half-rate 29 µs → 41.144 µs.
+- Golden fixture `classical_ethernet.expected.json` updated.
+
+### Note on NC bound semantics
+
+The change is from *roughly upper* to *upper*. Old bounds matched a
+fluid-bytes assumption; new bounds enforce the atomic-frame physics
+("a frame in flight must drain"). Users who calibrated against v0.8.1
+numbers will see proportional growth: ≈ +12.144 µs per 1 Gbps hop
+with 1518 B MTU. The `WcttFrameQuantization` diagnostic makes the
+correction visible per hop.
+
+---
+
 ## [0.9.0] — 2026-04-29
 
 Major: spar gains an MCP (Model Context Protocol) tool surface and a

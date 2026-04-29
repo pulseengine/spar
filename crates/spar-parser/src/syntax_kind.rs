@@ -1,6 +1,6 @@
 /// All syntax kinds for the AADL language.
 ///
-/// This enum covers every token and node type in AADL v2.2 (AS5506D).
+/// This enum covers every token and node type in AADL v2.2/v2.3 (SAE AS5506D).
 /// Option B: component categories use generic COMPONENT_TYPE/COMPONENT_IMPL
 /// nodes with a COMPONENT_CATEGORY child, rather than per-category variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

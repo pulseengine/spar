@@ -1,4 +1,4 @@
-# AS5506 AADL v2.2 Compliance Gap Analysis
+# AS5506D AADL v2.2/v2.3 Compliance Gap Analysis
 
 **Updated**: 2026-04-28 (v0.8.0 released; v0.8.1 Phase 2 TSN close-out in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)

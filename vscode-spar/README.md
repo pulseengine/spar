@@ -1,13 +1,13 @@
 # AADL (spar) — VS Code Extension
 
-AADL v2.2 language support with live interactive architecture diagrams.
+AADL v2.2/v2.3 language support with live interactive architecture diagrams.
 
 Powered by [spar](https://github.com/pulseengine/spar), an open-source AADL toolchain with 21 analysis passes, port-aware rendering, and orthogonal edge routing.
 
 ## Features
 
 ### Syntax Highlighting
-Full TextMate grammar for AADL v2.2 — keywords, component categories, features, connections, properties, modes, and annexes.
+Full TextMate grammar for AADL v2.2/v2.3 — keywords, component categories, features, connections, properties, modes, and annexes.
 
 ### Language Server (10 IDE Features)
 - **Diagnostics** — parser errors + 21 analysis passes on save
@@ -59,7 +59,7 @@ Interactive HTML diagram that updates on every save:
 - [spar on GitHub](https://github.com/pulseengine/spar)
 - [Latest Release](https://github.com/pulseengine/spar/releases/latest)
 - [Issue Tracker](https://github.com/pulseengine/spar/issues)
-- [AADL Standard (SAE AS5506C)](https://www.sae.org/standards/content/as5506c/)
+- [AADL Standard (SAE AS5506D)](https://www.sae.org/standards/content/as5506d/)
 
 ## License
 
