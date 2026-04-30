@@ -60,16 +60,16 @@ spar parse vehicle.aadl --tree
 spar items vehicle.aadl
 
 # Instantiate a system hierarchy
-spar instance --root Pkg::System.Impl vehicle.aadl platform.aadl
+spar instance --root Pkg::System.Impl vehicle.aadl test-data/sensor_lib.aadl
 
 # Run all analysis passes
-spar analyze --root Pkg::System.Impl vehicle.aadl platform.aadl
+spar analyze --root Pkg::System.Impl vehicle.aadl test-data/sensor_lib.aadl
 
 # Allocate threads to processors (deployment solver)
-spar allocate --root Pkg::System.Impl vehicle.aadl platform.aadl
+spar allocate --root Pkg::System.Impl vehicle.aadl test-data/sensor_lib.aadl
 
 # Render the architecture as SVG
-spar render --root Pkg::System.Impl -o arch.svg vehicle.aadl platform.aadl
+spar render --root Pkg::System.Impl -o arch.svg vehicle.aadl test-data/sensor_lib.aadl
 
 # Run verification assertions
 spar verify --root Pkg::System.Impl --rules rules.toml vehicle.aadl
@@ -92,26 +92,34 @@ spar verify --root Pkg::System.Impl --rules rules.toml vehicle.aadl
 
 ## Architecture
 
-12 crates, layered from low-level parsing to high-level analysis:
+20 crates, layered from low-level parsing to high-level analysis:
 
 ```
-spar-syntax     Lossless CST (rowan red-green trees)
-spar-parser     Recursive descent parser with error recovery
-spar-annex      AADL annex sublanguage parsing (EMV2, BLESS, BA)
-spar-base-db    Salsa database for incremental computation
-spar-hir-def    HIR definitions -- item tree, instance model, arenas
-spar-hir        Public semantic facade (name resolution, properties)
-spar-analysis   27+ pluggable analysis passes
-spar-transform  Format transforms (AADL <-> WIT, WAC, Rust crates, wRPC)
-spar-solver     Deployment solver (thread-to-processor allocation)
-spar-render     SVG architecture diagrams (compound Sugiyama layout)
-spar-cli        Command-line interface
-spar-wasm       WebAssembly component (WASI P2)
+spar-syntax        Lossless CST (rowan red-green trees)
+spar-parser        Recursive descent parser with error recovery
+spar-annex         AADL annex sublanguage parsing (EMV2, BLESS, BA)
+spar-base-db       Salsa database for incremental computation
+spar-hir-def       HIR definitions -- item tree, instance model, arenas
+spar-hir           Public semantic facade (name resolution, properties)
+spar-analysis      30 pluggable analysis passes
+spar-transform     Format transforms (AADL <-> WIT, WAC, Rust crates, wRPC)
+spar-solver        Deployment solver (thread-to-processor allocation)
+spar-render        SVG architecture diagrams (compound Sugiyama layout)
+spar-network       Network topology and WCTT analysis support
+spar-variants      Product-line variant selection and HIR filtering
+spar-verify        Requirements verification engine
+spar-verify-macros Procedural macros for verification rules
+spar-codegen       Rust + WIT code generation from instance models
+spar-insight       Discrepancy assistant (compare CTF traces vs expected)
+spar-sysml2        SysML v2 / KerML extraction and generation
+spar-mcp           Model Context Protocol server (read-only oracles)
+spar-cli           Command-line interface
+spar-wasm          WebAssembly component (WASI P2)
 ```
 
 ## Key Features
 
-- **27+ analysis passes** -- scheduling, latency, connectivity, resource budgets, ARINC 653, EMV2 fault trees, bus bandwidth, weight/power, mode reachability, and more
+- **30 analysis passes** -- scheduling, latency, connectivity, resource budgets, ARINC 653, EMV2 fault trees, bus bandwidth, weight/power, mode reachability, and more
 - **Assertion engine** -- declarative verification rules in TOML (`spar verify`)
 - **Deployment solver** -- automated thread-to-processor allocation with constraint satisfaction
 - **SARIF output** -- analysis results in SARIF format for CI integration
@@ -120,9 +128,13 @@ spar-wasm       WebAssembly component (WASI P2)
 - **Incremental** -- salsa-based memoization for fast re-analysis
 - **Lossless parsing** -- every byte preserved in the syntax tree
 
+## Editor support
+
+A first-party VS Code extension lives in [`vscode-spar/`](vscode-spar/). It pairs the `spar lsp` server (diagnostics, hover, go-to-definition, completion, rename, inlay hints) with a live architecture-diagram webview that re-renders on save. See [`vscode-spar/README.md`](vscode-spar/README.md) for install + setup.
+
 ## Documentation
 
-- [Integration plan](docs/plans/2026-03-08-spar-rivet-integration.md) -- rivet lifecycle integration
+- [`spar moves` reference](docs/cli/moves.md) -- hypothetical-rebinding oracle (verify + enumerate)
 - [WASM-as-architecture design](docs/plans/2026-03-10-wasm-as-architecture-design.md) -- WIT/WAC/wRPC transforms
 - [VS Code extension design](docs/plans/2026-03-18-vscode-extension-design.md) -- editor integration
 - [Deployment solver plan](docs/plans/2026-03-21-deployment-solver-plan.md) -- allocation algorithm

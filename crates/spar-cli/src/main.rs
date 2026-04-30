@@ -53,8 +53,13 @@ fn main() {
         "mcp" => cmd_mcp(&args[2..]),
         "moves" => moves::cmd_moves_dispatch(&args[2..]),
         "insight" => insight::cmd_insight(&args[2..]),
+        "help" | "--help" | "-h" => {
+            print_usage();
+            process::exit(0);
+        }
         other => {
             eprintln!("Unknown command: {other}");
+            print_usage();
             process::exit(1);
         }
     }
