@@ -166,7 +166,7 @@ theorem backlog_bound_classical (α : ArrivalCurve) (β : ServiceCurve)
   -- TODO(v1.0.0): discharge via case split on (t ≤ T) vs (t > T) and
   -- apply Nat.div arithmetic with `h_stable`.  The classical real-line
   -- proof shows sup_t (α(t) - β(t)) is reached at t = T.
-  sorry
+  sorry -- TODO(v1.0.0)
 
 /-! ## Theorem 5 — Delay closed form
 
@@ -196,7 +196,7 @@ theorem delay_bound_classical (α : ArrivalCurve) (β : ServiceCurve)
   -- TODO(v1.0.0): discharge via Le Boudec & Thiran horizontal-distance
   -- argument.  In integer arithmetic this reduces to chasing div_ceil
   -- bounds across the affine ↔ rate-latency intersection point.
-  sorry
+  sorry -- TODO(v1.0.0)
 
 /-! ## Theorem 6 — Output bound (burst inflation, rate preserved)
 
@@ -237,7 +237,7 @@ theorem output_dominates_input (α : ArrivalCurve) (β : ServiceCurve)
   intro _t
   -- TODO(v1.0.0): discharge.  The output curve has burst = σ + ρ·T
   -- (≥ σ) and the same sustained rate, so α'(t) ≥ α(t) at every t.
-  sorry
+  sorry -- TODO(v1.0.0)
 
 /-! ## Theorem 7 — Composition (serial chain delay aggregates)
 
@@ -290,7 +290,7 @@ theorem compose_delays_dominates
   -- hop, then chain through output_dominates_input to thread α →
   -- output(α,β1) → β2.  The arithmetic is straightforward once the
   -- per-hop sorries above are discharged.
-  sorry
+  sorry -- TODO(v1.0.0)
 
 /-! ## Sanity check — the zero-jitter / zero-burst sub-case
 
@@ -315,7 +315,7 @@ theorem arrival_at_zero_is_burst (α : ArrivalCurve) :
     -- diverge from the Rust impl by `min(σ, 0) = 0`.  We mark with
     -- `sorry` to flag the spec/impl mismatch as a v1.0.0 reconcile.
     -- TODO(v1.0.0): align Lean spec with Rust short-circuit.
-    sorry
+    sorry -- TODO(v1.0.0)
 
 /-- β below latency is monotone-zero.  Sanity corollary of Theorem 3. -/
 theorem service_at_zero_at_zero (β : ServiceCurve) :
