@@ -132,3 +132,25 @@ Use `rivet validate --format json` for machine-readable output.
 - Always include traceability links when creating artifacts
 - Run `rivet validate` before committing
 <!-- END rivet-managed -->
+
+## Spar contributor quick map
+
+Spar-specific guidance for contributors and agents (outside the rivet-managed
+section above):
+
+- **Build**: `cargo build --workspace`. Single-binary CLI: `cargo build --release -p spar`.
+- **Tests**: `cargo test --workspace`. Per-crate fixtures live under each crate's `tests/` directory.
+- **Salsa graph**: query definitions and the incremental DB live in
+  `crates/spar-base-db/`; HIR-side queries are in `crates/spar-hir-def/` and
+  `crates/spar-hir/`. Add new queries near existing ones — do not stand up a
+  parallel database.
+- **Analysis registry**: pluggable passes are wired in
+  `crates/spar-analysis/src/lib.rs` (see `Runner::register` / `register_all`).
+  New passes implement the `Analysis` trait and are registered there.
+- **Lean proofs gate**: proofs live in `proofs/Proofs/` (Scheduling, Network).
+  CI runs `lake build`; sorry-free is required for the verified-core modules
+  (`RTA`, `RTAJittered`, `EDF`, `RMBound`).
+- **Sample models**: `test-data/vehicle.aadl` + `test-data/sensor_lib.aadl` are
+  the canonical pair used in docs and smoke tests.
+- **Quickstart**: see [`docs/quickstart.md`](docs/quickstart.md) for the
+  user-facing entry point.
