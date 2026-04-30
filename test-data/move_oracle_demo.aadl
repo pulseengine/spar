@@ -1,0 +1,62 @@
+-- Demo fixture for the `spar moves enumerate` hypothetical-rebinding oracle.
+--
+-- What this demonstrates:
+--   * One root system implementation (`Move_Oracle_Demo::Top.Impl`) that
+--     contains two processors of the same type (`cpu_a`, `cpu_b`) plus
+--     one process implementation hosting a `Brake_Handler` thread bound
+--     to `cpu_a`.
+--   * The thread is annotated with `Spar_Migration::Mobile => true` and
+--     `Spar_Migration::Allowed_Targets => (reference (cpu_a),
+--     reference (cpu_b))`, so the move oracle has exactly two
+--     candidate targets.
+--   * `Compute_Execution_Time`, `Period`, and `Deadline` are set so RTA
+--     produces a sensible response-time bound on either target.
+--
+-- See docs/cli/moves.md for the full CLI reference. To exercise the
+-- oracle against this fixture:
+--
+--   spar moves enumerate \
+--     --root Move_Oracle_Demo::Top.Impl \
+--     --component brake_handler \
+--     test-data/move_oracle_demo.aadl
+--
+-- Expected: at least 2 candidates (cpu_a — currently bound — and cpu_b),
+-- both `ok=true`.
+
+package Move_Oracle_Demo
+public
+
+  processor M4
+  end M4;
+
+  thread Brake_Handler
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 20 ms;
+      Compute_Execution_Time => 2 ms .. 4 ms;
+      Deadline => 20 ms;
+      Spar_Migration::Mobile => true;
+      Spar_Migration::Allowed_Targets => (reference (cpu_a), reference (cpu_b));
+  end Brake_Handler;
+
+  process App
+  end App;
+
+  process implementation App.Impl
+    subcomponents
+      brake_handler: thread Brake_Handler;
+  end App.Impl;
+
+  system Top
+  end Top;
+
+  system implementation Top.Impl
+    subcomponents
+      cpu_a: processor M4;
+      cpu_b: processor M4;
+      app: process App.Impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu_a)) applies to app.brake_handler;
+  end Top.Impl;
+
+end Move_Oracle_Demo;
