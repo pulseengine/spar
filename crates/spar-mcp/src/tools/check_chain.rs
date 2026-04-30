@@ -8,8 +8,8 @@
 //!   "root":  "Pkg::Type.Impl",
 //!   "source_thread": "fw.acquire",
 //!   "sink_thread":   "fw.actuate",
-//!   "variant":         "diesel-eu5",          // optional
-//!   "variant_context": "/path/to/ctx.json"    // optional
+//!   "variant":         "diesel-eu5",          // NOT YET SUPPORTED — rejected
+//!   "variant_context": "/path/to/ctx.json"    // NOT YET SUPPORTED — rejected
 //! }
 //! ```
 //!
@@ -18,6 +18,19 @@
 //! `LatencyAnalysis` pass — these already alternate compute (WCET) and
 //! network (WCTT) hops in the message stream so an LLM can read the
 //! shape without re-running its own walk.
+//!
+//! # Variant scoping (deferred)
+//!
+//! Unlike `spar.verify_move` and `spar.enumerate_moves`, this tool does
+//! NOT yet apply rivet variant filtering to the analysis. Wiring the
+//! `VariantScope` through `LatencyAnalysis` requires the pass to honour
+//! "kept" predicates on the instance hierarchy (chains can cross dropped
+//! components in surprising ways), which is tracked as a v0.10
+//! enhancement. To avoid silently returning an unfiltered chain when an
+//! agent asks for a variant-scoped one, we hard-reject the inputs with
+//! a `BAD_INPUT` error here — the agent should fall back to
+//! `spar.verify_move` / `spar.enumerate_moves` for variant-scoped queries
+//! against the same chain participants.
 //!
 //! # Matching
 //!
@@ -122,22 +135,47 @@ pub fn call(arguments: &Value) -> ToolResult {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let _variant = match optional_string(arguments, "variant") {
+    let variant = match optional_string(arguments, "variant") {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let _variant_context = match optional_string(arguments, "variant_context") {
+    let variant_context = match optional_string(arguments, "variant_context") {
         Ok(v) => v,
         Err(e) => return e,
     };
 
+    // Mutual-exclusion guard, applied before the not-yet-supported
+    // refusal so an agent that supplies BOTH gets the more specific
+    // error. Mirrors the v1 contract's CLI-side enforcement in
+    // `spar_cli::moves::load_variant_context`.
+    if variant.is_some() && variant_context.is_some() {
+        return ToolResult::Error {
+            code: "BAD_INPUT",
+            message: "variant and variant_context are mutually exclusive (see \
+                 docs/contracts/rivet-spar-variant-v1.md)"
+                .to_string(),
+        };
+    }
+
+    // Variant inputs are accepted in the schema for API symmetry with
+    // verify_move / enumerate_moves but are not yet threaded into the
+    // latency analysis. Until that wiring lands (tracked as a v0.10
+    // enhancement), refuse the call rather than silently return an
+    // unfiltered chain — a wrong answer is worse than a clear refusal.
+    if variant.is_some() || variant_context.is_some() {
+        return ToolResult::Error {
+            code: "BAD_INPUT",
+            message: "variant and variant_context are not yet supported for check_chain \
+                 (tracked as v0.10 enhancement); call spar.verify_move or \
+                 spar.enumerate_moves with --variant for variant-scoped queries"
+                .to_string(),
+        };
+    }
+
     // Parse + instantiate. We reuse the same minimal pipeline as the
     // verify path (single file, named root) without going through
     // `spar_cli::moves` because the check_chain tool does not need
-    // overlay scaffolding. Variant scoping is accepted for API
-    // symmetry but not yet applied (latency analysis is monotonic
-    // w.r.t. the kept subset; non-kept components contribute 0 to the
-    // chain when their bindings are dropped).
+    // overlay scaffolding.
     let instance = match parse_and_instantiate(&model, &root) {
         Ok(i) => i,
         Err(e) => return e,
