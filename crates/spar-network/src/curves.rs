@@ -108,8 +108,19 @@ fn time_to_send_ps(bytes: u64, rate_bps: u64) -> u64 {
 /// α(t) = burst_bytes + sustained_rate · t
 /// ```
 ///
-/// when it is `None`. For `t = 0`, α(0) = `burst_bytes` regardless of
-/// the peak (the burst is the y-intercept).
+/// when it is `None`.
+///
+/// **Causality at t = 0**: α(0) = 0 by convention, regardless of the
+/// burst σ. A window of length zero contains zero bytes — the burst is
+/// only realized as soon as t > 0 (instantaneously). For the
+/// peak-capped form this falls out of `min(σ + 0, p · 0) = min(σ, 0) =
+/// 0`; for the affine-only form we special-case it. Aligned with the
+/// Lean spec in `proofs/Proofs/Network/MinPlus.lean` (v0.9.2 fix).
+///
+/// Note: the Network Calculus *bounds* (`backlog_bound`, `delay_bound`,
+/// `output_bound`, `residual_service`) all use the closed-form
+/// expressions in σ and ρ directly — they do **not** call `at(0)` —
+/// so this convention only affects readouts of α at t = 0 and tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArrivalCurve {
     /// σ — the maximum instantaneous burst in bytes (the y-intercept).
@@ -146,9 +157,20 @@ impl ArrivalCurve {
     /// Returns the number of bytes. Saturates to `u64::MAX` if the
     /// underlying arithmetic would overflow (which only happens for
     /// astronomical rate × time products).
+    ///
+    /// **Causality**: α(0) = 0 — a zero-length window admits no bytes
+    /// even when σ > 0. The peak-capped branch enforces this naturally
+    /// via `min(σ + 0, p · 0) = 0`; the affine-only branch needs the
+    /// explicit `t_ps == 0` short-circuit since `σ + ρ · 0 = σ`. This
+    /// matches the Lean spec in `proofs/Proofs/Network/MinPlus.lean`
+    /// (v0.9.2: aligned away from the prior pre-mature-optimisation
+    /// short-circuit that returned σ at t = 0).
     pub fn at(&self, t_ps: u64) -> u64 {
         if t_ps == 0 {
-            return self.burst_bytes;
+            // Causal: zero-length window admits zero bytes. The peak
+            // branch would give 0 by `min(σ, 0)` anyway; the affine-only
+            // branch needs this explicit case because `σ + ρ·0 = σ`.
+            return 0;
         }
         let sustained = self
             .burst_bytes
@@ -358,12 +380,20 @@ mod tests {
     const ONE_US_PS: u64 = 1_000_000;
 
     #[test]
-    fn arrival_curve_at_zero_is_burst() {
+    fn arrival_curve_at_zero_is_zero() {
+        // Causality: α(0) = 0 for all arrival curves — a zero-length
+        // window admits zero bytes even when σ > 0. v0.9.2 alignment
+        // with the Lean spec; the prior short-circuit that returned σ
+        // was a pre-mature optimisation that violated causality.
         let alpha = ArrivalCurve::affine(1500, HUNDRED_MBPS);
-        assert_eq!(alpha.at(0), 1500);
+        assert_eq!(alpha.at(0), 0);
 
         let alpha = ArrivalCurve::with_peak(1500, HUNDRED_MBPS, GBPS);
-        assert_eq!(alpha.at(0), 1500);
+        assert_eq!(alpha.at(0), 0);
+
+        // The burst is still the y-intercept of the affine line and is
+        // realised as t grows beyond zero — this is captured by other
+        // tests (`affine_arrival_eval`, `affine_arrival_with_peak`).
     }
 
     #[test]

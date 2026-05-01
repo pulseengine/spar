@@ -67,23 +67,25 @@ was decorative. The post-build grep makes the gate honest.
 ## Known sorrys (tracked in COMPLIANCE.md)
 
 The Network Calculus closed-form bounds in
-`proofs/Proofs/Network/MinPlus.lean` carry five unsorried theorems.
-They are listed below at file:line with one-line context. They are
-tracked as `TODO(v1.0.0)` in `COMPLIANCE.md` v0.9.1, and the post-build
-"fail on sorry" gate in `.github/workflows/proofs.yml` turns CI red
-until they are discharged. Discharging is scoped to a separate v0.10
-PR — the math is non-trivial Le Boudec & Thiran ch. 1 closed-form
-reasoning in min-plus algebra, and one of the five is a real
-spec-vs-Rust mismatch that needs reconciliation before it can be
-proved.
+`proofs/Proofs/Network/MinPlus.lean` carry **four** unsorried theorems
+(was five in v0.9.1; the `arrival_at_zero` mismatch was reconciled in
+v0.9.2 — see below). They are listed below at file:line with one-line
+context. They are tracked as `TODO(v1.0.0)` in `COMPLIANCE.md`, and
+the post-build "fail on sorry" gate in `.github/workflows/proofs.yml`
+turns CI red until they are discharged. Discharging is scoped to a
+separate v0.10 PR — the math is non-trivial Le Boudec & Thiran ch. 1
+closed-form reasoning in min-plus algebra.
 
 | File:line | Theorem | One-line context |
 |-----------|---------|-------------------|
-| `Proofs/Network/MinPlus.lean:169` | `backlog_bound_classical` | Closed-form backlog `B = σ + ρ·T` for affine α (no peak cap) and stable rate-latency β; needs case split `t ≤ T` vs `t > T` plus `Nat.div` arithmetic with `h_stable`. The classical real-line proof shows `sup_t (α(t) − β(t))` is reached at `t = T`. |
-| `Proofs/Network/MinPlus.lean:199` | `delay_bound_classical` | Closed-form delay `D = T + σ/R` (Le Boudec & Thiran horizontal-distance argument). In integer arithmetic this reduces to chasing `div_ceil` bounds across the affine ↔ rate-latency intersection point. |
-| `Proofs/Network/MinPlus.lean:240` | `output_dominates_input` | The closed-form output curve dominates the input curve at every `t`: burst inflates by `ρ·T`, sustained rate preserved, so `α'(t) ≥ α(t)`. Le Boudec & Thiran 1.4.3. |
-| `Proofs/Network/MinPlus.lean:293` | `compose_delays_dominates` | Naive serial-chain composition: `α(t) ≤ β2(β1(t + D_naive))`. Chains `delay_bound_classical` per hop through `output_dominates_input`; trivial *after* the per-hop sorrys above are discharged. |
-| `Proofs/Network/MinPlus.lean:318` | `arrival_at_zero_is_burst` (peak-rate branch) | Spec/impl mismatch: the Lean spec gives `min(σ, 0) = 0` at `t = 0` when a peak cap is set, but the Rust `ArrivalCurve::at` short-circuits `t == 0` and returns `σ`. The "no peak" branch is proved; the peak branch is `sorry` until v1.0.0 reconciles the spec to fold the short-circuit in. |
+| `Proofs/Network/MinPlus.lean:189` | `backlog_bound_classical` | Closed-form backlog `B = σ + ρ·T` for affine α (no peak cap) and stable rate-latency β; needs case split `t ≤ T` vs `t > T` plus `Nat.div` arithmetic with `h_stable`. The classical real-line proof shows `sup_t (α(t) − β(t))` is reached at `t = T`. |
+| `Proofs/Network/MinPlus.lean:219` | `delay_bound_classical` | Closed-form delay `D = T + σ/R` (Le Boudec & Thiran horizontal-distance argument). In integer arithmetic this reduces to chasing `div_ceil` bounds across the affine ↔ rate-latency intersection point. |
+| `Proofs/Network/MinPlus.lean:260` | `output_dominates_input` | The closed-form output curve dominates the input curve at every `t`: burst inflates by `ρ·T`, sustained rate preserved, so `α'(t) ≥ α(t)`. Le Boudec & Thiran 1.4.3. |
+| `Proofs/Network/MinPlus.lean:313` | `compose_delays_dominates` | Naive serial-chain composition: `α(t) ≤ β2(β1(t + D_naive))`. Chains `delay_bound_classical` per hop through `output_dominates_input`; trivial *after* the per-hop sorrys above are discharged. |
+
+### Discharged in v0.9.2
+
+- `arrival_at_zero_is_zero` (was `arrival_at_zero_is_burst` at MinPlus.lean:318): the v0.9.1 spec/impl mismatch (Lean gave `min(σ, 0) = 0` while Rust short-circuited to `σ`) was reconciled by aligning **toward the Lean spec** (causality: a zero-length window admits zero bytes, regardless of σ). The Rust `ArrivalCurve::at` no longer short-circuits to σ at `t = 0`; the Lean spec adds a matching `if t = 0 then 0` short-circuit so the affine-no-peak branch is also 0; the proof discharges via `simp`. Theorem renamed `arrival_at_zero_is_zero` and the Rust unit test renamed `arrival_curve_at_zero_is_zero`.
 
 The Lean tree is **load-bearing** for `RTAJittered` / `RTA` / `EDF` /
 `RMBound` (Liu & Layland 1973, Joseph & Pandya 1986, Dertouzos 1974
