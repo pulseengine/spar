@@ -1632,6 +1632,24 @@ artifacts:
     status: implemented
     tags: [network, tsn, cbs, wctt, v092]
 
+  - id: REQ-NETWORK-012
+    type: requirement
+    title: WCTT sensitivity output (∂σ_self, ∂ρ_competing, ∂T_link)
+    description: >
+      For each `WcttBound` Info diagnostic the `WcttAnalysis` pass also
+      emits a `WcttSensitivity` Info diagnostic carrying worst-hop
+      partial derivatives at the operating point: ∂WCTT/∂σ_self
+      (ps per byte of self-burst, dominated by the worst hop's
+      residual service rate), ∂WCTT/∂ρ_competing (ps per bps of
+      competing rate, σ/(R-ρ)² at the worst hop), and ∂WCTT/∂T_link
+      (chain-rule passthrough = number of hops). Pure post-processing
+      on the existing closed-form delay/output bounds — no new bounds
+      math, no impact on `WcttBound` numeric output. Per the
+      post-v0.9.0 reviewer's NC top-5 #13: cheapest workflow win,
+      turns spar from judge into design partner.
+    status: implemented
+    tags: [network, wctt, sensitivity, v092]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
