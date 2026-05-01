@@ -59,7 +59,10 @@ jobs:
       # leanprover/lean-action reads `proofs/lean-toolchain` and installs the
       # matching toolchain via elan, runs `lake exe cache get` to pull
       # precompiled Mathlib `.olean`s from the cloud cache, then runs
-      # `lake build`. The action fails the job on any Lean error or `sorry`.
+      # `lake build`. The action surfaces Lean errors and `sorry` warnings
+      # in the log, but does NOT fail the job on `sorry` warnings without
+      # explicit `warningAsError` configuration. The grep gate below is
+      # the actual fail-on-sorry enforcement (see #wave3-tier-a-1 audit).
       - name: Build proofs (lake build)
         id: lake_build
         uses: leanprover/lean-action@v1
@@ -71,6 +74,46 @@ jobs:
           # of #151 — module 2796/2845 cancelled by timeout).
           use-mathlib-cache: true
           build-args: ""
+
+      # Honest "fail on sorry" gate.
+      #
+      # The 12-persona Wave 3 audit (Lean reviewer + build engineer)
+      # established that `lake build` does NOT fail the job on `sorry`
+      # warnings without explicit `warningAsError` configuration in
+      # `lakefile.toml`. Rather than thread Lean-version-specific flags
+      # through Lake, we grep the proofs tree post-build: any line that
+      # is bare `sorry` (with optional indent) is an unfinished proof
+      # and turns CI red.
+      #
+      # Currently main carries 5 tracked sorrys in `Proofs/Network/MinPlus.lean`
+      # (`backlog_bound_classical`, `delay_bound_classical`,
+      #  `output_dominates_input`, `compose_delays_dominates`,
+      #  `arrival_at_zero_is_burst`). Those are listed in
+      # `proofs/README.md` under "Known sorrys" and tracked in
+      # `COMPLIANCE.md` v0.9.1 as TODO(v1.0.0). Until they land, this
+      # gate is expected to fail on `main` — that is the *point*: the
+      # previous green CI was decorative, this one is honest.
+      #
+      # Discharging the sorrys is a separate v0.10 PR. Once a sorry is
+      # discharged, this step turns green automatically; no allowlist
+      # to maintain.
+      - name: Fail on sorry (post-build gate)
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -u
+          # Match bare `sorry` lines (any indent), excluding those with
+          # a same-line comment exemption (`-- TODO(...)` etc). The
+          # five tracked sorrys do NOT carry a same-line comment; the
+          # TODO sits on the prior line, so this gate flags all five.
+          if grep -rn -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/ \
+              | grep -v -E 'sorry[[:space:]]*--[[:space:]]*TODO'; then
+            echo ""
+            echo "::error::Lean proofs tree contains unfinished proofs (sorry)."
+            echo "::error::See proofs/README.md 'Known sorrys' and COMPLIANCE.md v0.9.1 for the tracked list."
+            exit 1
+          fi
+          echo "No sorrys in proofs/Proofs/ — gate green."
 
       # Capture the Lake log on failure for forensic review. The action
       # streams output to the GH log already; this preserves a downloadable

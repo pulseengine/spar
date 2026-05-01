@@ -56,3 +56,40 @@ recompile in-tree changes.
 
 On failure, per-target lake build logs are uploaded as the
 `lake-build-log` workflow artifact for forensic review.
+
+The workflow also runs a post-build "fail on sorry" gate (a `grep`
+over `proofs/Proofs/`) that turns CI red when any line is a bare
+`sorry`. The previous gate relied on `lake build` itself failing on
+`sorry`, which only happens with explicit `warningAsError`
+configuration that the project does not currently set — so green CI
+was decorative. The post-build grep makes the gate honest.
+
+## Known sorrys (tracked in COMPLIANCE.md)
+
+The Network Calculus closed-form bounds in
+`proofs/Proofs/Network/MinPlus.lean` carry five unsorried theorems.
+They are listed below at file:line with one-line context. They are
+tracked as `TODO(v1.0.0)` in `COMPLIANCE.md` v0.9.1, and the post-build
+"fail on sorry" gate in `.github/workflows/proofs.yml` turns CI red
+until they are discharged. Discharging is scoped to a separate v0.10
+PR — the math is non-trivial Le Boudec & Thiran ch. 1 closed-form
+reasoning in min-plus algebra, and one of the five is a real
+spec-vs-Rust mismatch that needs reconciliation before it can be
+proved.
+
+| File:line | Theorem | One-line context |
+|-----------|---------|-------------------|
+| `Proofs/Network/MinPlus.lean:169` | `backlog_bound_classical` | Closed-form backlog `B = σ + ρ·T` for affine α (no peak cap) and stable rate-latency β; needs case split `t ≤ T` vs `t > T` plus `Nat.div` arithmetic with `h_stable`. The classical real-line proof shows `sup_t (α(t) − β(t))` is reached at `t = T`. |
+| `Proofs/Network/MinPlus.lean:199` | `delay_bound_classical` | Closed-form delay `D = T + σ/R` (Le Boudec & Thiran horizontal-distance argument). In integer arithmetic this reduces to chasing `div_ceil` bounds across the affine ↔ rate-latency intersection point. |
+| `Proofs/Network/MinPlus.lean:240` | `output_dominates_input` | The closed-form output curve dominates the input curve at every `t`: burst inflates by `ρ·T`, sustained rate preserved, so `α'(t) ≥ α(t)`. Le Boudec & Thiran 1.4.3. |
+| `Proofs/Network/MinPlus.lean:293` | `compose_delays_dominates` | Naive serial-chain composition: `α(t) ≤ β2(β1(t + D_naive))`. Chains `delay_bound_classical` per hop through `output_dominates_input`; trivial *after* the per-hop sorrys above are discharged. |
+| `Proofs/Network/MinPlus.lean:318` | `arrival_at_zero_is_burst` (peak-rate branch) | Spec/impl mismatch: the Lean spec gives `min(σ, 0) = 0` at `t = 0` when a peak cap is set, but the Rust `ArrivalCurve::at` short-circuits `t == 0` and returns `σ`. The "no peak" branch is proved; the peak branch is `sorry` until v1.0.0 reconciles the spec to fold the short-circuit in. |
+
+The Lean tree is **load-bearing** for `RTAJittered` / `RTA` / `EDF` /
+`RMBound` (Liu & Layland 1973, Joseph & Pandya 1986, Dertouzos 1974
+proofs in `Proofs/Scheduling/*` are fully discharged, no `sorry`s).
+The Lean tree is **informational** for the Network Calculus bounds at
+v0.9.1: the Rust `crates/spar-network/src/curves.rs` is the
+load-bearing artifact for the integer-arithmetic side, validated by
+unit tests against published worked examples; the Lean theorems
+encode the spec but await formal discharge.
