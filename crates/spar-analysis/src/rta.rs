@@ -229,6 +229,31 @@ impl Analysis for RtaAnalysis {
                 }
                 _ => 0,
             };
+            // v0.9.2 soundness (Tier A #6): Stop_For_Lock = priority
+            // inversion exposure. Silently using B=0 is the v0.8.x
+            // behaviour that the post-v0.9.0 reviewer flagged as a
+            // footgun. Emit a Warning when the user declares
+            // Stop_For_Lock but no Critical_Section_Blocking — they
+            // need to either supply the bound or re-declare the
+            // protocol. We can't tell from properties alone whether a
+            // shared resource exists, so this is a Warning (advisory)
+            // rather than an Error (hard fail).
+            if matches!(locking_protocol, Some(LockingProtocol::StopForLock))
+                && get_critical_section_blocking(props).is_none()
+            {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "thread '{}' declares Locking_Protocol => Stop_For_Lock but no \
+                         Spar_Timing::Critical_Section_Blocking — RTA is using B=0 \
+                         which is unsound under priority inversion. Either supply the \
+                         bound or re-declare the Locking_Protocol",
+                        comp.name.as_str()
+                    ),
+                    path: component_path(instance, idx),
+                    analysis: self.name().to_string(),
+                });
+            }
 
             processor_threads
                 .entry(binding)
@@ -1735,6 +1760,41 @@ mod tests {
                 info.message,
             );
         }
+    }
+
+    // ── B9 (v0.9.2): Stop_For_Lock without bound emits warning ─────
+    #[test]
+    fn stop_for_lock_without_blocking_emits_warning() {
+        // Stop_For_Lock declared but no Critical_Section_Blocking is
+        // exactly the silent-B=0 footgun the v0.9.2 soundness pass
+        // was meant to surface (Tier A #6).
+        let diags = make_two_thread_model_diags(Some("Stop_For_Lock"), None);
+        assert!(
+            diags.iter().any(|d| {
+                d.severity == Severity::Warning
+                    && d.message.contains("Stop_For_Lock")
+                    && d.message
+                        .contains("no Spar_Timing::Critical_Section_Blocking")
+            }),
+            "Stop_For_Lock without bound must emit warning, got: {:#?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn stop_for_lock_with_explicit_blocking_no_warning() {
+        // Same protocol but with an explicit (zero) bound: user
+        // acknowledged the priority-inversion exposure, so no warning.
+        let diags = make_two_thread_model_diags(Some("Stop_For_Lock"), Some("0 ns"));
+        assert!(
+            !diags.iter().any(|d| {
+                d.severity == Severity::Warning
+                    && d.message
+                        .contains("no Spar_Timing::Critical_Section_Blocking")
+            }),
+            "Stop_For_Lock with explicit bound must not warn: {:#?}",
+            diags,
+        );
     }
 
     // ── T10: ISR priority preempts regardless of task priority ─────

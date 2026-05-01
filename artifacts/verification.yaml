@@ -2078,6 +2078,35 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-010
 
+  - id: TEST-RTA-SOUNDNESS-V092
+    type: feature
+    title: RTA Stop_For_Lock warning + ARINC severity escape hatch
+    description: >
+      Verifies the v0.9.2 RTA soundness pass. (a) `rta::tests::
+      stop_for_lock_without_blocking_emits_warning` confirms a
+      Stop_For_Lock thread without `Critical_Section_Blocking`
+      raises a Warning naming the property; (b)
+      `stop_for_lock_with_explicit_blocking_no_warning` confirms an
+      explicit bound (even 0 ns) suppresses the diagnostic;
+      (c) the ARINC-PARTITION-ISOLATION analyzer now emits Error
+      severity by default (existing arinc653 tests cover the
+      detection); (d) the new `spar analyze --allow
+      arinc-partition-isolation` CLI flag demotes the matching
+      diagnostics back to Warning per the helper
+      `apply_allow_categories` in `crates/spar-cli/src/main.rs`.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta::tests::stop_for_lock
+        - run: cargo test -p spar-analysis --lib -- arinc653
+    status: passing
+    tags: [v0.9.2, analysis, rta, arinc653, soundness]
+    links:
+      - type: satisfies
+        target: REQ-RTA-009
+      - type: satisfies
+        target: REQ-ARINC-005
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
