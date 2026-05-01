@@ -21,6 +21,10 @@ jobs:
   solver-benchmarks:
     name: Solver criterion nightly
     runs-on: ubuntu-latest
+    # Belt-and-braces ceiling. milp/worst_64 is gated at the source level
+    # (SPAR_BENCH_SLOW_MILP). Keep a hard cap so a future slow-bench
+    # addition can't silently consume hours of runner budget.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
