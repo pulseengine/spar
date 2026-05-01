@@ -1650,6 +1650,25 @@ artifacts:
     status: implemented
     tags: [network, wctt, sensitivity, v092]
 
+  - id: REQ-NETWORK-011
+    type: requirement
+    title: RTA→WCTT release-jitter coupling
+    description: >
+      v0.9.2 closes the RTA↔WCTT loop the post-v0.9.0 reviewer flagged
+      as the single biggest credibility lift (NC top-5 #4): when a
+      WCTT stream's source end station declares
+      `Timing_Properties::Dispatch_Jitter`, that value is treated as
+      ingress release-jitter J and inflates the arrival burst by
+      `ρ·J` bytes (ceiling-rounded so the bound is never under-
+      estimated). New `WcttRtaCoupled` Info diagnostic per stream
+      echoes the (jitter_ps, jitter_burst_bytes) pair. Default unset
+      = 0 → byte-identical to v0.8.1 / v0.9.1. The full automatic
+      coupling (consume RTA's *computed* response_time directly
+      without requiring the user to propagate via Dispatch_Jitter)
+      is a v0.9.x follow-up.
+    status: implemented
+    tags: [network, wctt, rta, coupling, v092]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001

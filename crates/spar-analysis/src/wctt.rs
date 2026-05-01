@@ -243,6 +243,25 @@ impl WcttAnalysis {
             let mut max_comp_rate_bps: u64 = 0;
             let mut hops_counted: u64 = 0;
 
+            // v0.9.2 RTA→WCTT release-jitter coupling diagnostic. The
+            // burst inflation already happened in `collect_streams`;
+            // this is the user-facing Info that the coupling fired.
+            if stream.jitter_burst_bytes > 0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttRtaCoupled: stream '{}' release-jitter {} ns inflates ingress \
+                         burst by {} B (ρ·J coupling — RTA → WCTT per Buttazzo / Le \
+                         Boudec & Thiran)",
+                        stream_name,
+                        stream.release_jitter_ps / 1_000,
+                        stream.jitter_burst_bytes,
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+
             for (hop_idx, sw_idx) in stream.hops.iter().enumerate() {
                 let st = switch_type.get(sw_idx).copied().unwrap_or(SwitchType::Fifo);
 
@@ -1166,6 +1185,15 @@ struct Stream {
     /// `CbsReservation` (with hi/lo credit and send slope) is built at
     /// each TSN hop because it depends on the bus's link rate.
     cbs_idle_slope_bps: Option<u64>,
+    /// v0.9.2 RTA→WCTT release-jitter coupling: when the source end
+    /// station declares `Timing_Properties::Dispatch_Jitter`, that
+    /// value (picoseconds) is treated as ingress release-jitter J and
+    /// inflates the arrival burst by ρ·J bytes. Stored here so the
+    /// `WcttRtaCoupled` Info diagnostic at run-time can echo the
+    /// pair (jitter_ps, jitter_burst_bytes) back to the user. `0`
+    /// when the property is unset (= byte-identical v0.8.x behaviour).
+    release_jitter_ps: u64,
+    jitter_burst_bytes: u64,
 }
 
 impl Stream {
@@ -1259,11 +1287,47 @@ fn collect_streams(
             // Ethernet MTU (DEFAULT_BURST_BYTES).
             let src_props = instance.properties_for(src_idx);
             let rate_bps = read_output_rate_bps(src_props).unwrap_or(0);
-            let burst_bytes = read_queue_depth(src_props)
+            let burst_base_bytes = read_queue_depth(src_props)
                 .map(|q| q.saturating_mul(FRAME_BYTES))
                 .unwrap_or(DEFAULT_BURST_BYTES);
 
+            // v0.9.2 RTA→WCTT release-jitter coupling (NC reviewer top-5
+            // #4 — single biggest credibility lift, no new math). When
+            // the source end station declares `Timing_Properties::
+            // Dispatch_Jitter`, treat it as release-jitter J: a thread
+            // whose dispatcher fires up to J ps late at any cycle still
+            // produces the same number of bytes per period, but the
+            // *burst seen at the NIC* inflates by ρ·J. This couples
+            // RTA's response-time semantics into the WCTT input.
+            //
+            // Default unset = J=0 = byte-identical to v0.8.1/v0.9.1.
+            //
+            // Future v0.9.x: also consume RTA's *computed*
+            // response_time directly (today the user must propagate it
+            // via Dispatch_Jitter explicitly, which is the existing
+            // AS5506 property semantics).
+            let release_jitter_ps = src_props
+                .get("Timing_Properties", "Dispatch_Jitter")
+                .or_else(|| src_props.get("", "Dispatch_Jitter"))
+                .and_then(parse_time_value)
+                .unwrap_or(0);
+            // ρ·J in bytes = (rate_bps · jitter_ps) / 8 / 1e12, with
+            // ceiling rounding so the burst is never under-estimated.
+            let jitter_burst_bytes = if release_jitter_ps > 0 && rate_bps > 0 {
+                let bits = (rate_bps as u128).saturating_mul(release_jitter_ps as u128);
+                let bytes = bits.div_ceil(8u128 * 1_000_000_000_000u128);
+                u64::try_from(bytes).unwrap_or(u64::MAX)
+            } else {
+                0
+            };
+            let burst_bytes = burst_base_bytes.saturating_add(jitter_burst_bytes);
+
             let alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
+            if jitter_burst_bytes > 0 {
+                // Diagnostic emitted lazily inside `streams_diagnostics`
+                // below since `stream_name` is built later. We thread
+                // the jitter values through the Stream struct.
+            }
             // TSN dispatch metadata read off the source end station.
             // Spar_TSN::Class_of_Service drives the TAS gate-window
             // service curve and is also surfaced on CBS-shaped
@@ -1298,6 +1362,8 @@ fn collect_streams(
                 cos,
                 is_express,
                 cbs_idle_slope_bps,
+                release_jitter_ps,
+                jitter_burst_bytes,
             });
         }
     }
@@ -1520,6 +1586,135 @@ end Net;
             info[0].message.contains("24144000 ps"),
             "expected 24.144 us bound (12 us NC + 12.144 us frame quantization), got: {}",
             info[0].message
+        );
+    }
+
+    // ── v0.9.2 — RTA→WCTT release-jitter coupling ─────────────────
+    #[test]
+    fn rta_wctt_dispatch_jitter_inflates_burst_and_emits_diagnostic() {
+        // Source device with Dispatch_Jitter = 100 us. At 1 Gbps,
+        // ρ·J = 1e9 × 100e-6 / 8 = 12500 bytes of inflation.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate    => 1000000000 bitsps;
+      Timing_Properties::Dispatch_Jitter => 100 us;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+
+        let coupled = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttRtaCoupled"))
+            .unwrap_or_else(|| panic!("expected WcttRtaCoupled diagnostic, got: {:#?}", diags));
+        assert!(
+            coupled.message.contains("100000 ns"),
+            "expected jitter 100000 ns in message: {}",
+            coupled.message
+        );
+        // ρ·J = 1Gbps × 100us / 8 = 12500 bytes
+        assert!(
+            coupled.message.contains("12500 B"),
+            "expected 12500 B inflation in message: {}",
+            coupled.message
+        );
+    }
+
+    #[test]
+    fn no_dispatch_jitter_no_coupling_diagnostic() {
+        // Without Dispatch_Jitter the coupling diagnostic must not
+        // fire, preserving v0.8.x / v0.9.1 byte-identical output.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis.analyze(&inst);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttRtaCoupled")),
+            "no Dispatch_Jitter must not emit WcttRtaCoupled: {:#?}",
+            diags
         );
     }
 
