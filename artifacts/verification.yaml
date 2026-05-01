@@ -2132,6 +2132,27 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-005
 
+  - id: TEST-RTA-CONTEXT-SWITCH
+    type: feature
+    title: Context_Switch_Time inflates WCET in RTA recurrence
+    description: >
+      Verifies the v0.9.2 RTA Context_Switch_Time fix.
+      `context_switch_inflates_wcet` builds a one-thread model with
+      Context_Switch_Time = 100 µs and asserts WCET 1 ms → 1.2 ms
+      with an `OverheadInflation` Info diagnostic naming the thread
+      and the correction. `no_context_switch_byte_identical_to_v091`
+      confirms unset Context_Switch_Time produces byte-identical
+      output (no OverheadInflation diagnostic).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- context_switch
+    status: passing
+    tags: [v0.9.2, analysis, rta, soundness, scheduling]
+    links:
+      - type: satisfies
+        target: REQ-RTA-008
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
