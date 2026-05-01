@@ -517,6 +517,16 @@ const SPAR_TSN: &[(&str, &str)] = &[
     // accuracy. Default unset = 0 (legacy v0.8.1 behaviour).
     // Applies to bus and processor.
     ("Sync_Error", "aadlinteger units Time_Units"),
+    // CBS hi-credit / lo-credit (802.1Qav §34.5). Real Qcc/YANG configs
+    // (`ieee802-dot1q-bridge`, `tsn-stream`) carry these explicitly per
+    // traffic class. v0.8.1 hardcoded both to `Spar_TSN::Max_Frame_Size`
+    // (default 1518 bytes) which made the CBS recovery term
+    // `loCredit / |sendSlope|` constant and load-bearing on the bound
+    // for any tight AVB design. v0.9.2 adds explicit overrides; when
+    // unset the v0.8.1 default is preserved (byte-identical).
+    // Applies to port and connection.
+    ("Hi_Credit", "aadlinteger units Size_Units"),
+    ("Lo_Credit", "aadlinteger units Size_Units"),
 ];
 
 /// Helper: collect properties from a table into the result vector.
@@ -1098,7 +1108,7 @@ mod tests {
         assert!(is_standard_property_set("Spar_TSN"));
 
         let props = standard_properties_in_set("Spar_TSN");
-        assert_eq!(props.len(), 7);
+        assert_eq!(props.len(), 9);
         assert!(props.contains(&"Stream_ID"));
         assert!(props.contains(&"Class_of_Service"));
         assert!(props.contains(&"Gate_Control_List"));
@@ -1106,6 +1116,8 @@ mod tests {
         assert!(props.contains(&"Frame_Preemption"));
         assert!(props.contains(&"Bandwidth_Reservation"));
         assert!(props.contains(&"Sync_Error"));
+        assert!(props.contains(&"Hi_Credit"));
+        assert!(props.contains(&"Lo_Credit"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -1210,7 +1222,7 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 7 = 129
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 9 = 131
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration + Spar_Power + Spar_TSN)
@@ -1222,7 +1234,7 @@ mod tests {
         //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1)
         //   +1 for Bandwidth_Reservation (Track D Phase 2 v0.8.1 c3, CBS).
         //   +1 for Sync_Error (v0.9.1 NC soundness, gPTP ε budget).
-        assert_eq!(all.len(), 129);
+        assert_eq!(all.len(), 131);
     }
 
     #[test]

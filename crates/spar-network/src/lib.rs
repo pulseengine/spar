@@ -57,6 +57,7 @@ pub use tsn::{
     CbsReservation, ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow,
     MIN_FRAGMENT_BYTES, PREEMPTION_HEADER_BYTES, cbs_residual_service,
     get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
-    is_express_stream, preemption_blocking_term_ps, tas_residual_service,
+    get_hi_credit_bytes, get_lo_credit_bytes, is_express_stream, preemption_blocking_term_ps,
+    tas_residual_service,
 };
 pub use types::{NetworkGraph, NetworkLink, NetworkNode, NodeKind, SwitchType};

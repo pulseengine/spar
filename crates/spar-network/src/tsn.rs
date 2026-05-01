@@ -313,6 +313,36 @@ pub fn get_max_frame_size_bytes(props: &PropertyMap) -> Option<u64> {
     parse_size_bytes(raw)
 }
 
+/// Read [`Spar_TSN::Hi_Credit`] as the CBS hiCredit upper bound in
+/// bytes. Per IEEE 802.1Qav §34.5, hiCredit is the maximum positive
+/// credit a class can accumulate before sending; it bounds the
+/// burst-out tolerance. AADL declares the property as `aadlinteger
+/// units Size_Units` so it lowers via the same machinery as
+/// `Max_Frame_Size`. Returns `None` when unset (callers default to
+/// the pre-v0.9.2 behaviour of `Max_Frame_Size`).
+pub fn get_hi_credit_bytes(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Hi_Credit") {
+        return extract_size_bytes(expr);
+    }
+    let raw = get_raw(props, "Hi_Credit")?;
+    parse_size_bytes(raw)
+}
+
+/// Read [`Spar_TSN::Lo_Credit`] as the CBS loCredit lower bound in
+/// bytes (declared as a positive magnitude — the AVB spec uses a
+/// negative value but spar stores the absolute byte count). Per
+/// IEEE 802.1Qav §34.5, loCredit gives the worst-case credit
+/// drain, which combined with `|sendSlope|` yields the recovery
+/// time `T_recovery = loCredit / |sendSlope|` that lands in the
+/// CBS rate-latency service curve. Returns `None` when unset.
+pub fn get_lo_credit_bytes(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Lo_Credit") {
+        return extract_size_bytes(expr);
+    }
+    let raw = get_raw(props, "Lo_Credit")?;
+    parse_size_bytes(raw)
+}
+
 /// Read [`Spar_TSN::Frame_Preemption`] — whether frames in this
 /// class can be pre-empted by Express traffic (802.1Qbu).
 pub fn get_frame_preemption(props: &PropertyMap) -> Option<bool> {
