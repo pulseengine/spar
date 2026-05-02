@@ -8,6 +8,13 @@ name: Bench Nightly
 # Scheduled at 03:30 UTC, offset from other nightly jobs (e.g. fuzzing)
 # so bench machines aren't contending for runner minutes.
 
+# Each scheduled run is independent baseline data — must complete and
+# never cancel its predecessor. Use a per-run group so two scheduled
+# runs never queue or cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: "30 3 * * *"
