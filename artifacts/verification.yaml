@@ -2107,6 +2107,31 @@ artifacts:
       - type: satisfies
         target: REQ-ARINC-005
 
+  - id: TEST-TSN-CBS-CREDITS
+    type: feature
+    title: Spar_TSN::Hi_Credit + Lo_Credit user-tunable CBS credits
+    description: >
+      Verifies that `Spar_TSN::Hi_Credit` and `Spar_TSN::Lo_Credit`
+      register in the predeclared property tables (count 129 → 131,
+      Spar_TSN per-set 7 → 9), that `get_hi_credit_bytes` and
+      `get_lo_credit_bytes` accessors handle typed PropertyExpr +
+      string fallback paths and unit conversions, and that the wctt
+      CBS arm honours explicit credits in `CbsReservation::new` while
+      preserving v0.8.1 byte-identical output when both properties
+      are unset. The `WcttCbsCredit` Info diagnostic fires when at
+      least one of Hi_Credit / Lo_Credit is set on the bus.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.9.2, network, tsn, cbs, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-005
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection

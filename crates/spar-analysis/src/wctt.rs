@@ -58,8 +58,8 @@ use spar_network::extract::{
 use spar_network::tsn::{
     CbsReservation, ClassOfService, GateSchedule, cbs_residual_service, frame_quantization_ps,
     get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
-    get_max_frame_size_bytes, get_sync_error_ps, is_express_stream, preemption_blocking_term_ps,
-    tas_residual_service_with_sync_error,
+    get_hi_credit_bytes, get_lo_credit_bytes, get_max_frame_size_bytes, get_sync_error_ps,
+    is_express_stream, preemption_blocking_term_ps, tas_residual_service_with_sync_error,
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
@@ -356,11 +356,22 @@ impl WcttAnalysis {
                         let link_rate_bps = read_output_rate_bps(bus_props).unwrap_or(0);
                         let max_competing_frame_bytes = get_max_frame_size_bytes(bus_props)
                             .unwrap_or(CBS_DEFAULT_COMPETING_FRAME_BYTES);
+                        // v0.9.2: explicit hi/loCredit override the v0.8.1
+                        // default (`max_competing_frame_bytes` for both),
+                        // letting users plug in real Qcc/YANG credit
+                        // numbers. Default unset = byte-identical to v0.8.1
+                        // / v0.9.1.
+                        let hi_credit_bytes =
+                            get_hi_credit_bytes(bus_props).unwrap_or(max_competing_frame_bytes);
+                        let lo_credit_bytes =
+                            get_lo_credit_bytes(bus_props).unwrap_or(max_competing_frame_bytes);
+                        let credits_explicit = get_hi_credit_bytes(bus_props).is_some()
+                            || get_lo_credit_bytes(bus_props).is_some();
                         let reservation = CbsReservation::new(
                             idle_slope_bps,
                             link_rate_bps,
-                            max_competing_frame_bytes,
-                            max_competing_frame_bytes,
+                            hi_credit_bytes,
+                            lo_credit_bytes,
                         );
                         if let Some(reservation) = reservation {
                             let beta = cbs_residual_service(
@@ -392,6 +403,23 @@ impl WcttAnalysis {
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
                             });
+                            if credits_explicit {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Info,
+                                    message: format!(
+                                        "WcttCbsCredit: stream '{}' at hop {}: explicit \
+                                         hi_credit={} B, lo_credit={} B (override default \
+                                         max_competing_frame={} B)",
+                                        stream_name,
+                                        hop_idx,
+                                        hi_credit_bytes,
+                                        lo_credit_bytes,
+                                        max_competing_frame_bytes,
+                                    ),
+                                    path: stream_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                            }
                             beta
                         } else if bus_preemption && stream.is_express {
                             // CBS reservation invalid → fall back to

@@ -1598,6 +1598,24 @@ artifacts:
     status: implemented
     tags: [analysis, arinc653, safety, v092]
 
+  - id: REQ-TSN-005
+    type: requirement
+    title: Spar_TSN::Hi_Credit + Lo_Credit user-tunable CBS credits
+    description: >
+      Spar_TSN::Hi_Credit and Spar_TSN::Lo_Credit (both
+      `aadlinteger units Size_Units`, applied to port and connection)
+      let users override the v0.8.1-default CBS credit bounds (which
+      were hardcoded to `max_competing_frame_bytes` for both, making
+      the CBS recovery term `loCredit/|sendSlope|` constant and
+      load-bearing on the bound for any tight AVB design). Real
+      Qcc/YANG configs (`ieee802-dot1q-bridge`, `tsn-stream`) carry
+      these per traffic class. v0.9.2 adds the property surface plus
+      the `WcttCbsCredit` Info diagnostic that fires when at least
+      one credit is explicit. Default unset → byte-identical to
+      v0.8.1/v0.9.1. Per the post-v0.9.0 reviewer's Tier A #8.
+    status: implemented
+    tags: [network, tsn, cbs, wctt, v092]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
