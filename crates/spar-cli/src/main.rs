@@ -513,6 +513,12 @@ fn cmd_analyze(args: &[String]) {
     let mut files = Vec::new();
     let mut format = None;
     let mut per_som = false;
+    // v0.9.2: `--allow <category>` (comma-separated) demotes specific
+    // analysis findings from Error to Warning. Today the only recognised
+    // category is `arinc-partition-isolation` (Tier A #9 promoted ARINC
+    // 653 cross-partition direct connections from Warning to Error;
+    // legitimate IMA bypasses can opt out here).
+    let mut allow_categories: Vec<String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -537,6 +543,20 @@ fn cmd_analyze(args: &[String]) {
             }
             "--per-som" => {
                 per_som = true;
+            }
+            "--allow" => {
+                i += 1;
+                if i < args.len() {
+                    for cat in args[i].split(',') {
+                        let c = cat.trim();
+                        if !c.is_empty() {
+                            allow_categories.push(c.to_string());
+                        }
+                    }
+                } else {
+                    eprintln!("--allow requires a value (comma-separated category names)");
+                    process::exit(1);
+                }
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
@@ -612,6 +632,10 @@ fn cmd_analyze(args: &[String]) {
     } else {
         diagnostics.extend(run_all_analyses(&inst));
     }
+
+    // Apply --allow demotions before format dispatch so JSON / SARIF
+    // output also reflects the user's policy choices.
+    apply_allow_categories(&mut diagnostics, &allow_categories);
 
     // JSON output path
     if format.as_deref() == Some("json") {
@@ -1506,6 +1530,35 @@ fn run_all_analyses(
     let mut runner = spar_analysis::AnalysisRunner::new();
     runner.register_all();
     runner.run_all(inst)
+}
+
+/// Demote diagnostics matching any user-supplied `--allow` category
+/// from Error to Warning. Today the only recognised category is
+/// `arinc-partition-isolation` (matched by message-substring); the
+/// helper is structured so adding new categories is just adding a
+/// new arm here.
+fn apply_allow_categories(
+    diagnostics: &mut [spar_analysis::AnalysisDiagnostic],
+    allow_categories: &[String],
+) {
+    use spar_analysis::Severity;
+    for cat in allow_categories {
+        match cat.as_str() {
+            "arinc-partition-isolation" => {
+                for d in diagnostics.iter_mut() {
+                    if d.analysis == "arinc653"
+                        && d.message.contains("ARINC-PARTITION-ISOLATION")
+                        && d.severity == Severity::Error
+                    {
+                        d.severity = Severity::Warning;
+                    }
+                }
+            }
+            other => {
+                eprintln!("warning: unknown --allow category: '{}'", other);
+            }
+        }
+    }
 }
 
 /// Create an AnalysisRunner and run mode-independent analyses once plus
