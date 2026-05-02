@@ -72,12 +72,23 @@ theorem scale_pos : 0 < scale := by
 /-- α(t) at a given time `t` in picoseconds.  Affine `σ + ρ·t/scale`
     form with optional peak-rate cap `p·t/scale`.  The integer division
     by `scale` mirrors the Rust `bits_to_bytes_in_window` helper.
-    Mirrors `ArrivalCurve::at`. -/
+    Mirrors `ArrivalCurve::at`.
+
+    **Causality at t = 0**: α(0) = 0 for *all* arrival curves — a
+    zero-length window admits zero bytes regardless of σ.  The
+    peak-capped branch would give `min(σ, 0) = 0` automatically; the
+    affine-only branch needs the explicit `t_ps = 0` short-circuit
+    since `σ + ρ·0 = σ`.  v0.9.2 alignment: the Rust impl in
+    `crates/spar-network/src/curves.rs::ArrivalCurve::at` was updated
+    in the same change-set to return 0 at t = 0 (previously it
+    short-circuited to σ, which violated causality). -/
 def ArrivalCurve.at (α : ArrivalCurve) (t_ps : Nat) : Nat :=
-  let sustained := α.burst_bytes + (α.sustained_rate_bps * t_ps) / scale
-  match α.peak_rate_bps with
-  | none => sustained
-  | some p => Nat.min sustained ((p * t_ps) / scale)
+  if t_ps = 0 then 0
+  else
+    let sustained := α.burst_bytes + (α.sustained_rate_bps * t_ps) / scale
+    match α.peak_rate_bps with
+    | none => sustained
+    | some p => Nat.min sustained ((p * t_ps) / scale)
 
 /-- β(t) at a given time `t`.  Rate-latency form: `R · max(0, t − T) / scale`.
     Below the latency the server has not started: `β(t) = 0`.
@@ -92,23 +103,32 @@ def ServiceCurve.at (β : ServiceCurve) (t_ps : Nat) : Nat :=
 theorem arrival_at_mono (α : ArrivalCurve) {t1 t2 : Nat} (h : t1 ≤ t2) :
     α.at t1 ≤ α.at t2 := by
   unfold ArrivalCurve.at
-  -- Both the affine and the peak-cap branch are monotone:
-  -- σ + ρt/scale and pt/scale are each monotone in t, and `min`
-  -- preserves the inequality on both sides.
-  have hsust : α.burst_bytes + α.sustained_rate_bps * t1 / scale
-             ≤ α.burst_bytes + α.sustained_rate_bps * t2 / scale := by
-    apply Nat.add_le_add_left
-    apply Nat.div_le_div_right
-    exact Nat.mul_le_mul_left _ h
-  cases hp : α.peak_rate_bps with
-  | none => simpa [hp] using hsust
-  | some p =>
-    have hpeak : p * t1 / scale ≤ p * t2 / scale := by
+  -- Three cases on the `if t = 0` causality short-circuit:
+  --   • t1 = 0:        LHS = 0, any RHS ≥ 0.
+  --   • t1 > 0, t2 > 0: both fall through to the affine/peak branches,
+  --                     each of which is monotone in t.
+  -- (t1 > 0 ∧ t2 = 0 is impossible since t1 ≤ t2.)
+  by_cases h1 : t1 = 0
+  · -- LHS = 0 by the causality short-circuit; any Nat is ≥ 0.
+    simp [h1]
+  · -- t1 ≠ 0, hence t2 ≠ 0 too (since t1 ≤ t2 and t1 > 0).
+    have h2 : t2 ≠ 0 := by omega
+    rw [if_neg h1, if_neg h2]
+    -- Now both branches are the affine/peak forms with no short-circuit.
+    have hsust : α.burst_bytes + α.sustained_rate_bps * t1 / scale
+               ≤ α.burst_bytes + α.sustained_rate_bps * t2 / scale := by
+      apply Nat.add_le_add_left
       apply Nat.div_le_div_right
       exact Nat.mul_le_mul_left _ h
-    simp only [hp]
-    -- `min` is monotone in both arguments separately (Mathlib's `min_le_min`).
-    exact min_le_min hsust hpeak
+    cases hp : α.peak_rate_bps with
+    | none => simpa [hp] using hsust
+    | some p =>
+      have hpeak : p * t1 / scale ≤ p * t2 / scale := by
+        apply Nat.div_le_div_right
+        exact Nat.mul_le_mul_left _ h
+      simp only [hp]
+      -- `min` is monotone in both arguments separately (Mathlib's `min_le_min`).
+      exact min_le_min hsust hpeak
 
 /-! ## Theorem 2 — Monotonicity of β(t) -/
 
@@ -292,30 +312,27 @@ theorem compose_delays_dominates
   -- per-hop sorries above are discharged.
   sorry -- TODO(v1.0.0)
 
-/-! ## Sanity check — the zero-jitter / zero-burst sub-case
+/-! ## Sanity check — causality at t = 0
 
-    A degenerate sub-case the Rust tests pin (`arrival_curve_at_zero_is_burst`):
-    `α.at 0 = α.burst_bytes`. -/
+    A degenerate sub-case the Rust tests pin (`arrival_curve_at_zero_is_zero`):
+    `α.at 0 = 0` for *all* arrival curves, regardless of σ or peak cap.
+    A zero-length window admits zero bytes — the burst σ is the
+    y-intercept of the affine line and is realised only as soon as
+    `t > 0` (instantaneously), not *at* `t = 0`.  This is the causal
+    reading agreed in v0.9.2 (the prior Rust short-circuit returned σ
+    at t = 0; that was a pre-mature optimisation that violated
+    causality and has been retracted in `crates/spar-network/src/curves.rs`). -/
 
-/-- α(0) = σ regardless of peak rate. -/
-theorem arrival_at_zero_is_burst (α : ArrivalCurve) :
-    α.at 0 = α.burst_bytes := by
+/-- **Causality** — α(0) = 0 for all arrival curves, regardless of
+    burst σ or peak rate.  The peak-capped branch would give
+    `min(σ, 0) = 0` automatically; the affine-only branch needs the
+    explicit `t = 0` short-circuit baked into `ArrivalCurve.at`.
+    Discharged in v0.9.2 (was the 5th tracked `sorry`). -/
+theorem arrival_at_zero_is_zero (α : ArrivalCurve) :
+    α.at 0 = 0 := by
+  -- Direct from the `if t_ps = 0 then 0` short-circuit.
   unfold ArrivalCurve.at
-  -- Both branches reduce: ρ·0/scale = 0, p·0/scale = 0, and
-  -- σ + 0 = σ; min σ 0 ≠ σ in general, but the Rust impl returns
-  -- σ at t=0 by short-circuit.  Match that here.
-  cases hp : α.peak_rate_bps with
-  | none => simp [hp]
-  | some p =>
-    -- `min (σ + 0) 0 = 0`, which contradicts `α.at 0 = σ`.
-    -- The Rust impl special-cases t=0 via `if t_ps == 0` — we
-    -- follow with a separate theorem rather than fold the
-    -- short-circuit into the spec.  This subgoal therefore captures
-    -- the "no peak" case only; the peak case is documented to
-    -- diverge from the Rust impl by `min(σ, 0) = 0`.  We mark with
-    -- `sorry` to flag the spec/impl mismatch as a v1.0.0 reconcile.
-    -- TODO(v1.0.0): align Lean spec with Rust short-circuit.
-    sorry -- TODO(v1.0.0)
+  simp
 
 /-- β below latency is monotone-zero.  Sanity corollary of Theorem 3. -/
 theorem service_at_zero_at_zero (β : ServiceCurve) :

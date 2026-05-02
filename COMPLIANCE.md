@@ -1,6 +1,6 @@
 # AS5506D AADL v2.2/v2.3 Compliance Gap Analysis
 
-**Updated**: 2026-04-28 (v0.9.1 released; v0.10 in progress)
+**Updated**: 2026-04-28 (v0.9.1 released; v0.9.2 in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
 **Toolchain**: spar (2759+ tests passing across 18 crates)
 
@@ -240,6 +240,58 @@ artifacts at github.com/pulseengine/spar/releases/tag/v0.7.1.
 - Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
 - Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
 - Track D and Track E research design docs (#152, #153) and Track F engagement strategy (#160) anchoring v0.8.0+ scope.
+
+---
+
+## v0.9.2 (soundness pass — Lean ↔ Rust reconciliation, in progress)
+
+**Commit 1 of 5 — α(0) = 0 causality fix + first MinPlus sorry discharge**
+
+The 12-persona Wave 3 audit (Lean reviewer) flagged a real spec/impl
+mismatch in the arrival curve at `t = 0`:
+
+- The Lean spec in `proofs/Proofs/Network/MinPlus.lean` gave
+  `α(0) = min(σ + ρ·0, p·0) = min(σ, 0) = 0` for the peak-capped
+  branch, and `α(0) = σ + ρ·0 = σ` for the affine-only branch — an
+  internal inconsistency.
+- The Rust impl in `crates/spar-network/src/curves.rs::ArrivalCurve::at`
+  short-circuited `t_ps == 0` to return `σ` for *both* branches —
+  pre-mature optimisation that violated causality (a zero-length
+  window cannot admit any bytes).
+
+v0.9.2 reconciles toward the **causal answer** (`α(0) = 0` for all
+arrival curves):
+
+- Rust: `ArrivalCurve::at` now short-circuits `t_ps == 0` to `0`, not
+  `σ`. Doc comment + module-level doc updated. The peak-capped branch
+  would give 0 by `min(σ, 0)` natively; the affine-only branch needs
+  the explicit short-circuit because `σ + ρ · 0 = σ`.
+- Lean: `ArrivalCurve.at` adds a matching `if t_ps = 0 then 0`
+  short-circuit so the affine-only branch also returns 0. The
+  `arrival_at_mono` proof is updated to case-split on the
+  short-circuit; structurally identical otherwise.
+- The 5th tracked sorry in `proofs/Proofs/Network/MinPlus.lean`
+  (`arrival_at_zero_is_burst` peak-rate branch) is **discharged**.
+  Theorem renamed `arrival_at_zero_is_zero` (statement now
+  `α.at 0 = 0`), proof is `unfold ArrivalCurve.at; simp`. The Rust
+  test `arrival_curve_at_zero_is_burst` is renamed
+  `arrival_curve_at_zero_is_zero` and asserts `α.at(0) == 0` for both
+  branches.
+- No `WcttBound` numbers change: the Network Calculus *bounds*
+  (`backlog_bound`, `delay_bound`, `output_bound`, `residual_service`)
+  use closed-form expressions in σ and ρ directly; none of them call
+  `α.at(0)`. The fix is therefore semantically scoped to the readout
+  convention and does not perturb any wctt fixture or test bound.
+
+Sorry count delta: `proofs/Proofs/Network/MinPlus.lean` is now down to
+**4** tracked sorrys (was 5 in v0.9.1). The remaining four
+(`backlog_bound_classical`, `delay_bound_classical`,
+`output_dominates_input`, `compose_delays_dominates`) all require the
+Le Boudec & Thiran integer-arithmetic horizontal-distance arguments
+and remain scoped to v0.10 / v1.0.0.
+
+`proofs/README.md` § "Known sorrys" updated; the 5th entry moved to a
+new "Discharged in v0.9.2" sub-section.
 
 ---
 
