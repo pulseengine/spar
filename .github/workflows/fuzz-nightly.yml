@@ -49,7 +49,10 @@ jobs:
       - name: Run fuzz target for 1h
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo +nightly fuzz run "$TARGET" -- -max_total_time=3600 -timeout=10
+        # `--target x86_64-unknown-linux-gnu` avoids the cargo-fuzz default
+        # musl target whose statically-linked libc is incompatible with
+        # AddressSanitizer. Same fix as the PR-time fuzz smoke (PR #142).
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$TARGET" -- -max_total_time=3600 -timeout=10
 
       - name: Upload corpus
         if: always()
