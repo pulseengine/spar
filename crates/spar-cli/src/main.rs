@@ -92,7 +92,10 @@ fn print_usage() {
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
-    eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
+    eprintln!(
+        "  analyze  --root Package::Type.Impl [--format text|json|sarif] [--per-som] [--pmoo] \
+         [--allow <cat,...>] <file...>"
+    );
     eprintln!(
         "  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>"
     );
@@ -519,6 +522,14 @@ fn cmd_analyze(args: &[String]) {
     // 653 cross-partition direct connections from Warning to Error;
     // legitimate IMA bypasses can opt out here).
     let mut allow_categories: Vec<String> = Vec::new();
+    // v0.9.3 NC tightness #2: opt-in PMOO/LUDB analysis path for the
+    // WCTT pass. When `--pmoo` is set we enable Pay-Multiplexing-Only-
+    // Once / Bisti-LUDB linear-program bounds for tree-shaped flows
+    // (one tagged + ≥ 2 contiguous-sub-path competing). Bound is
+    // 30-60% tighter on the canonical zonal/automotive pattern; falls
+    // back to SFA on LP infeasibility. Default off → byte-identical
+    // to v0.9.2.
+    let mut pmoo = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -543,6 +554,9 @@ fn cmd_analyze(args: &[String]) {
             }
             "--per-som" => {
                 per_som = true;
+            }
+            "--pmoo" => {
+                pmoo = true;
             }
             "--allow" => {
                 i += 1;
@@ -628,9 +642,9 @@ fn cmd_analyze(args: &[String]) {
 
     // Run instance-level analyses
     if per_som {
-        diagnostics.extend(run_all_analyses_per_som(&inst));
+        diagnostics.extend(run_all_analyses_per_som_with_pmoo(&inst, pmoo));
     } else {
-        diagnostics.extend(run_all_analyses(&inst));
+        diagnostics.extend(run_all_analyses_with_pmoo(&inst, pmoo));
     }
 
     // Apply --allow demotions before format dispatch so JSON / SARIF
@@ -1530,6 +1544,39 @@ fn run_all_analyses(
     let mut runner = spar_analysis::AnalysisRunner::new();
     runner.register_all();
     runner.run_all(inst)
+}
+
+/// Variant of [`run_all_analyses`] that swaps in the PMOO/LUDB-enabled
+/// [`spar_analysis::wctt::WcttAnalysis`] when `pmoo` is `true`. Default
+/// (`pmoo = false`) is byte-identical to [`run_all_analyses`].
+fn run_all_analyses_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses(inst);
+    }
+    // Register every analysis except `WcttAnalysis`, then add the
+    // PMOO/LUDB-configured variant in its place. Keeps the runner's
+    // diagnostic order stable while flipping just the WCTT pass.
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all(inst)
+}
+
+/// Per-SOM variant of [`run_all_analyses_with_pmoo`].
+fn run_all_analyses_per_som_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses_per_som(inst);
+    }
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all_per_som(inst)
 }
 
 /// Demote diagnostics matching any user-supplied `--allow` category
