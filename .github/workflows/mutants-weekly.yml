@@ -17,6 +17,14 @@ name: Mutants Weekly
 on:
   schedule:
     - cron: "0 2 * * 0"      # 02:00 UTC every Sunday
+  push:
+    # TEMPORARY: trigger on push when this file changes, so the workflow
+    # can be exercised from a PR branch before it lands on main (GitHub's
+    # workflow_dispatch and schedule both require the file to exist on
+    # the default branch first). REMOVE this `push:` block before merging
+    # the PR to main.
+    paths:
+      - .github/workflows/mutants-weekly.yml
   workflow_dispatch:
     inputs:
       shard:
