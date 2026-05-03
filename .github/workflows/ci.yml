@@ -31,7 +31,10 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    # smithy: pilot-migrating this single job to the pulseengine self-hosted
+    # fleet (hetzner-private runner group, rust-cpu class). Other jobs stay
+    # on ubuntu-latest until this one is proven over a few runs.
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
