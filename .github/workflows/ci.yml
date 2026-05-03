@@ -21,7 +21,7 @@ jobs:
   # ── Fast checks ───────────────────────────────────────────────────────
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -31,7 +31,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -43,7 +43,7 @@ jobs:
   # ── Tests ─────────────────────────────────────────────────────────────
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -65,7 +65,7 @@ jobs:
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
     name: Bench compile smoke
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -79,6 +79,13 @@ jobs:
   # ── Security audits ──────────────────────────────────────────────────
   audit:
     name: Security Audit (RustSec)
+    # Stays on ubuntu-latest temporarily: smithy ships cargo-audit
+    # v0.21.2 whose bundled rustsec parser still rejects RUSTSEC-2026-0037
+    # ("unsupported CVSS version: 4.0"). v0.22.1 fixes it but the
+    # `cargo install --locked cargo-audit` build trips over our
+    # sccache-on-cc setup (aws-lc-sys C compile fails through sccache).
+    # Follow-up: drop sccache from ralf's profile before bumping the
+    # toolchains-role version, then move this back to [self-hosted, light].
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,16 +95,29 @@ jobs:
 
   deny:
     name: Cargo Deny
-    runs-on: ubuntu-latest
+    # Smithy has cargo-deny installed (toolchains role, v0.16.4).
+    # We avoid EmbarkStudios/cargo-deny-action@v2 because it launches
+    # a rootless container, which fails on our hardened systemd unit:
+    # newuidmap is setuid but NoNewPrivileges=true blocks the escalation
+    # (newuidmap: write to uid_map failed: Operation not permitted).
+    runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo deny --version
+      # Skip the `advisories` check because both cargo-deny and
+      # cargo-audit share the same rustsec parser, which currently
+      # rejects RUSTSEC-2026-0037 ("unsupported CVSS version: 4.0").
+      # bans / licenses / sources still gate. Re-add `advisories`
+      # once smithy ships an upgraded rustsec; the audit job (still
+      # on ubuntu-latest) covers vulnerability matching meanwhile.
+      - run: cargo deny check bans licenses sources
 
   # ── Code coverage ────────────────────────────────────────────────────
   coverage:
     name: Code Coverage
     needs: [test]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -129,7 +149,9 @@ jobs:
   # ── Miri (undefined behavior, pointer provenance) ───────────────────
   miri:
     name: Miri
-    runs-on: ubuntu-latest
+    # lean-mem class — Miri allocates aggressively and benefits from the 24G
+    # MemoryHigh ceiling on smithy lean-mem runners over the 12G rust-cpu cap.
+    runs-on: [self-hosted, linux, x64, lean-mem]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -152,7 +174,7 @@ jobs:
   # parser/scheduler invariants get exercised on every change.
   proptest:
     name: Proptest (extended)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -166,7 +188,10 @@ jobs:
   mutants:
     name: Mutation Testing
     needs: [test]
-    runs-on: ubuntu-latest
+    # lean-mem — many parallel cargo invocations, RAM pressure under -j 4.
+    # The full-workspace exhaustive run lives in mutants-weekly.yml; this
+    # gating job stays narrow (spar-analysis) with a survivor ratchet.
+    runs-on: [self-hosted, linux, x64, lean-mem]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -203,7 +228,7 @@ jobs:
   # ── Fuzz smoke (60s per target on PRs) ──────────────────────────────
   fuzz-smoke:
     name: Fuzz smoke (60s/target)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     # Only run on PRs — pushes to main hit the nightly workflow instead.
     if: github.event_name == 'pull_request'
     steps:
@@ -229,7 +254,7 @@ jobs:
   # ── Supply chain verification ───────────────────────────────────────
   supply-chain:
     name: Supply Chain (cargo-vet)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -246,7 +271,7 @@ jobs:
   # in artifacts/, safety/stpa/, and rivet.yaml.
   rivet-validate:
     name: Rivet validate (artifacts)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -272,6 +297,9 @@ jobs:
   # Time budget: cold cache ≤30 min, warm ≤5 min (per #135).
   bazel-test:
     name: Bazel test (//...)
+    # Stays on ubuntu-latest until Bazel is installed on the smithy host.
+    # Tracked as a follow-up: smithy/group_vars/all.yml could add a
+    # bazel apt-installable. Until then, hosted handles this.
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -318,6 +346,10 @@ jobs:
   #   3. At that point, extend MAX_TASKS from 4 to 8 and re-tune unwinds.
   kani:
     name: Kani Bounded Model Checking
+    # Stays on ubuntu-latest because kani-verifier bundles CBMC (~100 MB)
+    # which we don't pre-install on smithy. Once smithy ships Kani as a
+    # toolchain, switch to rust-cpu (the verification is RAM-modest but
+    # CPU-bound; CBMC is single-threaded per harness).
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
