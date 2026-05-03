@@ -1,0 +1,135 @@
+name: Mutants Weekly
+
+# Heavy-quality counterpart to the gating `mutants:` job in ci.yml.
+# That one runs on every PR with a survivor-count ratchet against
+# spar-analysis only. THIS one runs across the whole workspace on a
+# weekly cadence (and on demand) — no gating, just a long-form
+# quality signal you read async.
+#
+# Resource posture (DD: see smithy/artifacts/design-decisions.yaml):
+#   - lean-mem runners (24 G MemoryHigh, 24 G usable per job)
+#   - 12 h timeout cap
+#   - never cancel an in-flight run; let it finish even when overlapping refs land
+#   - results land in the run's GITHUB_STEP_SUMMARY + an uploaded artefact
+#     (90-day retention) — no PR red lights, no Issue auto-filing yet
+#     (that's a future iteration once the report shape stabilises)
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"      # 02:00 UTC every Sunday
+  workflow_dispatch:
+    inputs:
+      shard:
+        description: "Mutant shard, e.g. '0/8' (default), '1/8', or 'all' for the full workspace pass (~hours)."
+        required: false
+        default: "0/8"
+      packages:
+        description: "Cargo packages to mutate (space-separated -p list, empty = whole workspace)."
+        required: false
+        default: ""
+
+concurrency:
+  group: mutants-weekly
+  # Quality jobs don't cancel; an interrupted mutation report is worse
+  # than a delayed one. Two overlapping runs share the lean-mem pool;
+  # cgroup limits keep each within 24 G.
+  cancel-in-progress: false
+
+jobs:
+  mutants:
+    name: cargo-mutants ${{ github.event.inputs.shard || 'shard 0/8' }}
+    runs-on: [self-hosted, linux, x64, lean-mem]
+    timeout-minutes: 720
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Distinct cache key from the gating mutants — different mutation
+          # set, different sccache hit profile.
+          shared-key: mutants-weekly
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: Resolve inputs
+        id: cfg
+        run: |
+          SHARD="${{ github.event.inputs.shard || '0/8' }}"
+          PACKAGES="${{ github.event.inputs.packages }}"
+          PKGS_FLAG=""
+          if [ -n "$PACKAGES" ]; then
+            for p in $PACKAGES; do
+              PKGS_FLAG="$PKGS_FLAG -p $p"
+            done
+          fi
+          SHARD_FLAG=""
+          if [ "$SHARD" != "all" ]; then
+            SHARD_FLAG="--shard $SHARD"
+          fi
+          echo "shard=$SHARD" >> $GITHUB_OUTPUT
+          echo "shard_flag=$SHARD_FLAG" >> $GITHUB_OUTPUT
+          echo "pkgs_flag=$PKGS_FLAG" >> $GITHUB_OUTPUT
+          echo "Effective: cargo mutants ${PKGS_FLAG:-(workspace)} $SHARD_FLAG --timeout 180 --jobs 8 --output mutants-out -- --lib"
+
+      - name: Run cargo-mutants
+        id: run
+        # `|| true` so the report still uploads even when survivors exist;
+        # the next step decides exit status from the missed.txt content.
+        run: |
+          set -o pipefail
+          cargo mutants \
+            ${{ steps.cfg.outputs.pkgs_flag }} \
+            ${{ steps.cfg.outputs.shard_flag }} \
+            --timeout 180 \
+            --jobs 8 \
+            --output mutants-out \
+            --no-shuffle \
+            -- --lib \
+            || echo "cargo-mutants exited non-zero (survivors expected; see report)"
+
+      - name: Summarise to job summary
+        if: always()
+        run: |
+          MISSED=0
+          [ -f mutants-out/missed.txt ] && MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
+          CAUGHT=0
+          [ -f mutants-out/caught.txt ] && CAUGHT=$(wc -l < mutants-out/caught.txt | tr -d ' ')
+          UNVIABLE=0
+          [ -f mutants-out/unviable.txt ] && UNVIABLE=$(wc -l < mutants-out/unviable.txt | tr -d ' ')
+          TIMEOUT=0
+          [ -f mutants-out/timeout.txt ] && TIMEOUT=$(wc -l < mutants-out/timeout.txt | tr -d ' ')
+          {
+            echo "## cargo-mutants weekly — ${{ steps.cfg.outputs.shard }}"
+            echo
+            echo "Runner: \`$(hostname)\` (${SMITHY_RUNNER_CLASS:-unknown class})"
+            echo
+            echo "| Outcome | Count |"
+            echo "|---------|------:|"
+            echo "| 🟥 Missed  (test suite did not catch) | $MISSED |"
+            echo "| 🟩 Caught  (test suite caught)        | $CAUGHT |"
+            echo "| ⏱  Timeout                           | $TIMEOUT |"
+            echo "| ⚪ Unviable (build failed)           | $UNVIABLE |"
+            echo
+            if [ "$MISSED" -gt 0 ] && [ -f mutants-out/missed.txt ]; then
+              echo "<details><summary>First 50 missed mutants</summary>"
+              echo
+              echo '```'
+              head -50 mutants-out/missed.txt
+              echo '```'
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out-${{ github.run_id }}
+          path: mutants-out/
+          retention-days: 90
