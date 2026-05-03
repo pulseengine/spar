@@ -1346,6 +1346,7 @@ dependencies = [
 name = "spar-network"
 version = "0.9.2"
 dependencies = [
+ "good_lp",
  "spar-base-db",
  "spar-hir-def",
 ]
