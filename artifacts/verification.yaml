@@ -2078,6 +2078,53 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-010
 
+  - id: TEST-NC-PIECEWISE
+    type: feature
+    title: Piecewise-affine arrival curve unit tests (T-SPEC multi-bucket)
+    description: >
+      14 unit tests in
+      `crates/spar-network/src/curves.rs::piecewise::tests` exercise
+      the v0.9.3 `PiecewiseAffineArrivalCurve` primitive and its four
+      operators alongside the existing single-bucket
+      `ArrivalCurve`-targeted tests. Coverage:
+      (1) constructor rejects empty bucket lists;
+      (2) single-bucket case matches `ArrivalCurve::affine` numerically
+      at three probe times;
+      (3) input bucket order is canonicalised to σ-ascending so equal
+      curves compare equal regardless of declaration order;
+      (4) duplicate `(σ, ρ)` pairs are deduped on construction;
+      (5) `at(t)` takes the min across buckets — small-σ-high-ρ binds
+      at small t, small-ρ binds at large t in a 2-bucket curve;
+      (6) `at(0) = 0` causality holds even with very large σ;
+      (7) `delay_bound` returns the min across per-bucket bounds and
+      the chosen R lets each bucket dominate one regime — verified to
+      equal `min(single_bucket_delay_b1, single_bucket_delay_b2)`;
+      (8) any unstable bucket (`ρ_i > R`) makes the whole curve
+      unstable;
+      (9) `output_bound` preserves rates and inflates each bucket's
+      burst by `ρ_i · T` independently (canonical 2-bucket PWA out);
+      (10) `residual_service` uses `R - max ρ_i` and the worst per-bucket
+      burst-drain time at that residual rate;
+      (11) any saturating competing bucket makes the residual
+      unservable;
+      (12) `From<ArrivalCurve>` round-trips the affine single-bucket
+      case losslessly across three probe times;
+      (13) `From<ArrivalCurve>` lowers the peak-capped form to a
+      2-bucket PWA `(σ, ρ), (0, peak)` and readouts agree numerically;
+      (14) `backlog_bound` returns the min across per-bucket
+      backlog bounds (the small-burst-high-rate bucket binds tighter
+      than the sustained bucket on the same server). Per the
+      post-v0.9.2 reviewer's NC top-5 #1.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- curves::piecewise
+    status: passing
+    tags: [v0.9.3, network, wctt, network-calculus, piecewise]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-013
+
   - id: TEST-RTA-SOUNDNESS-V092
     type: feature
     title: RTA Stop_For_Lock warning + ARINC severity escape hatch
