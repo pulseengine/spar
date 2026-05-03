@@ -203,10 +203,36 @@ impl Analysis for RtaAnalysis {
                 continue;
             };
 
-            let Some(exec_ps) = get_execution_time(props) else {
+            let Some(exec_base_ps) = get_execution_time(props) else {
                 // No execution time — skip; the scheduling pass already warns.
                 continue;
             };
+
+            // v0.9.2 (Tier A #5): inflate WCET by 2·Context_Switch_Time
+            // (one preemption-in + one preemption-out per dispatch) per
+            // Buttazzo, *Hard Real-Time Computing Systems* §7. v0.8.x
+            // emitted a STPA-REQ-022 advisory if Context_Switch_Time was
+            // absent but never folded the value into the recurrence —
+            // silently optimistic. Default unset = 0 (byte-identical to
+            // v0.8.x). The property is read from the thread's props for
+            // compatibility with the existing scheduling.rs pattern.
+            let context_switch_ps = get_timing_property(props, "Context_Switch_Time").unwrap_or(0);
+            let exec_ps = exec_base_ps.saturating_add(context_switch_ps.saturating_mul(2));
+            if context_switch_ps > 0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "OverheadInflation: thread '{}' WCET {} → {} (added 2 × {} \
+                         Context_Switch_Time per Buttazzo §7)",
+                        comp.name.as_str(),
+                        format_time(exec_base_ps),
+                        format_time(exec_ps),
+                        format_time(context_switch_ps),
+                    ),
+                    path: component_path(instance, idx),
+                    analysis: self.name().to_string(),
+                });
+            }
 
             let binding = get_processor_binding(props).unwrap_or("__unbound__".to_string());
 
@@ -1498,6 +1524,57 @@ mod tests {
 
         let inst = b.build(root);
         RtaAnalysis.analyze(&inst)
+    }
+
+    // ── O1 (v0.9.2): Context_Switch_Time inflates WCET ────────────
+    #[test]
+    fn context_switch_inflates_wcet() {
+        // With Context_Switch_Time = 100 us, the WCET inflation is
+        // 2 × 100 us = 200 us (one preemption-in + one preemption-out
+        // per Buttazzo §7). The diagnostic must reflect the new value.
+        let (mut b, root, proc) = make_base();
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+        bind_thread(&mut b, t1, "10 ms", "1 ms", None);
+        b.set_property(t1, "Timing_Properties", "Context_Switch_Time", "100 us");
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let inflation = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.starts_with("OverheadInflation")
+                    && d.message.contains("'t1'")
+            })
+            .unwrap_or_else(|| panic!("expected OverheadInflation for t1, got: {:#?}", diags));
+        assert!(
+            inflation.message.contains("WCET 1.00 ms → 1.20 ms"),
+            "expected WCET 1 ms → 1.2 ms after 2x100us context-switch, got: {}",
+            inflation.message,
+        );
+    }
+
+    #[test]
+    fn no_context_switch_byte_identical_to_v091() {
+        // Context_Switch_Time unset = no OverheadInflation diagnostic
+        // and v0.8.x/v0.9.1 byte-identical RTA output.
+        let diags = make_two_thread_model_diags(None, None);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("OverheadInflation")),
+            "no Context_Switch_Time must not emit OverheadInflation: {:#?}",
+            diags,
+        );
     }
 
     // ── B1: non-regression — no Locking_Protocol must match v0.7.0 byte-for-byte ─
