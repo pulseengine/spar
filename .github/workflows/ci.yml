@@ -1,5 +1,12 @@
 name: CI
 
+# Cancel superseded PR runs; never cancel runs on main / tags / scheduled
+# events. See docs/ci-concurrency.md (or the org-wide CI concurrency brief)
+# for rationale.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]

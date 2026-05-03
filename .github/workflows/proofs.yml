@@ -16,6 +16,12 @@ name: Lean Proofs
 # (`proofs/.lake`) keyed on `lake-manifest.json`, so warm runs only
 # rebuild the in-tree proof modules.
 
+# Lean proof runs are multi-hour on cold cache. Cancel superseded PR
+# runs aggressively; never cancel main / scheduled / tag runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
   push:
     branches: [main]
