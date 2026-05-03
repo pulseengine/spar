@@ -2177,6 +2177,29 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-012
 
+  - id: TEST-WCTT-RTA-COUPLING
+    type: feature
+    title: WCTT consumes Dispatch_Jitter as release-jitter for ρ·J burst inflation
+    description: >
+      Verifies the v0.9.2 RTA→WCTT release-jitter coupling.
+      `rta_wctt_dispatch_jitter_inflates_burst_and_emits_diagnostic`
+      builds a 1 Gbps single-hop model with the source declaring
+      `Timing_Properties::Dispatch_Jitter => 100 us`; expects the
+      `WcttRtaCoupled` Info diagnostic to fire naming the
+      jitter_ns and the ρ·J = 12500 byte inflation.
+      `no_dispatch_jitter_no_coupling_diagnostic` confirms the
+      diagnostic does NOT fire when the property is unset.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta_wctt
+        - run: cargo test -p spar-analysis --lib -- no_dispatch_jitter
+    status: passing
+    tags: [v0.9.2, network, wctt, rta, coupling]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-011
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
