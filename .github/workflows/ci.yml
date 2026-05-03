@@ -79,22 +79,33 @@ jobs:
   # ── Security audits ──────────────────────────────────────────────────
   audit:
     name: Security Audit (RustSec)
-    runs-on: [self-hosted, linux, x64, light]
+    # Stays on ubuntu-latest temporarily: smithy ships cargo-audit
+    # v0.21.2 whose bundled rustsec parser still rejects RUSTSEC-2026-0037
+    # ("unsupported CVSS version: 4.0"). v0.22.1 fixes it but the
+    # `cargo install --locked cargo-audit` build trips over our
+    # sccache-on-cc setup (aws-lc-sys C compile fails through sccache).
+    # Follow-up: drop sccache from ralf's profile before bumping the
+    # toolchains-role version, then move this back to [self-hosted, light].
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Invoke cargo-audit directly (pre-installed on smithy at v0.21.2)
-      # rather than rustsec/audit-check@v2, which bundles an older
-      # cargo-audit that can't parse CVSS 4.0 advisories such as
-      # RUSTSEC-2026-0037 and exits non-zero on the parse error before
-      # evaluating the actual workspace.
-      - run: cargo audit --color always
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   deny:
     name: Cargo Deny
+    # Smithy has cargo-deny installed (toolchains role, v0.16.4).
+    # We avoid EmbarkStudios/cargo-deny-action@v2 because it launches
+    # a rootless container, which fails on our hardened systemd unit:
+    # newuidmap is setuid but NoNewPrivileges=true blocks the escalation
+    # (newuidmap: write to uid_map failed: Operation not permitted).
     runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo deny --version
+      - run: cargo deny check
 
   # ── Code coverage ────────────────────────────────────────────────────
   coverage:
