@@ -105,7 +105,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo deny --version
-      - run: cargo deny check
+      # Skip the `advisories` check because both cargo-deny and
+      # cargo-audit share the same rustsec parser, which currently
+      # rejects RUSTSEC-2026-0037 ("unsupported CVSS version: 4.0").
+      # bans / licenses / sources still gate. Re-add `advisories`
+      # once smithy ships an upgraded rustsec; the audit job (still
+      # on ubuntu-latest) covers vulnerability matching meanwhile.
+      - run: cargo deny check bans licenses sources
 
   # ── Code coverage ────────────────────────────────────────────────────
   coverage:
