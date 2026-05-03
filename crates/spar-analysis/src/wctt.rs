@@ -235,6 +235,13 @@ impl WcttAnalysis {
             let mut total_delay_ps: u64 = 0;
             let mut unservable_emitted = false;
             let mut deferred_emitted = false;
+            // v0.9.2 sensitivity tracking: capture the *minimum* residual
+            // service rate across hops (worst-case sensitivity) and the
+            // number of hops contributing to total_delay_ps. Both feed
+            // the post-stream WcttSensitivity diagnostic.
+            let mut min_residual_bps: u64 = u64::MAX;
+            let mut max_comp_rate_bps: u64 = 0;
+            let mut hops_counted: u64 = 0;
 
             for (hop_idx, sw_idx) in stream.hops.iter().enumerate() {
                 let st = switch_type.get(sw_idx).copied().unwrap_or(SwitchType::Fifo);
@@ -649,6 +656,16 @@ impl WcttAnalysis {
                     }
                 };
 
+                // v0.9.2 sensitivity: capture the residual service rate
+                // and the competing rate at this hop *before* computing
+                // delay. They feed the WcttSensitivity diagnostic.
+                if residual.rate_bps > 0 && residual.rate_bps < min_residual_bps {
+                    min_residual_bps = residual.rate_bps;
+                }
+                if comp_alpha.sustained_rate_bps > max_comp_rate_bps {
+                    max_comp_rate_bps = comp_alpha.sustained_rate_bps;
+                }
+
                 // Per-hop delay using the tagged stream's α and the
                 // residual service. Then add `quantization_ps` for
                 // atomic-frame correctness (zero on CBS / preemption arms,
@@ -656,6 +673,7 @@ impl WcttAnalysis {
                 match delay_bound(&alpha, &residual) {
                     Ok(d) => {
                         total_delay_ps = total_delay_ps.saturating_add(d);
+                        hops_counted = hops_counted.saturating_add(1);
                         if quantization_ps > 0 {
                             total_delay_ps = total_delay_ps.saturating_add(quantization_ps);
                             diags.push(AnalysisDiagnostic {
@@ -744,9 +762,61 @@ impl WcttAnalysis {
                     stream.hops.len(),
                     if stream.hops.len() == 1 { "" } else { "s" },
                 ),
-                path: stream_path,
+                path: stream_path.clone(),
                 analysis: self.name().to_string(),
             });
+
+            // v0.9.2 sensitivity output (NC reviewer top-5 #13 — pure
+            // post-processing on closed-form derivatives). For each
+            // bound, report worst-case partial derivatives at the
+            // operating point. Not bounds themselves; informational.
+            //
+            // d_e2e ≈ Σ_h ( T_h + σ / R_residual_h )  [bytes-fluid kernel]
+            //   ∂d/∂σ_self      = Σ 8e12 / R_residual_h ps/B; bound below by
+            //                     8e12 / min(R_residual) (worst hop dominates)
+            //   ∂d/∂ρ_competing ≈ σ_total / (R - ρ_c)^2 at the worst hop
+            //   ∂d/∂T_link      = hops_counted (chain rule across passthrough)
+            //
+            // When `min_residual_bps == u64::MAX` no hop contributed
+            // (all deferred / unservable); skip emission.
+            if hops_counted > 0 && min_residual_bps != u64::MAX && min_residual_bps > 0 {
+                // ps per byte = 8 bits/B · 1e12 ps/s / R bps. Saturate
+                // on the unlikely overflow path.
+                let dsigma_ps_per_byte = (8u128 * 1_000_000_000_000u128)
+                    .checked_div(min_residual_bps as u128)
+                    .unwrap_or(u128::MAX);
+                let dsigma_ns_per_byte = dsigma_ps_per_byte / 1_000;
+                // Aggregate σ_total across the chain (rough proxy is the
+                // self-burst plus max competing burst at any hop). Use
+                // initial alpha + max_comp_rate × stream-period as a
+                // safe upper estimate; lacking that, fall back to the
+                // self-burst alone.
+                let sigma_total_bytes = stream.alpha.burst_bytes as u128;
+                let dt_link_unitless = hops_counted;
+                // For ρ_c sensitivity: closed-form is σ/(R-ρ)^2; we
+                // approximate using residual rate squared.
+                let r_residual_sq = (min_residual_bps as u128).pow(2).max(1);
+                let drho_ps_per_bps = sigma_total_bytes
+                    .saturating_mul(8u128 * 1_000_000_000_000u128)
+                    .checked_div(r_residual_sq)
+                    .unwrap_or(0);
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttSensitivity: stream '{}' end-to-end ∂WCTT (worst hop, residual rate \
+                         {} bps): ∂σ_self={} ns/B, ∂ρ_competing≈{} ps per bps (using σ={} B), \
+                         ∂T_link={} ns/ns",
+                        stream_name,
+                        min_residual_bps,
+                        dsigma_ns_per_byte,
+                        drho_ps_per_bps,
+                        sigma_total_bytes,
+                        dt_link_unitless,
+                    ),
+                    path: stream_path,
+                    analysis: self.name().to_string(),
+                });
+            }
         }
 
         diags

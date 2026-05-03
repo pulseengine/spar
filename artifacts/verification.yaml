@@ -2153,6 +2153,30 @@ artifacts:
       - type: satisfies
         target: REQ-RTA-008
 
+  - id: TEST-WCTT-SENSITIVITY
+    type: feature
+    title: WCTT per-stream sensitivity output (∂σ, ∂ρ_c, ∂T)
+    description: >
+      Verifies that every `WcttBound` Info diagnostic is followed by
+      a `WcttSensitivity` Info diagnostic carrying the three
+      worst-hop partial derivatives. The fixture
+      `tests/fixtures/wctt/classical_ethernet` exercises the new
+      diagnostic on a 1 Gbps single-hop scenario; the sensitivity
+      values (∂σ_self = 8 ns/B at 900 Mbps residual, ∂T_link = 1
+      ns/ns for a single hop) are pinned in the .expected.json
+      golden file. wctt unit tests confirm the diagnostic does NOT
+      fire when all hops were deferred / unservable.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- wctt
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.9.2, network, wctt, sensitivity]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-012
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection

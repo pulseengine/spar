@@ -2,5 +2,7 @@
   "WcttBound: stream 'data_a (ecu_a → ecu_sink)' end-to-end WCTT 43810668 ps (1 hop)",
   "WcttBound: stream 'data_b (ecu_b → ecu_sink)' end-to-end WCTT 43810668 ps (1 hop)",
   "WcttFrameQuantization: stream 'data_a (ecu_a → ecu_sink)' at hop 0 on switch 'sw': atomic-frame correction +12144 ns (max-frame serialization at link rate)",
-  "WcttFrameQuantization: stream 'data_b (ecu_b → ecu_sink)' at hop 0 on switch 'sw': atomic-frame correction +12144 ns (max-frame serialization at link rate)"
+  "WcttFrameQuantization: stream 'data_b (ecu_b → ecu_sink)' at hop 0 on switch 'sw': atomic-frame correction +12144 ns (max-frame serialization at link rate)",
+  "WcttSensitivity: stream 'data_a (ecu_a → ecu_sink)' end-to-end ∂WCTT (worst hop, residual rate 900000000 bps): ∂σ_self=8 ns/B, ∂ρ_competing≈0 ps per bps (using σ=1500 B), ∂T_link=1 ns/ns",
+  "WcttSensitivity: stream 'data_b (ecu_b → ecu_sink)' end-to-end ∂WCTT (worst hop, residual rate 900000000 bps): ∂σ_self=8 ns/B, ∂ρ_competing≈0 ps per bps (using σ=1500 B), ∂T_link=1 ns/ns"
 ]
