@@ -1,0 +1,15 @@
+[package]
+name = "spar-trace-topology"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runtime/declared topology reconciliation for spar (PCAPNG + LLDP + Qcc + AADL)"
+
+[dependencies]
+spar-hir-def.workspace = true
+spar-base-db.workspace = true
+spar-syntax.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

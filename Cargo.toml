@@ -21,6 +21,7 @@ members = [
     "crates/spar-verify",
     "crates/spar-wasm",
     "crates/spar-insight",
+    "crates/spar-trace-topology",
 ]
 
 [workspace.package]
@@ -45,6 +46,7 @@ spar-transform = { path = "crates/spar-transform" }
 spar-variants = { path = "crates/spar-variants" }
 spar-codegen = { path = "crates/spar-codegen" }
 spar-insight = { path = "crates/spar-insight" }
+spar-trace-topology = { path = "crates/spar-trace-topology" }
 rowan = "0.16"
 salsa = "0.26"
 la-arena = "0.3"
