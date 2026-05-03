@@ -2275,3 +2275,38 @@ artifacts:
         target: REQ-MIGRATION-006
       - type: satisfies
         target: REQ-MIGRATION-008
+
+  # ── Track G — v0.10.0 trace-topology foundation ─────────────────────
+
+  - id: TEST-TRACE-TOPOLOGY-IDENTITY
+    type: feature
+    title: Spar_Identity property surface + spar-trace-topology accessors
+    description: >
+      Verifies that the v0.10.0 Spar_Identity property surface and
+      the spar-trace-topology crate's identity-accessor surface are
+      registered and reachable. spar-hir-def standard_properties
+      tests assert that Spar_Identity appears in
+      STANDARD_PROPERTY_SET_NAMES with the expected six properties
+      (MAC_Address, VLAN_ID, Stream_Handle, Multicast_Group,
+      LLDP_Chassis_Id, LLDP_Port_Id), that each property resolves
+      via GlobalScope without explicit `with` imports, and that the
+      total predeclared property count is 137 (was 131 before this
+      commit). spar-trace-topology integration tests
+      (tests/identity_accessors.rs) verify the six typed accessors
+      (get_mac_address, get_vlan_id, get_stream_handle,
+      get_multicast_group, get_lldp_chassis_id, get_lldp_port_id)
+      read both typed PropertyExpr values and string-fallback
+      values from a PropertyMap, and that VLAN_ID rejects values
+      outside 0..=4094 (including the reserved 4095) on both paths.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-trace-topology
+    status: passing
+    tags: [v0.10.0, trace-topology, track-g, properties]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-001
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-002

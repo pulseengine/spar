@@ -1406,6 +1406,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-trace-topology"
+version = "0.9.2"
+dependencies = [
+ "spar-base-db",
+ "spar-hir-def",
+ "spar-syntax",
+ "tempfile",
+]
+
+[[package]]
 name = "spar-transform"
 version = "0.9.2"
 dependencies = [
