@@ -98,7 +98,36 @@ const CBS_DEFAULT_COMPETING_FRAME_BYTES: u64 = 1518;
 ///
 /// See the module-level docs for diagnostic kinds and the Phase 1
 /// algorithm.
-pub struct WcttAnalysis;
+///
+/// # Configuration
+///
+/// `pmoo` (default `false`): when `true` and a stream's chain has a
+/// tree shape (one tagged flow with ≥ 2 competing flows on a contiguous
+/// sub-path of the tagged tandem), invoke
+/// [`spar_network::pmoo::ludb_bound`] for a tighter PMOO/LUDB delay.
+/// On LP infeasibility we transparently fall back to per-hop SFA, so
+/// turning the flag on never *worsens* the bound — only ever tightens
+/// it. With `pmoo = false` (the default) the analysis is
+/// byte-identical to v0.9.2.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WcttAnalysis {
+    /// Opt-in PMOO/LUDB path. v0.9.3 NC tightness #2.
+    pub pmoo: bool,
+}
+
+impl WcttAnalysis {
+    /// New analysis with PMOO **disabled** (matches v0.9.2 behaviour).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// New analysis with PMOO **enabled**. The PMOO path is opt-in
+    /// because v0.9.2 output should remain byte-identical for users
+    /// who haven't asked for the tighter bound.
+    pub fn with_pmoo() -> Self {
+        Self { pmoo: true }
+    }
+}
 
 impl Analysis for WcttAnalysis {
     fn name(&self) -> &str {
@@ -752,6 +781,43 @@ impl WcttAnalysis {
                 continue;
             }
 
+            // Step 5b (v0.9.3 NC tightness #2): optional PMOO/LUDB
+            // dispatch. When `self.pmoo` is enabled *and* the
+            // topology is tree-shaped (every other stream that crosses
+            // any hop on this stream's tandem does so on a contiguous
+            // sub-path, with ≥ 2 such competing flows, and every hop
+            // is a plain FIFO/Priority switch — no CBS / TAS shaping),
+            // call `ludb_bound` and use the tighter PMOO delay. On LP
+            // infeasibility we keep the SFA total — fallback is silent.
+            //
+            // With `self.pmoo == false` (the default) this branch is a
+            // no-op and the v0.9.2 output is byte-identical.
+            let sfa_delay_ps = total_delay_ps;
+            if self.pmoo
+                && let Some((pmoo_delay_ps, pmoo_solve_us)) =
+                    pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
+            {
+                let tightening_pct = if sfa_delay_ps > 0 {
+                    100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
+                } else {
+                    0.0
+                };
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
+                         {} ps (tightening {:.1}%, LP solve {} us)",
+                        stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+                // The PMOO bound is no looser than SFA on the LP's
+                // canonical topology (Bondorf et al.); guard with a
+                // min just in case f64 rounding flips that.
+                total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+            }
+
             // Step 6: budget check. If the source bus carried a
             // WCTT_Budget, compare. We use the *first* bound switch's
             // budget as the per-stream budget (matches the doc's
@@ -1092,6 +1158,112 @@ pub fn compute_network_hop_latency(
         max_ps: total_max_ps,
         unservable,
     })
+}
+
+/// Try the PMOO/LUDB delay for a stream when the topology is
+/// tree-shaped, falling back to `None` when the precondition is not
+/// met. Returns `Some((pmoo_delay_ps, lp_solve_us))` on success.
+///
+/// **Eligibility criteria** (all must hold):
+/// - Every hop on the tagged stream's tandem is a `SwitchType::Fifo`
+///   switch — TSN/CBS/TAS dispatch shapes the per-hop service curve in
+///   ways the present LP doesn't model, so we conservatively skip.
+/// - At least 2 other streams cross at least one of the tagged
+///   stream's hops (otherwise PMOO == SFA trivially, no signal).
+/// - Each competing stream's contact path with the tagged tandem is a
+///   contiguous sub-path of `tagged.hops` (PMOO precondition).
+///
+/// On any failure (eligibility, LP infeasible, malformed inputs) we
+/// return `None` so the caller transparently keeps the SFA bound.
+fn pmoo_or_sfa(
+    tagged: &Stream,
+    all_streams: &[Stream],
+    switch_type: &FxHashMap<ComponentInstanceIdx, SwitchType>,
+    service_for_bus: &FxHashMap<ComponentInstanceIdx, ServiceCurve>,
+) -> Option<(u64, u64)> {
+    use spar_network::pmoo::{
+        CompetingFlow as PmooCompetingFlow, TaggedFlow as PmooTaggedFlow, ludb_bound,
+    };
+
+    if tagged.hops.is_empty() {
+        return None;
+    }
+
+    // 1. All hops must be FIFO; PMOO doesn't model TAS/CBS shapes.
+    for h in &tagged.hops {
+        let st = switch_type.get(h).copied().unwrap_or(SwitchType::Fifo);
+        if !matches!(st, SwitchType::Fifo | SwitchType::Priority) {
+            return None;
+        }
+    }
+
+    // 2. Build position map for the tagged tandem (ComponentInstanceIdx
+    // → position in the local services vector). PMOO works in those
+    // local positions because services are passed as a flat slice.
+    let mut hop_position: FxHashMap<ComponentInstanceIdx, usize> = FxHashMap::default();
+    for (i, h) in tagged.hops.iter().enumerate() {
+        hop_position.insert(*h, i);
+    }
+    let services: Vec<ServiceCurve> = tagged
+        .hops
+        .iter()
+        .map(|h| {
+            service_for_bus
+                .get(h)
+                .copied()
+                .unwrap_or_else(|| ServiceCurve::rate_latency(0, 0))
+        })
+        .collect();
+    if services.iter().any(|s| s.rate_bps == 0) {
+        return None;
+    }
+
+    // 3. Build competing-flow set: every other stream that crosses any
+    // hop on the tagged tandem. Each competing flow's path within the
+    // tandem must be contiguous (PMOO precondition); when it isn't we
+    // bail out so the caller falls back to SFA (which has no such
+    // restriction).
+    let mut competing: Vec<PmooCompetingFlow> = Vec::new();
+    for other in all_streams {
+        if std::ptr::eq(other, tagged) {
+            continue;
+        }
+        let mut local_path: Vec<usize> = Vec::new();
+        for sw in &other.hops {
+            if let Some(&pos) = hop_position.get(sw) {
+                local_path.push(pos);
+            }
+        }
+        if local_path.is_empty() {
+            continue;
+        }
+        // Contiguity check: the local positions must form an
+        // increasing run with no gaps.
+        local_path.sort_unstable();
+        for w in local_path.windows(2) {
+            if w[1] != w[0] + 1 {
+                return None;
+            }
+        }
+        competing.push(PmooCompetingFlow {
+            alpha: other.alpha,
+            path: local_path,
+        });
+    }
+
+    if competing.len() < 2 {
+        return None;
+    }
+
+    let pmoo_input = PmooTaggedFlow {
+        alpha: tagged.alpha,
+        path: (0..tagged.hops.len()).collect(),
+    };
+
+    match ludb_bound(&pmoo_input, &competing, &services) {
+        Ok(b) => Some((b.delay_ps, b.solve_time_us)),
+        Err(_) => None,
+    }
 }
 
 /// Read `Spar_Network::WCTT_Budget` (Time) in picoseconds. Mirrors the
@@ -1517,7 +1689,7 @@ public
 end Plain;
 "#;
         let inst = instantiate(src, "Plain", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert_eq!(
             count_wctt(&diags),
             0,
@@ -1573,7 +1745,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1645,7 +1817,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let coupled = diags
             .iter()
@@ -1708,7 +1880,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert!(
             !diags
                 .iter()
@@ -1781,7 +1953,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let infos: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1863,7 +2035,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let unservable: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1928,7 +2100,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info = diags
             .iter()
@@ -1995,7 +2167,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let err = diags
             .iter()
@@ -2049,7 +2221,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let errors: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -2113,7 +2285,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info = diags
             .iter()
@@ -2168,7 +2340,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let deferred = diags
             .iter()
@@ -2257,7 +2429,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let cbs_shaped: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -2344,7 +2516,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert_eq!(
             count_wctt(&diags),
             0,
@@ -2413,7 +2585,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         // We must see a WcttTasGated Info, not WcttDeferred.
         let tas_gated = diags
@@ -2494,7 +2666,7 @@ public
 end Net;
 "#;
         let ungated = instantiate(ungated_src, "Net", "Sys", "impl");
-        let ungated_diags = WcttAnalysis.analyze(&ungated);
+        let ungated_diags = WcttAnalysis::default().analyze(&ungated);
         let ungated_bound = ungated_diags
             .iter()
             .find(|d| d.message.starts_with("WcttBound"))
@@ -2556,7 +2728,7 @@ public
 end Net;
 "#;
         let gated = instantiate(gated_src, "Net", "Sys", "impl");
-        let gated_diags = WcttAnalysis.analyze(&gated);
+        let gated_diags = WcttAnalysis::default().analyze(&gated);
         let gated_bound = gated_diags
             .iter()
             .find(|d| d.message.starts_with("WcttBound"))
@@ -2616,7 +2788,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         let deferred = diags
             .iter()
             .find(|d| d.message.starts_with("WcttDeferred"))
@@ -2676,7 +2848,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         let deferred = diags
             .iter()
             .find(|d| d.message.starts_with("WcttDeferred"))
@@ -2761,7 +2933,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         // The express stream must produce a `WcttPreemptionApplied`
         // Info diagnostic.
@@ -2864,7 +3036,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         // No `WcttPreemptionApplied` because the bus is silent.
         let applied: Vec<&AnalysisDiagnostic> = diags
@@ -2941,7 +3113,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let applied: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -3021,7 +3193,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert!(
             diags
                 .iter()
@@ -3029,5 +3201,124 @@ end Net;
             "high-CoS stream must opt into preemption by default: {:#?}",
             diags
         );
+    }
+
+    // ── v0.9.3 NC tightness #2 — PMOO/LUDB opt-in flag ──────────────
+
+    /// Helper: instantiate a fixture with multiple competing streams
+    /// sharing a single FIFO switch. Used by both the PMOO-on and
+    /// PMOO-off round-trip tests below.
+    fn pmoo_fixture_aadl() -> &'static str {
+        r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      a2 : device src_d.impl;
+      a3 : device src_d.impl;
+      a4 : device src_d.impl;
+      b  : device d.impl;
+      c  : device d.impl;
+      c2 : device d.impl;
+      c3 : device d.impl;
+    connections
+      c_sw_a  : bus access sw -> a.net;
+      c_sw_a2 : bus access sw -> a2.net;
+      c_sw_a3 : bus access sw -> a3.net;
+      c_sw_a4 : bus access sw -> a4.net;
+      c_sw_b  : bus access sw -> b.net;
+      c_sw_c  : bus access sw -> c.net;
+      c_sw_c2 : bus access sw -> c2.net;
+      c_sw_c3 : bus access sw -> c3.net;
+      data1   : port a.out_p  -> b.in_p;
+      data2   : port a2.out_p -> c.in_p;
+      data3   : port a3.out_p -> c2.in_p;
+      data4   : port a4.out_p -> c3.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#
+    }
+
+    #[test]
+    fn pmoo_flag_off_emits_no_pmoo_diagnostic() {
+        // Default WcttAnalysis (pmoo = false) must produce
+        // byte-identical diagnostics to v0.9.2: no `WcttPmooBound`
+        // ever fires regardless of topology.
+        let inst = instantiate(pmoo_fixture_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        assert!(
+            !diags.iter().any(|d| d.message.starts_with("WcttPmooBound")),
+            "WcttPmooBound must NOT fire when pmoo flag is off: {:#?}",
+            diags
+        );
+        // Sanity: WcttBound still fires for each stream.
+        let bound_count = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttBound"))
+            .count();
+        assert_eq!(bound_count, 4, "expected 4 streams: {:#?}", diags);
+    }
+
+    #[test]
+    fn pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams() {
+        // With pmoo = true, the PMOO/LUDB path fires for every stream
+        // that meets the eligibility criteria (≥ 2 contiguous-sub-path
+        // competing flows on a FIFO tandem).
+        let inst = instantiate(pmoo_fixture_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+        let pmoo_diags: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPmooBound"))
+            .collect();
+        assert!(
+            !pmoo_diags.is_empty(),
+            "expected at least one WcttPmooBound diagnostic with --pmoo: {:#?}",
+            diags
+        );
+        // The diagnostic must mention the LP method tag.
+        for d in &pmoo_diags {
+            assert!(
+                d.message.contains("method=ludb"),
+                "WcttPmooBound must mention method=ludb: {}",
+                d.message
+            );
+        }
     }
 }

@@ -235,7 +235,7 @@ fn instantiate(aadl_src: &str, pkg: &str, sys: &str, sys_impl: &str) -> SystemIn
 #[test]
 fn phase2_dispatch_routes_each_stream_to_its_shaping_path() {
     let inst = instantiate(TSN_TRIPLE_DISPATCH_AADL, "TsnTriple", "Sys", "impl");
-    let diags: Vec<AnalysisDiagnostic> = WcttAnalysis.analyze(&inst);
+    let diags: Vec<AnalysisDiagnostic> = WcttAnalysis::default().analyze(&inst);
 
     let by_kind = |kind: &'static str| -> Vec<&AnalysisDiagnostic> {
         diags

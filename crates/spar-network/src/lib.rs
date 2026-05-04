@@ -46,6 +46,7 @@
 
 pub mod curves;
 pub mod extract;
+pub mod pmoo;
 pub mod tsn;
 pub mod types;
 
@@ -54,6 +55,7 @@ pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };
 pub use extract::extract_network_graph;
+pub use pmoo::{CompetingFlow, LpError, PmooBound, TaggedFlow, ludb_bound};
 pub use tsn::{
     CbsReservation, ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow,
     MIN_FRAGMENT_BYTES, PREEMPTION_HEADER_BYTES, cbs_residual_service,

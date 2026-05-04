@@ -8,6 +8,7 @@ description = "Network Calculus primitives for AADL WCTT analysis (TSN/Ethernet,
 
 [dependencies]
 spar-hir-def.workspace = true
+good_lp.workspace = true
 
 [dev-dependencies]
 spar-base-db.workspace = true

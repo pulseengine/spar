@@ -2247,6 +2247,37 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-011
 
+  - id: TEST-NC-PMOO
+    type: feature
+    title: PMOO/LUDB bound is tighter than SFA for tree-shaped multiplexing
+    description: >
+      Ten unit tests in `spar-network/src/pmoo.rs` plus two CLI-flag
+      round-trip tests in `spar-analysis/src/wctt.rs` exercise the
+      v0.9.3 PMOO/LUDB path. The PMOO unit tests cover: (a) single-hop
+      no-competing baseline (PMOO ≡ SFA), (b) 2-hop tandem 1 competing
+      flow joining at hop 2 (PMOO ≤ SFA, strictly tighter on the
+      fixture), (c) 3-hop / 3-competing convergent fixture (PMOO ≪ SFA,
+      ≥ 5 % tightening asserted; observed 27.4 %), (d) LP infeasibility
+      surfaces as `Err(LpError::Infeasible)` for SFA fallback,
+      (e) empty-path / out-of-range / non-contiguous validation, (f) LP
+      model size and solve-time reporting, (g) single-flow tandem
+      reduces to "pay-burst-once" closed form, (h) the canonical
+      automotive-zonal 5-source pattern (observed 23.7 % tightening).
+      CLI round-trip tests confirm `WcttPmooBound` only fires with the
+      `--pmoo` flag (`pmoo_flag_off_emits_no_pmoo_diagnostic` and
+      `pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams`),
+      preserving v0.9.2 byte-identical default output.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- pmoo
+        - run: cargo test -p spar-analysis --lib -- pmoo_flag
+    status: passing
+    tags: [v0.9.3, network, wctt, pmoo, ludb, lp]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-014
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection

@@ -34,7 +34,7 @@ fn run_wctt_sorted(aadl_src: &str, pkg: &str, sys: &str, sys_impl: &str) -> Vec<
         inst.diagnostics
     );
 
-    let diags: Vec<AnalysisDiagnostic> = WcttAnalysis.analyze(&inst);
+    let diags: Vec<AnalysisDiagnostic> = WcttAnalysis::default().analyze(&inst);
     let mut msgs: Vec<String> = diags.into_iter().map(|d| d.message).collect();
     msgs.sort();
     msgs
