@@ -1762,4 +1762,52 @@ artifacts:
     status: implemented
     tags: [mcp, migration, track-e, v090, integration]
 
+  # ── Track G — v0.10.0 trace-topology foundation ──────────────────────
+
+  - id: REQ-TRACE-TOPOLOGY-001
+    type: requirement
+    title: Spar_Identity property surface
+    description: >
+      System shall expose a Spar_Identity property set that lets
+      AADL declare runtime-observable identities for the v0.10.0+
+      `spar trace topology` reconciler. The set carries six
+      properties: MAC_Address (aadlstring; device, processor),
+      VLAN_ID (aadlinteger 0 .. 4094; connection, bus),
+      Stream_Handle (aadlinteger; connection), Multicast_Group
+      (aadlstring; connection), LLDP_Chassis_Id (aadlstring;
+      device, processor, bus), and LLDP_Port_Id (aadlstring; bus
+      access feature). The set is registered as a predefined
+      (non-AS5506) property set so AADL annotations resolve without
+      explicit `with` imports, mirroring Spar_TSN, Spar_Network,
+      Spar_Migration, and Spar_Power. Per the v0.10.0 trace-topology
+      foundation design (docs/designs/v0.10.0-trace-topology.md §3).
+    status: planned
+    tags: [trace-topology, track-g, v0100, properties]
+
+  - id: REQ-TRACE-TOPOLOGY-002
+    type: requirement
+    title: spar-trace-topology crate skeleton
+    description: >
+      System shall expose a spar-trace-topology crate carrying the
+      foundation surface for runtime/declared topology
+      reconciliation. v0.10.0 ships four modules: `identity` (typed
+      accessors for the six Spar_Identity properties, typed-first
+      / string-fallback per the existing Spar_TSN pattern),
+      `ingest` (placeholder traits FrameSource / TopologySource /
+      SwitchConfigSource / PtpTimeSource for the v0.10.x parsers),
+      `reconcile` (ReconcileFinding enum with the five
+      deterministic check kinds — IdentityUnknown,
+      TopologyMissingWiring, ConfigDrift, GptpOutOfBudget,
+      BinaryMismatch), and `report` (TopologyReport struct
+      aggregating findings). v0.10.0 ships no real parsing, no
+      reconciliation logic, no SARIF emission, and no in-toto
+      attestation; those land in v0.10.x sibling commits and
+      v0.11.0 / v1.0 respectively per the design doc's
+      §"Implementation phasing". The in-toto attestation predicate
+      URL is `https://pulseengine.eu/spar-trace-topology/v1`. Per
+      docs/designs/v0.10.0-trace-topology.md and the companion
+      external-integrator contract docs/contracts/spar-trace-topology-v1.md.
+    status: planned
+    tags: [trace-topology, track-g, v0100, crate]
+
   # Research findings tracked separately in research/findings.yaml
