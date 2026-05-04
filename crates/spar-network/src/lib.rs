@@ -49,6 +49,7 @@ pub mod extract;
 pub mod tsn;
 pub mod types;
 
+pub use curves::piecewise::{PiecewiseAffineArrivalCurve, PwaError};
 pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };

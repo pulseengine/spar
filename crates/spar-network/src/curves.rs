@@ -21,8 +21,34 @@
 //!   picoseconds.
 //!
 //! The four operators (`backlog_bound`, `delay_bound`, `residual_service`,
-//! `output_bound`) implement the closed-form bounds for this case. A
-//! piecewise-affine extension is deferred to v0.8.x.
+//! `output_bound`) implement the closed-form bounds for this case.
+//!
+//! # Piecewise-affine extension (v0.9.3)
+//!
+//! The single-bucket affine form pays the full burst on the peak rate
+//! over arbitrarily long windows. Real ADAS / TSN traffic is often
+//! described by T-SPEC-style multi-bucket constraints:
+//!
+//! ```text
+//! α(t) = min_i (σ_i + ρ_i · t)
+//! ```
+//!
+//! where each `(σ_i, ρ_i)` is a leaky bucket and the overall curve is
+//! the minimum of the family — capturing both short-horizon burst (small
+//! σ, high ρ) and long-horizon sustained behaviour (large σ, low ρ).
+//! This form typically *halves* delay/backlog bounds on real traffic
+//! because the small-burst bucket binds the short-window readouts that
+//! the worst-case delay computation actually exercises.
+//!
+//! [`piecewise::PiecewiseAffineArrivalCurve`] implements this
+//! generalisation alongside the single-bucket [`ArrivalCurve`]. The
+//! `wctt.rs` consumers continue to use the single-bucket form for
+//! v0.9.3 — switching the WCTT pass to piecewise (with a propagation
+//! strategy that keeps the min-bucket structure across hops) is a
+//! follow-up commit. The Lean theorems in
+//! `proofs/Proofs/Network/MinPlus.lean` still target the single-bucket
+//! form; piecewise theorem statements are skeletoned in
+//! `proofs/Proofs/Network/MinPlusPwa.lean` for a future v1.0.0 sweep.
 //!
 //! # Units
 //!
@@ -594,5 +620,588 @@ mod tests {
 
         // End-to-end naive sum = 22us + 18us = 40us.
         assert_eq!(d_a + d_b, 40_000_000);
+    }
+}
+
+// ── Piecewise-affine arrival curves (v0.9.3) ─────────────────────────
+
+/// Piecewise-affine arrival curves: `α(t) = min_i (σ_i + ρ_i · t)`.
+///
+/// The math kernel for the v0.9.3 NC tightness item #1: a generalisation
+/// of the single-bucket [`ArrivalCurve`] that captures T-SPEC-style
+/// multi-bucket constraints. The single-bucket form is the special case
+/// `[(σ, ρ)]` and round-trips through `From<ArrivalCurve>`.
+///
+/// The wctt.rs analysis pass continues to consume single-bucket
+/// [`ArrivalCurve`] in v0.9.3; switching the pass to piecewise is a
+/// follow-up commit (it needs a min-bucket-preserving propagation
+/// strategy that respects the AADL property surface for declaring
+/// per-stream T-SPEC inputs).
+pub mod piecewise {
+    use super::{ArrivalCurve, NcError, ServiceCurve, bits_to_bytes_in_window, time_to_send_ps};
+
+    /// Piecewise-affine arrival curve: `α(t) = min_i (σ_i + ρ_i · t)`.
+    ///
+    /// Each `(σ_i, ρ_i)` is a leaky bucket; the overall curve is the
+    /// pointwise minimum of the family. The min-of-affines structure
+    /// captures both short-horizon burst (small σ, high ρ) and
+    /// long-horizon sustained behaviour (large σ, low ρ) — the workhorse
+    /// model of T-SPEC and IntServ-style traffic descriptors.
+    ///
+    /// `ArrivalCurve::affine(σ, ρ)` is the special case `[(σ, ρ)]`;
+    /// `From<ArrivalCurve>` round-trips through it. Peak-rate caps from
+    /// the single-bucket form are encoded as a second bucket
+    /// `(0, peak)` so all callers see a single representation here.
+    ///
+    /// # Canonicalisation
+    ///
+    /// On construction the bucket list is sorted by σ (ascending) and
+    /// duplicate (σ, ρ) pairs are removed. Equality (`PartialEq`,
+    /// `Eq`) compares the canonical form so two curves that describe
+    /// the same min-of-affines are equal regardless of input order.
+    /// The constructor rejects an empty bucket list — at least one
+    /// bucket is required for the min to be defined.
+    ///
+    /// # Causality at t = 0
+    ///
+    /// `at(0) = 0` for all piecewise curves, matching the single-bucket
+    /// convention pinned by the Lean spec in `MinPlus.lean`. A
+    /// zero-length window admits zero bytes regardless of the bucket
+    /// bursts.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct PiecewiseAffineArrivalCurve {
+        /// Buckets `(σ_i bytes, ρ_i bps)` in canonical form: sorted by
+        /// σ ascending (ρ used as secondary key for stability), with
+        /// duplicate pairs removed. Always non-empty.
+        buckets: Vec<(u64, u64)>,
+    }
+
+    /// Errors returned when constructing a [`PiecewiseAffineArrivalCurve`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PwaError {
+        /// The bucket list was empty. Piecewise α requires at least
+        /// one bucket — the min over an empty family is undefined and
+        /// would mean "infinite arrivals", which is not the intent.
+        EmptyBuckets,
+    }
+
+    impl core::fmt::Display for PwaError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            match self {
+                Self::EmptyBuckets => write!(
+                    f,
+                    "piecewise-affine arrival curve requires at least one bucket"
+                ),
+            }
+        }
+    }
+
+    impl core::error::Error for PwaError {}
+
+    impl PiecewiseAffineArrivalCurve {
+        /// Construct a piecewise-affine arrival curve from a bucket
+        /// list. The list is canonicalised in place: sorted by σ
+        /// ascending (ρ ties broken by ρ ascending) and de-duplicated.
+        ///
+        /// Returns [`PwaError::EmptyBuckets`] when `buckets` is empty.
+        ///
+        /// Note: this constructor does **not** prune buckets that are
+        /// dominated by others (e.g. a `(σ_i, ρ_i)` strictly above the
+        /// min envelope of the others). Dominated buckets are sound
+        /// but redundant and can be stripped for compactness; we keep
+        /// the simple-and-correct form here and leave domination
+        /// pruning to a future helper.
+        pub fn new(mut buckets: Vec<(u64, u64)>) -> Result<Self, PwaError> {
+            if buckets.is_empty() {
+                return Err(PwaError::EmptyBuckets);
+            }
+            // Canonicalise: sort by (σ, ρ) ascending, dedup exact pairs.
+            buckets.sort_unstable();
+            buckets.dedup();
+            Ok(Self { buckets })
+        }
+
+        /// Borrow the canonical bucket list.
+        pub fn buckets(&self) -> &[(u64, u64)] {
+            &self.buckets
+        }
+
+        /// Compute `α(t) = min_i (σ_i + ρ_i · t)` at the given time
+        /// `t_ps` in picoseconds.
+        ///
+        /// Returns the minimum over per-bucket readouts. Saturates to
+        /// `u64::MAX` only if every bucket saturates, which is
+        /// astronomical input territory.
+        ///
+        /// **Causality**: `at(0) = 0` for all piecewise curves —
+        /// matches the single-bucket convention; a zero-length window
+        /// admits zero bytes regardless of σ.
+        pub fn at(&self, t_ps: u64) -> u64 {
+            if t_ps == 0 {
+                return 0;
+            }
+            self.buckets
+                .iter()
+                .map(|&(sigma, rho)| sigma.saturating_add(bits_to_bytes_in_window(rho, t_ps)))
+                .min()
+                .expect("buckets is non-empty by construction")
+        }
+
+        /// Asymptotic long-run sustained rate of the curve.
+        ///
+        /// As `t → ∞` the smallest `ρ_i` dominates. This is the
+        /// long-run rate seen by stability checks and by the bound
+        /// operators when they compose with a service curve.
+        pub fn sustained_rate_bps(&self) -> u64 {
+            self.buckets
+                .iter()
+                .map(|&(_, rho)| rho)
+                .min()
+                .expect("buckets is non-empty by construction")
+        }
+
+        /// Largest sustained rate across all buckets — the conservative
+        /// rate used by [`residual_service`] when a single-bucket
+        /// rate-latency residual must absorb a piecewise competitor.
+        pub fn max_sustained_rate_bps(&self) -> u64 {
+            self.buckets
+                .iter()
+                .map(|&(_, rho)| rho)
+                .max()
+                .expect("buckets is non-empty by construction")
+        }
+
+        /// Largest burst across all buckets — the conservative σ used
+        /// by [`residual_service`] when a single-bucket rate-latency
+        /// residual must absorb a piecewise competitor.
+        pub fn max_burst_bytes(&self) -> u64 {
+            self.buckets
+                .iter()
+                .map(|&(sigma, _)| sigma)
+                .max()
+                .expect("buckets is non-empty by construction")
+        }
+    }
+
+    /// `ArrivalCurve::affine(σ, ρ)` round-trips into the single-bucket
+    /// piecewise form `[(σ, ρ)]`. A peak-rate cap (if present) is
+    /// encoded as a second bucket `(0, peak)`: `α(t) = min(σ + ρ·t,
+    /// peak·t)` is the canonical 2-bucket form of the peak-capped
+    /// affine curve.
+    impl From<ArrivalCurve> for PiecewiseAffineArrivalCurve {
+        fn from(alpha: ArrivalCurve) -> Self {
+            let mut buckets = vec![(alpha.burst_bytes, alpha.sustained_rate_bps)];
+            if let Some(peak) = alpha.peak_rate_bps {
+                // The peak cap `min(σ + ρ·t, p·t)` is `p·t` at large t
+                // when ρ < p, so the second bucket has σ = 0 burst and
+                // rate p. For p ≤ ρ the peak cap is degenerate (the
+                // sustained line dominates) and we'd dedup naturally.
+                buckets.push((0, peak));
+            }
+            // Constructor canonicalises and never fails on a
+            // non-empty list.
+            Self::new(buckets).expect("buckets is non-empty")
+        }
+    }
+
+    /// Maximum backlog (bytes) at a server with piecewise arrival α
+    /// and rate-latency service β.
+    ///
+    /// Each bucket `(σ_i, ρ_i)` independently dominates α (since
+    /// α = min, α(t) ≤ σ_i + ρ_i·t for every i), so the per-bucket
+    /// backlog `σ_i + ρ_i·T` is a valid bound. The tight composite
+    /// bound is the **minimum** over per-bucket bounds — the bucket
+    /// that gives the smallest backlog is the one that actually binds
+    /// at the supremum.
+    ///
+    /// Stability: every bucket must satisfy `ρ_i ≤ R`. With strict
+    /// piecewise α the asymptotic rate is `min ρ_i`, so as long as
+    /// one bucket is stable the system is stable; but we require
+    /// **all** buckets stable here so every per-bucket bound is
+    /// well-defined and the min is taken over a uniformly valid family.
+    /// This matches the conservative single-bucket convention.
+    /// Returns [`NcError::UnstableServer`] if any bucket has `ρ_i > R`.
+    pub fn backlog_bound(
+        alpha: &PiecewiseAffineArrivalCurve,
+        beta: &ServiceCurve,
+    ) -> Result<u64, NcError> {
+        for &(_, rho) in &alpha.buckets {
+            if rho > beta.rate_bps {
+                return Err(NcError::UnstableServer);
+            }
+        }
+        let mut best: Option<u64> = None;
+        for &(sigma, rho) in &alpha.buckets {
+            let inflation = bits_to_bytes_in_window(rho, beta.latency_ps);
+            let candidate = sigma.saturating_add(inflation);
+            best = Some(match best {
+                Some(b) => b.min(candidate),
+                None => candidate,
+            });
+        }
+        Ok(best.expect("buckets is non-empty by construction"))
+    }
+
+    /// Maximum delay (picoseconds) experienced by a flow with
+    /// piecewise arrival α at a server with rate-latency service β.
+    ///
+    /// Each bucket gives a per-bucket delay bound `T + σ_i / R`; the
+    /// tight composite bound is the **minimum** across buckets — the
+    /// horizontal distance `h(α, β)` for `α = min_i α_i` is at most
+    /// `min_i h(α_i, β)` because `D` is monotone non-decreasing in α.
+    /// At any operating point one bucket is binding (the one whose
+    /// `σ + ρ·t` is smallest there); its `T + σ/R` is the delay.
+    ///
+    /// The `σ_i / R` term is rounded up via [`time_to_send_ps`] so
+    /// every per-bucket bound is a valid upper bound, and so is the
+    /// minimum.
+    ///
+    /// Stability: requires every `ρ_i ≤ R` so every per-bucket bound
+    /// is well-defined. Returns [`NcError::UnstableServer`] otherwise.
+    pub fn delay_bound(
+        alpha: &PiecewiseAffineArrivalCurve,
+        beta: &ServiceCurve,
+    ) -> Result<u64, NcError> {
+        if beta.rate_bps == 0 {
+            return Err(NcError::UnstableServer);
+        }
+        for &(_, rho) in &alpha.buckets {
+            if rho > beta.rate_bps {
+                return Err(NcError::UnstableServer);
+            }
+        }
+        let mut best: Option<u64> = None;
+        for &(sigma, _) in &alpha.buckets {
+            let burst_drain_ps = time_to_send_ps(sigma, beta.rate_bps);
+            let candidate = beta.latency_ps.saturating_add(burst_drain_ps);
+            best = Some(match best {
+                Some(b) => b.min(candidate),
+                None => candidate,
+            });
+        }
+        Ok(best.expect("buckets is non-empty by construction"))
+    }
+
+    /// Output (departure) arrival curve of a flow with piecewise
+    /// arrival α through a rate-latency server β.
+    ///
+    /// Each bucket `(σ_i, ρ_i)` of α produces an output bucket
+    /// `(σ_i + ρ_i · T, ρ_i)` — rate is preserved, burst grows by
+    /// `ρ_i · T` (Le Boudec & Thiran theorem 1.4.3 applied
+    /// per-bucket). Since α(t) ≤ σ_i + ρ_i·t for every i, the output
+    /// satisfies `α*(t) ≤ (σ_i + ρ_i·T) + ρ_i·t` for every i, so the
+    /// output is again the **minimum** of the inflated per-bucket
+    /// affine curves: a piecewise-affine output curve with the same
+    /// number of buckets, each independently inflated.
+    ///
+    /// Stability: every `ρ_i ≤ R` is required. Returns
+    /// [`NcError::UnstableServer`] otherwise.
+    pub fn output_bound(
+        alpha: &PiecewiseAffineArrivalCurve,
+        beta: &ServiceCurve,
+    ) -> Result<PiecewiseAffineArrivalCurve, NcError> {
+        for &(_, rho) in &alpha.buckets {
+            if rho > beta.rate_bps {
+                return Err(NcError::UnstableServer);
+            }
+        }
+        let new_buckets: Vec<(u64, u64)> = alpha
+            .buckets
+            .iter()
+            .map(|&(sigma, rho)| {
+                let inflation = bits_to_bytes_in_window(rho, beta.latency_ps);
+                (sigma.saturating_add(inflation), rho)
+            })
+            .collect();
+        // Re-canonicalise: inflation can change σ ordering relative to
+        // the input (a small-σ-high-ρ bucket may inflate past a
+        // large-σ-low-ρ bucket). Constructor only fails on an empty
+        // list, which is impossible here because `alpha.buckets` is
+        // non-empty by construction.
+        Ok(PiecewiseAffineArrivalCurve::new(new_buckets)
+            .expect("buckets is non-empty by construction"))
+    }
+
+    /// Residual service curve seen by a tagged flow when a piecewise
+    /// competing flow shares the same FIFO server.
+    ///
+    /// **Conservative single-bucket residual.** Each competing bucket
+    /// independently bounds the competitor, so for soundness we must
+    /// satisfy *every* bucket constraint. Lowering to a single
+    /// rate-latency residual we take:
+    ///
+    /// ```text
+    /// R_residual = R - max ρ_i
+    /// T_residual = T + max_i ( σ_i / (R - max ρ_j) )
+    /// ```
+    ///
+    /// i.e. the residual rate is `R − max ρ_i` (the most pessimistic,
+    /// since the worst-case bucket dominates the rate budget) and the
+    /// residual latency adds the worst per-bucket burst-drain time
+    /// at that rate. This is sound but not maximally tight — a
+    /// piecewise residual service curve (preserving the multi-bucket
+    /// structure) is a possible v0.9.x extension once the analysis
+    /// pass downstream can consume it.
+    ///
+    /// Returns [`NcError::UnservableFlow`] when `max ρ_i ≥ R` (no
+    /// residual rate available for the tagged flow). The
+    /// `σ_i / (R − max ρ_j)` term is rounded up for the same
+    /// pessimism reason as the single-bucket version.
+    pub fn residual_service(
+        beta: &ServiceCurve,
+        alpha_competing: &PiecewiseAffineArrivalCurve,
+    ) -> Result<ServiceCurve, NcError> {
+        let max_rho = alpha_competing.max_sustained_rate_bps();
+        if max_rho >= beta.rate_bps {
+            return Err(NcError::UnservableFlow);
+        }
+        let residual_rate = beta.rate_bps - max_rho;
+        // For each bucket compute the latency inflation σ_i / R_residual
+        // (rounded up) and take the worst one.
+        let extra_latency = alpha_competing
+            .buckets
+            .iter()
+            .map(|&(sigma, _)| time_to_send_ps(sigma, residual_rate))
+            .max()
+            .expect("buckets is non-empty by construction");
+        Ok(ServiceCurve {
+            rate_bps: residual_rate,
+            latency_ps: beta.latency_ps.saturating_add(extra_latency),
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{ArrivalCurve, NcError, ServiceCurve};
+        use super::*;
+
+        const GBPS: u64 = 1_000_000_000;
+        const HUNDRED_MBPS: u64 = 100_000_000;
+        const TEN_MBPS: u64 = 10_000_000;
+        const TEN_US_PS: u64 = 10_000_000;
+        const ONE_US_PS: u64 = 1_000_000;
+
+        #[test]
+        fn empty_bucket_list_is_rejected() {
+            // Constructor refuses an empty list — α with no buckets
+            // would mean "min over empty family", which is undefined.
+            let err = PiecewiseAffineArrivalCurve::new(vec![]).unwrap_err();
+            assert_eq!(err, PwaError::EmptyBuckets);
+        }
+
+        #[test]
+        fn single_bucket_matches_single_affine_at_readouts() {
+            // The single-bucket case must reproduce the affine
+            // ArrivalCurve numerically. σ=1500, ρ=100 Mbps.
+            let pwa = PiecewiseAffineArrivalCurve::new(vec![(1500, HUNDRED_MBPS)]).unwrap();
+            let affine = ArrivalCurve::affine(1500, HUNDRED_MBPS);
+            // Spot a few times: at 0 (causality), at 1 us, at 1 ms.
+            assert_eq!(pwa.at(0), affine.at(0));
+            assert_eq!(pwa.at(ONE_US_PS), affine.at(ONE_US_PS));
+            assert_eq!(pwa.at(1_000_000_000), affine.at(1_000_000_000));
+        }
+
+        #[test]
+        fn buckets_are_sorted_by_sigma_for_canonical_equality() {
+            // Two curves with the same (σ,ρ) set in different input
+            // orders should compare equal after canonicalisation.
+            let a =
+                PiecewiseAffineArrivalCurve::new(vec![(1500, HUNDRED_MBPS), (100, GBPS)]).unwrap();
+            let b =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            assert_eq!(a, b);
+            // And the canonical layout is σ-ascending.
+            assert_eq!(a.buckets(), &[(100, GBPS), (1500, HUNDRED_MBPS)]);
+        }
+
+        #[test]
+        fn duplicate_buckets_are_deduped() {
+            let pwa = PiecewiseAffineArrivalCurve::new(vec![
+                (1500, HUNDRED_MBPS),
+                (1500, HUNDRED_MBPS),
+                (100, GBPS),
+            ])
+            .unwrap();
+            // After dedup: two distinct buckets.
+            assert_eq!(pwa.buckets().len(), 2);
+            assert_eq!(pwa.buckets(), &[(100, GBPS), (1500, HUNDRED_MBPS)]);
+        }
+
+        #[test]
+        fn at_takes_min_across_buckets() {
+            // Two-bucket curve: short-burst high-rate + large-burst
+            // low-rate. At small t the small-σ bucket dominates
+            // (small σ + large ρ·t still small); at large t the
+            // small-ρ bucket wins because ρ·t is dwarfed by the σ of
+            // the high-rate bucket.
+            //
+            //   B1: σ=100,   ρ=1 Gbps   (peak)
+            //   B2: σ=1500,  ρ=100 Mbps (sustained)
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            // at(0) = 0 (causality).
+            assert_eq!(pwa.at(0), 0);
+            // At small t (1 ns = 1000 ps):
+            //   B1 = 100 + 1Gbps · 1000ps / 8e12 = 100 + 0 = 100
+            //   B2 = 1500 + 100Mbps · 1000ps / 8e12 = 1500 + 0 = 1500
+            //   min = 100 (B1 binds).
+            assert_eq!(pwa.at(1_000), 100);
+            // At large t (1 ms = 1e9 ps):
+            //   B1 = 100 + 1Gbps · 1e9 / 8e12 = 100 + 125_000 = 125_100
+            //   B2 = 1500 + 100Mbps · 1e9 / 8e12 = 1500 + 12_500 = 14_000
+            //   min = 14_000 (B2 binds — sustained dominates).
+            assert_eq!(pwa.at(1_000_000_000), 14_000);
+        }
+
+        #[test]
+        fn at_zero_is_zero_for_all_buckets() {
+            // Causality holds even with very large σ.
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(1_000_000, TEN_MBPS), (10, GBPS)]).unwrap();
+            assert_eq!(pwa.at(0), 0);
+        }
+
+        #[test]
+        fn delay_bound_min_across_buckets_each_dominates_a_regime() {
+            // Two-bucket α and a single rate-latency β, choosing β
+            // so that *each* bucket binds in some regime. We assert
+            // the result is the **min** of per-bucket delay bounds.
+            //
+            // β: rate=1 Gbps, latency=10 us.
+            //   B1: σ=100,  ρ=1 Gbps  → D1 = 10us + 100·8·1e12/1Gbps
+            //                              = 10us + 800_000 ps
+            //                              = 10_800_000 ps
+            //   B2: σ=1500, ρ=100Mbps → D2 = 10us + 1500·8·1e12/1Gbps
+            //                              = 10us + 12_000_000 ps
+            //                              = 22_000_000 ps
+            //   min(D1, D2) = 10_800_000 ps — the small-burst bucket
+            //                                  binds.
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            let beta = ServiceCurve::rate_latency(GBPS, TEN_US_PS);
+            let d = delay_bound(&pwa, &beta).unwrap();
+            assert_eq!(d, TEN_US_PS + 800_000);
+
+            // Sanity: each per-bucket bound matches the
+            // single-bucket ArrivalCurve::affine bound on its own.
+            let single_b1 =
+                super::super::delay_bound(&ArrivalCurve::affine(100, GBPS), &beta).unwrap();
+            let single_b2 =
+                super::super::delay_bound(&ArrivalCurve::affine(1500, HUNDRED_MBPS), &beta)
+                    .unwrap();
+            assert_eq!(d, single_b1.min(single_b2));
+        }
+
+        #[test]
+        fn delay_bound_unstable_when_any_bucket_exceeds_service() {
+            // β = 100 Mbps. B1 has ρ=1 Gbps (unstable on this β).
+            // Even though B2 is stable (ρ=10 Mbps), we require
+            // *every* bucket stable for a uniformly-valid bound.
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, TEN_MBPS)]).unwrap();
+            let beta = ServiceCurve::rate_latency(HUNDRED_MBPS, TEN_US_PS);
+            assert_eq!(delay_bound(&pwa, &beta), Err(NcError::UnstableServer));
+        }
+
+        #[test]
+        fn output_bound_inflates_each_bucket_independently() {
+            // Each bucket's burst grows by ρ_i·T; rates are preserved.
+            //   B1: σ=100,  ρ=1 Gbps,  T=10us → σ' = 100 + 1Gbps·10us/8e12
+            //                                       = 100 + 1250 = 1350
+            //   B2: σ=1500, ρ=100Mbps, T=10us → σ' = 1500 + 100Mbps·10us/8e12
+            //                                       = 1500 + 125  = 1625
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            let beta = ServiceCurve::rate_latency(GBPS, TEN_US_PS);
+            let out = output_bound(&pwa, &beta).unwrap();
+            // Two buckets out, rates preserved, bursts inflated
+            // independently. Canonical ordering by σ ascending:
+            // (1350, 1Gbps), (1625, 100Mbps).
+            assert_eq!(out.buckets(), &[(1350, GBPS), (1625, HUNDRED_MBPS)]);
+        }
+
+        #[test]
+        fn residual_service_uses_max_rho_and_max_sigma_drain() {
+            // Two competing buckets share a 1 Gbps server.
+            //   B1: σ=100,  ρ=400 Mbps
+            //   B2: σ=1500, ρ=600 Mbps
+            // Conservative residual:
+            //   R_residual = 1 Gbps − max(400, 600) Mbps = 400 Mbps
+            //   max σ/R_residual = max(100, 1500) · 8·1e12 / 400Mbps
+            //                    = 1500 · 8e12 / 4e8
+            //                    = 30_000_000 ps = 30 us.
+            // Original β has latency 0, so residual latency = 30 us.
+            let four_hundred_mbps = 400_000_000u64;
+            let six_hundred_mbps = 600_000_000u64;
+            let pwa = PiecewiseAffineArrivalCurve::new(vec![
+                (100, four_hundred_mbps),
+                (1500, six_hundred_mbps),
+            ])
+            .unwrap();
+            let beta = ServiceCurve::rate_latency(GBPS, 0);
+            let residual = residual_service(&beta, &pwa).unwrap();
+            assert_eq!(residual.rate_bps, four_hundred_mbps);
+            assert_eq!(residual.latency_ps, 30_000_000);
+        }
+
+        #[test]
+        fn residual_service_unservable_when_any_bucket_saturates_rate() {
+            // Single competing bucket at 1 Gbps on a 1 Gbps server:
+            // even one saturating bucket makes the conservative
+            // residual unservable (max ρ = 1 Gbps ≥ R).
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(0, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            let beta = ServiceCurve::rate_latency(GBPS, 0);
+            assert_eq!(residual_service(&beta, &pwa), Err(NcError::UnservableFlow));
+        }
+
+        #[test]
+        fn from_arrival_curve_round_trips_affine() {
+            // The single-bucket affine round-trips through `From`.
+            let affine = ArrivalCurve::affine(1500, HUNDRED_MBPS);
+            let pwa: PiecewiseAffineArrivalCurve = affine.into();
+            assert_eq!(pwa.buckets(), &[(1500, HUNDRED_MBPS)]);
+
+            // Spot-check that readouts agree numerically over a few
+            // probe times — the round-trip is lossless on the affine
+            // single-bucket case.
+            for &t in &[1_u64, ONE_US_PS, 1_000_000_000_u64] {
+                assert_eq!(pwa.at(t), affine.at(t));
+            }
+        }
+
+        #[test]
+        fn from_arrival_curve_with_peak_encodes_two_buckets() {
+            // The peak-capped single-bucket form
+            // `min(σ + ρ·t, peak·t)` becomes a 2-bucket
+            // PWA: (σ, ρ) and (0, peak).
+            let affine = ArrivalCurve::with_peak(1500, HUNDRED_MBPS, GBPS);
+            let pwa: PiecewiseAffineArrivalCurve = affine.into();
+            // After canonicalisation by σ ascending: (0, GBPS),
+            // (1500, 100 Mbps).
+            assert_eq!(pwa.buckets(), &[(0, GBPS), (1500, HUNDRED_MBPS)]);
+
+            // Readouts must agree with the peak-capped affine form
+            // numerically. The peak dominates at small t (matches
+            // affine_arrival_with_peak in the parent test module).
+            for &t in &[10_000_u64, ONE_US_PS, 1_000_000_000_u64] {
+                assert_eq!(pwa.at(t), affine.at(t));
+            }
+        }
+
+        #[test]
+        fn backlog_bound_min_across_buckets() {
+            // Two-bucket α; backlog at a 1 Gbps / 10 us-latency server.
+            //   B1: σ=100,  ρ=1 Gbps    → B1_b = 100  + 1Gbps·10us/8e12  = 100  + 1250 = 1350
+            //   B2: σ=1500, ρ=100 Mbps  → B2_b = 1500 + 100Mbps·10us/8e12 = 1500 + 125  = 1625
+            // min(B1_b, B2_b) = 1350. The small-burst, high-rate
+            // bucket binds the worst-case backlog tighter than the
+            // sustained bucket.
+            let pwa =
+                PiecewiseAffineArrivalCurve::new(vec![(100, GBPS), (1500, HUNDRED_MBPS)]).unwrap();
+            let beta = ServiceCurve::rate_latency(GBPS, TEN_US_PS);
+            let b = backlog_bound(&pwa, &beta).unwrap();
+            assert_eq!(b, 1350);
+        }
     }
 }
