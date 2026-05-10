@@ -2410,3 +2410,22 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-RTA-010
+
+  - id: TEST-TRACE-TOPOLOGY-LLDP
+    type: feature
+    title: LldpJsonTopologySource yields correct typed LldpNeighbors
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover the
+      array and single-object interface shapes, multi-neighbor
+      lists, chassis-id type preservation across mac/local/etc.,
+      malformed-JSON error path, and file-open via a tempfile
+      roundtrip.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, lldp, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-004

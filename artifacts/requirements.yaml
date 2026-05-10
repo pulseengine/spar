@@ -1847,4 +1847,20 @@ artifacts:
     status: implemented
     tags: [rta, timing, isr, v093, tier-a-5]
 
+  - id: REQ-TRACE-TOPOLOGY-004
+    type: requirement
+    title: LLDP JSON TopologySource for runtime adjacency ingest
+    description: >
+      System shall provide an `lldpctl -f json`-backed
+      TopologySource implementation in spar-trace-topology that,
+      given a JSON dump produced by lldpd's `lldpctl -f json`, yields
+      a list of LldpNeighbor records carrying local_port, typed
+      remote_chassis_id (with id type), typed remote_port_id (with id
+      type), and optional remote_system_name. Handles both the
+      single-interface object form and the multi-interface array
+      form lldpd emits. Per the v0.10.0 trace-topology design's
+      §"Implementation phasing" LLDP entry.
+    status: implemented
+    tags: [trace-topology, ingest, lldp, v0100]
+
   # Research findings tracked separately in research/findings.yaml

@@ -41,3 +41,5 @@ pub mod identity;
 pub mod ingest;
 pub mod reconcile;
 pub mod report;
+
+pub use ingest::{LldpJsonTopologySource, LldpNeighbor, TopologySource};
