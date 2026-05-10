@@ -4,6 +4,93 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] — 2026-05-03
+
+Honesty + tightness pass. Closes the post-v0.9.0 reviewer's NC top-5
+items #4 and #13, three Tier-A soundness items (#5/#6/#9), the CBS
+hi/loCredit user-tunability gap (#8), and the Lean/Rust α(0)
+spec-impl mismatch (#2). Plus org-wide CI concurrency control and the
+v0.8.x nightly-CI workflow fix.
+
+### Added — NC kernel honesty (4 PRs)
+
+- **α(0) = 0 causality fix (#193)** — Rust `ArrivalCurve::at` short-
+  circuited to return `σ` at t=0; Lean spec said `min(σ,0) = 0`.
+  Aligned to the causal answer (no traffic before t=0). Discharged
+  the 5th `MinPlus.lean` sorry; sorry count 5 → 4.
+- **`Spar_TSN::Hi_Credit` + `Lo_Credit` user-tunable CBS (#195)** —
+  v0.8.1 hardcoded both credits to `Max_Frame_Size` regardless of
+  what the model declared. Real Qcc/YANG configs carry these per
+  traffic class. Property count 129 → 131. Default unset →
+  byte-identical to v0.8.1/v0.9.1. New `WcttCbsCredit` Info
+  diagnostic when at least one credit is explicit. Reviewer
+  Tier A #8.
+- **WCTT per-stream sensitivity output (#196)** — every `WcttBound`
+  Info now followed by a `WcttSensitivity` Info carrying worst-hop
+  partial derivatives ∂σ_self / ∂ρ_competing / ∂T_link. Pure
+  post-processing on closed-form derivatives. Reviewer NC top-5
+  #13: cheapest workflow win, turns spar from judge into design
+  partner.
+- **RTA→WCTT release-jitter coupling (#199)** — when a stream's
+  source declares `Timing_Properties::Dispatch_Jitter`, that value
+  J is treated as ingress release-jitter and inflates the arrival
+  burst σ by `ρ·J` bytes. New `WcttRtaCoupled` Info diagnostic.
+  Reviewer NC top-5 #4: single biggest credibility lift.
+
+### Added — RTA / safety soundness (2 PRs)
+
+- **Stop_For_Lock + ARINC severity (#197)** — (a) RTA emits a
+  Warning when a thread declares `Locking_Protocol => Stop_For_Lock`
+  but no `Critical_Section_Blocking` (was silently using B=0,
+  unsound under priority inversion); (b) `ARINC-PARTITION-ISOLATION`
+  promoted from Warning to Error per DO-297 spatial-isolation
+  invariant; new `spar analyze --allow arinc-partition-isolation`
+  CLI flag for legitimate IMA bypasses. Reviewer Tier A #6 + #9.
+- **Context_Switch_Time in RTA recurrence (#198)** — v0.8.x emitted
+  a STPA-REQ-022 advisory if `Context_Switch_Time` was unset but
+  never folded the value into the recurrence when set. Now inflates
+  each thread's WCET by `2 × Context_Switch_Time` per Buttazzo §7
+  (one preemption-in + one preemption-out). New `OverheadInflation`
+  Info diagnostic. Lean recurrence theorem unchanged (caller-side
+  inflation). Reviewer Tier A #5 (partial — `Interrupt_Overhead`
+  per ISR firing still deferred).
+
+### Added — CI infrastructure (2 PRs)
+
+- **CI concurrency control (#200)** — top-level `concurrency:` block
+  on every workflow. Cancel superseded PR runs aggressively; never
+  cancel main / tags / scheduled events. Variant per workflow:
+  default for `ci.yml` + `proofs.yml`, scheduled (per-run group)
+  for `bench-nightly.yml` + `fuzz-nightly.yml`, release (group by
+  tag, never cancel) for `release.yml`. Per the org-wide CI
+  hardening brief.
+- **Nightly fuzz + bench fixes (#194)** — both nightly workflows
+  had failed since 2026-04-24 introduction. Fuzz: add
+  `--target x86_64-unknown-linux-gnu` to avoid the cargo-fuzz musl
+  / ASan conflict. Bench: gate `solver_worst_case/milp/worst_64`
+  behind `SPAR_BENCH_SLOW_MILP=1` env var; add `timeout-minutes: 60`
+  ceiling.
+
+### Changed
+
+- COMPLIANCE.md narrative for v0.9.2.
+- Test count: 2790+ across 19 crates (was 2772 at v0.9.1).
+- Property count: 129 → 131 (Spar_TSN::Hi_Credit + Lo_Credit).
+
+### Deferred
+
+- `Interrupt_Overhead` per ISR firing in RTA recurrence — Tier A
+  #5 partial close-out; companion to v0.9.2 `Context_Switch_Time`.
+- Full RTA→WCTT automatic propagation (consume RTA's *computed*
+  `response_time` directly without requiring user-declared
+  `Dispatch_Jitter`).
+- `MinPlus.lean` 4 remaining sorrys (`backlog_bound_classical`,
+  `delay_bound_classical`, `output_dominates_input`,
+  `compose_delays_dominates`) — tracked as TODO(v1.0.0).
+- Kani harness production-code wiring (Tier A #3).
+
+---
+
 ## [0.9.1] — 2026-04-29
 
 NC kernel soundness pass. Fixes two pure-soundness gaps flagged by an

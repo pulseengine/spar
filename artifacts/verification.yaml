@@ -2078,6 +2078,53 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-010
 
+  - id: TEST-NC-PIECEWISE
+    type: feature
+    title: Piecewise-affine arrival curve unit tests (T-SPEC multi-bucket)
+    description: >
+      14 unit tests in
+      `crates/spar-network/src/curves.rs::piecewise::tests` exercise
+      the v0.9.3 `PiecewiseAffineArrivalCurve` primitive and its four
+      operators alongside the existing single-bucket
+      `ArrivalCurve`-targeted tests. Coverage:
+      (1) constructor rejects empty bucket lists;
+      (2) single-bucket case matches `ArrivalCurve::affine` numerically
+      at three probe times;
+      (3) input bucket order is canonicalised to σ-ascending so equal
+      curves compare equal regardless of declaration order;
+      (4) duplicate `(σ, ρ)` pairs are deduped on construction;
+      (5) `at(t)` takes the min across buckets — small-σ-high-ρ binds
+      at small t, small-ρ binds at large t in a 2-bucket curve;
+      (6) `at(0) = 0` causality holds even with very large σ;
+      (7) `delay_bound` returns the min across per-bucket bounds and
+      the chosen R lets each bucket dominate one regime — verified to
+      equal `min(single_bucket_delay_b1, single_bucket_delay_b2)`;
+      (8) any unstable bucket (`ρ_i > R`) makes the whole curve
+      unstable;
+      (9) `output_bound` preserves rates and inflates each bucket's
+      burst by `ρ_i · T` independently (canonical 2-bucket PWA out);
+      (10) `residual_service` uses `R - max ρ_i` and the worst per-bucket
+      burst-drain time at that residual rate;
+      (11) any saturating competing bucket makes the residual
+      unservable;
+      (12) `From<ArrivalCurve>` round-trips the affine single-bucket
+      case losslessly across three probe times;
+      (13) `From<ArrivalCurve>` lowers the peak-capped form to a
+      2-bucket PWA `(σ, ρ), (0, peak)` and readouts agree numerically;
+      (14) `backlog_bound` returns the min across per-bucket
+      backlog bounds (the small-burst-high-rate bucket binds tighter
+      than the sustained bucket on the same server). Per the
+      post-v0.9.2 reviewer's NC top-5 #1.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- curves::piecewise
+    status: passing
+    tags: [v0.9.3, network, wctt, network-calculus, piecewise]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-013
+
   - id: TEST-RTA-SOUNDNESS-V092
     type: feature
     title: RTA Stop_For_Lock warning + ARINC severity escape hatch
@@ -2152,6 +2199,53 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-RTA-008
+
+  - id: TEST-WCTT-SENSITIVITY
+    type: feature
+    title: WCTT per-stream sensitivity output (∂σ, ∂ρ_c, ∂T)
+    description: >
+      Verifies that every `WcttBound` Info diagnostic is followed by
+      a `WcttSensitivity` Info diagnostic carrying the three
+      worst-hop partial derivatives. The fixture
+      `tests/fixtures/wctt/classical_ethernet` exercises the new
+      diagnostic on a 1 Gbps single-hop scenario; the sensitivity
+      values (∂σ_self = 8 ns/B at 900 Mbps residual, ∂T_link = 1
+      ns/ns for a single hop) are pinned in the .expected.json
+      golden file. wctt unit tests confirm the diagnostic does NOT
+      fire when all hops were deferred / unservable.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- wctt
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.9.2, network, wctt, sensitivity]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-012
+
+  - id: TEST-WCTT-RTA-COUPLING
+    type: feature
+    title: WCTT consumes Dispatch_Jitter as release-jitter for ρ·J burst inflation
+    description: >
+      Verifies the v0.9.2 RTA→WCTT release-jitter coupling.
+      `rta_wctt_dispatch_jitter_inflates_burst_and_emits_diagnostic`
+      builds a 1 Gbps single-hop model with the source declaring
+      `Timing_Properties::Dispatch_Jitter => 100 us`; expects the
+      `WcttRtaCoupled` Info diagnostic to fire naming the
+      jitter_ns and the ρ·J = 12500 byte inflation.
+      `no_dispatch_jitter_no_coupling_diagnostic` confirms the
+      diagnostic does NOT fire when the property is unset.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta_wctt
+        - run: cargo test -p spar-analysis --lib -- no_dispatch_jitter
+    status: passing
+    tags: [v0.9.2, network, wctt, rta, coupling]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-011
 
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature

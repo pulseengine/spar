@@ -1632,6 +1632,74 @@ artifacts:
     status: implemented
     tags: [network, tsn, cbs, wctt, v092]
 
+  - id: REQ-NETWORK-012
+    type: requirement
+    title: WCTT sensitivity output (∂σ_self, ∂ρ_competing, ∂T_link)
+    description: >
+      For each `WcttBound` Info diagnostic the `WcttAnalysis` pass also
+      emits a `WcttSensitivity` Info diagnostic carrying worst-hop
+      partial derivatives at the operating point: ∂WCTT/∂σ_self
+      (ps per byte of self-burst, dominated by the worst hop's
+      residual service rate), ∂WCTT/∂ρ_competing (ps per bps of
+      competing rate, σ/(R-ρ)² at the worst hop), and ∂WCTT/∂T_link
+      (chain-rule passthrough = number of hops). Pure post-processing
+      on the existing closed-form delay/output bounds — no new bounds
+      math, no impact on `WcttBound` numeric output. Per the
+      post-v0.9.0 reviewer's NC top-5 #13: cheapest workflow win,
+      turns spar from judge into design partner.
+    status: implemented
+    tags: [network, wctt, sensitivity, v092]
+
+  - id: REQ-NETWORK-013
+    type: requirement
+    title: Piecewise-affine arrival curves (T-SPEC multi-bucket)
+    description: >
+      v0.9.3 adds a `PiecewiseAffineArrivalCurve` Network Calculus
+      primitive alongside the existing single-bucket `ArrivalCurve`.
+      The piecewise form encodes T-SPEC-style multi-leaky-bucket
+      constraints `α(t) = min_i (σ_i + ρ_i · t)` — capturing both
+      short-horizon burst (small σ, high ρ) and long-horizon sustained
+      behaviour (large σ, low ρ) in a single curve. The four operators
+      (`backlog_bound`, `delay_bound`, `output_bound`,
+      `residual_service`) extend per-bucket: backlog/delay take the
+      min over per-bucket bounds (the binding bucket determines the
+      bound at any operating point), output bound preserves the
+      piecewise structure with each bucket inflated independently
+      (Le Boudec & Thiran 1.4.3 applied per-bucket), and residual
+      service lowers conservatively to a single rate-latency curve
+      using `R - max ρ_i` and the worst per-bucket burst-drain time.
+      `From<ArrivalCurve>` round-trips the single-bucket case; the
+      peak-capped affine form lowers to a 2-bucket PWA. wctt.rs
+      consumers continue to use `ArrivalCurve` for v0.9.3 (no test
+      bound changes); switching the WCTT propagation to piecewise is
+      a follow-up commit. Lean theorems on the piecewise form are
+      skeletoned in `proofs/Proofs/Network/MinPlusPwa.lean` for a
+      future v1.0.0 sweep — `MinPlus.lean` (the single-bucket spec)
+      is unchanged. Per the post-v0.9.2 reviewer's NC top-5 #1: the
+      highest-leverage tightness item; typically halves bounds on
+      real ADAS traffic.
+    status: implemented
+    tags: [network, wctt, network-calculus, piecewise, v093]
+
+  - id: REQ-NETWORK-011
+    type: requirement
+    title: RTA→WCTT release-jitter coupling
+    description: >
+      v0.9.2 closes the RTA↔WCTT loop the post-v0.9.0 reviewer flagged
+      as the single biggest credibility lift (NC top-5 #4): when a
+      WCTT stream's source end station declares
+      `Timing_Properties::Dispatch_Jitter`, that value is treated as
+      ingress release-jitter J and inflates the arrival burst by
+      `ρ·J` bytes (ceiling-rounded so the bound is never under-
+      estimated). New `WcttRtaCoupled` Info diagnostic per stream
+      echoes the (jitter_ps, jitter_burst_bytes) pair. Default unset
+      = 0 → byte-identical to v0.8.1 / v0.9.1. The full automatic
+      coupling (consume RTA's *computed* response_time directly
+      without requiring the user to propagate via Dispatch_Jitter)
+      is a v0.9.x follow-up.
+    status: implemented
+    tags: [network, wctt, rta, coupling, v092]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
