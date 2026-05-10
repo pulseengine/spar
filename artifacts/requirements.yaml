@@ -1833,4 +1833,18 @@ artifacts:
     status: planned
     tags: [trace-topology, track-g, v0100, crate]
 
+  - id: REQ-RTA-010
+    type: requirement
+    title: Interrupt_Overhead folds into ISR WCET (Tier A #5 cont.)
+    description: >
+      System shall fold the `Spar_Timing::Interrupt_Overhead` property
+      into each ISR's effective WCET as 1× per firing — vector dispatch,
+      ISR-context save/restore, EOI ack — when computing RTA. Mirrors the
+      `Context_Switch_Time` 2× inflation for tasks (REQ-RTA-009 / PR
+      #198) but applied 1× because the ISR pays this cost once per
+      firing, not twice. Closes the Tier A #5 reviewer follow-up after
+      v0.9.2's task-side context-switch fix.
+    status: implemented
+    tags: [rta, timing, isr, v093, tier-a-5]
+
   # Research findings tracked separately in research/findings.yaml
