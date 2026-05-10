@@ -1700,6 +1700,29 @@ artifacts:
     status: implemented
     tags: [network, wctt, rta, coupling, v092]
 
+  - id: REQ-NETWORK-014
+    type: requirement
+    title: PMOO/LUDB bound for tree-shaped multiplexing
+    description: >
+      v0.9.3 adds an opt-in Pay-Multiplexing-Only-Once / Bisti-LUDB
+      ("Linear Upper Delay Bound") path in `spar-network::pmoo` that
+      the `WcttAnalysis` pass invokes when (a) the stream's tandem is
+      composed entirely of FIFO/Priority switches, (b) every other
+      stream that crosses any hop on the tandem does so on a contiguous
+      sub-path (PMOO precondition), and (c) ≥ 2 such competing flows
+      exist (otherwise PMOO ≡ SFA). The LP is set up via `good_lp` with
+      the HiGHS backend already vendored for the deployment solver;
+      on infeasibility (`Σ ρ ≥ R_h` at any hop) we silently fall back
+      to per-hop SFA. New `WcttPmooBound` Info diagnostic reports the
+      method (=ludb), the PMOO delay, the SFA delay for comparison,
+      the percentage tightening, and the LP solve time. Closes the
+      external reviewer's NC top-5 #2 (credibility gap with RTaW-Pegase):
+      typical 30-60% tightening on automotive zonal aggregations,
+      observed 23-27% on the in-tree fixtures. CLI `--pmoo` flag opts
+      in; default off → byte-identical to v0.9.2.
+    status: implemented
+    tags: [network, wctt, pmoo, ludb, lp, v093]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
@@ -1761,5 +1784,53 @@ artifacts:
       design.
     status: implemented
     tags: [mcp, migration, track-e, v090, integration]
+
+  # ── Track G — v0.10.0 trace-topology foundation ──────────────────────
+
+  - id: REQ-TRACE-TOPOLOGY-001
+    type: requirement
+    title: Spar_Identity property surface
+    description: >
+      System shall expose a Spar_Identity property set that lets
+      AADL declare runtime-observable identities for the v0.10.0+
+      `spar trace topology` reconciler. The set carries six
+      properties: MAC_Address (aadlstring; device, processor),
+      VLAN_ID (aadlinteger 0 .. 4094; connection, bus),
+      Stream_Handle (aadlinteger; connection), Multicast_Group
+      (aadlstring; connection), LLDP_Chassis_Id (aadlstring;
+      device, processor, bus), and LLDP_Port_Id (aadlstring; bus
+      access feature). The set is registered as a predefined
+      (non-AS5506) property set so AADL annotations resolve without
+      explicit `with` imports, mirroring Spar_TSN, Spar_Network,
+      Spar_Migration, and Spar_Power. Per the v0.10.0 trace-topology
+      foundation design (docs/designs/v0.10.0-trace-topology.md §3).
+    status: planned
+    tags: [trace-topology, track-g, v0100, properties]
+
+  - id: REQ-TRACE-TOPOLOGY-002
+    type: requirement
+    title: spar-trace-topology crate skeleton
+    description: >
+      System shall expose a spar-trace-topology crate carrying the
+      foundation surface for runtime/declared topology
+      reconciliation. v0.10.0 ships four modules: `identity` (typed
+      accessors for the six Spar_Identity properties, typed-first
+      / string-fallback per the existing Spar_TSN pattern),
+      `ingest` (placeholder traits FrameSource / TopologySource /
+      SwitchConfigSource / PtpTimeSource for the v0.10.x parsers),
+      `reconcile` (ReconcileFinding enum with the five
+      deterministic check kinds — IdentityUnknown,
+      TopologyMissingWiring, ConfigDrift, GptpOutOfBudget,
+      BinaryMismatch), and `report` (TopologyReport struct
+      aggregating findings). v0.10.0 ships no real parsing, no
+      reconciliation logic, no SARIF emission, and no in-toto
+      attestation; those land in v0.10.x sibling commits and
+      v0.11.0 / v1.0 respectively per the design doc's
+      §"Implementation phasing". The in-toto attestation predicate
+      URL is `https://pulseengine.eu/spar-trace-topology/v1`. Per
+      docs/designs/v0.10.0-trace-topology.md and the companion
+      external-integrator contract docs/contracts/spar-trace-topology-v1.md.
+    status: planned
+    tags: [trace-topology, track-g, v0100, crate]
 
   # Research findings tracked separately in research/findings.yaml

@@ -1346,6 +1346,7 @@ dependencies = [
 name = "spar-network"
 version = "0.9.2"
 dependencies = [
+ "good_lp",
  "spar-base-db",
  "spar-hir-def",
 ]
@@ -1403,6 +1404,16 @@ dependencies = [
  "rowan",
  "smol_str",
  "spar-hir-def",
+]
+
+[[package]]
+name = "spar-trace-topology"
+version = "0.9.2"
+dependencies = [
+ "spar-base-db",
+ "spar-hir-def",
+ "spar-syntax",
+ "tempfile",
 ]
 
 [[package]]
