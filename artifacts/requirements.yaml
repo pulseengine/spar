@@ -1879,4 +1879,20 @@ artifacts:
     status: implemented
     tags: [trace-topology, ingest, pcapng, v0100]
 
+  - id: REQ-TRACE-TOPOLOGY-006
+    type: requirement
+    title: gPTP JSON PtpTimeSource for sync-error sample ingest
+    description: >
+      System shall provide a JSON-backed PtpTimeSource implementation
+      in spar-trace-topology that, given a gPTP-shaped JSON dump
+      (typically produced by a wrapper around `pmc -u -b 0` queries or
+      `ptp4l` summary logs), yields the grandmaster identity, PTP
+      domain, and per-port sample streams of (timestamp_ns,
+      sync_error_ns). Sync-error samples are unsigned magnitudes —
+      producers must pre-`abs()` signed offsets before serializing.
+      Errors carry a concrete MalformedPtpJson kind. Per the v0.10.0
+      trace-topology design's §"Implementation phasing" gPTP entry.
+    status: implemented
+    tags: [trace-topology, ingest, gptp, sync, v0100]
+
   # Research findings tracked separately in research/findings.yaml

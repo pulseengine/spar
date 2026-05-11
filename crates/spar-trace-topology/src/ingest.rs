@@ -12,7 +12,10 @@
 //!   yields [`LldpNeighbor`] records carrying local_port + typed
 //!   remote chassis-id / port-id / system-name.
 //! - **Qcc YANG** ([`SwitchConfigSource`]) — placeholder, sibling commit.
-//! - **gPTP** ([`PtpTimeSource`]) — placeholder, sibling commit.
+//! - **gPTP** ([`GptpJsonPtpTimeSource`]) — implemented in v0.10.x B-5.
+//!   Parses a JSON sync-error dump (typically produced by a wrapper
+//!   around `pmc` or `ptp4l`); yields per-port `PtpSample` streams that
+//!   the reconciler compares against `Spar_TSN::Sync_Error`.
 //!
 //! See `docs/designs/v0.10.0-trace-topology.md` §"Implementation
 //! phasing" for the per-source roadmap.
@@ -77,19 +80,43 @@ pub trait SwitchConfigSource {
         Self: Sized;
 }
 
+/// One observed gPTP sync-error sample for a single port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtpSample {
+    /// Sample timestamp in ns since Unix epoch (as reported by the
+    /// gPTP stack / pmc client).
+    pub timestamp_ns: u64,
+    /// Magnitude of the sync error in nanoseconds (callers must
+    /// pre-`abs()` signed offsets before serializing).
+    pub sync_error_ns: u64,
+}
+
+/// Per-port gPTP-sample stream parsed from a JSON dump.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PtpPortObservation {
+    /// Local interface name (e.g. `eth0`).
+    pub name: String,
+    /// Time-ordered list of sync-error samples for this port. May be
+    /// empty when the dump recorded the port but observed no samples.
+    pub samples: Vec<PtpSample>,
+}
+
 /// Source of gPTP / IEEE 802.1AS synchronization-error observations
 /// over the capture window — typically `ptp4l` summary logs, `pmc`
 /// JSON dumps, or CTF events emitted by a Linux/Zephyr gPTP stack.
 ///
-/// TODO(v0.10.0+): real parser — IEEE 802.1AS-2020. The reconciler
-/// uses these readings to evaluate the `GptpOutOfBudget` check
-/// against `Spar_TSN::Sync_Error`. See design doc §"Input artefact
-/// set" §gPTP.
+/// v0.10.x B-5 ships a concrete [`GptpJsonPtpTimeSource`] backed by
+/// a JSON dump shaped per the design doc's §"Input artefact set" gPTP
+/// entry. The reconciler uses these readings to evaluate the
+/// `GptpOutOfBudget` check against `Spar_TSN::Sync_Error`.
 pub trait PtpTimeSource {
-    /// Open the gPTP-time source at `path`. v0.10.0 placeholder.
-    fn open(path: &Path) -> Result<Self, IngestError>
-    where
-        Self: Sized;
+    /// Grandmaster clock identity (e.g. `"00:1b:21:ff:fe:01:02:03"`)
+    /// if the dump recorded it.
+    fn grandmaster(&self) -> Option<&str>;
+    /// PTP domain number (typically 0 or 20 for 802.1AS) if recorded.
+    fn domain(&self) -> Option<u8>;
+    /// Borrow the per-port sample streams.
+    fn ports(&self) -> &[PtpPortObservation];
 }
 
 /// One LLDP-observed adjacency. The local-port end is identified by
@@ -293,6 +320,200 @@ fn type_name(v: &serde_json::Value) -> &'static str {
     }
 }
 
+/// JSON-backed [`PtpTimeSource`] carrying per-port gPTP sync-error
+/// samples.
+///
+/// The expected JSON shape is:
+///
+/// ```json
+/// {
+///   "gptp": {
+///     "grandmaster": "00:1b:21:ff:fe:01:02:03",
+///     "domain": 0,
+///     "ports": [
+///       {
+///         "name": "eth0",
+///         "samples": [
+///           {"timestamp_ns": 1700000000000000000, "sync_error_ns": 250}
+///         ]
+///       }
+///     ]
+///   }
+/// }
+/// ```
+///
+/// `grandmaster` and `domain` are optional; `ports` is required (but
+/// may be empty). Each `samples[].sync_error_ns` is parsed as a
+/// non-negative `u64` — callers must pre-`abs()` signed offsets before
+/// serializing, and negative values are rejected with
+/// [`IngestError::MalformedPtpJson`].
+#[derive(Debug, Clone)]
+pub struct GptpJsonPtpTimeSource {
+    grandmaster: Option<String>,
+    domain: Option<u8>,
+    ports: Vec<PtpPortObservation>,
+}
+
+impl GptpJsonPtpTimeSource {
+    /// Open and parse a gPTP JSON dump from `path`.
+    pub fn open(path: &Path) -> Result<Self, IngestError> {
+        let s = std::fs::read_to_string(path)?;
+        Self::from_json_str(&s)
+    }
+
+    /// Parse a gPTP JSON dump from an in-memory string.
+    pub fn from_json_str(s: &str) -> Result<Self, IngestError> {
+        let v: serde_json::Value = serde_json::from_str(s)
+            .map_err(|e| IngestError::MalformedPtpJson(format!("invalid JSON: {e}")))?;
+
+        let gptp = v.get("gptp").ok_or_else(|| {
+            IngestError::MalformedPtpJson("missing top-level `gptp` key".to_string())
+        })?;
+
+        let grandmaster = gptp
+            .get("grandmaster")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+
+        let domain = match gptp.get("domain") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => {
+                let n = v.as_u64().ok_or_else(|| {
+                    IngestError::MalformedPtpJson(format!(
+                        "`gptp.domain` must be a non-negative integer, got {}",
+                        type_name(v)
+                    ))
+                })?;
+                if n > u64::from(u8::MAX) {
+                    return Err(IngestError::MalformedPtpJson(format!(
+                        "`gptp.domain` {n} exceeds u8 range"
+                    )));
+                }
+                Some(n as u8)
+            }
+        };
+
+        let ports_value = gptp.get("ports").ok_or_else(|| {
+            IngestError::MalformedPtpJson("missing `gptp.ports` array".to_string())
+        })?;
+        let ports_arr = ports_value.as_array().ok_or_else(|| {
+            IngestError::MalformedPtpJson(format!(
+                "`gptp.ports` must be an array, got {}",
+                type_name(ports_value)
+            ))
+        })?;
+
+        let mut ports = Vec::with_capacity(ports_arr.len());
+        for (idx, port) in ports_arr.iter().enumerate() {
+            ports.push(parse_ptp_port(port, idx)?);
+        }
+
+        Ok(Self {
+            grandmaster,
+            domain,
+            ports,
+        })
+    }
+}
+
+impl PtpTimeSource for GptpJsonPtpTimeSource {
+    fn grandmaster(&self) -> Option<&str> {
+        self.grandmaster.as_deref()
+    }
+    fn domain(&self) -> Option<u8> {
+        self.domain
+    }
+    fn ports(&self) -> &[PtpPortObservation] {
+        &self.ports
+    }
+}
+
+fn parse_ptp_port(port: &serde_json::Value, idx: usize) -> Result<PtpPortObservation, IngestError> {
+    let name = port
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            IngestError::MalformedPtpJson(format!("`gptp.ports[{idx}]` missing `name` string"))
+        })?
+        .to_string();
+
+    let samples_value = port.get("samples").ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{idx}]` ({name}) missing `samples` array"
+        ))
+    })?;
+    let samples_arr = samples_value.as_array().ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{idx}]` ({name}) `samples` must be an array, got {}",
+            type_name(samples_value)
+        ))
+    })?;
+
+    let mut samples = Vec::with_capacity(samples_arr.len());
+    for (s_idx, sample) in samples_arr.iter().enumerate() {
+        samples.push(parse_ptp_sample(sample, &name, s_idx)?);
+    }
+
+    Ok(PtpPortObservation { name, samples })
+}
+
+fn parse_ptp_sample(
+    sample: &serde_json::Value,
+    port_name: &str,
+    s_idx: usize,
+) -> Result<PtpSample, IngestError> {
+    let ts_value = sample.get("timestamp_ns").ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{port_name}].samples[{s_idx}]` missing `timestamp_ns`"
+        ))
+    })?;
+    let timestamp_ns = ts_value.as_u64().ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{port_name}].samples[{s_idx}].timestamp_ns` must be a \
+             non-negative integer, got {}",
+            type_name(ts_value)
+        ))
+    })?;
+
+    let err_value = sample.get("sync_error_ns").ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{port_name}].samples[{s_idx}]` missing `sync_error_ns`"
+        ))
+    })?;
+    // Reject negative / non-integer values explicitly — schema demands
+    // pre-abs'd unsigned magnitudes. `as_u64()` returns None for any
+    // signed-negative or floating value.
+    let sync_error_ns = err_value.as_u64().ok_or_else(|| {
+        IngestError::MalformedPtpJson(format!(
+            "`gptp.ports[{port_name}].samples[{s_idx}].sync_error_ns` must be a \
+             non-negative integer (pre-abs() signed offsets before serializing), got {}",
+            describe_number_or_type(err_value)
+        ))
+    })?;
+
+    Ok(PtpSample {
+        timestamp_ns,
+        sync_error_ns,
+    })
+}
+
+/// Helper for error messages: distinguishes a signed-negative number
+/// from other type mismatches so the user gets a useful hint.
+fn describe_number_or_type(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                format!("signed integer {i}")
+            } else if let Some(f) = n.as_f64() {
+                format!("floating-point {f}")
+            } else {
+                format!("number {n}")
+            }
+        }
+        other => type_name(other).to_string(),
+    }
+}
+
 /// Errors surfaced from a runtime-artefact parser.
 ///
 /// v0.10.0 shipped only `Unimplemented`; v0.10.x parsers extend this
@@ -312,6 +533,8 @@ pub enum IngestError {
     UnsupportedLinkType(i32),
     /// LLDP JSON dump did not match the `lldpctl -f json` schema.
     MalformedLldpJson(String),
+    /// gPTP JSON dump did not match the expected schema.
+    MalformedPtpJson(String),
     /// The requested parser surface is not implemented in this
     /// build of spar-trace-topology. v0.10.0 returned this from
     /// every `open` call; v0.10.x parsers replace it with concrete
@@ -331,6 +554,9 @@ impl core::fmt::Display for IngestError {
             ),
             Self::MalformedLldpJson(msg) => {
                 write!(f, "malformed lldpctl JSON: {msg}")
+            }
+            Self::MalformedPtpJson(msg) => {
+                write!(f, "malformed gPTP JSON: {msg}")
             }
             Self::Unimplemented => write!(
                 f,
@@ -921,5 +1147,161 @@ mod tests {
         let cf = frames.into_iter().next().unwrap().unwrap();
         let expected = (u64::from(ts_high) << 32) | u64::from(ts_low);
         assert_eq!(cf.timestamp_ns, expected);
+    }
+
+    // ── gPTP JSON tests ─────────────────────────────────────────────
+
+    const GPTP_CANONICAL: &str = r#"
+    {
+      "gptp": {
+        "grandmaster": "00:1b:21:ff:fe:01:02:03",
+        "domain": 0,
+        "ports": [
+          {
+            "name": "eth0",
+            "samples": [
+              {"timestamp_ns": 1700000000000000000, "sync_error_ns": 250},
+              {"timestamp_ns": 1700000001000000000, "sync_error_ns": 310},
+              {"timestamp_ns": 1700000002000000000, "sync_error_ns": 280}
+            ]
+          },
+          {
+            "name": "eth1",
+            "samples": [
+              {"timestamp_ns": 1700000000000000000, "sync_error_ns": 410}
+            ]
+          }
+        ]
+      }
+    }
+    "#;
+
+    #[test]
+    fn gptp_full_dump_two_ports() {
+        let src = GptpJsonPtpTimeSource::from_json_str(GPTP_CANONICAL).expect("parse");
+        assert_eq!(src.grandmaster(), Some("00:1b:21:ff:fe:01:02:03"));
+        assert_eq!(src.domain(), Some(0));
+        let ports = src.ports();
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].name, "eth0");
+        assert_eq!(ports[0].samples.len(), 3);
+        assert_eq!(
+            ports[0].samples[0],
+            PtpSample {
+                timestamp_ns: 1_700_000_000_000_000_000,
+                sync_error_ns: 250
+            }
+        );
+        assert_eq!(ports[0].samples[1].sync_error_ns, 310);
+        assert_eq!(ports[0].samples[2].sync_error_ns, 280);
+        assert_eq!(ports[1].name, "eth1");
+        assert_eq!(ports[1].samples.len(), 1);
+        assert_eq!(ports[1].samples[0].sync_error_ns, 410);
+        assert_eq!(ports[1].samples[0].timestamp_ns, 1_700_000_000_000_000_000);
+    }
+
+    #[test]
+    fn gptp_port_with_no_samples() {
+        let json = r#"
+        {
+          "gptp": {
+            "domain": 20,
+            "ports": [
+              {"name": "eth0", "samples": []}
+            ]
+          }
+        }
+        "#;
+        let src = GptpJsonPtpTimeSource::from_json_str(json).expect("parse");
+        assert_eq!(src.ports().len(), 1);
+        assert_eq!(src.ports()[0].name, "eth0");
+        assert!(src.ports()[0].samples.is_empty());
+        assert_eq!(src.domain(), Some(20));
+    }
+
+    #[test]
+    fn gptp_missing_grandmaster_and_domain() {
+        let json = r#"
+        {
+          "gptp": {
+            "ports": [
+              {"name": "eth0", "samples": []}
+            ]
+          }
+        }
+        "#;
+        let src = GptpJsonPtpTimeSource::from_json_str(json).expect("parse");
+        assert_eq!(src.grandmaster(), None);
+        assert_eq!(src.domain(), None);
+        assert_eq!(src.ports().len(), 1);
+    }
+
+    #[test]
+    fn gptp_missing_gptp_root_yields_error() {
+        let json = r#"{"not_gptp": {}}"#;
+        match GptpJsonPtpTimeSource::from_json_str(json) {
+            Err(IngestError::MalformedPtpJson(msg)) => {
+                assert!(
+                    msg.contains("gptp"),
+                    "error message should mention `gptp`, got: {msg}"
+                );
+            }
+            other => panic!("expected MalformedPtpJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gptp_missing_ports_yields_error() {
+        let json = r#"{"gptp": {}}"#;
+        match GptpJsonPtpTimeSource::from_json_str(json) {
+            Err(IngestError::MalformedPtpJson(msg)) => {
+                assert!(
+                    msg.contains("ports"),
+                    "error message should mention `ports`, got: {msg}"
+                );
+            }
+            other => panic!("expected MalformedPtpJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gptp_open_from_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("gptp.json");
+        std::fs::write(&path, GPTP_CANONICAL).expect("write tempfile");
+        let src = GptpJsonPtpTimeSource::open(&path).expect("open");
+        assert_eq!(src.grandmaster(), Some("00:1b:21:ff:fe:01:02:03"));
+        assert_eq!(src.domain(), Some(0));
+        assert_eq!(src.ports().len(), 2);
+    }
+
+    #[test]
+    fn gptp_sample_with_negative_error_clamps_to_zero_or_errors() {
+        // Schema is unsigned magnitudes — negative offsets must be
+        // pre-`abs()`'d by the producer. We reject negative integers
+        // with MalformedPtpJson rather than silently clamping.
+        let json = r#"
+        {
+          "gptp": {
+            "ports": [
+              {
+                "name": "eth0",
+                "samples": [
+                  {"timestamp_ns": 1700000000000000000, "sync_error_ns": -100}
+                ]
+              }
+            ]
+          }
+        }
+        "#;
+        match GptpJsonPtpTimeSource::from_json_str(json) {
+            Err(IngestError::MalformedPtpJson(msg)) => {
+                assert!(
+                    msg.contains("sync_error_ns"),
+                    "error message should mention `sync_error_ns`, got: {msg}"
+                );
+            }
+            other => panic!("expected MalformedPtpJson, got {other:?}"),
+        }
     }
 }
