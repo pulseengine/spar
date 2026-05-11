@@ -225,7 +225,7 @@ impl BindingOverlay {
             if !target_in_allowed {
                 let allowed_idx: Vec<ComponentInstanceIdx> = allowed_names
                     .iter()
-                    .filter_map(|n| find_component_by_name(instance, n))
+                    .filter_map(|n| instance.resolve_dotted_path(n))
                     .collect();
                 out.push(AllowedTargetsViolation {
                     component: comp,
@@ -247,10 +247,11 @@ impl BindingOverlay {
 ///    overlay's hypothetical target index. The declared binding is
 ///    *not* consulted in this case.
 /// 2. Otherwise, read the declared `Actual_Processor_Binding` from
-///    the component's property map. The reference target is matched
-///    case-insensitively against component names anywhere in the
-///    instance hierarchy (matching the `find_component_by_name`
-///    pattern already used in `spar-analysis::arinc653`).
+///    the component's property map. The reference target is resolved
+///    case-insensitively via [`SystemInstance::resolve_dotted_path`],
+///    which handles both bare names (e.g. `cpu1`) and multi-level
+///    dotted paths (e.g. `cvc.soc.a53` or fully-qualified
+///    `ee_system.poc.cvc.soc.a53`).
 /// 3. Returns `None` when no binding is declared and the overlay is
 ///    silent for this component, or when the declared binding's
 ///    target name does not resolve to a known component.
@@ -271,7 +272,11 @@ pub fn actual_processor_binding_with_overlay(
     }
     let props = instance.properties_for(comp);
     let target_name = read_actual_processor_binding_name(props)?;
-    find_component_by_name(instance, &target_name)
+    // Use the dotted-path resolver so multi-level references like
+    // `(reference (cvc.soc.a53))` or fully-qualified
+    // `(reference (ee_system.poc.cvc.soc.a53))` resolve correctly.
+    // Single-level bare names still resolve as before.
+    instance.resolve_dotted_path(&target_name)
 }
 
 // ── helpers (private) ────────────────────────────────────────────────
@@ -375,16 +380,6 @@ fn read_actual_processor_binding_name(props: &PropertyMap) -> Option<String> {
         .get("Deployment_Properties", "Actual_Processor_Binding")
         .or_else(|| props.get("", "Actual_Processor_Binding"))?;
     parse_reference_list(raw).into_iter().next()
-}
-
-/// Find a component by name anywhere in the instance hierarchy
-/// (case-insensitive). First match wins; ties are unlikely in
-/// well-formed AADL because instance paths disambiguate.
-fn find_component_by_name(instance: &SystemInstance, name: &str) -> Option<ComponentInstanceIdx> {
-    instance
-        .all_components()
-        .find(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name))
-        .map(|(idx, _)| idx)
 }
 
 #[cfg(test)]
@@ -854,5 +849,268 @@ mod tests {
         // Lookup through the cloned overlay sees the same effective binding.
         let through_clone = actual_processor_binding_with_overlay(&instance, t1, Some(&cloned));
         assert_eq!(through_clone, Some(cpu2));
+    }
+
+    // ── nested-binding-path resolution (REQ-BINDING-002) ─────────────
+
+    /// Build a deeper instance tree shaped like the user-reported
+    /// `ee_system.poc.cvc.soc.a53` topology plus a sibling thread that
+    /// binds to the deeply nested processor.
+    ///
+    /// Layout:
+    /// ```text
+    /// ee_system (system)
+    /// ├── poc (system)
+    /// │   └── cvc (system)
+    /// │       └── soc (system)
+    /// │           └── a53 (processor)
+    /// └── thr (thread)
+    /// ```
+    fn make_nested_instance() -> (
+        SystemInstance,
+        ComponentInstanceIdx, // ee_system
+        ComponentInstanceIdx, // poc
+        ComponentInstanceIdx, // cvc
+        ComponentInstanceIdx, // soc
+        ComponentInstanceIdx, // a53
+        ComponentInstanceIdx, // thr
+    ) {
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let ee_system = components.alloc(ComponentInstance {
+            name: Name::new("ee_system"),
+            category: ComponentCategory::System,
+            type_name: Name::new("EE"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+        let mk_child = |components: &mut Arena<ComponentInstance>,
+                        name: &str,
+                        category: ComponentCategory,
+                        parent: ComponentInstanceIdx|
+         -> ComponentInstanceIdx {
+            components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new("T"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(parent),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        };
+        let poc = mk_child(&mut components, "poc", ComponentCategory::System, ee_system);
+        let cvc = mk_child(&mut components, "cvc", ComponentCategory::System, poc);
+        let soc = mk_child(&mut components, "soc", ComponentCategory::System, cvc);
+        let a53 = mk_child(&mut components, "a53", ComponentCategory::Processor, soc);
+        let thr = mk_child(&mut components, "thr", ComponentCategory::Thread, ee_system);
+
+        components[ee_system].children = vec![poc, thr];
+        components[poc].children = vec![cvc];
+        components[cvc].children = vec![soc];
+        components[soc].children = vec![a53];
+
+        let instance = SystemInstance {
+            root: ee_system,
+            components,
+            features: Arena::default(),
+            connections: Arena::default(),
+            flow_instances: Arena::default(),
+            end_to_end_flows: Arena::default(),
+            mode_instances: Arena::default(),
+            mode_transition_instances: Arena::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        };
+        (instance, ee_system, poc, cvc, soc, a53, thr)
+    }
+
+    #[test]
+    fn nested_binding_3_level_path_resolves() {
+        // `Actual_Processor_Binding => (reference (cvc.soc.a53))` on a
+        // thread declared up at the root level must resolve to the
+        // deeply nested a53 processor instance (the original user-
+        // reported bug). The 3-level dotted path is not a literal
+        // component name; it's a path through cvc → soc → a53.
+        let (mut instance, _ee_sys, _poc, _cvc, _soc, a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "cvc.soc.a53");
+
+        let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
+        assert_eq!(
+            resolved,
+            Some(a53),
+            "3-level dotted binding path must resolve to the leaf processor"
+        );
+    }
+
+    #[test]
+    fn nested_binding_full_path_resolves() {
+        // Fully-qualified `(reference (ee_system.poc.cvc.soc.a53))`
+        // must also resolve (suffix match against full instance path).
+        let (mut instance, _ee_sys, _poc, _cvc, _soc, a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "ee_system.poc.cvc.soc.a53");
+
+        let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
+        assert_eq!(
+            resolved,
+            Some(a53),
+            "fully-qualified binding path must resolve to the leaf processor"
+        );
+    }
+
+    #[test]
+    fn single_level_binding_still_resolves() {
+        // Regression check: single-level `(reference (cvc))` must
+        // still resolve to the `cvc` component (a system, in this
+        // tree — semantic checks happen elsewhere, what we test here
+        // is that the resolver doesn't regress to "path required").
+        let (mut instance, _ee_sys, _poc, cvc, _soc, _a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "cvc");
+
+        let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
+        assert_eq!(
+            resolved,
+            Some(cvc),
+            "single-level binding name must continue to resolve"
+        );
+    }
+
+    #[test]
+    fn unknown_path_emits_diagnostic() {
+        // `(reference (does.not.exist))` resolves to None; the higher-
+        // level `BindingRuleAnalysis` reads None and emits the
+        // "does not exist in the instance model" diagnostic
+        // unchanged. We assert the resolver returns None so the
+        // existing diagnostic path is preserved.
+        let (mut instance, _ee_sys, _poc, _cvc, _soc, _a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "does.not.exist");
+
+        let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
+        assert_eq!(
+            resolved, None,
+            "unknown dotted path must return None so diagnostics fire"
+        );
+    }
+
+    #[test]
+    fn ambiguous_suffix_match_picks_deepest() {
+        // Two components share the `cvc.soc.a53` suffix under
+        // different roots. Policy: the deepest match wins (matches
+        // `spar moves` resolver semantics) and the resolver never
+        // returns None for a syntactically valid suffix.
+        //
+        // Layout extension:
+        //   other_system/cvc/soc/a53   (depth 3)
+        //   ee_system/poc/cvc/soc/a53  (depth 4) ← chosen
+        let mut components: Arena<ComponentInstance> = Arena::default();
+        let ee_system = components.alloc(ComponentInstance {
+            name: Name::new("ee_system"),
+            category: ComponentCategory::System,
+            type_name: Name::new("EE"),
+            impl_name: Some(Name::new("impl")),
+            package: Name::new("Pkg"),
+            parent: None,
+            children: Vec::new(),
+            features: Vec::new(),
+            connections: Vec::new(),
+            flows: Vec::new(),
+            modes: Vec::new(),
+            mode_transitions: Vec::new(),
+            array_index: None,
+            in_modes: Vec::new(),
+        });
+        let mk = |components: &mut Arena<ComponentInstance>,
+                  name: &str,
+                  category: ComponentCategory,
+                  parent: ComponentInstanceIdx|
+         -> ComponentInstanceIdx {
+            components.alloc(ComponentInstance {
+                name: Name::new(name),
+                category,
+                type_name: Name::new("T"),
+                impl_name: None,
+                package: Name::new("Pkg"),
+                parent: Some(parent),
+                children: Vec::new(),
+                features: Vec::new(),
+                connections: Vec::new(),
+                flows: Vec::new(),
+                modes: Vec::new(),
+                mode_transitions: Vec::new(),
+                array_index: None,
+                in_modes: Vec::new(),
+            })
+        };
+        // Deep branch (ee_system/poc/cvc/soc/a53 — depth 4)
+        let poc = mk(&mut components, "poc", ComponentCategory::System, ee_system);
+        let cvc_deep = mk(&mut components, "cvc", ComponentCategory::System, poc);
+        let soc_deep = mk(&mut components, "soc", ComponentCategory::System, cvc_deep);
+        let a53_deep = mk(
+            &mut components,
+            "a53",
+            ComponentCategory::Processor,
+            soc_deep,
+        );
+        // Shallow branch (ee_system/cvc/soc/a53 — depth 3)
+        let cvc_shallow = mk(&mut components, "cvc", ComponentCategory::System, ee_system);
+        let soc_shallow = mk(
+            &mut components,
+            "soc",
+            ComponentCategory::System,
+            cvc_shallow,
+        );
+        let _a53_shallow = mk(
+            &mut components,
+            "a53",
+            ComponentCategory::Processor,
+            soc_shallow,
+        );
+        let thr = mk(&mut components, "thr", ComponentCategory::Thread, ee_system);
+        components[ee_system].children = vec![poc, cvc_shallow, thr];
+        components[poc].children = vec![cvc_deep];
+        components[cvc_deep].children = vec![soc_deep];
+        components[soc_deep].children = vec![a53_deep];
+        components[cvc_shallow].children = vec![soc_shallow];
+        components[soc_shallow].children = vec![_a53_shallow];
+
+        let mut instance = SystemInstance {
+            root: ee_system,
+            components,
+            features: Arena::default(),
+            connections: Arena::default(),
+            flow_instances: Arena::default(),
+            end_to_end_flows: Arena::default(),
+            mode_instances: Arena::default(),
+            mode_transition_instances: Arena::default(),
+            diagnostics: Vec::new(),
+            property_maps: FxHashMap::default(),
+            semantic_connections: Vec::new(),
+            system_operation_modes: Vec::new(),
+        };
+        set_actual_processor_binding(&mut instance, thr, "cvc.soc.a53");
+
+        let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
+        assert_eq!(
+            resolved,
+            Some(a53_deep),
+            "ambiguous suffix match must prefer the deepest (most specific) path"
+        );
     }
 }

@@ -593,65 +593,12 @@ fn format_severity(s: SerSeverity) -> &'static str {
 /// Resolve a user-supplied component name (FQN, dotted path, or bare
 /// name) to a [`ComponentInstanceIdx`].
 ///
-/// Matching rules (case-insensitive, first match wins):
-///
-/// 1. `name` is a bare identifier → match `component.name == name`.
-/// 2. `name` contains `/` or `.` → translate `.` to `/`, then match the
-///    component's instance path (`root/sub1/sub2`) by suffix.
-///
-/// Returns `None` if no component matches; resolves ties by preferring
-/// matches deeper in the hierarchy (more specific paths win), which is
-/// the common case for `--component` arguments naming a leaf thread or
-/// process.
+/// Thin wrapper over [`SystemInstance::resolve_dotted_path`] — the
+/// canonical resolver shared with the HIR-level overlay surface so
+/// `--component cvc.soc.a53` and `Actual_Processor_Binding =>
+/// (reference (cvc.soc.a53))` use identical matching semantics.
 pub fn resolve_component(instance: &SystemInstance, name: &str) -> Option<ComponentInstanceIdx> {
-    let needle = name.replace('.', "/");
-    let needle_lower = needle.to_ascii_lowercase();
-    let is_path = needle.contains('/');
-
-    // Path matching: suffix-match against the component's full path.
-    if is_path {
-        // Prefer the deepest (most specific) match.
-        let mut best: Option<(ComponentInstanceIdx, usize)> = None;
-        for (idx, _comp) in instance.all_components() {
-            let path = component_instance_path(instance, idx);
-            let path_lower = path.to_ascii_lowercase();
-            if path_lower.ends_with(&needle_lower) {
-                let depth = path.matches('/').count();
-                if best.map(|(_, d)| depth >= d).unwrap_or(true) {
-                    best = Some((idx, depth));
-                }
-            }
-        }
-        return best.map(|(idx, _)| idx);
-    }
-
-    // Bare-name matching: exact name, deepest match wins.
-    let mut best: Option<(ComponentInstanceIdx, usize)> = None;
-    for (idx, comp) in instance.all_components() {
-        if comp.name.as_str().eq_ignore_ascii_case(name) {
-            let depth = component_instance_path(instance, idx).matches('/').count();
-            if best.map(|(_, d)| depth >= d).unwrap_or(true) {
-                best = Some((idx, depth));
-            }
-        }
-    }
-    best.map(|(idx, _)| idx)
-}
-
-/// Build a `/`-separated instance path for a component (root first).
-///
-/// Mirrors the `spar-analysis::component_path` helper but returns a
-/// joined string suitable for FQN matching, not a Vec.
-fn component_instance_path(instance: &SystemInstance, idx: ComponentInstanceIdx) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    let mut current = Some(idx);
-    while let Some(ci) = current {
-        let comp = instance.component(ci);
-        parts.push(comp.name.as_str().to_string());
-        current = comp.parent;
-    }
-    parts.reverse();
-    parts.join("/")
+    instance.resolve_dotted_path(name)
 }
 
 /// FQN-style render of a component for report output.
@@ -660,7 +607,7 @@ fn component_instance_path(instance: &SystemInstance, idx: ComponentInstanceIdx)
 /// round-trip a report's component name back into a follow-up
 /// `--component` argument.
 fn fqn(instance: &SystemInstance, idx: ComponentInstanceIdx) -> String {
-    component_instance_path(instance, idx)
+    instance.component_instance_path(idx)
 }
 
 /// Parse a `Pkg::Type.Impl` root reference. Returns a [`MovesError`] on

@@ -2486,3 +2486,23 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-007
+
+  - id: TEST-BINDING-NESTED-PATH
+    type: feature
+    title: Nested binding paths resolve correctly
+    description: >
+      Tests in crates/spar-hir-def/src/overlay.rs (or
+      crates/spar-cli/tests/) verify 3-level dotted reference paths
+      resolve, fully-qualified paths from root resolve, single-level
+      references continue to work, unknown paths emit a clean
+      diagnostic, and ambiguous suffix matches are handled.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def overlay
+        - run: cargo test -p spar-cli applies_to_nested
+    status: passing
+    tags: [binding, hir-def, v093]
+    links:
+      - type: satisfies
+        target: REQ-BINDING-002
