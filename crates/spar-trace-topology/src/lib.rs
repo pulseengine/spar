@@ -43,6 +43,8 @@ pub mod reconcile;
 pub mod report;
 
 pub use ingest::{
-    CapturedFrame, FrameSource, GptpJsonPtpTimeSource, IngestError, LldpJsonTopologySource,
-    LldpNeighbor, PcapngFrameSource, PtpPortObservation, PtpSample, PtpTimeSource, TopologySource,
+    CapturedFrame, FrameSource, GateOperation, GptpJsonPtpTimeSource, IngestError,
+    LldpJsonTopologySource, LldpNeighbor, PcapngFrameSource, PortConfig, PtpPortObservation,
+    PtpSample, PtpTimeSource, QccYangSwitchConfigSource, StreamFilter, SwitchConfigSource,
+    TopologySource,
 };
