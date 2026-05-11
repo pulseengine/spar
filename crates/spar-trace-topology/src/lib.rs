@@ -42,4 +42,7 @@ pub mod ingest;
 pub mod reconcile;
 pub mod report;
 
-pub use ingest::{LldpJsonTopologySource, LldpNeighbor, TopologySource};
+pub use ingest::{
+    CapturedFrame, FrameSource, IngestError, LldpJsonTopologySource, LldpNeighbor,
+    PcapngFrameSource, TopologySource,
+};

@@ -1863,4 +1863,20 @@ artifacts:
     status: implemented
     tags: [trace-topology, ingest, lldp, v0100]
 
+  - id: REQ-TRACE-TOPOLOGY-003
+    type: requirement
+    title: PCAPNG FrameSource for L2 frame ingest
+    description: >
+      System shall provide a PCAPNG-backed FrameSource implementation
+      in spar-trace-topology that, given a `.pcapng` file recorded
+      with tcpdump / tshark / Wireshark from a TAP/SPAN port, yields
+      a stream of CapturedFrame records carrying mac_src, mac_dst,
+      optional 802.1Q VLAN-ID and PCP, and a Unix-epoch ns timestamp
+      derived from the per-IDB ts_resol option. Built atop the
+      `pcap-parser` crate. Errors carry concrete kinds (Truncated,
+      UnsupportedLinkType, MalformedPcapng, Io). Per the v0.10.0
+      trace-topology design's §"Implementation phasing" PCAPNG entry.
+    status: implemented
+    tags: [trace-topology, ingest, pcapng, v0100]
+
   # Research findings tracked separately in research/findings.yaml
