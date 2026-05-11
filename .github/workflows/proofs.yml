@@ -28,11 +28,6 @@ on:
   pull_request:
     branches: [main]
 
-# Avoid duplicate runs on PR + push for the same SHA.
-concurrency:
-  group: proofs-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   lean:
     name: Lean proof typecheck (lake build)
