@@ -2449,3 +2449,22 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-003
+
+  - id: TEST-TRACE-TOPOLOGY-GPTP
+    type: feature
+    title: GptpJsonPtpTimeSource parses sync-error samples
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover a full
+      two-port roundtrip with grandmaster + domain, a port with no
+      samples, optional-field absence (no grandmaster / domain), the
+      missing-root and missing-ports malformed-JSON error paths, a
+      tempfile-based open roundtrip, and negative sync-error rejection.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, gptp, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-006
