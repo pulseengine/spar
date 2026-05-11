@@ -2429,3 +2429,23 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-004
+
+  - id: TEST-TRACE-TOPOLOGY-PCAPNG
+    type: feature
+    title: PcapngFrameSource yields correct typed CapturedFrames
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover an
+      untagged Ethernet frame roundtrip, an 802.1Q-tagged frame with
+      VLAN-ID and PCP extraction, a truncated frame producing
+      IngestError::Truncated, an unsupported link type producing
+      IngestError::UnsupportedLinkType, and per-IDB ts_resol
+      handling for both µs and ns resolutions.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, pcapng, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-003
