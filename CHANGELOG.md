@@ -4,6 +4,63 @@ All notable changes to spar are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] — 2026-05-10
+
+NC tightness pass. Closes the post-v0.9.0 reviewer's NC top-5
+items #1 and #2 — the two largest remaining tightness gains —
+giving spar parity with RTaW-Pegase's NC arm on the workloads
+where bounds matter most. v0.8.x/v0.9.x output is byte-identical
+when the new shapes / methods are not enabled.
+
+### Added — Network Calculus tightness (2 PRs)
+
+- **Piecewise-affine arrival curves (#204)** — new
+  `PiecewiseAffineArrivalCurve` type alongside the existing affine
+  form. Multi-leaky-bucket `(σ₁, ρ₁) ∧ (σ₂, ρ₂) ∧ ...` exactly
+  captures "burst of N frames at line rate, then sustained at
+  100 Mbps" — the canonical T-SPEC pattern in real ADAS / TSN
+  traffic. Operators (`delay_bound`, `output_bound`, `residual_service`,
+  `backlog_bound`) take the *min over buckets* — this is the
+  mathematically tight choice; max would loosen bounds, defeating
+  the point. `From<ArrivalCurve>` round-trip preserves single-bucket
+  case. Lean theorem-statement skeleton at
+  `proofs/Proofs/Network/MinPlusPwa.lean` (filed out-of-tree;
+  proofs sorry-tagged for v1.0.0). 14 new tests. Reviewer NC
+  top-5 #1.
+- **PMOO/LUDB tree-shaped multiplexing (#203)** — new
+  `crates/spar-network/src/pmoo.rs`. `ludb_bound(tagged, competing,
+  services)` returns a Pay-Multiplexing-Only-Once bound for the
+  zonal/automotive pattern (one tagged flow + N competing flows
+  sharing a sub-path, all converging to one sink). LP solved via
+  `good_lp`/HiGHS (already vendored from spar-solver). New
+  `spar analyze --pmoo` opt-in flag; default remains SFA so
+  v0.9.2 output is byte-identical. New `WcttPmooBound` Info
+  diagnostic carries `(method=ludb, delay_ps, sfa_delay_ps_for_comparison)`
+  so reviewers can see the tightening per stream. Numerical
+  confirmation: **27.4% tighter than SFA** on a 3-hop / 3-competing
+  test, **23.7% tighter** on 5-source zonal aggregation. Closes
+  the "spar says 31.7 ms vs RTaW says 8 ms" credibility gap on
+  tree topologies. Reviewer NC top-5 #2.
+
+### Changed
+
+- COMPLIANCE.md narrative for v0.9.3.
+- Test count: 2900+ across 19 crates (was 2790+ at v0.9.2;
+  +14 piecewise + 10 PMOO + 2 wctt round-trip).
+
+### Deferred
+
+- Multi-grouping LUDB LP for nested topologies (today's
+  closed-form PMOO theorem result is exact on canonical trees;
+  full LP nesting waits for the v0.9.x follow-up).
+- `wctt.rs` per-stream propagation of `PiecewiseAffineArrivalCurve`
+  (today's wctt still uses the single-bucket `ArrivalCurve`;
+  switching is a v0.9.x propagation strategy commit).
+- `MinPlusPwa.lean` 8 sorry-tagged theorem statements — discharge
+  is v1.0.0 scope.
+
+---
+
 ## [0.9.2] — 2026-05-03
 
 Honesty + tightness pass. Closes the post-v0.9.0 reviewer's NC top-5
