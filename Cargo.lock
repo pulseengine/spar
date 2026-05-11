@@ -1410,6 +1410,8 @@ dependencies = [
 name = "spar-trace-topology"
 version = "0.9.3"
 dependencies = [
+ "serde",
+ "serde_json",
  "spar-base-db",
  "spar-hir-def",
  "spar-syntax",
