@@ -2468,3 +2468,21 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-006
+
+  - id: TEST-TRACE-TOPOLOGY-IP-IDENTITY
+    type: feature
+    title: IPv4/IPv6 accessors honour typed and raw paths
+    description: >
+      Tests in crates/spar-trace-topology/src/identity.rs verify that
+      get_ipv4_address / get_ipv6_address return the typed value
+      first and fall back to the raw quoted form, mirroring the
+      existing 6 Spar_Identity accessors.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- identity::tests
+    status: passing
+    tags: [trace-topology, properties, identity, ip, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-007

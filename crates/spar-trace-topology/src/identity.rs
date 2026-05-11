@@ -109,3 +109,29 @@ pub fn get_lldp_port_id(props: &PropertyMap) -> Option<String> {
     }
     get_raw(props, "LLDP_Port_Id").map(unquote)
 }
+
+/// Read [`Spar_Identity::IPv4_Address`] — the canonical IPv4 of a
+/// device, processor, system, or bus.
+///
+/// Returns the raw declared string (e.g. `"192.0.2.42"`); no
+/// canonicalisation here — the v0.11.0 reconciliation engine
+/// normalises before comparison.
+pub fn get_ipv4_address(props: &PropertyMap) -> Option<String> {
+    if let Some(PropertyExpr::StringLit(s)) = get_typed(props, "IPv4_Address") {
+        return Some(s.clone());
+    }
+    get_raw(props, "IPv4_Address").map(unquote)
+}
+
+/// Read [`Spar_Identity::IPv6_Address`] — the canonical IPv6 of a
+/// device, processor, system, or bus.
+///
+/// Returns the raw declared string (e.g. `"2001:db8::1"`); no
+/// canonicalisation here — the v0.11.0 reconciliation engine
+/// normalises before comparison.
+pub fn get_ipv6_address(props: &PropertyMap) -> Option<String> {
+    if let Some(PropertyExpr::StringLit(s)) = get_typed(props, "IPv6_Address") {
+        return Some(s.clone());
+    }
+    get_raw(props, "IPv6_Address").map(unquote)
+}

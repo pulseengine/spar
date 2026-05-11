@@ -189,3 +189,46 @@ fn lldp_port_id_typed_and_string_fallback() {
     let empty = PropertyMap::new();
     assert_eq!(identity::get_lldp_port_id(&empty), None);
 }
+
+#[test]
+fn ipv4_address_typed_path() {
+    // Typed PropertyExpr::StringLit path returns the unquoted value
+    // directly.
+    let typed = make_props(
+        "Spar_Identity",
+        "IPv4_Address",
+        "\"192.0.2.42\"",
+        Some(PropertyExpr::StringLit("192.0.2.42".to_string())),
+    );
+    assert_eq!(
+        identity::get_ipv4_address(&typed),
+        Some("192.0.2.42".to_string())
+    );
+
+    // Absent => None.
+    let empty = PropertyMap::new();
+    assert_eq!(identity::get_ipv4_address(&empty), None);
+}
+
+#[test]
+fn ipv6_address_raw_fallback() {
+    // String-fallback path strips surrounding quotes from the raw
+    // source-text form.
+    let raw = make_props("Spar_Identity", "IPv6_Address", "\"2001:db8::1\"", None);
+    assert_eq!(
+        identity::get_ipv6_address(&raw),
+        Some("2001:db8::1".to_string())
+    );
+
+    // Typed path also works end-to-end.
+    let typed = make_props(
+        "Spar_Identity",
+        "IPv6_Address",
+        "\"fe80::1\"",
+        Some(PropertyExpr::StringLit("fe80::1".to_string())),
+    );
+    assert_eq!(
+        identity::get_ipv6_address(&typed),
+        Some("fe80::1".to_string())
+    );
+}
