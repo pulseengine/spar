@@ -2388,3 +2388,25 @@ artifacts:
         target: REQ-TRACE-TOPOLOGY-001
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-002
+
+  - id: TEST-RTA-INTERRUPT-OVERHEAD
+    type: feature
+    title: Interrupt_Overhead inflates ISR exec_wcet by exactly 1x
+    description: >
+      Tests in crates/spar-analysis/src/rta.rs verify that
+      Spar_Timing::Interrupt_Overhead set on an ISR thread inflates
+      its effective exec_wcet by exactly that value (not 2x, since
+      the firing pays the cost once). Companion tests verify byte-
+      identical RTA output when the property is absent and correct
+      composition with Context_Switch_Time on the ISR handler.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis rta::tests::interrupt_overhead_inflates_isr_wcet
+        - run: cargo test -p spar-analysis rta::tests::no_interrupt_overhead_byte_identical_to_pre_c1
+        - run: cargo test -p spar-analysis rta::tests::interrupt_overhead_combined_with_context_switch_for_handler
+    status: passing
+    tags: [rta, isr, v093]
+    links:
+      - type: satisfies
+        target: REQ-RTA-010

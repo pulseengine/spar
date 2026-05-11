@@ -54,8 +54,8 @@ use spar_hir_def::item_tree::ComponentCategory;
 use crate::property_accessors::{
     LockingProtocol, get_bottom_half_server, get_critical_section_blocking, get_dispatch_jitter,
     get_dispatch_protocol, get_execution_time, get_execution_time_range,
-    get_interrupt_latency_bound, get_isr_execution_time_range, get_isr_priority,
-    get_locking_protocol, get_processor_binding, get_timing_property,
+    get_interrupt_latency_bound, get_interrupt_overhead, get_isr_execution_time_range,
+    get_isr_priority, get_locking_protocol, get_processor_binding, get_timing_property,
 };
 use crate::scheduling_verified::{self, RtaResult};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -130,9 +130,38 @@ impl Analysis for RtaAnalysis {
 
                 // ISR execution: prefer ISR_Execution_Time, else
                 // Compute_Execution_Time. We take the WCET.
-                let (isr_bcet, isr_wcet) = get_isr_execution_time_range(props)
+                let (isr_bcet_base, isr_wcet_base) = get_isr_execution_time_range(props)
                     .or_else(|| get_execution_time_range(props))
                     .unwrap_or((0, 0));
+
+                // v0.9.3 (Tier A #5 cont.): Interrupt_Overhead inflates
+                // ISR WCET by 1× per firing — vector dispatch, ISR-
+                // context save/restore, EOI ack — companion to the
+                // 2× Context_Switch_Time inflation tasks pay per
+                // dispatch (REQ-RTA-009 / PR #198). The ISR pays this
+                // cost once per firing, not twice. Default unset = 0
+                // (byte-identical to v0.9.2). The cost is folded into
+                // both the per-CPU utilization term and the IRQ-chain
+                // budget so the kernel-resident interrupt path is
+                // accounted for everywhere the ISR's WCET is used.
+                let interrupt_overhead_ps = get_interrupt_overhead(props).unwrap_or(0);
+                let isr_wcet = isr_wcet_base.saturating_add(interrupt_overhead_ps);
+                let isr_bcet = isr_bcet_base.saturating_add(interrupt_overhead_ps);
+                if interrupt_overhead_ps > 0 && isr_wcet_base > 0 {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "IsrOverheadInflation: ISR '{}' WCET {} → {} (added 1 × {} \
+                             Interrupt_Overhead per firing)",
+                            comp.name.as_str(),
+                            format_time(isr_wcet_base),
+                            format_time(isr_wcet),
+                            format_time(interrupt_overhead_ps),
+                        ),
+                        path: component_path(instance, idx),
+                        analysis: self.name().to_string(),
+                    });
+                }
 
                 // Only admit ISRs that have enough info to contribute
                 // a utilization term. Otherwise they just exist and
@@ -1574,6 +1603,197 @@ mod tests {
                 .any(|d| d.message.starts_with("OverheadInflation")),
             "no Context_Switch_Time must not emit OverheadInflation: {:#?}",
             diags,
+        );
+    }
+
+    // ── O2 (v0.9.3 Tier A #5 cont.): Interrupt_Overhead inflates ISR WCET ─
+    #[test]
+    fn interrupt_overhead_inflates_isr_wcet() {
+        // With Interrupt_Overhead = 50 us, the ISR's effective WCET is
+        // inflated by exactly 50 us per firing (1×, not 2× — contrast
+        // with Context_Switch_Time which is applied 2× per task
+        // dispatch). Base ISR_Execution_Time = 100 us → effective
+        // WCET = 150 us. Diagnostic must mirror OverheadInflation
+        // style.
+        let (mut b, root, proc) = make_base();
+        let dev = add_isr_device(&mut b, root, "irq_src", "2 ms", "100 us", 99);
+        b.set_property(dev, "Spar_Timing", "Interrupt_Overhead", "50 us");
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+                dev,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+        bind_thread(&mut b, t1, "10 ms", "1 ms", Some("10 ms"));
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        let inflation = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.starts_with("IsrOverheadInflation")
+                    && d.message.contains("'irq_src'")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected IsrOverheadInflation for irq_src, got: {:#?}",
+                    diags
+                )
+            });
+        assert!(
+            inflation.message.contains("WCET 100.00 us → 150.00 us"),
+            "expected WCET 100us → 150us after 1×50us Interrupt_Overhead, got: {}",
+            inflation.message,
+        );
+        assert!(
+            inflation.message.contains("1 × 50.00 us"),
+            "diagnostic should make the 1× factor explicit, got: {}",
+            inflation.message,
+        );
+    }
+
+    #[test]
+    fn no_interrupt_overhead_byte_identical_to_pre_c1() {
+        // Interrupt_Overhead unset = no IsrOverheadInflation diagnostic
+        // and pre-v0.9.3 byte-identical RTA output (no inflation in the
+        // ISR's exec_wcet term).
+        let (mut b, root, proc) = make_base();
+        let dev = add_isr_device(&mut b, root, "irq_src", "2 ms", "100 us", 99);
+        let _ = dev;
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+                dev,
+            ],
+        );
+        b.set_children(proc, vec![t1]);
+        bind_thread(&mut b, t1, "10 ms", "8 ms", Some("10 ms"));
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("IsrOverheadInflation")),
+            "no Interrupt_Overhead must not emit IsrOverheadInflation: {:#?}",
+            diags,
+        );
+
+        // Same response time as the equivalent test in
+        // single_isr_reduces_task_capacity (8.40 ms or 8.50 ms,
+        // converged value).
+        let info = diags
+            .iter()
+            .find(|d| d.severity == Severity::Info && d.message.contains("thread 't1'"))
+            .expect("thread info present");
+        assert!(
+            info.message.contains("8.40 ms") || info.message.contains("8.50 ms"),
+            "absent Interrupt_Overhead must yield baseline RTA: {}",
+            info.message,
+        );
+    }
+
+    #[test]
+    fn interrupt_overhead_combined_with_context_switch_for_handler() {
+        // A Sporadic ISR (device) with Interrupt_Overhead set inflates
+        // the ISR exec_wcet by exactly 1× per firing, while the
+        // separately-modeled handler thread (Bottom_Half_Server) has
+        // Context_Switch_Time set and gets the 2× task-side inflation.
+        // Both inflations must apply correctly and independently.
+        let (mut b, root, proc) = make_base();
+        let dev = b.add_component("irq_dev", ComponentCategory::Device, Some(root));
+        b.set_property(dev, "Timing_Properties", "Period", "2 ms");
+        b.set_property(dev, "Spar_Timing", "ISR_Execution_Time", "100 us");
+        b.set_property(dev, "Spar_Timing", "ISR_Priority", "99");
+        b.set_property(dev, "Spar_Timing", "Interrupt_Overhead", "50 us");
+        b.set_property(
+            dev,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            dev,
+            "Spar_Timing",
+            "Bottom_Half_Server",
+            "reference (handler)",
+        );
+
+        let handler = b.add_component("handler", ComponentCategory::Thread, Some(proc));
+        b.set_children(
+            root,
+            vec![
+                ComponentInstanceIdx::from_raw(la_arena::RawIdx::from_u32(1)),
+                proc,
+                dev,
+            ],
+        );
+        b.set_children(proc, vec![handler]);
+        bind_thread(&mut b, handler, "10 ms", "1 ms", Some("10 ms"));
+        b.set_property(
+            handler,
+            "Thread_Properties",
+            "Dispatch_Protocol",
+            "Sporadic",
+        );
+        b.set_property(
+            handler,
+            "Timing_Properties",
+            "Context_Switch_Time",
+            "100 us",
+        );
+
+        let inst = b.build(root);
+        let diags = RtaAnalysis.analyze(&inst);
+
+        // 1× Interrupt_Overhead applied to ISR.
+        let isr_inflation = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.starts_with("IsrOverheadInflation")
+                    && d.message.contains("'irq_dev'")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected IsrOverheadInflation for irq_dev, got: {:#?}",
+                    diags
+                )
+            });
+        assert!(
+            isr_inflation.message.contains("WCET 100.00 us → 150.00 us"),
+            "ISR side: 1×50us Interrupt_Overhead → 100us+50us = 150us, got: {}",
+            isr_inflation.message,
+        );
+
+        // 2× Context_Switch_Time applied to handler thread.
+        let task_inflation = diags
+            .iter()
+            .find(|d| {
+                d.severity == Severity::Info
+                    && d.message.starts_with("OverheadInflation")
+                    && d.message.contains("'handler'")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected OverheadInflation for handler thread, got: {:#?}",
+                    diags
+                )
+            });
+        assert!(
+            task_inflation.message.contains("WCET 1.00 ms → 1.20 ms"),
+            "task side: 2×100us Context_Switch_Time → 1ms+200us = 1.20ms, got: {}",
+            task_inflation.message,
         );
     }
 
