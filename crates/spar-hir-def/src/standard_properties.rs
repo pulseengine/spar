@@ -573,6 +573,14 @@ const SPAR_IDENTITY: &[(&str, &str)] = &[
     // LLDP port-id of a bus access feature as reported by the runtime
     // LLDP snapshot. Applies to bus access (feature-level).
     ("LLDP_Port_Id", "aadlstring"),
+    // L3 IPv4 address of an addressable AADL component as reported by
+    // runtime ARP / DHCP snapshots. Applies to device, processor,
+    // system, bus, abstract.
+    ("IPv4_Address", "aadlstring"),
+    // L3 IPv6 address of an addressable AADL component as reported by
+    // runtime NDP / DHCPv6 snapshots. Applies to device, processor,
+    // system, bus, abstract.
+    ("IPv6_Address", "aadlstring"),
 ];
 
 /// Helper: collect properties from a table into the result vector.
@@ -1262,13 +1270,15 @@ mod tests {
         assert!(is_standard_property_set("Spar_Identity"));
 
         let props = standard_properties_in_set("Spar_Identity");
-        assert_eq!(props.len(), 6);
+        assert_eq!(props.len(), 8);
         assert!(props.contains(&"MAC_Address"));
         assert!(props.contains(&"VLAN_ID"));
         assert!(props.contains(&"Stream_Handle"));
         assert!(props.contains(&"Multicast_Group"));
         assert!(props.contains(&"LLDP_Chassis_Id"));
         assert!(props.contains(&"LLDP_Port_Id"));
+        assert!(props.contains(&"IPv4_Address"));
+        assert!(props.contains(&"IPv6_Address"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -1293,6 +1303,14 @@ mod tests {
         );
         assert_eq!(
             standard_property_type("Spar_Identity", "LLDP_Port_Id"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "IPv4_Address"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "IPv6_Address"),
             Some("aadlstring")
         );
 
@@ -1325,6 +1343,8 @@ mod tests {
             "Multicast_Group",
             "LLDP_Chassis_Id",
             "LLDP_Port_Id",
+            "IPv4_Address",
+            "IPv6_Address",
         ] {
             let result = scope.resolve_property(&Name::new("Spar_Identity"), &Name::new(prop_name));
             assert!(
@@ -1368,7 +1388,7 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 9 + 6 = 137
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 9 + 8 = 139
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
         //  + Spar_Migration + Spar_Power + Spar_TSN + Spar_Identity)
@@ -1383,7 +1403,9 @@ mod tests {
         // Spar_Identity: +6 for MAC_Address, VLAN_ID, Stream_Handle,
         //   Multicast_Group, LLDP_Chassis_Id, LLDP_Port_Id (v0.10.0
         //   trace-topology foundation, Track G).
-        assert_eq!(all.len(), 137);
+        //   +2 for IPv4_Address, IPv6_Address (v0.10.x B-6, L3
+        //   identity for the reconciler).
+        assert_eq!(all.len(), 139);
     }
 
     #[test]
