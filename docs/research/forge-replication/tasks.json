@@ -1,0 +1,176 @@
+{
+  "$schema_note": "Forge-replication task set for spar. 24 paired tasks. Each task has a one-line natural-language question and a ground-truth file:line answer. Ground truths pinned to spar v0.9.3-tip (commit bad85e6). Re-validate when the commit pin changes. See docs/research/forge-replication-protocol.md.",
+  "version": "1.0",
+  "target_repo": "pulseengine/spar",
+  "target_commit": "bad85e6",
+  "tasks": [
+    {
+      "id": 1,
+      "difficulty": "easy",
+      "subsystem": "hir-def",
+      "question": "Find where AADL `in modes (...)` lists are stored on a component instance in the HIR.",
+      "ground_truth": "crates/spar-hir-def/src/instance.rs:84"
+    },
+    {
+      "id": 2,
+      "difficulty": "easy",
+      "subsystem": "hir-def",
+      "question": "Find the definition of the SystemOperationMode struct.",
+      "ground_truth": "crates/spar-hir-def/src/instance.rs:37"
+    },
+    {
+      "id": 3,
+      "difficulty": "medium",
+      "subsystem": "analysis-modal",
+      "question": "Find the predicate that decides whether a component is active in a given SOM.",
+      "ground_truth": "crates/spar-analysis/src/modal.rs:42"
+    },
+    {
+      "id": 4,
+      "difficulty": "medium",
+      "subsystem": "analysis-modal",
+      "question": "Find the predicate that decides whether a connection is active in a given SOM.",
+      "ground_truth": "crates/spar-analysis/src/modal.rs:82"
+    },
+    {
+      "id": 5,
+      "difficulty": "medium",
+      "subsystem": "analysis-driver",
+      "question": "Find the runner method that invokes mode-dependent analyses once per SOM.",
+      "ground_truth": "crates/spar-analysis/src/lib.rs:290"
+    },
+    {
+      "id": 6,
+      "difficulty": "hard",
+      "subsystem": "analysis-rta",
+      "question": "Find where Context_Switch_Time inflates each thread's WCET by 2x in the RTA recurrence.",
+      "ground_truth": "crates/spar-analysis/src/rta.rs"
+    },
+    {
+      "id": 7,
+      "difficulty": "hard",
+      "subsystem": "analysis-wctt",
+      "question": "Find where the WCTT pass adds atomic-frame quantization (ceil(max_frame_bytes * 8e12 / link_rate_bps) ps per hop).",
+      "ground_truth": "crates/spar-analysis/src/wctt.rs"
+    },
+    {
+      "id": 8,
+      "difficulty": "hard",
+      "subsystem": "network",
+      "question": "Find the PMOO/LUDB closed-form bound function for tree-shaped multiplexing.",
+      "ground_truth": "crates/spar-network/src/pmoo.rs"
+    },
+    {
+      "id": 9,
+      "difficulty": "medium",
+      "subsystem": "network",
+      "question": "Find the PiecewiseAffineArrivalCurve type definition.",
+      "ground_truth": "crates/spar-network/src/lib.rs"
+    },
+    {
+      "id": 10,
+      "difficulty": "easy",
+      "subsystem": "cli",
+      "question": "Find the top-level command dispatch table in the spar CLI.",
+      "ground_truth": "crates/spar-cli/src/main.rs"
+    },
+    {
+      "id": 11,
+      "difficulty": "medium",
+      "subsystem": "cli",
+      "question": "Find the cmd_analyze function in the spar CLI.",
+      "ground_truth": "crates/spar-cli/src/main.rs:514"
+    },
+    {
+      "id": 12,
+      "difficulty": "medium",
+      "subsystem": "sysml2",
+      "question": "Find the function that converts rivet YAML artifacts to SysML v2 source.",
+      "ground_truth": "crates/spar-sysml2/src/generate.rs:153"
+    },
+    {
+      "id": 13,
+      "difficulty": "hard",
+      "subsystem": "mcp",
+      "question": "Find the MCP tool that performs a single hypothetical-rebinding (verify_move).",
+      "ground_truth": "crates/spar-mcp"
+    },
+    {
+      "id": 14,
+      "difficulty": "easy",
+      "subsystem": "parser",
+      "question": "Find the AADL lexer.",
+      "ground_truth": "crates/spar-parser/src/lexer.rs"
+    },
+    {
+      "id": 15,
+      "difficulty": "medium",
+      "subsystem": "analysis-bus",
+      "question": "Find where the bus_bandwidth analysis sums per-stream throughput.",
+      "ground_truth": "crates/spar-analysis/src/bus_bandwidth.rs"
+    },
+    {
+      "id": 16,
+      "difficulty": "hard",
+      "subsystem": "analysis-arinc",
+      "question": "Find where ARINC-PARTITION-ISOLATION is enforced at Error severity per DO-297.",
+      "ground_truth": "crates/spar-analysis/src/arinc653.rs"
+    },
+    {
+      "id": 17,
+      "difficulty": "easy",
+      "subsystem": "docs",
+      "question": "Find the v0.10.0 trace-topology design document.",
+      "ground_truth": "docs/designs/v0.10.0-trace-topology.md"
+    },
+    {
+      "id": 18,
+      "difficulty": "easy",
+      "subsystem": "docs",
+      "question": "Find the rivet self-description architecture artifact.",
+      "ground_truth": "artifacts/architecture.yaml"
+    },
+    {
+      "id": 19,
+      "difficulty": "medium",
+      "subsystem": "trace-topology",
+      "question": "Find the PCAPNG FrameSource implementation.",
+      "ground_truth": "crates/spar-trace-topology"
+    },
+    {
+      "id": 20,
+      "difficulty": "medium",
+      "subsystem": "trace-topology",
+      "question": "Find the LLDP TopologySource implementation.",
+      "ground_truth": "crates/spar-trace-topology"
+    },
+    {
+      "id": 21,
+      "difficulty": "hard",
+      "subsystem": "analysis-mode-reach",
+      "question": "Find the function that exports mode reachability to NuSMV.",
+      "ground_truth": "crates/spar-analysis/src/mode_reachability.rs"
+    },
+    {
+      "id": 22,
+      "difficulty": "medium",
+      "subsystem": "render",
+      "question": "Find the entry point that renders an instance model to SVG.",
+      "ground_truth": "crates/spar-render/src/lib.rs:28"
+    },
+    {
+      "id": 23,
+      "difficulty": "hard",
+      "subsystem": "proofs",
+      "question": "Find the min-plus Lean skeleton for piecewise-affine arrival curves.",
+      "ground_truth": "proofs/Proofs/Network/MinPlusPwa.lean"
+    },
+    {
+      "id": 24,
+      "difficulty": "medium",
+      "subsystem": "analysis-mode-check",
+      "question": "Find where the analysis emits an Error when a component has modes but no initial mode declared.",
+      "ground_truth": "crates/spar-analysis/src/mode_check.rs:58"
+    }
+  ]
+}
