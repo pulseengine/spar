@@ -1879,6 +1879,22 @@ artifacts:
     status: implemented
     tags: [trace-topology, ingest, pcapng, v0100]
 
+  - id: REQ-TRACE-TOPOLOGY-005
+    type: requirement
+    title: Qcc YANG SwitchConfigSource for TSN switch-config ingest
+    description: >
+      System shall provide a JSON-backed SwitchConfigSource implementation
+      in spar-trace-topology that, given a `ieee802-dot1q-tsn-types`-shaped
+      JSON dump retrieved over NETCONF/RESTCONF (or extracted from a `tc
+      qdisc` snapshot transformed to the canonical shape), yields a list
+      of PortConfig records carrying port_name plus optional
+      gate_control_list (802.1Qbv TAS gates), bandwidth_reservation_permille
+      (CBS reservation), max_frame_size, and streams (Qci stream filters).
+      Errors carry a concrete MalformedQccJson kind. Per the v0.10.0
+      trace-topology design's §"Implementation phasing" Qcc entry.
+    status: implemented
+    tags: [trace-topology, ingest, qcc, yang, v0100]
+
   - id: REQ-TRACE-TOPOLOGY-006
     type: requirement
     title: gPTP JSON PtpTimeSource for sync-error sample ingest

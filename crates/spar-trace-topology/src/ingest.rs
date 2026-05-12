@@ -11,7 +11,13 @@
 //!   Backed by `lldpctl -f json` output (see <https://lldpd.github.io/>);
 //!   yields [`LldpNeighbor`] records carrying local_port + typed
 //!   remote chassis-id / port-id / system-name.
-//! - **Qcc YANG** ([`SwitchConfigSource`]) — placeholder, sibling commit.
+//! - **Qcc YANG** ([`QccYangSwitchConfigSource`]) — implemented in v0.10.x B-4.
+//!   Parses an `ieee802-dot1q-tsn-types`-shaped JSON dump (typically
+//!   retrieved over NETCONF/RESTCONF, or extracted from a `tc qdisc`
+//!   snapshot transformed to the canonical shape) into per-port
+//!   [`PortConfig`] records carrying the 802.1Qbv gate-control-list,
+//!   CBS bandwidth reservation (permille), max-frame-size, and Qci
+//!   stream filters.
 //! - **gPTP** ([`GptpJsonPtpTimeSource`]) — implemented in v0.10.x B-5.
 //!   Parses a JSON sync-error dump (typically produced by a wrapper
 //!   around `pmc` or `ptp4l`); yields per-port `PtpSample` streams that
@@ -70,14 +76,287 @@ pub trait TopologySource {
 /// — typically a Qcc YANG dump retrieved over NETCONF/RESTCONF or
 /// `ieee802-dot1q-bridge` / `ieee802-dot1q-tsn-types`-shaped JSON.
 ///
-/// TODO(v0.10.0+): real parser — IEEE 802.1Qcc-2018 plus the
-/// `ieee802-dot1q-tsn-types` and `ieee802-dot1q-stream-filters-and-policing`
-/// YANG modules. See design doc §"Input artefact set" §Qcc YANG.
+/// v0.10.x B-4 ships a concrete [`QccYangSwitchConfigSource`] backed
+/// by a JSON dump shaped per the `ieee802-dot1q-tsn-types` YANG module
+/// (or a canonical equivalent extracted from `tc qdisc`). The trait
+/// surface itself is intentionally minimal — it just exposes the
+/// parsed per-port configuration list — so that alternate sources
+/// (XML, vendor-specific REST APIs) can plug in without churning the
+/// surface.
 pub trait SwitchConfigSource {
-    /// Open the switch-config source at `path`. v0.10.0 placeholder.
-    fn open(path: &Path) -> Result<Self, IngestError>
-    where
-        Self: Sized;
+    /// Borrow the parsed list of per-port TSN switch configurations.
+    fn ports(&self) -> &[PortConfig];
+}
+
+/// One TAS gate-control-list entry — 802.1Qbv gate state for an
+/// interval. The reconciler uses these to verify that the declared
+/// `Spar_TSN::Schedule` matches what the switch is actually enforcing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateOperation {
+    /// 8-bit gate-state value; bit `i` open means traffic-class `i`
+    /// may transmit during this interval.
+    pub gate_states_value: u8,
+    /// Interval duration in nanoseconds.
+    pub time_interval_value: u64,
+}
+
+/// One Qci stream filter — links a stream-handle to a priority. The
+/// reconciler matches these against the declared
+/// `Spar_Identity::Stream_Handle` / `Spar_TSN::Priority` pairs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamFilter {
+    /// Stream handle (`null-stream-identification` etc.) the switch
+    /// uses to identify this flow.
+    pub stream_handle: u32,
+    /// 3-bit priority spec the filter assigns / matches against.
+    pub priority_spec: u8,
+}
+
+/// Per-port TSN switch configuration parsed from a Qcc YANG-shaped
+/// JSON dump. Each field beyond the port name is optional because
+/// real switch configs typically declare only the TSN features that
+/// are actually enabled on a given interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortConfig {
+    /// Local interface name on the switch (e.g. `swp1`, `Gi0/3`).
+    pub port_name: String,
+    /// 802.1Qbv Time-Aware Shaper gate-control list, in interval
+    /// order. `None` if TAS is not enabled on this port.
+    pub gate_control_list: Option<Vec<GateOperation>>,
+    /// 802.1Qav Credit-Based Shaper bandwidth reservation, expressed
+    /// as parts-per-thousand of port link speed (0..=1000). `None`
+    /// if CBS is not enabled on this port.
+    pub bandwidth_reservation_permille: Option<u32>,
+    /// Maximum L2 frame size in bytes (typically 1518, or 9000 for
+    /// jumbo frames). `None` if the dump did not declare it.
+    pub max_frame_size: Option<u16>,
+    /// 802.1Qci stream filters configured on this port. `None` if
+    /// Qci is not enabled.
+    pub streams: Option<Vec<StreamFilter>>,
+}
+
+/// Qcc YANG-shaped JSON-backed [`SwitchConfigSource`].
+///
+/// The expected JSON shape is
+///
+/// ```json
+/// { "interfaces": [
+///     { "name": "swp1",
+///       "tsn": {
+///         "gate-control-list": [
+///           {"gate-states-value": 1, "time-interval-value": 500000}
+///         ],
+///         "bandwidth-reservation-permille": 750,
+///         "max-frame-size": 1518,
+///         "stream-filters": [
+///           {"stream-handle": 42, "priority-spec": 5}
+///         ]
+///       }
+///     }
+/// ]}
+/// ```
+///
+/// All four `tsn`-block fields are individually optional; an interface
+/// without a `tsn` block (or with an empty one) yields a [`PortConfig`]
+/// carrying just the name.
+#[derive(Debug, Clone)]
+pub struct QccYangSwitchConfigSource {
+    ports: Vec<PortConfig>,
+}
+
+impl QccYangSwitchConfigSource {
+    /// Open and parse a Qcc YANG-shaped JSON dump from `path`.
+    pub fn open(path: &Path) -> Result<Self, IngestError> {
+        let s = std::fs::read_to_string(path)?;
+        Self::from_json_str(&s)
+    }
+
+    /// Parse a Qcc YANG-shaped JSON dump from an in-memory string.
+    pub fn from_json_str(s: &str) -> Result<Self, IngestError> {
+        let v: serde_json::Value = serde_json::from_str(s)
+            .map_err(|e| IngestError::MalformedQccJson(format!("invalid JSON: {e}")))?;
+
+        let interfaces = v.get("interfaces").ok_or_else(|| {
+            IngestError::MalformedQccJson("missing top-level `interfaces` key".to_string())
+        })?;
+        let interfaces = interfaces.as_array().ok_or_else(|| {
+            IngestError::MalformedQccJson(format!(
+                "`interfaces` must be an array, got {}",
+                type_name(interfaces)
+            ))
+        })?;
+
+        let mut ports = Vec::with_capacity(interfaces.len());
+        for iface in interfaces {
+            ports.push(parse_port(iface)?);
+        }
+        Ok(Self { ports })
+    }
+}
+
+impl SwitchConfigSource for QccYangSwitchConfigSource {
+    fn ports(&self) -> &[PortConfig] {
+        &self.ports
+    }
+}
+
+fn parse_port(iface: &serde_json::Value) -> Result<PortConfig, IngestError> {
+    let port_name = iface
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            IngestError::MalformedQccJson("interface entry missing `name` string".to_string())
+        })?
+        .to_string();
+
+    let tsn = iface.get("tsn");
+
+    let gate_control_list = match tsn.and_then(|t| t.get("gate-control-list")) {
+        None => None,
+        Some(serde_json::Value::Array(arr)) => {
+            let mut gates = Vec::with_capacity(arr.len());
+            for entry in arr {
+                gates.push(parse_gate_operation(&port_name, entry)?);
+            }
+            Some(gates)
+        }
+        Some(other) => {
+            return Err(IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` `gate-control-list` must be an array, got {}",
+                type_name(other)
+            )));
+        }
+    };
+
+    let bandwidth_reservation_permille = match tsn
+        .and_then(|t| t.get("bandwidth-reservation-permille"))
+    {
+        None => None,
+        Some(v) => {
+            let n = v.as_u64().ok_or_else(|| {
+                IngestError::MalformedQccJson(format!(
+                    "interface `{port_name}` `bandwidth-reservation-permille` must be a non-negative integer, got {}",
+                    type_name(v)
+                ))
+            })?;
+            if n > 1000 {
+                return Err(IngestError::MalformedQccJson(format!(
+                    "interface `{port_name}` `bandwidth-reservation-permille` = {n} is out of range (0..=1000)"
+                )));
+            }
+            Some(n as u32)
+        }
+    };
+
+    let max_frame_size = match tsn.and_then(|t| t.get("max-frame-size")) {
+        None => None,
+        Some(v) => {
+            let n = v.as_u64().ok_or_else(|| {
+                IngestError::MalformedQccJson(format!(
+                    "interface `{port_name}` `max-frame-size` must be a non-negative integer, got {}",
+                    type_name(v)
+                ))
+            })?;
+            if n > u64::from(u16::MAX) {
+                return Err(IngestError::MalformedQccJson(format!(
+                    "interface `{port_name}` `max-frame-size` = {n} exceeds u16::MAX"
+                )));
+            }
+            Some(n as u16)
+        }
+    };
+
+    let streams = match tsn.and_then(|t| t.get("stream-filters")) {
+        None => None,
+        Some(serde_json::Value::Array(arr)) => {
+            let mut filters = Vec::with_capacity(arr.len());
+            for entry in arr {
+                filters.push(parse_stream_filter(&port_name, entry)?);
+            }
+            Some(filters)
+        }
+        Some(other) => {
+            return Err(IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` `stream-filters` must be an array, got {}",
+                type_name(other)
+            )));
+        }
+    };
+
+    Ok(PortConfig {
+        port_name,
+        gate_control_list,
+        bandwidth_reservation_permille,
+        max_frame_size,
+        streams,
+    })
+}
+
+fn parse_gate_operation(
+    port_name: &str,
+    entry: &serde_json::Value,
+) -> Result<GateOperation, IngestError> {
+    let gate_states_raw = entry
+        .get("gate-states-value")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` gate entry missing `gate-states-value` u64"
+            ))
+        })?;
+    if gate_states_raw > u64::from(u8::MAX) {
+        return Err(IngestError::MalformedQccJson(format!(
+            "interface `{port_name}` `gate-states-value` = {gate_states_raw} exceeds u8::MAX"
+        )));
+    }
+    let time_interval_value = entry
+        .get("time-interval-value")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` gate entry missing `time-interval-value` u64"
+            ))
+        })?;
+    Ok(GateOperation {
+        gate_states_value: gate_states_raw as u8,
+        time_interval_value,
+    })
+}
+
+fn parse_stream_filter(
+    port_name: &str,
+    entry: &serde_json::Value,
+) -> Result<StreamFilter, IngestError> {
+    let stream_handle_raw = entry
+        .get("stream-handle")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` stream-filter missing `stream-handle` u64"
+            ))
+        })?;
+    if stream_handle_raw > u64::from(u32::MAX) {
+        return Err(IngestError::MalformedQccJson(format!(
+            "interface `{port_name}` `stream-handle` = {stream_handle_raw} exceeds u32::MAX"
+        )));
+    }
+    let priority_raw = entry
+        .get("priority-spec")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            IngestError::MalformedQccJson(format!(
+                "interface `{port_name}` stream-filter missing `priority-spec` u64"
+            ))
+        })?;
+    if priority_raw > u64::from(u8::MAX) {
+        return Err(IngestError::MalformedQccJson(format!(
+            "interface `{port_name}` `priority-spec` = {priority_raw} exceeds u8::MAX"
+        )));
+    }
+    Ok(StreamFilter {
+        stream_handle: stream_handle_raw as u32,
+        priority_spec: priority_raw as u8,
+    })
 }
 
 /// One observed gPTP sync-error sample for a single port.
@@ -540,6 +819,8 @@ pub enum IngestError {
     /// every `open` call; v0.10.x parsers replace it with concrete
     /// kinds as they land.
     Unimplemented,
+    /// Qcc YANG-shaped JSON did not match the expected schema.
+    MalformedQccJson(String),
 }
 
 impl core::fmt::Display for IngestError {
@@ -563,6 +844,9 @@ impl core::fmt::Display for IngestError {
                 "parser not implemented in v0.10.0 foundation; see \
                  docs/designs/v0.10.0-trace-topology.md"
             ),
+            Self::MalformedQccJson(msg) => {
+                write!(f, "malformed Qcc YANG JSON: {msg}")
+            }
         }
     }
 }
@@ -1176,6 +1460,29 @@ mod tests {
     }
     "#;
 
+    // ── Qcc YANG tests ──────────────────────────────────────────────
+
+    const QCC_FULL_SINGLE_PORT: &str = r#"
+    {
+      "interfaces": [
+        {
+          "name": "swp1",
+          "tsn": {
+            "gate-control-list": [
+              {"gate-states-value": 1, "time-interval-value": 500000},
+              {"gate-states-value": 254, "time-interval-value": 9500000}
+            ],
+            "bandwidth-reservation-permille": 750,
+            "max-frame-size": 1518,
+            "stream-filters": [
+              {"stream-handle": 42, "priority-spec": 5}
+            ]
+          }
+        }
+      ]
+    }
+    "#;
+
     #[test]
     fn gptp_full_dump_two_ports() {
         let src = GptpJsonPtpTimeSource::from_json_str(GPTP_CANONICAL).expect("parse");
@@ -1302,6 +1609,156 @@ mod tests {
                 );
             }
             other => panic!("expected MalformedPtpJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn qcc_single_port_full_config() {
+        let src = QccYangSwitchConfigSource::from_json_str(QCC_FULL_SINGLE_PORT).expect("parse");
+        let ports = src.ports();
+        assert_eq!(ports.len(), 1);
+        let p = &ports[0];
+        assert_eq!(p.port_name, "swp1");
+
+        let gates = p.gate_control_list.as_ref().expect("gate list present");
+        assert_eq!(gates.len(), 2);
+        assert_eq!(gates[0].gate_states_value, 1);
+        assert_eq!(gates[0].time_interval_value, 500_000);
+        assert_eq!(gates[1].gate_states_value, 254);
+        assert_eq!(gates[1].time_interval_value, 9_500_000);
+
+        assert_eq!(p.bandwidth_reservation_permille, Some(750));
+        assert_eq!(p.max_frame_size, Some(1518));
+
+        let streams = p.streams.as_ref().expect("streams present");
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].stream_handle, 42);
+        assert_eq!(streams[0].priority_spec, 5);
+    }
+
+    #[test]
+    fn qcc_port_with_only_max_frame_size() {
+        let json = r#"
+        {
+          "interfaces": [
+            {
+              "name": "swp2",
+              "tsn": {
+                "max-frame-size": 9000
+              }
+            }
+          ]
+        }
+        "#;
+        let src = QccYangSwitchConfigSource::from_json_str(json).expect("parse");
+        let ports = src.ports();
+        assert_eq!(ports.len(), 1);
+        let p = &ports[0];
+        assert_eq!(p.port_name, "swp2");
+        assert_eq!(p.gate_control_list, None);
+        assert_eq!(p.bandwidth_reservation_permille, None);
+        assert_eq!(p.max_frame_size, Some(9000));
+        assert_eq!(p.streams, None);
+    }
+
+    #[test]
+    fn qcc_multiple_ports() {
+        let json = r#"
+        {
+          "interfaces": [
+            {
+              "name": "swp1",
+              "tsn": {
+                "bandwidth-reservation-permille": 250,
+                "max-frame-size": 1518
+              }
+            },
+            {
+              "name": "swp2",
+              "tsn": {
+                "gate-control-list": [
+                  {"gate-states-value": 255, "time-interval-value": 1000000}
+                ],
+                "stream-filters": [
+                  {"stream-handle": 7, "priority-spec": 3},
+                  {"stream-handle": 8, "priority-spec": 4}
+                ]
+              }
+            }
+          ]
+        }
+        "#;
+        let src = QccYangSwitchConfigSource::from_json_str(json).expect("parse");
+        let ports = src.ports();
+        assert_eq!(ports.len(), 2);
+
+        assert_eq!(ports[0].port_name, "swp1");
+        assert_eq!(ports[0].bandwidth_reservation_permille, Some(250));
+        assert_eq!(ports[0].max_frame_size, Some(1518));
+        assert_eq!(ports[0].gate_control_list, None);
+        assert_eq!(ports[0].streams, None);
+
+        assert_eq!(ports[1].port_name, "swp2");
+        assert_eq!(ports[1].bandwidth_reservation_permille, None);
+        assert_eq!(ports[1].max_frame_size, None);
+        let gates = ports[1].gate_control_list.as_ref().expect("gates");
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].gate_states_value, 255);
+        assert_eq!(gates[0].time_interval_value, 1_000_000);
+        let streams = ports[1].streams.as_ref().expect("streams");
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].stream_handle, 7);
+        assert_eq!(streams[1].stream_handle, 8);
+        assert_eq!(streams[1].priority_spec, 4);
+    }
+
+    #[test]
+    fn qcc_empty_interfaces() {
+        let src = QccYangSwitchConfigSource::from_json_str(r#"{"interfaces": []}"#).expect("parse");
+        assert!(src.ports().is_empty());
+    }
+
+    #[test]
+    fn qcc_missing_root_yields_error() {
+        let json = r#"{"not_interfaces": []}"#;
+        match QccYangSwitchConfigSource::from_json_str(json) {
+            Err(IngestError::MalformedQccJson(_)) => {}
+            other => panic!("expected MalformedQccJson, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn qcc_open_from_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("qcc.json");
+        std::fs::write(&path, QCC_FULL_SINGLE_PORT).expect("write tempfile");
+        let src = QccYangSwitchConfigSource::open(&path).expect("open");
+        assert_eq!(src.ports().len(), 1);
+        assert_eq!(src.ports()[0].port_name, "swp1");
+        assert_eq!(src.ports()[0].max_frame_size, Some(1518));
+    }
+
+    #[test]
+    fn qcc_invalid_bandwidth_reservation() {
+        // permille > 1000 is out-of-range — we reject with MalformedQccJson.
+        let json = r#"
+        {
+          "interfaces": [
+            {
+              "name": "swp1",
+              "tsn": {"bandwidth-reservation-permille": 1500}
+            }
+          ]
+        }
+        "#;
+        match QccYangSwitchConfigSource::from_json_str(json) {
+            Err(IngestError::MalformedQccJson(msg)) => {
+                assert!(
+                    msg.contains("bandwidth-reservation-permille"),
+                    "error message should mention the offending field, got: {msg}"
+                );
+            }
+            other => panic!("expected MalformedQccJson, got {other:?}"),
         }
     }
 }
