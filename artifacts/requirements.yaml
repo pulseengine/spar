@@ -1911,4 +1911,18 @@ artifacts:
     status: implemented
     tags: [trace-topology, ingest, gptp, sync, v0100]
 
+  - id: REQ-TRACE-TOPOLOGY-007
+    type: requirement
+    title: IPv4 + IPv6 address properties in Spar_Identity
+    description: >
+      System shall extend the Spar_Identity property set with
+      IPv4_Address and IPv6_Address (aadlstring; applies to device,
+      processor, system, bus, abstract). Typed accessors live in
+      spar-trace-topology::identity following the same typed-first /
+      string-fallback pattern as the existing six identity
+      properties. Enables the v0.11.0 reconciler to check L3
+      identity against runtime-observed ARP / NDP / DHCP state.
+    status: implemented
+    tags: [trace-topology, properties, identity, ip, v0100]
+
   # Research findings tracked separately in research/findings.yaml

@@ -21,7 +21,7 @@
 //! - The [`identity`] module exposes typed accessors for the new
 //!   `Spar_Identity::*` property surface (`MAC_Address`, `VLAN_ID`,
 //!   `Stream_Handle`, `Multicast_Group`, `LLDP_Chassis_Id`,
-//!   `LLDP_Port_Id`).
+//!   `LLDP_Port_Id`, `IPv4_Address`, `IPv6_Address`).
 //! - The [`ingest`] module declares trait skeletons for the four
 //!   parsers — frame source (PCAPNG), topology source (LLDP), switch
 //!   config source (Qcc YANG), and PTP-time source (gPTP). Real
