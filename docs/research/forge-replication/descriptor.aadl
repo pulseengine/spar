@@ -1,0 +1,155 @@
+-- Forge-replication descriptor (AADL form) for the spar workspace.
+--
+-- This is a cross-check artefact for docs/research/forge-replication/
+-- descriptor.sexp. It models the spar crate graph as nested AADL
+-- `system` declarations. It is NOT a runnable spec for spar itself
+-- (the workspace is a Rust toolchain, not an embedded system); it is
+-- a structural descriptor for Forge-protocol trials.
+--
+-- See docs/research/forge-replication-protocol.md §2 for the role of
+-- this file.
+
+package SparWorkspace
+public
+
+  -- The entire workspace.
+  system Spar
+    features
+      cli_in  : in event port;
+      wasm_in : in event port;
+      mcp_in  : in event port;
+  end Spar;
+
+  system implementation Spar.v0_9_3
+    subcomponents
+      -- Parsing & syntax layer
+      parser   : system Parser.impl;
+      syntax   : system Syntax.impl;
+      annex    : system Annex.impl;
+
+      -- HIR / instance model
+      base_db  : system BaseDb.impl;
+      hir_def  : system HirDef.impl;
+      hir      : system Hir.impl;
+
+      -- Analyses
+      analysis : system Analysis.impl;
+
+      -- Network calculus / solver
+      network  : system Network.impl;
+      solver   : system Solver.impl;
+
+      -- Transform / codegen / variants
+      transform : system Transform.impl;
+      codegen   : system Codegen.impl;
+      variants  : system Variants.impl;
+
+      -- Verification
+      verify        : system Verify.impl;
+      verify_macros : system VerifyMacros.impl;
+
+      -- External integration
+      sysml2         : system Sysml2.impl;
+      render         : system Render.impl;
+      trace_topology : system TraceTopology.impl;
+
+      -- Top surface
+      insight  : system Insight.impl;
+      mcp      : system Mcp.impl;
+      cli      : system Cli.impl;
+      wasm     : system Wasm.impl;
+
+    connections
+      c01 : port parser.out      -> syntax.in;
+      c02 : port syntax.out      -> annex.in;
+      c03 : port syntax.out      -> hir_def.in;
+      c04 : port hir_def.out     -> hir.in;
+      c05 : port hir.out         -> analysis.in;
+      c06 : port analysis.out    -> verify.in;
+      c07 : port analysis.out    -> codegen.in;
+      c08 : port analysis.out    -> render.in;
+      c09 : port analysis.out    -> insight.in;
+      c10 : port analysis.out    -> mcp.in;
+      c11 : port hir.out         -> sysml2.in;
+      c12 : port network.out     -> analysis.network_in;
+      c13 : port solver.out      -> network.solver_in;
+      c14 : port hir.out         -> transform.in;
+      c15 : port transform.out   -> variants.in;
+      c16 : port verify_macros.out -> verify.in;
+      c17 : port hir.out         -> trace_topology.in;
+      c18 : port mcp.out         -> cli.mcp_in;
+      c19 : port cli.in          -> Spar.cli_in;
+      c20 : port wasm.in         -> Spar.wasm_in;
+      c21 : port mcp.in          -> Spar.mcp_in;
+  end Spar.v0_9_3;
+
+  -- Stub system types (no implementations beyond marker subcomponents)
+  system Parser features out : out event port; end Parser;
+  system implementation Parser.impl end Parser.impl;
+
+  system Syntax features in : in event port; out : out event port; end Syntax;
+  system implementation Syntax.impl end Syntax.impl;
+
+  system Annex features in : in event port; end Annex;
+  system implementation Annex.impl end Annex.impl;
+
+  system BaseDb end BaseDb;
+  system implementation BaseDb.impl end BaseDb.impl;
+
+  system HirDef features in : in event port; out : out event port; end HirDef;
+  system implementation HirDef.impl end HirDef.impl;
+
+  system Hir features in : in event port; out : out event port; end Hir;
+  system implementation Hir.impl end Hir.impl;
+
+  system Analysis
+    features
+      in         : in event port;
+      out        : out event port;
+      network_in : in event port;
+  end Analysis;
+  system implementation Analysis.impl end Analysis.impl;
+
+  system Network features out : out event port; solver_in : in event port; end Network;
+  system implementation Network.impl end Network.impl;
+
+  system Solver features out : out event port; end Solver;
+  system implementation Solver.impl end Solver.impl;
+
+  system Transform features in : in event port; out : out event port; end Transform;
+  system implementation Transform.impl end Transform.impl;
+
+  system Codegen features in : in event port; end Codegen;
+  system implementation Codegen.impl end Codegen.impl;
+
+  system Variants features in : in event port; end Variants;
+  system implementation Variants.impl end Variants.impl;
+
+  system Verify features in : in event port; end Verify;
+  system implementation Verify.impl end Verify.impl;
+
+  system VerifyMacros features out : out event port; end VerifyMacros;
+  system implementation VerifyMacros.impl end VerifyMacros.impl;
+
+  system Sysml2 features in : in event port; end Sysml2;
+  system implementation Sysml2.impl end Sysml2.impl;
+
+  system Render features in : in event port; end Render;
+  system implementation Render.impl end Render.impl;
+
+  system TraceTopology features in : in event port; end TraceTopology;
+  system implementation TraceTopology.impl end TraceTopology.impl;
+
+  system Insight features in : in event port; end Insight;
+  system implementation Insight.impl end Insight.impl;
+
+  system Mcp features in : in event port; out : out event port; end Mcp;
+  system implementation Mcp.impl end Mcp.impl;
+
+  system Cli features in : in event port; mcp_in : in event port; end Cli;
+  system implementation Cli.impl end Cli.impl;
+
+  system Wasm features in : in event port; end Wasm;
+  system implementation Wasm.impl end Wasm.impl;
+
+end SparWorkspace;
