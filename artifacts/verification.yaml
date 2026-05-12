@@ -2486,3 +2486,22 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-007
+
+  - id: TEST-CLASSIFIER-MATCH-DELEGATION
+    type: feature
+    title: Delegation connections accept matching directions, peer connections require opposing
+    description: >
+      Tests in crates/spar-analysis/src/classifier_match.rs verify
+      bus access delegation with both `provides` (and both
+      `requires`) passes; peer connections continue to require
+      provides ↔ requires pairing and still error on same-direction
+      cases. Includes the user-reported MWE verbatim.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis classifier_match
+    status: passing
+    tags: [classifier-match, connections, v093]
+    links:
+      - type: satisfies
+        target: REQ-CLASSIFIER-MATCH-002
