@@ -1925,4 +1925,19 @@ artifacts:
     status: implemented
     tags: [trace-topology, properties, identity, ip, v0100]
 
+  - id: REQ-BINDING-002
+    type: requirement
+    title: Actual_Processor_Binding accepts nested dotted reference paths
+    description: >
+      System shall resolve `Actual_*_Binding => (reference (a.b.c))`
+      property values whose target is a multi-level dotted instance
+      path, not just a single-component leaf name. Resolution uses
+      suffix-matching against full instance paths plus root-anchored
+      walk, mirroring the existing dotted-path resolver in
+      spar-cli::moves::resolve_component. Single-level references
+      continue to resolve as before; unknown paths emit the existing
+      "does not exist in instance model" diagnostic unchanged.
+    status: implemented
+    tags: [binding, hir-def, overlay, v093]
+
   # Research findings tracked separately in research/findings.yaml

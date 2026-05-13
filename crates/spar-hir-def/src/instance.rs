@@ -302,6 +302,76 @@ impl SystemInstance {
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
     }
 
+    /// Build a `/`-separated instance path for a component (root first).
+    ///
+    /// Example: for `ee_system.poc.cvc.soc.a53`, this returns the string
+    /// `"ee_system/poc/cvc/soc/a53"`. Used by [`Self::resolve_dotted_path`]
+    /// to match user-supplied dotted references against the instance
+    /// hierarchy.
+    pub fn component_instance_path(&self, idx: ComponentInstanceIdx) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = Some(idx);
+        while let Some(ci) = current {
+            let comp = &self.components[ci];
+            parts.push(comp.name.as_str().to_string());
+            current = comp.parent;
+        }
+        parts.reverse();
+        parts.join("/")
+    }
+
+    /// Resolve a user-supplied component reference (bare name or dotted
+    /// path) to a [`ComponentInstanceIdx`].
+    ///
+    /// Matching rules (case-insensitive):
+    ///
+    /// 1. **Bare identifier** (no `.` or `/`) — match `component.name`
+    ///    anywhere in the hierarchy. Ties are broken by preferring the
+    ///    deepest match (most specific path wins).
+    /// 2. **Dotted path** (`a.b.c`) — translate `.` to `/`, then suffix-
+    ///    match against full instance paths (`root/sub1/sub2/a/b/c`).
+    ///    Ties are broken by preferring the deepest match.
+    ///
+    /// Returns `None` if no component matches.
+    ///
+    /// This is the canonical resolver used by both `Actual_*_Binding`
+    /// reference values in [`crate::overlay`] and by the
+    /// `spar moves` CLI surface.
+    pub fn resolve_dotted_path(&self, name: &str) -> Option<ComponentInstanceIdx> {
+        let needle = name.replace('.', "/");
+        let needle_lower = needle.to_ascii_lowercase();
+        let is_path = needle.contains('/');
+
+        if is_path {
+            // Path matching: suffix-match against the component's full path.
+            // Prefer the deepest (most specific) match.
+            let mut best: Option<(ComponentInstanceIdx, usize)> = None;
+            for (idx, _comp) in self.all_components() {
+                let path = self.component_instance_path(idx);
+                let path_lower = path.to_ascii_lowercase();
+                if path_lower.ends_with(&needle_lower) {
+                    let depth = path.matches('/').count();
+                    if best.map(|(_, d)| depth >= d).unwrap_or(true) {
+                        best = Some((idx, depth));
+                    }
+                }
+            }
+            return best.map(|(idx, _)| idx);
+        }
+
+        // Bare-name matching: exact name, deepest match wins.
+        let mut best: Option<(ComponentInstanceIdx, usize)> = None;
+        for (idx, comp) in self.all_components() {
+            if comp.name.as_str().eq_ignore_ascii_case(name) {
+                let depth = self.component_instance_path(idx).matches('/').count();
+                if best.map(|(_, d)| depth >= d).unwrap_or(true) {
+                    best = Some((idx, depth));
+                }
+            }
+        }
+        best.map(|(idx, _)| idx)
+    }
+
     /// Get the mode instances for a given component.
     pub fn modes_for(&self, idx: ComponentInstanceIdx) -> Vec<&ModeInstance> {
         self.components[idx]
