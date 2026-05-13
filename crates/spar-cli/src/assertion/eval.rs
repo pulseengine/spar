@@ -375,12 +375,23 @@ fn eval_component_predicate(
             let func_name = first_token_text(node);
             if func_name == "has" {
                 let prop_name = find_string_literal(node).unwrap_or_default();
+                // Check properties first.
                 let props = ctx.instance.properties_for(idx);
-                if let Some((set, name)) = prop_name.split_once("::") {
+                let prop_found = if let Some((set, name)) = prop_name.split_once("::") {
                     props.get(set, name).is_some()
                 } else {
                     props.get("", &prop_name).is_some()
+                };
+                if prop_found {
+                    return true;
                 }
+                // Also check whether the component has a feature with this name.
+                // Property names always contain '::' (set::name); bare names are
+                // therefore unambiguously feature name lookups.
+                let comp = ctx.instance.component(idx);
+                comp.features.iter().any(|&feat_idx| {
+                    ctx.instance.features[feat_idx].name.as_str() == prop_name.as_str()
+                })
             } else {
                 false
             }

@@ -1940,4 +1940,18 @@ artifacts:
     status: implemented
     tags: [binding, hir-def, overlay, v093]
 
+  - id: REQ-HAS-FEATURES
+    type: requirement
+    title: has() predicate matches component features by name
+    description: >
+      The has() predicate in the assertion DSL must return true when
+      the component under evaluation owns a feature (port, bus access,
+      data access, parameter, feature group, etc.) whose name matches
+      the argument string, in addition to the existing property-name
+      match. Bare names (no '::' separator) are checked against both
+      property names and feature names; qualified names (set::name)
+      continue to resolve only against the property namespace.
+    status: implemented
+    tags: [assertions, v093]
+
   # Research findings tracked separately in research/findings.yaml
