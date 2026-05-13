@@ -2525,3 +2525,23 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-BINDING-002
+
+  - id: TEST-APPLIES-TO-FEATURE-PATH
+    type: feature
+    title: applies_to feature paths resolve without spurious diagnostics
+    description: >
+      Integration tests in crates/spar-cli/tests/applies_to_feature_path.rs
+      verify that `applies to subcomp.feature` resolves cleanly
+      (applies_to_feature_path_does_not_emit_unresolved_diagnostic) and
+      that genuinely unknown final segments still emit a clean
+      "could not be resolved" diagnostic
+      (applies_to_unknown_segment_still_emits_diagnostic).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test applies_to_feature_path
+    status: passing
+    tags: [hir-def, properties, v093]
+    links:
+      - type: satisfies
+        target: REQ-APPLIES-TO-FEATURE-PATH
