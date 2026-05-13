@@ -62,6 +62,14 @@ impl Analysis for ClassifierMatchAnalysis {
                     );
                 }
 
+                // Per AADL v2.3 §9.4, an access connection is a "delegation"
+                // (a.k.a. feature-delegation) iff exactly one endpoint
+                // references a feature of the enclosing component itself
+                // rather than a subcomponent's feature. In our HIR this
+                // shows up as a `ConnectionEnd.subcomponent` being `None`
+                // on exactly one of the two sides.
+                let is_delegation = src_end.subcomponent.is_none() ^ dst_end.subcomponent.is_none();
+
                 // Check access connection classifier + provides/requires compatibility
                 if conn.kind == ConnectionKind::Access {
                     check_access_match(
@@ -70,6 +78,7 @@ impl Analysis for ClassifierMatchAnalysis {
                         dst_feat,
                         &src_end.feature,
                         &dst_end.feature,
+                        is_delegation,
                         &path,
                         &mut diags,
                     );
@@ -157,13 +166,21 @@ fn check_port_classifier_match(
 ///
 /// For access connections (DataAccess, BusAccess, SubprogramAccess):
 /// - Classifiers must match (same as port connections)
-/// - Access kinds must be complementary (Provides ↔ Requires)
+/// - Access kinds depend on the connection kind (AADL v2.3 §9.4):
+///   - **Peer** (subcomponent-to-subcomponent): directions must oppose
+///     (one `provides`, one `requires`).
+///   - **Delegation** (enclosing-feature-to-subcomponent-feature): the
+///     enclosing component's feature *delegates* to a subcomponent's
+///     feature with the same role, so the directions must MATCH (both
+///     `provides` ✓ or both `requires` ✓).
+#[allow(clippy::too_many_arguments)]
 fn check_access_match(
     conn_name: &Name,
     src_feat: &FeatureInstance,
     dst_feat: &FeatureInstance,
     src_name: &Name,
     dst_name: &Name,
+    is_delegation: bool,
     path: &[String],
     diags: &mut Vec<AnalysisDiagnostic>,
 ) {
@@ -224,19 +241,39 @@ fn check_access_match(
         (None, None) => {}
     }
 
-    // Check access kind compatibility: Provides ↔ Requires
+    // Check access kind compatibility (AADL v2.3 §9.4):
+    //   peer connections require Provides ↔ Requires (opposing directions),
+    //   delegation connections require matching directions (both Provides
+    //   or both Requires) because the enclosing feature delegates its role
+    //   to the subcomponent's feature.
     match (&src_feat.access_kind, &dst_feat.access_kind) {
-        (Some(src_ak), Some(dst_ak)) if src_ak == dst_ak => {
-            diags.push(AnalysisDiagnostic {
-                severity: Severity::Error,
-                message: format!(
-                    "connection '{}': both source '{}' and destination '{}' are '{}' — \
-                     access connections require provides ↔ requires pairing",
-                    conn_name, src_name, dst_name, src_ak
-                ),
-                path: path.to_vec(),
-                analysis: "classifier_match".to_string(),
-            });
+        (Some(src_ak), Some(dst_ak)) => {
+            if is_delegation {
+                if src_ak != dst_ak {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "connection '{}': delegation between enclosing feature \
+                             '{}' ({}) and subcomponent feature '{}' ({}) — delegation \
+                             access connections require matching directions",
+                            conn_name, src_name, src_ak, dst_name, dst_ak
+                        ),
+                        path: path.to_vec(),
+                        analysis: "classifier_match".to_string(),
+                    });
+                }
+            } else if src_ak == dst_ak {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "connection '{}': both source '{}' and destination '{}' are '{}' — \
+                         access connections require provides ↔ requires pairing",
+                        conn_name, src_name, dst_name, src_ak
+                    ),
+                    path: path.to_vec(),
+                    analysis: "classifier_match".to_string(),
+                });
+            }
         }
         _ => {
             // One or both missing access_kind — skip (may not be resolvable)
@@ -1623,6 +1660,317 @@ mod tests {
             diags.is_empty(),
             "incomplete connections should be skipped: {:?}",
             diags
+        );
+    }
+
+    // ── Delegation vs peer access connection tests (AADL v2.3 §9.4) ──
+    //
+    // Per the spec, access connections come in two flavours:
+    //   - Peer (subcomponent ↔ subcomponent): directions must oppose.
+    //   - Delegation (enclosing feature ↔ subcomponent feature): directions
+    //     must match — the enclosing feature delegates its role inward.
+    //
+    // In the test builder a "delegation" endpoint is built with
+    // `end(None, "...")` (no subcomponent name → references the enclosing
+    // component's own feature) on exactly one side.
+
+    /// User MWE from the v0.9.3 bug report: bus access delegation with
+    /// both `provides` must NOT error.
+    #[test]
+    fn bus_access_delegation_both_provides_ok() {
+        // package Repro
+        //   device InnerDevice
+        //     features eth : provides bus access Buses::Ethernet;
+        //   system Outer
+        //     features eth_ext : provides bus access Buses::Ethernet;
+        //   system implementation Outer.impl
+        //     subcomponents inner : device InnerDevice;
+        //     connections c_eth : bus access eth_ext <-> inner.eth;
+        let mut b = TestBuilder::new();
+        let outer = b.add_component("Outer", ComponentCategory::System, None);
+        let inner = b.add_component("inner", ComponentCategory::Device, Some(outer));
+
+        // Enclosing feature on Outer itself
+        b.add_feature(
+            "eth_ext",
+            FeatureKind::BusAccess,
+            None,
+            outer,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        // Feature on the subcomponent
+        b.add_feature(
+            "eth",
+            FeatureKind::BusAccess,
+            None,
+            inner,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        b.add_connection(
+            "c_eth",
+            ConnectionKind::Access,
+            outer,
+            end(None, "eth_ext"),
+            end(Some("inner"), "eth"),
+        );
+        b.set_children(outer, vec![inner]);
+
+        let inst = b.build(outer);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "bus access delegation with both `provides` must be accepted (AADL v2.3 §9.4): {:?}",
+            diags
+        );
+    }
+
+    /// Mirror MWE: same shape with `requires` on both ends — also valid.
+    #[test]
+    fn bus_access_delegation_both_requires_ok() {
+        let mut b = TestBuilder::new();
+        let outer = b.add_component("Outer", ComponentCategory::System, None);
+        let inner = b.add_component("inner", ComponentCategory::Device, Some(outer));
+        b.add_feature(
+            "eth_ext",
+            FeatureKind::BusAccess,
+            None,
+            outer,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_feature(
+            "eth",
+            FeatureKind::BusAccess,
+            None,
+            inner,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c_eth",
+            ConnectionKind::Access,
+            outer,
+            end(None, "eth_ext"),
+            end(Some("inner"), "eth"),
+        );
+        b.set_children(outer, vec![inner]);
+
+        let inst = b.build(outer);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "bus access delegation with both `requires` must be accepted: {:?}",
+            diags
+        );
+    }
+
+    /// Regression: peer subcomponent-to-subcomponent access connections
+    /// must still pass when directions oppose (Provides ↔ Requires).
+    #[test]
+    fn bus_access_peer_provides_to_requires_ok() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "bus1",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "bus2",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "bus1"),
+            end(Some("b"), "bus2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "bus access peer with provides/requires must remain clean: {:?}",
+            diags
+        );
+    }
+
+    /// Regression: peer bus access with both `provides` must STILL error
+    /// with the original peer-connection wording.
+    #[test]
+    fn bus_access_peer_both_provides_errors() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "bus1",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "bus2",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "bus1"),
+            end(Some("b"), "bus2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("provides ↔ requires pairing")
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "bus access peer both-provides must still error with peer-pairing wording: {:?}",
+            diags
+        );
+    }
+
+    /// Regression: peer bus access with both `requires` must STILL error.
+    #[test]
+    fn bus_access_peer_both_requires_errors() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let a = b.add_component("a", ComponentCategory::Process, Some(root));
+        let bb = b.add_component("b", ComponentCategory::Process, Some(root));
+        b.add_feature(
+            "bus1",
+            FeatureKind::BusAccess,
+            None,
+            a,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_feature(
+            "bus2",
+            FeatureKind::BusAccess,
+            None,
+            bb,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c1",
+            ConnectionKind::Access,
+            root,
+            end(Some("a"), "bus1"),
+            end(Some("b"), "bus2"),
+        );
+        b.set_children(root, vec![a, bb]);
+
+        let inst = b.build(root);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error && d.message.contains("provides ↔ requires pairing")
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "bus access peer both-requires must still error with peer-pairing wording: {:?}",
+            diags
+        );
+    }
+
+    /// Delegation with mismatched directions (enclosing `provides`,
+    /// subcomponent `requires`) must error with the new
+    /// delegation-direction-mismatch wording.
+    #[test]
+    fn bus_access_delegation_directions_mismatch_errors() {
+        let mut b = TestBuilder::new();
+        let outer = b.add_component("Outer", ComponentCategory::System, None);
+        let inner = b.add_component("inner", ComponentCategory::Device, Some(outer));
+        b.add_feature(
+            "eth_ext",
+            FeatureKind::BusAccess,
+            None,
+            outer,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Provides),
+        );
+        b.add_feature(
+            "eth",
+            FeatureKind::BusAccess,
+            None,
+            inner,
+            cls("Buses", "Ethernet"),
+            Some(AccessKind::Requires),
+        );
+        b.add_connection(
+            "c_eth",
+            ConnectionKind::Access,
+            outer,
+            end(None, "eth_ext"),
+            end(Some("inner"), "eth"),
+        );
+        b.set_children(outer, vec![inner]);
+
+        let inst = b.build(outer);
+        let diags = ClassifierMatchAnalysis.analyze(&inst);
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error
+                    && d.message.contains("delegation")
+                    && d.message.contains("matching directions")
+            })
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "delegation with mismatched directions must error with delegation wording: {:?}",
+            diags
+        );
+        // Must NOT use the peer-connection wording.
+        assert!(
+            !errors[0].message.contains("provides ↔ requires pairing"),
+            "delegation mismatch must use fresh wording, not peer wording: {:?}",
+            errors[0].message,
         );
     }
 }
