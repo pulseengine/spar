@@ -22,6 +22,7 @@ members = [
     "crates/spar-wasm",
     "crates/spar-insight",
     "crates/spar-trace-topology",
+    "crates/spar-mermaid",
 ]
 
 [workspace.package]
