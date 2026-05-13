@@ -1940,6 +1940,23 @@ artifacts:
     status: implemented
     tags: [binding, hir-def, overlay, v093]
 
+  - id: REQ-CLASSIFIER-MATCH-002
+    type: requirement
+    title: classifier_match distinguishes delegation from peer access connections
+    description: >
+      Per AADL v2.3 §9.4, access connections come in two kinds:
+      peer (subcomponent-to-subcomponent) connections where the
+      provides/requires directions must oppose, and delegation
+      connections (enclosing-component feature to subcomponent
+      feature) where the directions must match. spar shall apply
+      the correct rule per connection kind based on whether either
+      endpoint references the enclosing component's own feature.
+      Resolves user-reported v0.9.3 false-positive on bus access
+      delegation connections (32 occurrences in OEM SIP-internal
+      wiring).
+    status: implemented
+    tags: [classifier-match, connections, v093]
+
   - id: REQ-HAS-FEATURES
     type: requirement
     title: has() predicate matches component features by name
