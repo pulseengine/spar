@@ -2450,6 +2450,25 @@ artifacts:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-003
 
+  - id: TEST-TRACE-TOPOLOGY-QCC
+    type: feature
+    title: QccYangSwitchConfigSource parses per-port TSN configs
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover a single-port
+      full-config roundtrip, a port with only max-frame-size set, multiple
+      ports with differing configs, the empty interfaces array case, the
+      missing-root malformed-JSON error path, a tempfile-based open
+      roundtrip, and bandwidth-reservation out-of-range handling.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, qcc, yang, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-005
+
   - id: TEST-TRACE-TOPOLOGY-GPTP
     type: feature
     title: GptpJsonPtpTimeSource parses sync-error samples
