@@ -62,6 +62,7 @@ pub(crate) fn eval_node(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, E
                 }))
         }
         ExprSyntaxKind::PIPELINE_EXPR => eval_pipeline(node, ctx),
+        ExprSyntaxKind::COUNT_COMPARE_EXPR => eval_count_compare(node, ctx),
         _ => Err(EvalError {
             message: format!("unexpected top-level node: {:?}", node.kind()),
         }),
@@ -87,6 +88,74 @@ fn eval_pipeline(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, EvalErro
     }
 
     Ok(value)
+}
+
+/// Evaluate a COUNT_COMPARE_EXPR: `pipeline <op> <integer>`.
+fn eval_count_compare(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, EvalError> {
+    // Children: PIPELINE_EXPR, then tokens for the operator and integer.
+    // The PIPELINE_EXPR is the only child node; the operator and integer are tokens.
+    let pipeline_node = node.children().find(|c| c.kind() == ExprSyntaxKind::PIPELINE_EXPR).ok_or_else(|| EvalError {
+        message: "count comparison missing pipeline".to_string(),
+    })?;
+
+    let pipeline_value = eval_pipeline(&pipeline_node, ctx)?;
+    let count = match pipeline_value {
+        Value::Count(n) => n,
+        Value::Components(ref comps) => comps.len(),
+        Value::Features(ref feats) => feats.len(),
+        Value::Diagnostics(ref diags) => diags.len(),
+        _ => {
+            return Err(EvalError {
+                message: "count comparison requires a countable value (use .count() or a collection)".to_string(),
+            });
+        }
+    };
+
+    // Extract the comparison operator token and integer literal token.
+    let mut op_kind: Option<ExprSyntaxKind> = None;
+    let mut rhs_text: Option<String> = None;
+
+    for elem in node.children_with_tokens() {
+        if let rowan::NodeOrToken::Token(t) = elem {
+            match t.kind() {
+                ExprSyntaxKind::GE
+                | ExprSyntaxKind::GT
+                | ExprSyntaxKind::LE
+                | ExprSyntaxKind::LT
+                | ExprSyntaxKind::EQ_EQ
+                | ExprSyntaxKind::NEQ => {
+                    op_kind = Some(t.kind());
+                }
+                ExprSyntaxKind::INT_LIT => {
+                    rhs_text = Some(t.text().to_string());
+                }
+                ExprSyntaxKind::WHITESPACE => {}
+                _ => {}
+            }
+        }
+    }
+
+    let op = op_kind.ok_or_else(|| EvalError {
+        message: "count comparison missing operator".to_string(),
+    })?;
+    let rhs_str = rhs_text.ok_or_else(|| EvalError {
+        message: "count comparison missing integer operand".to_string(),
+    })?;
+    let rhs: usize = rhs_str.parse().map_err(|_| EvalError {
+        message: format!("invalid integer in count comparison: '{}'", rhs_str),
+    })?;
+
+    let result = match op {
+        ExprSyntaxKind::GE => count >= rhs,
+        ExprSyntaxKind::GT => count > rhs,
+        ExprSyntaxKind::LE => count <= rhs,
+        ExprSyntaxKind::LT => count < rhs,
+        ExprSyntaxKind::EQ_EQ => count == rhs,
+        ExprSyntaxKind::NEQ => count != rhs,
+        _ => unreachable!(),
+    };
+
+    Ok(Value::Bool(result))
 }
 
 /// Evaluate a source expression: `components` or `analysis('name')`.
