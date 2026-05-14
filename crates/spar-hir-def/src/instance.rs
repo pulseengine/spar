@@ -2387,7 +2387,10 @@ impl<'a> Builder<'a> {
             let is_last = i == segments.len() - 1;
             if is_last {
                 let is_feature = self.components[current].features.iter().any(|&fi| {
-                    self.features[fi].name.as_str().eq_ignore_ascii_case(segment)
+                    self.features[fi]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(segment)
                 });
                 if is_feature {
                     return AppliesTarget::FeatureOwner(current);
