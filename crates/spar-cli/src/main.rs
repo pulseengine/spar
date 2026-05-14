@@ -43,6 +43,7 @@ fn main() {
         "allocate" => cmd_allocate(&args[2..]),
         "diff" => cmd_diff(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
+        "emit" => cmd_emit(&args[2..]),
         "render" => cmd_render(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
         "codegen" => cmd_codegen(&args[2..]),
@@ -76,6 +77,7 @@ fn print_usage() {
     eprintln!("  allocate   Allocate threads to processors via bin-packing");
     eprintln!("  diff       Compare two model versions and report changes");
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
+    eprintln!("  emit       Emit a text diagram (Mermaid flowchart) from an instantiated system");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
@@ -103,6 +105,10 @@ fn print_usage() {
         "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
+    eprintln!(
+        "  emit     --root Package::Type.Impl [--format mermaid] [--category <cat,...>] \
+         [--max-depth N] [--no-connections] [-o output.md] <file...>"
+    );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
         "  verify   --root Package::Type.Impl [--format text|json] requirements.toml <file...>"
@@ -1272,6 +1278,189 @@ fn cmd_modes(args: &[String]) {
                 println!();
             }
         }
+    }
+}
+
+fn parse_category(s: &str) -> spar_hir_def::item_tree::ComponentCategory {
+    use spar_hir_def::item_tree::ComponentCategory;
+    match s.to_ascii_lowercase().as_str() {
+        "system" => ComponentCategory::System,
+        "process" => ComponentCategory::Process,
+        "thread" => ComponentCategory::Thread,
+        "threadgroup" | "thread-group" | "thread_group" => ComponentCategory::ThreadGroup,
+        "processor" => ComponentCategory::Processor,
+        "virtualprocessor" | "virtual-processor" | "virtual_processor" => {
+            ComponentCategory::VirtualProcessor
+        }
+        "memory" => ComponentCategory::Memory,
+        "bus" => ComponentCategory::Bus,
+        "virtualbus" | "virtual-bus" | "virtual_bus" => ComponentCategory::VirtualBus,
+        "device" => ComponentCategory::Device,
+        "subprogram" => ComponentCategory::Subprogram,
+        "subprogramgroup" | "subprogram-group" | "subprogram_group" => {
+            ComponentCategory::SubprogramGroup
+        }
+        "data" => ComponentCategory::Data,
+        "abstract" => ComponentCategory::Abstract,
+        other => {
+            eprintln!("Unknown component category: {other}");
+            eprintln!(
+                "Valid categories: system, process, thread, threadgroup, processor, \
+                 virtualprocessor, memory, bus, virtualbus, device, subprogram, \
+                 subprogramgroup, data, abstract"
+            );
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_emit(args: &[String]) {
+    let mut root: Option<String> = None;
+    let mut format: Option<String> = None;
+    let mut categories: Vec<spar_hir_def::item_tree::ComponentCategory> = Vec::new();
+    let mut max_depth: Option<usize> = None;
+    let mut include_connections = true;
+    let mut output: Option<String> = None;
+    let mut files: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    let f = args[i].clone();
+                    if f != "mermaid" {
+                        eprintln!("--format only supports 'mermaid' (got '{f}')");
+                        process::exit(1);
+                    }
+                    format = Some(f);
+                } else {
+                    eprintln!("--format requires a value (mermaid)");
+                    process::exit(1);
+                }
+            }
+            "--category" => {
+                i += 1;
+                if i < args.len() {
+                    for cat_str in args[i].split(',') {
+                        let cat_str = cat_str.trim();
+                        if !cat_str.is_empty() {
+                            categories.push(parse_category(cat_str));
+                        }
+                    }
+                } else {
+                    eprintln!("--category requires a comma-separated list of component categories");
+                    process::exit(1);
+                }
+            }
+            "--max-depth" => {
+                i += 1;
+                if i < args.len() {
+                    match args[i].parse::<usize>() {
+                        Ok(n) => max_depth = Some(n),
+                        Err(_) => {
+                            eprintln!("--max-depth requires a non-negative integer");
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("--max-depth requires an integer value");
+                    process::exit(1);
+                }
+            }
+            "--no-connections" => {
+                include_connections = false;
+            }
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires an output file path");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    let _ = format; // "mermaid" is the only valid value; validated above.
+
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    if !inst.diagnostics.is_empty() {
+        for diag in &inst.diagnostics {
+            eprintln!("warning: {diag:?}");
+        }
+    }
+
+    if inst.component_count() == 0 {
+        eprintln!(
+            "error: root '{}::{}' could not be resolved — check --root spelling and file paths",
+            pkg_name, type_name
+        );
+        process::exit(1);
+    }
+
+    let opts = spar_mermaid::MermaidOptions {
+        categories,
+        max_depth,
+        include_connections,
+    };
+
+    let diagram = spar_mermaid::emit_flowchart(&inst, &opts);
+
+    match output {
+        Some(path) => {
+            fs::write(&path, &diagram).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote {path}");
+        }
+        None => print!("{diagram}"),
     }
 }
 
