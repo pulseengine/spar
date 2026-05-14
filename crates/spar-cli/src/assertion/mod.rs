@@ -1221,13 +1221,11 @@ check = "components.count()"
             diagnostics: &diags,
         };
 
-        match eval_check(
-            "components.any(has('no_such_port'))",
-            &ctx,
-        )
-        .unwrap()
-        {
-            Value::Bool(b) => assert!(!b, "has('no_such_port') must be false — port does not exist"),
+        match eval_check("components.any(has('no_such_port'))", &ctx).unwrap() {
+            Value::Bool(b) => assert!(
+                !b,
+                "has('no_such_port') must be false — port does not exist"
+            ),
             other => panic!("expected Bool, got {:?}", other),
         }
     }
