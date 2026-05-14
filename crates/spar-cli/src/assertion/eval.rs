@@ -94,9 +94,12 @@ fn eval_pipeline(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, EvalErro
 fn eval_count_compare(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, EvalError> {
     // Children: PIPELINE_EXPR, then tokens for the operator and integer.
     // The PIPELINE_EXPR is the only child node; the operator and integer are tokens.
-    let pipeline_node = node.children().find(|c| c.kind() == ExprSyntaxKind::PIPELINE_EXPR).ok_or_else(|| EvalError {
-        message: "count comparison missing pipeline".to_string(),
-    })?;
+    let pipeline_node = node
+        .children()
+        .find(|c| c.kind() == ExprSyntaxKind::PIPELINE_EXPR)
+        .ok_or_else(|| EvalError {
+            message: "count comparison missing pipeline".to_string(),
+        })?;
 
     let pipeline_value = eval_pipeline(&pipeline_node, ctx)?;
     let count = match pipeline_value {
@@ -106,7 +109,9 @@ fn eval_count_compare(node: &SyntaxNode, ctx: &EvalContext) -> Result<Value, Eva
         Value::Diagnostics(ref diags) => diags.len(),
         _ => {
             return Err(EvalError {
-                message: "count comparison requires a countable value (use .count() or a collection)".to_string(),
+                message:
+                    "count comparison requires a countable value (use .count() or a collection)"
+                        .to_string(),
             });
         }
     };
