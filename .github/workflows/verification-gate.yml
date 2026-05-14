@@ -32,13 +32,15 @@ jobs:
       - name: Install rivet
         run: |
           # Pin to the etch rev used by the rivet workspace dependency.
-          # The rivet repo is a multi-package workspace; --package selects which
-          # crate owns the `rivet` binary (otherwise cargo errors with
-          # "multiple packages with binaries found: rivet-cli, rivet-fuzz").
+          # The rivet repo is a multi-package workspace; the positional
+          # `rivet-cli` selects which crate owns the `rivet` binary (otherwise
+          # cargo errors with "multiple packages with binaries found:
+          # rivet-cli, rivet-fuzz"). `--package` is not accepted by
+          # `cargo install`; the crate name is the positional argument.
           cargo install --locked --git https://github.com/pulseengine/rivet \
             --rev 4c067093ac34fc9e32227bc5bc853d47e9220540 \
-            --package rivet-cli \
-            --bin rivet
+            --bin rivet \
+            rivet-cli
 
       - name: Pick verification filter (per-PR override via body)
         id: pick
