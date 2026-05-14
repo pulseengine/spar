@@ -1348,6 +1348,20 @@ struct ImplChainResult {
     call_map: FxHashMap<String, Name>,
 }
 
+/// Result of resolving an `applies to <dotted-path>` target.
+///
+/// Used internally by [`Builder::resolve_applies_to_path`].
+enum AppliesTarget {
+    /// All segments named subcomponents; resolved to this component.
+    Component(ComponentInstanceIdx),
+    /// All-but-last segments named subcomponents; the last segment names a
+    /// feature on the returned component (AADL v2.3 AS5506D §11.3).
+    FeatureOwner(ComponentInstanceIdx),
+    /// No valid resolution: the path contains a segment that matches neither
+    /// a subcomponent nor (for the last segment) a feature.
+    Unresolvable,
+}
+
 struct Builder<'a> {
     scope: &'a GlobalScope,
     components: Arena<ComponentInstance>,
@@ -2296,23 +2310,37 @@ impl<'a> Builder<'a> {
     /// eagerly so that downstream analyses and the JSON instance exporter
     /// (#129) see the property on the target.
     ///
-    /// If the path cannot be resolved (bad name, or walks into a feature
-    /// rather than a subcomponent), the property stays on the declaring
-    /// component and a diagnostic is recorded.
+    /// AADL v2.3 (AS5506D §11.3) also allows the `applies to` path to end with
+    /// a feature name: `Some_Property => value applies to subcomp.port;`.
+    /// In that case the property is stored on the component that owns the
+    /// feature (the resolved component at the penultimate segment), so that
+    /// downstream analyses can retrieve it via `properties_for`.  No diagnostic
+    /// is emitted for valid feature paths.
+    ///
+    /// If the path cannot be resolved at all (bad subcomponent name or name
+    /// that matches neither a subcomponent nor a feature), the property stays
+    /// on the declaring component and a diagnostic is recorded.
     fn resolve_pending_applies_to(&mut self) {
         let pending = std::mem::take(&mut self.pending_applies_to);
         for (owner, path, prop) in pending {
             match self.resolve_applies_to_path(owner, &path) {
-                Some(target) => {
+                AppliesTarget::Component(target) => {
                     self.property_maps.entry(target).or_default().add(prop);
                 }
-                None => {
+                AppliesTarget::FeatureOwner(component) => {
+                    // The last segment named a feature on `component`.  Store
+                    // the property on the owning component — per AS5506D §11.3
+                    // the property association applies to the feature instance,
+                    // and the component is the natural retrieval point.
+                    self.property_maps.entry(component).or_default().add(prop);
+                }
+                AppliesTarget::Unresolvable => {
                     // Unresolvable path: keep on owner (prior behavior) and
                     // emit a diagnostic so the author notices.
                     self.property_maps.entry(owner).or_default().add(prop);
                     self.diagnostics.push(InstanceDiagnostic {
                         message: format!(
-                            "applies_to path '{path}' could not be resolved to a component instance"
+                            "applies_to path '{path}' could not be resolved to a component instance or feature"
                         ),
                         path: vec![self.components[owner].name.clone()],
                     });
@@ -2321,25 +2349,59 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Walk a dotted path (`fw.firmware`) from `owner` down through
-    /// subcomponent children, matching names case-insensitively. Returns
-    /// the resolved target component index, or `None` if any segment fails.
-    fn resolve_applies_to_path(
-        &self,
-        owner: ComponentInstanceIdx,
-        path: &str,
-    ) -> Option<ComponentInstanceIdx> {
+    /// Walk a dotted path (`fw.firmware` or `proc_inst.input_port`) from
+    /// `owner` down through subcomponent children, matching names
+    /// case-insensitively.
+    ///
+    /// Returns:
+    /// - [`AppliesTarget::Component`] when all segments name subcomponents.
+    /// - [`AppliesTarget::FeatureOwner`] when all-but-last segments name
+    ///   subcomponents and the final segment names a feature on the resolved
+    ///   component (AADL v2.3 AS5506D §11.3 feature-path support).
+    /// - [`AppliesTarget::Unresolvable`] when any segment cannot be matched.
+    fn resolve_applies_to_path(&self, owner: ComponentInstanceIdx, path: &str) -> AppliesTarget {
+        let segments: Vec<&str> = path
+            .split('.')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if segments.is_empty() {
+            return AppliesTarget::Component(owner);
+        }
+
         let mut current = owner;
-        for segment in path.split('.').map(str::trim).filter(|s| !s.is_empty()) {
-            let child = self.components[current].children.iter().find(|&&ci| {
+        for (i, &segment) in segments.iter().enumerate() {
+            // Try to match as a subcomponent child first.
+            if let Some(&child) = self.components[current].children.iter().find(|&&ci| {
                 self.components[ci]
                     .name
                     .as_str()
                     .eq_ignore_ascii_case(segment)
-            })?;
-            current = *child;
+            }) {
+                current = child;
+                continue;
+            }
+
+            // Not a child — check if this is the last segment and names a feature.
+            let is_last = i == segments.len() - 1;
+            if is_last {
+                let is_feature = self.components[current].features.iter().any(|&fi| {
+                    self.features[fi]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(segment)
+                });
+                if is_feature {
+                    return AppliesTarget::FeatureOwner(current);
+                }
+            }
+
+            // Neither subcomponent nor feature — unresolvable.
+            return AppliesTarget::Unresolvable;
         }
-        Some(current)
+
+        AppliesTarget::Component(current)
     }
 
     /// STPA-REQ-010: Validate that connection endpoint array indices are within bounds.
