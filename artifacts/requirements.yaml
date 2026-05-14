@@ -1985,6 +1985,23 @@ artifacts:
     status: implemented
     tags: [assertions, v093]
 
+  - id: REQ-APPLIES-TO-FEATURE-PATH
+    type: requirement
+    title: applies_to property association accepts feature paths
+    description: >
+      Per AADL v2.3 (SAE AS5506D §11.3), a property association's
+      `applies to` clause may name a feature on a subcomponent
+      (`Some_Property => value applies to fw.input_port;`), not just
+      a subcomponent path. spar shall resolve such paths: when all
+      segments name subcomponents the property attaches to the leaf
+      component; when the final segment names a feature on the
+      penultimate component, the property attaches to that component
+      and the feature is the logical target. Resolves v0.9.x bug where
+      feature-path applies_to clauses emitted spurious "could not be
+      resolved" diagnostics and dropped the property.
+    status: implemented
+    tags: [hir-def, properties, v093]
+
   # ── Mermaid emission ────────────────────────────────────────────────────
 
   - id: REQ-MERMAID-001
