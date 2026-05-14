@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Post (or update) a sticky PR comment summarising rivet verification results.
 
-Reads the JSON written by `tools/run_verification.py` and uses the `gh` CLI to
-upsert a single marker-tagged comment on the PR. Re-running on the same PR
-replaces the prior body rather than appending another comment.
+Reads the JSON written by `tools/run_verification.py` and calls the GitHub
+REST API directly to upsert a single marker-tagged comment on the PR.
+Re-running on the same PR replaces the prior body rather than appending
+another comment. Pure stdlib (urllib) — no `gh` CLI dependency.
 
 Usage:
     tools/post_verification_comment.py <pr-number> [--results-json PATH] [--repo OWNER/NAME]
 
-Required:
+Required env:
     GH_TOKEN (or GITHUB_TOKEN) with `pull-requests: write`.
 """
 
@@ -17,11 +18,37 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 MARKER = "<!-- rivet-verification-gate -->"
+API = "https://api.github.com"
+
+
+def github_request(
+    method: str, path: str, token: str, body: dict | None = None
+) -> tuple[int, bytes]:
+    url = f"{API}{path}"
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "spar-verification-gate",
+            "Content-Type": "application/json" if data else "application/octet-stream",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
 
 
 def render_body(results: dict) -> str:
@@ -63,56 +90,50 @@ def render_body(results: dict) -> str:
 <sub>Updated automatically by `tools/post_verification_comment.py`. Source of truth: `artifacts/verification.yaml`.</sub>"""
 
 
-def find_marker_comment(repo: str, pr: int) -> int | None:
-    proc = subprocess.run(
-        [
-            "gh",
-            "api",
-            f"repos/{repo}/issues/{pr}/comments",
-            "--paginate",
-            "--jq",
-            f'.[] | select(.body | contains("{MARKER}")) | .id',
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    out = proc.stdout.strip()
-    if not out:
-        return None
-    return int(out.splitlines()[0])
+def find_marker_comment(repo: str, pr: int, token: str) -> int | None:
+    """Page through PR comments looking for the marker. Returns comment id or None."""
+    page = 1
+    while True:
+        status, body = github_request(
+            "GET",
+            f"/repos/{repo}/issues/{pr}/comments?per_page=100&page={page}",
+            token,
+        )
+        if status != 200:
+            print(f"GET comments failed: {status} {body[:200]}", file=sys.stderr)
+            return None
+        comments = json.loads(body)
+        if not comments:
+            return None
+        for c in comments:
+            if MARKER in (c.get("body") or ""):
+                return c["id"]
+        if len(comments) < 100:
+            return None
+        page += 1
 
 
-def upsert_comment(repo: str, pr: int, body: str) -> None:
-    existing = find_marker_comment(repo, pr)
+def upsert_comment(repo: str, pr: int, body: str, token: str) -> None:
+    existing = find_marker_comment(repo, pr, token)
     if existing is not None:
         print(f"updating comment {existing}", file=sys.stderr)
-        subprocess.run(
-            [
-                "gh",
-                "api",
-                "-X",
-                "PATCH",
-                f"repos/{repo}/issues/comments/{existing}",
-                "-f",
-                f"body={body}",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
+        status, resp = github_request(
+            "PATCH",
+            f"/repos/{repo}/issues/comments/{existing}",
+            token,
+            {"body": body},
         )
     else:
         print("creating new comment", file=sys.stderr)
-        subprocess.run(
-            [
-                "gh",
-                "api",
-                f"repos/{repo}/issues/{pr}/comments",
-                "-f",
-                f"body={body}",
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
+        status, resp = github_request(
+            "POST",
+            f"/repos/{repo}/issues/{pr}/comments",
+            token,
+            {"body": body},
         )
+    if status not in (200, 201):
+        print(f"comment upsert failed: {status} {resp[:300]}", file=sys.stderr)
+        sys.exit(2)
 
 
 def main() -> int:
@@ -131,13 +152,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        print("GH_TOKEN or GITHUB_TOKEN required", file=sys.stderr)
+        return 2
+
     if not args.results_json.is_file():
         print(f"no {args.results_json} found; nothing to post", file=sys.stderr)
         return 0
 
     results = json.loads(args.results_json.read_text())
     body = render_body(results)
-    upsert_comment(args.repo, args.pr, body)
+    upsert_comment(args.repo, args.pr, body, token)
     return 0
 
 

@@ -2519,7 +2519,7 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p spar-hir-def overlay
-        - run: cargo test -p spar-cli applies_to_nested
+        - run: cargo test -p spar --test applies_to_nested
     status: passing
     tags: [binding, hir-def, v093]
     links:
