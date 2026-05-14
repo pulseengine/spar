@@ -73,9 +73,7 @@ pub fn emit_flowchart(instance: &SystemInstance, opts: &MermaidOptions) -> Strin
         .all_components()
         .filter(|(idx, comp)| {
             // Category filter.
-            if !opts.categories.is_empty()
-                && !opts.categories.contains(&comp.category)
-            {
+            if !opts.categories.is_empty() && !opts.categories.contains(&comp.category) {
                 return false;
             }
             // Depth filter.
@@ -136,14 +134,17 @@ pub fn emit_flowchart(instance: &SystemInstance, opts: &MermaidOptions) -> Strin
                 continue;
             };
 
-            let src_idx = resolve_endpoint(conn.owner, src_end.subcomponent.as_ref(), &children_by_name);
-            let dst_idx = resolve_endpoint(conn.owner, dst_end.subcomponent.as_ref(), &children_by_name);
+            let src_idx =
+                resolve_endpoint(conn.owner, src_end.subcomponent.as_ref(), &children_by_name);
+            let dst_idx =
+                resolve_endpoint(conn.owner, dst_end.subcomponent.as_ref(), &children_by_name);
 
             let (Some(src_idx), Some(dst_idx)) = (src_idx, dst_idx) else {
                 continue;
             };
 
-            let (Some(src_id), Some(dst_id)) = (emitted.get(&src_idx), emitted.get(&dst_idx)) else {
+            let (Some(src_id), Some(dst_id)) = (emitted.get(&src_idx), emitted.get(&dst_idx))
+            else {
                 continue;
             };
 
@@ -214,7 +215,13 @@ fn resolve_endpoint(
 /// Replaces every character that is not ASCII alphanumeric or `_` with `_`.
 fn sanitize_id(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -226,7 +233,7 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::{
-        ComponentInstance, ConnectionInstance, ConnectionEnd, SystemInstance,
+        ComponentInstance, ConnectionEnd, ConnectionInstance, SystemInstance,
     };
     use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind};
     use spar_hir_def::name::Name;
@@ -238,9 +245,9 @@ mod tests {
     /// `connections` is a list of `(conn_name, owner_idx_in_spec, src_sub, dst_sub)`
     /// where `src_sub` / `dst_sub` are indices into `spec` converted to Names.
     fn build_instance(
-        spec: &[(&str, ComponentCategory)],           // (name, category)
-        parent_map: &[(usize, usize)],                // (child_idx, parent_idx) in spec
-        connections: &[(&str, usize, usize, usize)],  // (name, owner, src_child, dst_child)
+        spec: &[(&str, ComponentCategory)],          // (name, category)
+        parent_map: &[(usize, usize)],               // (child_idx, parent_idx) in spec
+        connections: &[(&str, usize, usize, usize)], // (name, owner, src_child, dst_child)
     ) -> SystemInstance {
         let mut components: Arena<ComponentInstance> = Arena::default();
         let mut comp_idxs: Vec<ComponentInstanceIdx> = Vec::new();
@@ -346,7 +353,10 @@ mod tests {
         let opts = MermaidOptions::default();
         let out = emit_flowchart(&instance, &opts);
 
-        assert!(out.starts_with("flowchart TD\n"), "missing flowchart header");
+        assert!(
+            out.starts_with("flowchart TD\n"),
+            "missing flowchart header"
+        );
         assert!(out.contains("t1"), "missing t1");
         assert!(out.contains("t2"), "missing t2");
         assert!(out.contains("t3"), "missing t3");
@@ -410,6 +420,9 @@ mod tests {
         let out = emit_flowchart(&instance, &opts);
         // Labels should be "category: name"
         assert!(out.contains("thread: t1"), "expected 'thread: t1' in label");
-        assert!(out.contains("processor: cpu"), "expected 'processor: cpu' in label");
+        assert!(
+            out.contains("processor: cpu"),
+            "expected 'processor: cpu' in label"
+        );
     }
 }
