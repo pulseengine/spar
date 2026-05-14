@@ -2605,6 +2605,29 @@ artifacts:
       - type: satisfies
         target: REQ-APPLIES-TO-FEATURE-PATH
 
+  # ── Mermaid emission ────────────────────────────────────────────────────
+
+  - id: TEST-MERMAID-FLOWCHART
+    type: feature
+    title: Flowchart emitter produces correct Mermaid markup
+    description: >
+      Unit tests in crates/spar-mermaid/src/lib.rs construct a small
+      SystemInstance manually (root system + 3 threads + 1 processor +
+      2 connections) and verify: (a) output starts with "flowchart TD",
+      all four component names appear, and at least one "-->" edge is
+      present; (b) category filter (threads only) excludes the processor
+      node; (c) max_depth=0 emits only the root component; (d) the
+      include_connections=false flag suppresses all edges.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-mermaid
+    status: passing
+    tags: [mermaid, emission, v0100]
+    links:
+      - type: satisfies
+        target: REQ-MERMAID-001
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: TEST-VERIFY-GATE-RUNNER

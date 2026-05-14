@@ -2002,6 +2002,25 @@ artifacts:
     status: implemented
     tags: [hir-def, properties, v093]
 
+  # ── Mermaid emission ────────────────────────────────────────────────────
+
+  - id: REQ-MERMAID-001
+    type: requirement
+    title: Flowchart emission from AADL instance models
+    description: >
+      spar shall provide a library crate (spar-mermaid) that accepts a
+      SystemInstance and emits a Mermaid flowchart TD diagram.  Each
+      component instance becomes one labelled node (label format:
+      "category: name").  Each ConnectionInstance whose source and
+      destination both resolve to emitted nodes becomes one directed edge.
+      Callers may filter by ComponentCategory set, by max parent-hop depth
+      from the root, and by whether connection edges are included.  The
+      empty-category filter means "emit all categories".  This crate is
+      emit-only; no CLI subcommand, no round-trip parser, no classDiagram
+      or block-beta — those are follow-on work.
+    status: implemented
+    tags: [mermaid, emission, v0100]
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: REQ-VERIFY-GATE-001
