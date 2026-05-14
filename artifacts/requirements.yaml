@@ -2021,4 +2021,21 @@ artifacts:
     status: implemented
     tags: [mermaid, emission, v0100]
 
+  - id: REQ-EMV2-PROPAGATION-001
+    type: requirement
+    title: EMV2 error-propagation traversal across AADL connection graph
+    description: >
+      spar shall provide an analysis pass that, for each component declaring
+      an `out propagation` for an error type T, walks the AADL connection
+      graph (via semantic connections) to identify all downstream components
+      that declare a matching `in propagation` for T (case-insensitive match
+      per AADL EMV2 v2 §4.3).  The traversal shall recurse transitively
+      through relay components that declare both in and out propagations for
+      the same type.  Cycle detection (tracking component+error_type pairs)
+      shall prevent infinite loops in cyclic topologies.  Error flows
+      (path/sink/source) shall be captured per component in the report but
+      shall not by themselves trigger cross-component propagation.
+    status: implemented
+    tags: [emv2, analysis, v0100, safety]
+
   # Research findings tracked separately in research/findings.yaml

@@ -2627,3 +2627,27 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-MERMAID-001
+
+  - id: TEST-EMV2-PROPAGATION
+    type: feature
+    title: EMV2 error-propagation traversal tests
+    description: >
+      Unit tests in crates/spar-analysis/src/emv2_propagation.rs verify:
+      (a) single-hop propagation produces one chain (sensor → controller)
+      with the correct origin, error type, downstream, and via-connection;
+      (b) three-hop chain A→B→C→D with relay nodes produces downstream in
+      order [B, C, D]; (c) cycle detection (A→B→A) terminates cleanly with
+      each origin's chain not containing the origin itself; (d) path error
+      flows appear in local_flows but produce no propagation chain;
+      (e) case-insensitive error-type matching yields a chain despite
+      differing capitalisation; (f) no connection between components with
+      matching propagations yields no chain.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis emv2_propagation
+    status: passing
+    tags: [emv2, analysis, v0100, safety]
+    links:
+      - type: satisfies
+        target: REQ-EMV2-PROPAGATION-001
