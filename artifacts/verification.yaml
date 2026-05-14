@@ -2565,6 +2565,26 @@ artifacts:
       - type: satisfies
         target: REQ-ASSERTION-COMPARISON
 
+  - id: TEST-HAS-FEATURES
+    type: feature
+    title: has() predicate matches features by name
+    description: >
+      Unit tests in crates/spar-cli/src/assertion/mod.rs verify that
+      has('feature_name') returns true when a component owns a feature
+      with that name (has_matches_feature_by_name), false when no such
+      feature exists (has_feature_name_absent_returns_false), and that
+      all() correctly fails when only some components carry the named
+      feature (has_feature_all_fails_when_partial).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --bin spar -- assertion::tests::has
+    status: passing
+    tags: [assertions, v093]
+    links:
+      - type: satisfies
+        target: REQ-HAS-FEATURES
+
   # ── Mermaid emission ────────────────────────────────────────────────────
 
   - id: TEST-MERMAID-FLOWCHART
