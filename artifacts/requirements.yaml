@@ -1957,6 +1957,20 @@ artifacts:
     status: implemented
     tags: [classifier-match, connections, v093]
 
+  - id: REQ-ASSERTION-COMPARISON
+    type: requirement
+    title: Assertion DSL supports count() comparisons against integer literals
+    description: >
+      The assertion DSL shall evaluate pipeline expressions ending in
+      `.count()` followed by a comparison operator and integer literal
+      (`>=`, `>`, `<=`, `<`, `==`, `!=`) and return a Bool result. This
+      applies uniformly to Count, Components, Features, and Diagnostics
+      collection-valued pipelines. Resolves v0.9.x bug where
+      `components.where(...).count() >= n` failed to parse, leaving users
+      unable to express cardinality constraints in [[assertion]] blocks.
+    status: implemented
+    tags: [assertions, eval, v093]
+
   - id: REQ-HAS-FEATURES
     type: requirement
     title: has() predicate matches component features by name

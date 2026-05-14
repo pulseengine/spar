@@ -1254,4 +1254,59 @@ check = "components.count()"
             other => panic!("expected Bool, got {:?}", other),
         }
     }
+
+    // ── count() comparison tests (REQ-ASSERTION-COMPARISON) ────────────
+
+    fn assert_bool(expr: &str, expected: bool) {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+        match eval_check(expr, &ctx).unwrap() {
+            Value::Bool(b) => assert_eq!(b, expected, "expr: {expr}"),
+            other => panic!("expr {expr}: expected Bool, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eval_count_ge_true() {
+        assert_bool("components.where(category == 'thread').count() >= 2", true);
+    }
+
+    #[test]
+    fn eval_count_ge_false() {
+        assert_bool("components.where(category == 'thread').count() >= 3", false);
+    }
+
+    #[test]
+    fn eval_count_gt() {
+        assert_bool("components.where(category == 'thread').count() > 1", true);
+        assert_bool("components.where(category == 'thread').count() > 2", false);
+    }
+
+    #[test]
+    fn eval_count_le() {
+        assert_bool("components.where(category == 'thread').count() <= 2", true);
+        assert_bool("components.where(category == 'thread').count() <= 1", false);
+    }
+
+    #[test]
+    fn eval_count_lt() {
+        assert_bool("components.where(category == 'thread').count() < 3", true);
+        assert_bool("components.where(category == 'thread').count() < 2", false);
+    }
+
+    #[test]
+    fn eval_count_eq() {
+        assert_bool("components.where(category == 'thread').count() == 2", true);
+        assert_bool("components.where(category == 'thread').count() == 3", false);
+    }
+
+    #[test]
+    fn eval_count_neq() {
+        assert_bool("components.where(category == 'thread').count() != 3", true);
+        assert_bool("components.where(category == 'thread').count() != 2", false);
+    }
 }
