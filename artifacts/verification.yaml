@@ -2544,3 +2544,23 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CLASSIFIER-MATCH-002
+
+  - id: TEST-ASSERTION-COMPARISON
+    type: feature
+    title: count() comparisons evaluate correctly against integer literals
+    description: >
+      Unit tests in crates/spar-cli/src/assertion/mod.rs verify that
+      pipelines ending in `.count() <op> n` return the expected Bool
+      for each comparison operator: `>=`, `>`, `<=`, `<`, `==`, `!=`
+      against fixtures with known component counts (eval_count_ge_true,
+      eval_count_ge_false, eval_count_gt, eval_count_le, eval_count_lt,
+      eval_count_eq, eval_count_neq).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --bin spar -- assertion::tests::eval_count
+    status: passing
+    tags: [assertions, eval, v093]
+    links:
+      - type: satisfies
+        target: REQ-ASSERTION-COMPARISON
