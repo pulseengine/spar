@@ -1612,8 +1612,8 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p spar --test moves_enumerate_objectives
-        - run: cargo test -p spar-solver enumerate::
-        - run: cargo test -p spar moves::enumerate_tests
+        - run: "cargo test -p spar-solver enumerate::"
+        - run: "cargo test -p spar moves::enumerate_tests"
     status: passing
     tags: [migration, track-e, v080, cli, solver]
     links:
@@ -2519,7 +2519,7 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p spar-hir-def overlay
-        - run: cargo test -p spar-cli applies_to_nested
+        - run: cargo test -p spar --test applies_to_nested
     status: passing
     tags: [binding, hir-def, v093]
     links:
@@ -2627,3 +2627,23 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-MERMAID-001
+
+  # ── CI / Verification gate ──────────────────────────────────────────────
+
+  - id: TEST-VERIFY-GATE-RUNNER
+    type: feature
+    title: Verification gate runner executes a tag-filtered subset and emits JSON
+    description: >
+      Smoke-test of `tools/run_verification.py`: filter to the
+      classifier-match tag (1 artifact), verify that the runner exits 0 and
+      writes a verification-results.json with passed_count=1, failed_count=0.
+    fields:
+      method: automated-test
+      steps:
+        - run: "tools/run_verification.py --filter '(and (= type \"feature\") (has-tag \"classifier-match\"))' --results-json /tmp/verify-smoke.json"
+        - run: "python3 -c 'import json,sys; d=json.load(open(\"/tmp/verify-smoke.json\")); sys.exit(0 if d[\"passed_count\"]==1 and d[\"failed_count\"]==0 else 1)'"
+    status: passing
+    tags: [ci, rivet, verification, v0100]
+    links:
+      - type: satisfies
+        target: REQ-VERIFY-GATE-001
