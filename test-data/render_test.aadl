@@ -31,14 +31,17 @@ public
       cmd_out: out data port;
   end Controller;
 
+  -- Note: subcomponent renamed from `compute` to `computer` because
+  -- `compute` is an AADL reserved keyword (see AS5506C §15.4 and the
+  -- COMPUTE_KW token in spar-parser/src/syntax_kind.rs).
   process implementation Controller.Impl
     subcomponents
       filter: thread FilterThread.Impl;
-      compute: thread ComputeThread.Impl;
+      computer: thread ComputeThread.Impl;
     connections
       c3: port sensor_in -> filter.raw_in;
-      c4: port filter.filtered_out -> compute.data_in;
-      c5: port compute.result_out -> cmd_out;
+      c4: port filter.filtered_out -> computer.data_in;
+      c5: port computer.result_out -> cmd_out;
   end Controller.Impl;
 
   thread FilterThread

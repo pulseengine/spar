@@ -427,6 +427,39 @@ pub fn get_interrupt_latency_bound(props: &PropertyMap) -> Option<u64> {
     parse_time_value(raw)
 }
 
+/// Get `Spar_Timing::Interrupt_Overhead` in picoseconds.
+///
+/// Per-firing fixed cost the kernel/hardware pays each time an ISR
+/// fires — vector dispatch, ISR-context save/restore, EOI ack. Used
+/// by RTA to inflate an ISR's effective WCET by exactly 1× this
+/// value per firing (contrast with `Context_Switch_Time` which is
+/// applied 2× per task dispatch — preempt + resume).
+///
+/// Looks up in `Spar_Timing` first, then falls back to legacy
+/// `SPAR_Properties` and unqualified for compatibility with the
+/// v0.8.x advisory pattern in scheduling.rs.
+pub fn get_interrupt_overhead(props: &PropertyMap) -> Option<u64> {
+    // Typed path: Spar_Timing
+    if let Some(expr) = get_typed_qualified(props, SPAR_TIMING, "Interrupt_Overhead")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
+    }
+    // Typed path: legacy SPAR_Properties
+    if let Some(expr) = get_typed_qualified(props, "SPAR_Properties", "Interrupt_Overhead")
+        && let Some(ps) = extract_time_ps(expr)
+    {
+        return Some(ps);
+    }
+
+    // String fallback
+    let raw = props
+        .get(SPAR_TIMING, "Interrupt_Overhead")
+        .or_else(|| props.get("SPAR_Properties", "Interrupt_Overhead"))
+        .or_else(|| props.get("", "Interrupt_Overhead"))?;
+    parse_time_value(raw)
+}
+
 /// Get `Spar_Timing::Bottom_Half_Server` reference name.
 pub fn get_bottom_half_server(props: &PropertyMap) -> Option<String> {
     // Typed path
@@ -1362,5 +1395,41 @@ mod tests {
     fn critical_section_blocking_missing_returns_none() {
         let props = PropertyMap::new();
         assert_eq!(get_critical_section_blocking(&props), None);
+    }
+
+    // ── Interrupt_Overhead (v0.9.3 Tier A #5 cont.) ──────────────────
+    #[test]
+    fn interrupt_overhead_parses_us_spar_timing() {
+        let props = make_props(&[("Spar_Timing", "Interrupt_Overhead", "50 us")]);
+        assert_eq!(get_interrupt_overhead(&props), Some(50_000_000));
+    }
+
+    #[test]
+    fn interrupt_overhead_parses_us_legacy_spar_properties() {
+        let props = make_props(&[("SPAR_Properties", "Interrupt_Overhead", "10 us")]);
+        assert_eq!(get_interrupt_overhead(&props), Some(10_000_000));
+    }
+
+    #[test]
+    fn interrupt_overhead_parses_bare() {
+        let props = make_props(&[("", "Interrupt_Overhead", "25 us")]);
+        assert_eq!(get_interrupt_overhead(&props), Some(25_000_000));
+    }
+
+    #[test]
+    fn interrupt_overhead_typed() {
+        let props = make_typed_props(
+            "Spar_Timing",
+            "Interrupt_Overhead",
+            "50 us",
+            PropertyExpr::Integer(50, Some(Name::new("us"))),
+        );
+        assert_eq!(get_interrupt_overhead(&props), Some(50_000_000));
+    }
+
+    #[test]
+    fn interrupt_overhead_missing_returns_none() {
+        let props = PropertyMap::new();
+        assert_eq!(get_interrupt_overhead(&props), None);
     }
 }

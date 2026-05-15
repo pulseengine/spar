@@ -364,6 +364,119 @@ fn enumerate_tool_with_objective_picks_least_loaded() {
     cleanup(&path);
 }
 
+// ── 6. check_chain_rejects_variant_input_with_bad_input ──────────────
+
+#[test]
+fn check_chain_rejects_variant_input_with_bad_input() {
+    // Tier A #7: check_chain previously accepted `variant` and silently
+    // discarded it, returning unfiltered chain results. Until variant
+    // scoping is wired through `LatencyAnalysis` (v0.10 enhancement),
+    // the tool refuses the input cleanly so an agent cannot mistake an
+    // unfiltered answer for a variant-scoped one.
+    let path = write_model("chain_variant_reject", CHAIN_MODEL);
+    let args = json!({
+        "model": path.to_string_lossy(),
+        "root":  "Chain::Sys.Impl",
+        "source_thread": "producer",
+        "sink_thread":   "consumer",
+        "variant":       "test-variant",
+    });
+    let result = check_chain::call(&args);
+    match result {
+        ToolResult::Error { code, message } => {
+            assert_eq!(
+                code, "BAD_INPUT",
+                "expected BAD_INPUT for variant on check_chain; got {code}: {message}",
+            );
+            assert!(
+                message.contains("not yet supported"),
+                "error message should explain the limitation; got {message}",
+            );
+            assert!(
+                message.contains("verify_move") || message.contains("enumerate_moves"),
+                "error message should suggest the variant-aware tools; got {message}",
+            );
+        }
+        ToolResult::Ok(v) => {
+            cleanup(&path);
+            panic!("expected BAD_INPUT for variant input on check_chain, got Ok({v})");
+        }
+    }
+    cleanup(&path);
+}
+
+// ── 7. tools_reject_both_variant_and_variant_context ─────────────────
+
+#[test]
+fn check_chain_rejects_both_variant_and_variant_context() {
+    // Tier C #50: mutual exclusion was previously enforced only at the
+    // pipeline layer (verify/enumerate); check_chain now applies it
+    // before the not-yet-supported refusal so an agent supplying both
+    // gets a stable BAD_INPUT mentioning the conflict.
+    let path = write_model("chain_both_variant", CHAIN_MODEL);
+    let args = json!({
+        "model": path.to_string_lossy(),
+        "root":  "Chain::Sys.Impl",
+        "source_thread": "producer",
+        "sink_thread":   "consumer",
+        "variant":         "test-variant",
+        "variant_context": "/tmp/ctx.json",
+    });
+    let result = check_chain::call(&args);
+    match result {
+        ToolResult::Error { code, message } => {
+            assert_eq!(
+                code, "BAD_INPUT",
+                "expected BAD_INPUT; got {code}: {message}"
+            );
+            assert!(
+                message.contains("mutually exclusive"),
+                "error message should mention mutual exclusion; got {message}",
+            );
+        }
+        ToolResult::Ok(v) => {
+            cleanup(&path);
+            panic!("expected BAD_INPUT for variant+variant_context, got Ok({v})");
+        }
+    }
+    cleanup(&path);
+}
+
+#[test]
+fn verify_rejects_both_variant_and_variant_context() {
+    // The verify pipeline already maps the conflict to
+    // `MovesError::VariantArgsConflict`, which classifies as
+    // BAD_INPUT. This test pins the contract so future refactors can't
+    // regress it without breaking the agent-visible error code.
+    let path = write_model("verify_both_variant", MOBILE_MODEL);
+    let args = json!({
+        "model": path.to_string_lossy(),
+        "root":  "Migrate::Sys.Impl",
+        "component": "t1",
+        "target":    "cpu2",
+        "variant":         "test-variant",
+        "variant_context": "/tmp/ctx.json",
+    });
+    let result = verify::call(&args);
+    match result {
+        ToolResult::Error { code, message } => {
+            assert_eq!(
+                code, "BAD_INPUT",
+                "expected BAD_INPUT; got {code}: {message}"
+            );
+            assert!(
+                message.contains("mutually exclusive"),
+                "error message should mention mutual exclusion; got {message}",
+            );
+        }
+        ToolResult::Ok(v) => {
+            cleanup(&path);
+            panic!("expected BAD_INPUT for variant+variant_context, got Ok({v})");
+        }
+    }
+    cleanup(&path);
+}
+
 // ── Validation helper used by stdio tests too ─────────────────────────
 
 /// Used by both in-process and stdio tests: accept either Ok(payload)

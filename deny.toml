@@ -1,5 +1,8 @@
 [advisories]
-unmaintained = "workspace"
+# `unmaintained` was removed from this section in cargo-deny PR #611
+# (the unmaintained-crate signal is now handled differently). The other
+# advisory checks (yanked, vulnerability matching against rustsec/
+# advisory-db) still gate normally.
 yanked = "warn"
 
 [licenses]

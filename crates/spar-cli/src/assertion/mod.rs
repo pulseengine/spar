@@ -1184,4 +1184,129 @@ check = "components.count()"
         assert!(file.assertion[0].description.is_empty());
         assert_eq!(file.assertion[0].severity, SeverityFilter::Error);
     }
+
+    // ── has() feature matching tests (REQ-HAS-FEATURES) ────────────────
+
+    /// has('feature_name') must return true when a component owns a feature
+    /// with that exact name, not just when a property with that name exists.
+    #[test]
+    fn has_matches_feature_by_name() {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        // thread1 has a feature named "sensor_out" — has() must find it.
+        match eval_check(
+            "components.where(category == 'thread').any(has('sensor_out'))",
+            &ctx,
+        )
+        .unwrap()
+        {
+            Value::Bool(b) => assert!(b, "has('sensor_out') must be true for thread1"),
+            other => panic!("expected Bool, got {:?}", other),
+        }
+    }
+
+    /// has('nonexistent_feature') must return false when no feature or
+    /// property with that name exists on any component.
+    #[test]
+    fn has_feature_name_absent_returns_false() {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        match eval_check("components.any(has('no_such_port'))", &ctx).unwrap() {
+            Value::Bool(b) => assert!(
+                !b,
+                "has('no_such_port') must be false — port does not exist"
+            ),
+            other => panic!("expected Bool, got {:?}", other),
+        }
+    }
+
+    /// all() with has('feature_name') must fail when only some components
+    /// carry the named feature.
+    #[test]
+    fn has_feature_all_fails_when_partial() {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+
+        // Only thread1 has "sensor_out"; the processor has no features at all.
+        // all() across threads (thread1 + thread2) must fail: thread2 has
+        // "cmd_in" / "status_out", not "sensor_out".
+        match eval_check(
+            "components.where(category == 'thread').all(has('sensor_out'))",
+            &ctx,
+        )
+        .unwrap()
+        {
+            Value::Bool(b) => assert!(!b, "not all threads have sensor_out"),
+            other => panic!("expected Bool, got {:?}", other),
+        }
+    }
+
+    // ── count() comparison tests (REQ-ASSERTION-COMPARISON) ────────────
+
+    fn assert_bool(expr: &str, expected: bool) {
+        let inst = make_test_instance();
+        let diags = vec![];
+        let ctx = EvalContext {
+            instance: &inst,
+            diagnostics: &diags,
+        };
+        match eval_check(expr, &ctx).unwrap() {
+            Value::Bool(b) => assert_eq!(b, expected, "expr: {expr}"),
+            other => panic!("expr {expr}: expected Bool, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn eval_count_ge_true() {
+        assert_bool("components.where(category == 'thread').count() >= 2", true);
+    }
+
+    #[test]
+    fn eval_count_ge_false() {
+        assert_bool("components.where(category == 'thread').count() >= 3", false);
+    }
+
+    #[test]
+    fn eval_count_gt() {
+        assert_bool("components.where(category == 'thread').count() > 1", true);
+        assert_bool("components.where(category == 'thread').count() > 2", false);
+    }
+
+    #[test]
+    fn eval_count_le() {
+        assert_bool("components.where(category == 'thread').count() <= 2", true);
+        assert_bool("components.where(category == 'thread').count() <= 1", false);
+    }
+
+    #[test]
+    fn eval_count_lt() {
+        assert_bool("components.where(category == 'thread').count() < 3", true);
+        assert_bool("components.where(category == 'thread').count() < 2", false);
+    }
+
+    #[test]
+    fn eval_count_eq() {
+        assert_bool("components.where(category == 'thread').count() == 2", true);
+        assert_bool("components.where(category == 'thread').count() == 3", false);
+    }
+
+    #[test]
+    fn eval_count_neq() {
+        assert_bool("components.where(category == 'thread').count() != 3", true);
+        assert_bool("components.where(category == 'thread').count() != 2", false);
+    }
 }

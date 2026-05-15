@@ -1,5 +1,12 @@
 name: Release
 
+# Releases publish to registries + write SLSA attestations. Cancelling
+# mid-publish leaves external state inconsistent. Group for
+# serialization (one release per tag), never cancel.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     tags:

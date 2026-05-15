@@ -1645,8 +1645,8 @@ artifacts:
       method: automated-test
       steps:
         - run: cargo test -p spar --test moves_enumerate_objectives
-        - run: cargo test -p spar-solver enumerate::
-        - run: cargo test -p spar moves::enumerate_tests
+        - run: "cargo test -p spar-solver enumerate::"
+        - run: "cargo test -p spar moves::enumerate_tests"
     status: passing
     tags: [migration, track-e, v080, cli, solver]
     links:
@@ -1957,6 +1957,360 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-001
 
+  - id: TEST-TSN-TAS
+    type: feature
+    title: TAS (802.1Qbv) gate-window service curve dispatch in WCTT
+    description: >
+      Verifies the v0.8.1 commit 2 TAS service-curve math and its
+      dispatch from the WCTT analysis. spar-network::tsn unit tests
+      cover the Gate_Control_List parser (single-window, two-window
+      50/50 split, eight-window per-class round-robin, overlap
+      rejection, gap rejection, malformed entry rejection), the
+      ρ_K / T_K derivation (open fraction by mask, max contiguous
+      closed run including wrap-around, permanently-closed gates),
+      the tas_residual_service helper (50%-open at 1 Gbps gives
+      500 Mbps and the cycle's worst-case gate latency, full-open
+      preserves link rate with zero latency, never-open gives rate=0
+      latency=cycle), and the get_gate_schedule property-map
+      accessor. spar-analysis WCTT tests cover the dispatch into the
+      TAS service curve when both Spar_TSN::Gate_Control_List and
+      Spar_TSN::Class_of_Service are present (single-hop bound matches
+      T_K + σ/(R_link·ρ_K) closed-form), the strict ordering between
+      the gated and ungated bounds at the same line rate (29 us > 12
+      us at 50% open), and the two negative paths where the analysis
+      falls back to the existing WcttDeferred Info diagnostic
+      (Gate_Control_List missing on the bus; Class_of_Service missing
+      on the stream).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.8.1, network, tsn, wctt, tas]
+    links:
+      - type: satisfies
+        target: REQ-TSN-002
+      - type: satisfies
+        target: REQ-NETWORK-006
+
+  - id: TEST-TSN-CBS
+    type: feature
+    title: 802.1Qav CBS credit-pool service curve + wctt dispatch
+    description: >
+      Verifies the v0.8.1 commit 3 CBS analysis. Unit tests in
+      crates/spar-network/src/tsn.rs cover (1) `CbsReservation::new`
+      construction with idle/link-rate validation, (2) rejection of
+      oversubscribed reservations and the zero-link-rate boundary,
+      (3) the boundary case where idleSlope == linkRate (sendSlope = 0),
+      (4) `reserved_fraction` recovers the link rate, (5)
+      `cbs_residual_service` rate equals idleSlope, (6) the blocking
+      term (max_competing_frame / link_rate) dominates when lo_credit
+      is zero, (7) the credit-recovery term (lo_credit / |sendSlope|)
+      adds correctly, (8) the idleSlope-equals-linkRate boundary is
+      latency-free, (9) two classes reserving 30% each both see their
+      own idleSlope as the service rate, and (10) the
+      `Bandwidth_Reservation` property reads via typed PropertyExpr,
+      bare integer, and string-fallback paths. Integration test in
+      crates/spar-analysis/src/wctt.rs (`cbs_dispatch_two_classes_*`)
+      asserts that on a 1 Gbps TSN switch with two streams each
+      declaring `Spar_TSN::Bandwidth_Reservation => 300000000 bitsps`,
+      the wctt pass emits one `WcttCbsShaped` Info per stream
+      (carrying idle_slope and service_latency), no `WcttDeferred`
+      (CBS dispatch supersedes Phase-1 deferral on TSN switches), and
+      one `WcttBound` per stream. Property registration is also
+      verified: Spar_TSN now exposes 6 properties (was 5),
+      Bandwidth_Reservation type is `aadlinteger units
+      Data_Rate_Units`, and the total predeclared property count is
+      128 (was 127 before this commit).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-network --lib -- tsn::tests::cbs
+        - run: cargo test -p spar-analysis --lib -- wctt::tests::cbs
+    status: passing
+    tags: [v0.8.1, network, tsn, cbs, qav, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-003
+      - type: satisfies
+        target: REQ-NETWORK-001
+
+  - id: TEST-TSN-PREEMPTION
+    type: feature
+    title: 802.1Qbu frame-preemption blocking term in WCTT analysis
+    description: >
+      Unit + integration tests covering v0.8.1 commit 4's
+      frame-preemption (802.1Qbu) hook into the WCTT analysis. The
+      spar-network::tsn module ships eight tests verifying the
+      preemption_blocking_term_ps helper (with-preemption fragment
+      term, without-preemption legacy max-frame term, zero-rate
+      pathology, ceiling-rounding pessimism) and the is_express_stream
+      classifier (explicit Frame_Preemption overrides the
+      Class_of_Service heuristic, CoS >= 6 defaults to express,
+      missing properties default to non-express). The
+      spar-analysis::wctt module ships four end-to-end fixtures
+      driving the WcttAnalysis pass against AADL models with TSN
+      switches: the express stream carrying explicit
+      `Spar_TSN::Frame_Preemption => true` on a bus that also enables
+      preemption produces a `WcttPreemptionApplied` Info diagnostic
+      reporting the legacy 1518 B blocking (≈121 µs at 100 Mbps) and
+      the preempted 68 B blocking (≈5.4 µs); a stream whose source
+      lacks Frame_Preemption and a bus that is silent both fall
+      through to the existing `WcttDeferred` Phase-1 placeholder; a
+      `Class_of_Service => 7` stream is express by default when the
+      bus enables preemption. Foundation for the c2/c3 sibling PRs
+      (TAS, CBS) which extend the same TSN dispatch.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.8.1, network, tsn, preemption, qbu, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-004
+
+  - id: TEST-NC-SOUNDNESS
+    type: feature
+    title: gPTP ε budget + atomic-frame quantization soundness tests
+    description: >
+      Unit + integration tests covering the v0.9.1 soundness pass:
+      (1) `Spar_TSN::Sync_Error` accessor handles unset / typed
+      PropertyExpr / string fallback paths and unit conversions
+      (ps, ns, us, ms);
+      (2) `tas_residual_service_with_sync_error` shrinks
+      open_fraction by ε/cycle and grows worst_case_latency by ε;
+      ε equal to or exceeding a window's open_time clamps to
+      zero (gate effectively closed); ε = 0 reproduces v0.8.1
+      byte-identically;
+      (3) `frame_quantization_ps` returns ceil(max_frame · 8e12 /
+      link_rate_bps) — 1518 B at 100 Mbps ≈ 121440 ns; 64 B at 1 Gbps
+      ≈ 512 ns; rate-divides-evenly vs ceil-rounding cases; zero-rate
+      guard;
+      (4) wctt dispatch integration: TAS / FIFO arms emit
+      `WcttFrameQuantization` Info per hop and add the correction
+      to the per-hop delay; CBS / preemption arms remain unchanged
+      (their service curves already absorb / replace the max-frame
+      term); the v0.8.0 `single_hop_classical_ethernet`,
+      `multi_hop_chain_aggregates`, and TSN/TAS bound assertions
+      were updated to the sound numbers.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.9.1, network, wctt, soundness, gptp, quantization]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-009
+      - type: satisfies
+        target: REQ-NETWORK-010
+
+  - id: TEST-NC-PIECEWISE
+    type: feature
+    title: Piecewise-affine arrival curve unit tests (T-SPEC multi-bucket)
+    description: >
+      14 unit tests in
+      `crates/spar-network/src/curves.rs::piecewise::tests` exercise
+      the v0.9.3 `PiecewiseAffineArrivalCurve` primitive and its four
+      operators alongside the existing single-bucket
+      `ArrivalCurve`-targeted tests. Coverage:
+      (1) constructor rejects empty bucket lists;
+      (2) single-bucket case matches `ArrivalCurve::affine` numerically
+      at three probe times;
+      (3) input bucket order is canonicalised to σ-ascending so equal
+      curves compare equal regardless of declaration order;
+      (4) duplicate `(σ, ρ)` pairs are deduped on construction;
+      (5) `at(t)` takes the min across buckets — small-σ-high-ρ binds
+      at small t, small-ρ binds at large t in a 2-bucket curve;
+      (6) `at(0) = 0` causality holds even with very large σ;
+      (7) `delay_bound` returns the min across per-bucket bounds and
+      the chosen R lets each bucket dominate one regime — verified to
+      equal `min(single_bucket_delay_b1, single_bucket_delay_b2)`;
+      (8) any unstable bucket (`ρ_i > R`) makes the whole curve
+      unstable;
+      (9) `output_bound` preserves rates and inflates each bucket's
+      burst by `ρ_i · T` independently (canonical 2-bucket PWA out);
+      (10) `residual_service` uses `R - max ρ_i` and the worst per-bucket
+      burst-drain time at that residual rate;
+      (11) any saturating competing bucket makes the residual
+      unservable;
+      (12) `From<ArrivalCurve>` round-trips the affine single-bucket
+      case losslessly across three probe times;
+      (13) `From<ArrivalCurve>` lowers the peak-capped form to a
+      2-bucket PWA `(σ, ρ), (0, peak)` and readouts agree numerically;
+      (14) `backlog_bound` returns the min across per-bucket
+      backlog bounds (the small-burst-high-rate bucket binds tighter
+      than the sustained bucket on the same server). Per the
+      post-v0.9.2 reviewer's NC top-5 #1.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- curves::piecewise
+    status: passing
+    tags: [v0.9.3, network, wctt, network-calculus, piecewise]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-013
+
+  - id: TEST-RTA-SOUNDNESS-V092
+    type: feature
+    title: RTA Stop_For_Lock warning + ARINC severity escape hatch
+    description: >
+      Verifies the v0.9.2 RTA soundness pass. (a) `rta::tests::
+      stop_for_lock_without_blocking_emits_warning` confirms a
+      Stop_For_Lock thread without `Critical_Section_Blocking`
+      raises a Warning naming the property; (b)
+      `stop_for_lock_with_explicit_blocking_no_warning` confirms an
+      explicit bound (even 0 ns) suppresses the diagnostic;
+      (c) the ARINC-PARTITION-ISOLATION analyzer now emits Error
+      severity by default (existing arinc653 tests cover the
+      detection); (d) the new `spar analyze --allow
+      arinc-partition-isolation` CLI flag demotes the matching
+      diagnostics back to Warning per the helper
+      `apply_allow_categories` in `crates/spar-cli/src/main.rs`.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta::tests::stop_for_lock
+        - run: cargo test -p spar-analysis --lib -- arinc653
+    status: passing
+    tags: [v0.9.2, analysis, rta, arinc653, soundness]
+    links:
+      - type: satisfies
+        target: REQ-RTA-009
+      - type: satisfies
+        target: REQ-ARINC-005
+
+  - id: TEST-TSN-CBS-CREDITS
+    type: feature
+    title: Spar_TSN::Hi_Credit + Lo_Credit user-tunable CBS credits
+    description: >
+      Verifies that `Spar_TSN::Hi_Credit` and `Spar_TSN::Lo_Credit`
+      register in the predeclared property tables (count 129 → 131,
+      Spar_TSN per-set 7 → 9), that `get_hi_credit_bytes` and
+      `get_lo_credit_bytes` accessors handle typed PropertyExpr +
+      string fallback paths and unit conversions, and that the wctt
+      CBS arm honours explicit credits in `CbsReservation::new` while
+      preserving v0.8.1 byte-identical output when both properties
+      are unset. The `WcttCbsCredit` Info diagnostic fires when at
+      least one of Hi_Credit / Lo_Credit is set on the bus.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-network --lib -- tsn
+        - run: cargo test -p spar-analysis --lib -- wctt
+    status: passing
+    tags: [v0.9.2, network, tsn, cbs, wctt]
+    links:
+      - type: satisfies
+        target: REQ-TSN-005
+
+  - id: TEST-RTA-CONTEXT-SWITCH
+    type: feature
+    title: Context_Switch_Time inflates WCET in RTA recurrence
+    description: >
+      Verifies the v0.9.2 RTA Context_Switch_Time fix.
+      `context_switch_inflates_wcet` builds a one-thread model with
+      Context_Switch_Time = 100 µs and asserts WCET 1 ms → 1.2 ms
+      with an `OverheadInflation` Info diagnostic naming the thread
+      and the correction. `no_context_switch_byte_identical_to_v091`
+      confirms unset Context_Switch_Time produces byte-identical
+      output (no OverheadInflation diagnostic).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- context_switch
+    status: passing
+    tags: [v0.9.2, analysis, rta, soundness, scheduling]
+    links:
+      - type: satisfies
+        target: REQ-RTA-008
+
+  - id: TEST-WCTT-SENSITIVITY
+    type: feature
+    title: WCTT per-stream sensitivity output (∂σ, ∂ρ_c, ∂T)
+    description: >
+      Verifies that every `WcttBound` Info diagnostic is followed by
+      a `WcttSensitivity` Info diagnostic carrying the three
+      worst-hop partial derivatives. The fixture
+      `tests/fixtures/wctt/classical_ethernet` exercises the new
+      diagnostic on a 1 Gbps single-hop scenario; the sensitivity
+      values (∂σ_self = 8 ns/B at 900 Mbps residual, ∂T_link = 1
+      ns/ns for a single hop) are pinned in the .expected.json
+      golden file. wctt unit tests confirm the diagnostic does NOT
+      fire when all hops were deferred / unservable.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- wctt
+        - run: cargo test -p spar-analysis --test wctt_fixtures
+    status: passing
+    tags: [v0.9.2, network, wctt, sensitivity]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-012
+
+  - id: TEST-WCTT-RTA-COUPLING
+    type: feature
+    title: WCTT consumes Dispatch_Jitter as release-jitter for ρ·J burst inflation
+    description: >
+      Verifies the v0.9.2 RTA→WCTT release-jitter coupling.
+      `rta_wctt_dispatch_jitter_inflates_burst_and_emits_diagnostic`
+      builds a 1 Gbps single-hop model with the source declaring
+      `Timing_Properties::Dispatch_Jitter => 100 us`; expects the
+      `WcttRtaCoupled` Info diagnostic to fire naming the
+      jitter_ns and the ρ·J = 12500 byte inflation.
+      `no_dispatch_jitter_no_coupling_diagnostic` confirms the
+      diagnostic does NOT fire when the property is unset.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- rta_wctt
+        - run: cargo test -p spar-analysis --lib -- no_dispatch_jitter
+    status: passing
+    tags: [v0.9.2, network, wctt, rta, coupling]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-011
+
+  - id: TEST-NC-PMOO
+    type: feature
+    title: PMOO/LUDB bound is tighter than SFA for tree-shaped multiplexing
+    description: >
+      Ten unit tests in `spar-network/src/pmoo.rs` plus two CLI-flag
+      round-trip tests in `spar-analysis/src/wctt.rs` exercise the
+      v0.9.3 PMOO/LUDB path. The PMOO unit tests cover: (a) single-hop
+      no-competing baseline (PMOO ≡ SFA), (b) 2-hop tandem 1 competing
+      flow joining at hop 2 (PMOO ≤ SFA, strictly tighter on the
+      fixture), (c) 3-hop / 3-competing convergent fixture (PMOO ≪ SFA,
+      ≥ 5 % tightening asserted; observed 27.4 %), (d) LP infeasibility
+      surfaces as `Err(LpError::Infeasible)` for SFA fallback,
+      (e) empty-path / out-of-range / non-contiguous validation, (f) LP
+      model size and solve-time reporting, (g) single-flow tandem
+      reduces to "pay-burst-once" closed form, (h) the canonical
+      automotive-zonal 5-source pattern (observed 23.7 % tightening).
+      CLI round-trip tests confirm `WcttPmooBound` only fires with the
+      `--pmoo` flag (`pmoo_flag_off_emits_no_pmoo_diagnostic` and
+      `pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams`),
+      preserving v0.9.2 byte-identical default output.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- pmoo
+        - run: cargo test -p spar-analysis --lib -- pmoo_flag
+    status: passing
+    tags: [v0.9.3, network, wctt, pmoo, ludb, lp]
+    links:
+      - type: satisfies
+        target: REQ-NETWORK-014
+
   - id: TEST-INSIGHT-DISCREPANCY
     type: feature
     title: spar-insight CTF parser + 5-kind discrepancy detection
@@ -2032,3 +2386,297 @@ artifacts:
         target: REQ-MIGRATION-006
       - type: satisfies
         target: REQ-MIGRATION-008
+
+  # ── Track G — v0.10.0 trace-topology foundation ─────────────────────
+
+  - id: TEST-TRACE-TOPOLOGY-IDENTITY
+    type: feature
+    title: Spar_Identity property surface + spar-trace-topology accessors
+    description: >
+      Verifies that the v0.10.0 Spar_Identity property surface and
+      the spar-trace-topology crate's identity-accessor surface are
+      registered and reachable. spar-hir-def standard_properties
+      tests assert that Spar_Identity appears in
+      STANDARD_PROPERTY_SET_NAMES with the expected six properties
+      (MAC_Address, VLAN_ID, Stream_Handle, Multicast_Group,
+      LLDP_Chassis_Id, LLDP_Port_Id), that each property resolves
+      via GlobalScope without explicit `with` imports, and that the
+      total predeclared property count is 137 (was 131 before this
+      commit). spar-trace-topology integration tests
+      (tests/identity_accessors.rs) verify the six typed accessors
+      (get_mac_address, get_vlan_id, get_stream_handle,
+      get_multicast_group, get_lldp_chassis_id, get_lldp_port_id)
+      read both typed PropertyExpr values and string-fallback
+      values from a PropertyMap, and that VLAN_ID rejects values
+      outside 0..=4094 (including the reserved 4095) on both paths.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib -- standard_properties
+        - run: cargo test -p spar-trace-topology
+    status: passing
+    tags: [v0.10.0, trace-topology, track-g, properties]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-001
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-002
+
+  - id: TEST-RTA-INTERRUPT-OVERHEAD
+    type: feature
+    title: Interrupt_Overhead inflates ISR exec_wcet by exactly 1x
+    description: >
+      Tests in crates/spar-analysis/src/rta.rs verify that
+      Spar_Timing::Interrupt_Overhead set on an ISR thread inflates
+      its effective exec_wcet by exactly that value (not 2x, since
+      the firing pays the cost once). Companion tests verify byte-
+      identical RTA output when the property is absent and correct
+      composition with Context_Switch_Time on the ISR handler.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis rta::tests::interrupt_overhead_inflates_isr_wcet
+        - run: cargo test -p spar-analysis rta::tests::no_interrupt_overhead_byte_identical_to_pre_c1
+        - run: cargo test -p spar-analysis rta::tests::interrupt_overhead_combined_with_context_switch_for_handler
+    status: passing
+    tags: [rta, isr, v093]
+    links:
+      - type: satisfies
+        target: REQ-RTA-010
+
+  - id: TEST-TRACE-TOPOLOGY-LLDP
+    type: feature
+    title: LldpJsonTopologySource yields correct typed LldpNeighbors
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover the
+      array and single-object interface shapes, multi-neighbor
+      lists, chassis-id type preservation across mac/local/etc.,
+      malformed-JSON error path, and file-open via a tempfile
+      roundtrip.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, lldp, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-004
+
+  - id: TEST-TRACE-TOPOLOGY-PCAPNG
+    type: feature
+    title: PcapngFrameSource yields correct typed CapturedFrames
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover an
+      untagged Ethernet frame roundtrip, an 802.1Q-tagged frame with
+      VLAN-ID and PCP extraction, a truncated frame producing
+      IngestError::Truncated, an unsupported link type producing
+      IngestError::UnsupportedLinkType, and per-IDB ts_resol
+      handling for both µs and ns resolutions.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, pcapng, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-003
+
+  - id: TEST-TRACE-TOPOLOGY-QCC
+    type: feature
+    title: QccYangSwitchConfigSource parses per-port TSN configs
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover a single-port
+      full-config roundtrip, a port with only max-frame-size set, multiple
+      ports with differing configs, the empty interfaces array case, the
+      missing-root malformed-JSON error path, a tempfile-based open
+      roundtrip, and bandwidth-reservation out-of-range handling.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, qcc, yang, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-005
+
+  - id: TEST-TRACE-TOPOLOGY-GPTP
+    type: feature
+    title: GptpJsonPtpTimeSource parses sync-error samples
+    description: >
+      Tests in crates/spar-trace-topology/src/ingest.rs cover a full
+      two-port roundtrip with grandmaster + domain, a port with no
+      samples, optional-field absence (no grandmaster / domain), the
+      missing-root and missing-ports malformed-JSON error paths, a
+      tempfile-based open roundtrip, and negative sync-error rejection.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- ingest::tests
+    status: passing
+    tags: [trace-topology, ingest, gptp, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-006
+
+  - id: TEST-TRACE-TOPOLOGY-IP-IDENTITY
+    type: feature
+    title: IPv4/IPv6 accessors honour typed and raw paths
+    description: >
+      Tests in crates/spar-trace-topology/src/identity.rs verify that
+      get_ipv4_address / get_ipv6_address return the typed value
+      first and fall back to the raw quoted form, mirroring the
+      existing 6 Spar_Identity accessors.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- identity::tests
+    status: passing
+    tags: [trace-topology, properties, identity, ip, v0100]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-007
+
+  - id: TEST-BINDING-NESTED-PATH
+    type: feature
+    title: Nested binding paths resolve correctly
+    description: >
+      Tests in crates/spar-hir-def/src/overlay.rs (or
+      crates/spar-cli/tests/) verify 3-level dotted reference paths
+      resolve, fully-qualified paths from root resolve, single-level
+      references continue to work, unknown paths emit a clean
+      diagnostic, and ambiguous suffix matches are handled.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def overlay
+        - run: cargo test -p spar --test applies_to_nested
+    status: passing
+    tags: [binding, hir-def, v093]
+    links:
+      - type: satisfies
+        target: REQ-BINDING-002
+
+  - id: TEST-CLASSIFIER-MATCH-DELEGATION
+    type: feature
+    title: Delegation connections accept matching directions, peer connections require opposing
+    description: >
+      Tests in crates/spar-analysis/src/classifier_match.rs verify
+      bus access delegation with both `provides` (and both
+      `requires`) passes; peer connections continue to require
+      provides ↔ requires pairing and still error on same-direction
+      cases. Includes the user-reported MWE verbatim.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis classifier_match
+    status: passing
+    tags: [classifier-match, connections, v093]
+    links:
+      - type: satisfies
+        target: REQ-CLASSIFIER-MATCH-002
+
+  - id: TEST-ASSERTION-COMPARISON
+    type: feature
+    title: count() comparisons evaluate correctly against integer literals
+    description: >
+      Unit tests in crates/spar-cli/src/assertion/mod.rs verify that
+      pipelines ending in `.count() <op> n` return the expected Bool
+      for each comparison operator: `>=`, `>`, `<=`, `<`, `==`, `!=`
+      against fixtures with known component counts (eval_count_ge_true,
+      eval_count_ge_false, eval_count_gt, eval_count_le, eval_count_lt,
+      eval_count_eq, eval_count_neq).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --bin spar -- assertion::tests::eval_count
+    status: passing
+    tags: [assertions, eval, v093]
+    links:
+      - type: satisfies
+        target: REQ-ASSERTION-COMPARISON
+
+  - id: TEST-HAS-FEATURES
+    type: feature
+    title: has() predicate matches features by name
+    description: >
+      Unit tests in crates/spar-cli/src/assertion/mod.rs verify that
+      has('feature_name') returns true when a component owns a feature
+      with that name (has_matches_feature_by_name), false when no such
+      feature exists (has_feature_name_absent_returns_false), and that
+      all() correctly fails when only some components carry the named
+      feature (has_feature_all_fails_when_partial).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --bin spar -- assertion::tests::has
+    status: passing
+    tags: [assertions, v093]
+    links:
+      - type: satisfies
+        target: REQ-HAS-FEATURES
+
+  - id: TEST-APPLIES-TO-FEATURE-PATH
+    type: feature
+    title: applies_to feature paths resolve without spurious diagnostics
+    description: >
+      Integration tests in crates/spar-cli/tests/applies_to_feature_path.rs
+      verify that `applies to subcomp.feature` resolves cleanly
+      (applies_to_feature_path_does_not_emit_unresolved_diagnostic) and
+      that genuinely unknown final segments still emit a clean
+      "could not be resolved" diagnostic
+      (applies_to_unknown_segment_still_emits_diagnostic).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test applies_to_feature_path
+    status: passing
+    tags: [hir-def, properties, v093]
+    links:
+      - type: satisfies
+        target: REQ-APPLIES-TO-FEATURE-PATH
+
+  # ── Mermaid emission ────────────────────────────────────────────────────
+
+  - id: TEST-MERMAID-FLOWCHART
+    type: feature
+    title: Flowchart emitter produces correct Mermaid markup
+    description: >
+      Unit tests in crates/spar-mermaid/src/lib.rs construct a small
+      SystemInstance manually (root system + 3 threads + 1 processor +
+      2 connections) and verify: (a) output starts with "flowchart TD",
+      all four component names appear, and at least one "-->" edge is
+      present; (b) category filter (threads only) excludes the processor
+      node; (c) max_depth=0 emits only the root component; (d) the
+      include_connections=false flag suppresses all edges.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-mermaid
+    status: passing
+    tags: [mermaid, emission, v0100]
+    links:
+      - type: satisfies
+        target: REQ-MERMAID-001
+
+  # ── CI / Verification gate ──────────────────────────────────────────────
+
+  - id: TEST-VERIFY-GATE-RUNNER
+    type: feature
+    title: Verification gate runner executes a tag-filtered subset and emits JSON
+    description: >
+      Smoke-test of `tools/run_verification.py`: filter to the
+      classifier-match tag (1 artifact), verify that the runner exits 0 and
+      writes a verification-results.json with passed_count=1, failed_count=0.
+    fields:
+      method: automated-test
+      steps:
+        - run: "tools/run_verification.py --filter '(and (= type \"feature\") (has-tag \"classifier-match\"))' --results-json /tmp/verify-smoke.json"
+        - run: "python3 -c 'import json,sys; d=json.load(open(\"/tmp/verify-smoke.json\")); sys.exit(0 if d[\"passed_count\"]==1 and d[\"failed_count\"]==0 else 1)'"
+    status: passing
+    tags: [ci, rivet, verification, v0100]
+    links:
+      - type: satisfies
+        target: REQ-VERIFY-GATE-001

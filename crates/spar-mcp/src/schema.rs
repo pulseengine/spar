@@ -93,14 +93,18 @@ pub fn verify_move_descriptor() -> ToolDescriptor {
                 },
                 "variant": {
                     "type": "string",
-                    "description": "Optional variant name (implicit form; spar shells out to rivet resolve)."
+                    "description": "Optional variant name (implicit form; spar shells out to rivet resolve). Mutually exclusive with variant_context."
                 },
                 "variant_context": {
                     "type": "string",
-                    "description": "Optional explicit-form variant-context path or '-' for stdin."
+                    "description": "Optional explicit-form variant-context path or '-' for stdin. Mutually exclusive with variant."
                 }
             },
-            "required": ["model", "root", "component", "target"]
+            "required": ["model", "root", "component", "target"],
+            "not": {
+                "type": "object",
+                "required": ["variant", "variant_context"]
+            }
         }),
         annotations: Annotations::read_only_idempotent(),
     }
@@ -144,14 +148,18 @@ pub fn enumerate_moves_descriptor() -> ToolDescriptor {
                 },
                 "variant": {
                     "type": "string",
-                    "description": "Optional variant name (implicit form)."
+                    "description": "Optional variant name (implicit form). Mutually exclusive with variant_context."
                 },
                 "variant_context": {
                     "type": "string",
-                    "description": "Optional explicit-form variant-context path or '-' for stdin."
+                    "description": "Optional explicit-form variant-context path or '-' for stdin. Mutually exclusive with variant."
                 }
             },
-            "required": ["model", "root", "component"]
+            "required": ["model", "root", "component"],
+            "not": {
+                "type": "object",
+                "required": ["variant", "variant_context"]
+            }
         }),
         annotations: Annotations::read_only_idempotent(),
     }
@@ -189,14 +197,18 @@ pub fn check_chain_descriptor() -> ToolDescriptor {
                 },
                 "variant": {
                     "type": "string",
-                    "description": "Optional variant name (implicit form)."
+                    "description": "Not yet supported for check_chain (tracked as v0.10 enhancement); supplying this returns BAD_INPUT. Use spar.verify_move or spar.enumerate_moves for variant-scoped queries. Mutually exclusive with variant_context."
                 },
                 "variant_context": {
                     "type": "string",
-                    "description": "Optional explicit-form variant-context path or '-' for stdin."
+                    "description": "Not yet supported for check_chain (tracked as v0.10 enhancement); supplying this returns BAD_INPUT. Use spar.verify_move or spar.enumerate_moves for variant-scoped queries. Mutually exclusive with variant."
                 }
             },
-            "required": ["model", "root", "source_thread", "sink_thread"]
+            "required": ["model", "root", "source_thread", "sink_thread"],
+            "not": {
+                "type": "object",
+                "required": ["variant", "variant_context"]
+            }
         }),
         annotations: Annotations::read_only_idempotent(),
     }

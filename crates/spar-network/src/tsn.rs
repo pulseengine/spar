@@ -1,15 +1,22 @@
-//! Time-Sensitive Networking (TSN) primitives — placeholder.
+//! Time-Sensitive Networking (TSN) primitives.
 //!
-//! Phase 2 (v0.8.x) will implement TAS gate-window service curves
+//! Phase 2 (v0.8.x) implements TAS gate-window service curves
 //! (802.1Qbv), CBS credit-pool tracking (802.1Qav), and frame preemption
-//! (802.1Qbu). v0.8.1 commit 1 ships only the type surface and
-//! `Spar_TSN::*` property reader; subsequent commits add the math.
+//! (802.1Qbu). v0.8.1 commit 1 shipped the type surface and
+//! `Spar_TSN::*` property readers; commit 2 (this commit) adds the TAS
+//! service-curve math (parser for [`Gate_Control_List`], the open-fraction
+//! and worst-case gate-latency derivation, and [`tas_residual_service`]).
 //!
 //! See `docs/designs/track-d-tsn-wctt-research.md` §5.1 (property-set
-//! design) and §5.2 (switch modeling) for the design rationale.
+//! design), §5.2 (switch modeling), and §5.3 (TAS / 802.1Qbv shaping) for
+//! the design rationale.
+//!
+//! [`Gate_Control_List`]: get_gate_control_list_raw
 
 use spar_hir_def::item_tree::PropertyExpr;
 use spar_hir_def::properties::PropertyMap;
+
+use crate::curves::ServiceCurve;
 
 const SPAR_TSN: &str = "Spar_TSN";
 
@@ -63,6 +70,183 @@ pub struct CreditPool {
     /// while the queue is transmitting; conventionally negative in
     /// the spec, stored here as the absolute magnitude).
     pub send_slope_bps: u64,
+}
+
+/// 802.1Qav CBS reservation parameters for one class.
+///
+/// Derived from the per-class properties (`Spar_TSN::Bandwidth_Reservation`
+/// for the idle slope, plus the bus's `Spar_Network::Output_Rate` for the
+/// link rate that determines the send slope and the credit bounds).
+///
+/// All slopes are stored in bits per second. By the standard:
+/// - `idle_slope_bps > 0` (the reserved bps for this class)
+/// - `send_slope_bps == idle_slope_bps - link_rate_bps` (always negative
+///   for a stable reservation; we keep the signed form so the analysis
+///   does not need to remember the convention)
+/// - `hi_credit_bytes` and `lo_credit_bytes` bound the credit pool;
+///   `lo_credit_bytes` is the magnitude of the credit floor (always a
+///   non-negative byte count here, the spec's `loCredit` is its negation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CbsReservation {
+    /// Reserved bandwidth for this class (`idleSlope`), bits per second.
+    pub idle_slope_bps: u64,
+    /// Drain rate while the class is transmitting (`sendSlope`), bits
+    /// per second; conventionally negative in the standard
+    /// (= idleSlope − linkRate).
+    pub send_slope_bps: i64,
+    /// Upper credit bound (`hiCredit`), bytes.
+    pub hi_credit_bytes: u64,
+    /// Magnitude of the lower credit bound (`|loCredit|`), bytes. The
+    /// classical CBS service-curve closed form drains credit to this
+    /// value during the worst-case other-class burst.
+    pub lo_credit_bytes: u64,
+}
+
+impl CbsReservation {
+    /// Construct a [`CbsReservation`] from the four primary parameters.
+    ///
+    /// `idle_slope_bps` is the reserved bandwidth; `link_rate_bps` is
+    /// the underlying link rate. `send_slope_bps` is computed as
+    /// `idleSlope − linkRate` and is therefore non-positive when the
+    /// reservation is feasible (idleSlope ≤ linkRate). Returns `None`
+    /// when the reservation is infeasible (idleSlope > linkRate) or
+    /// the link rate is zero.
+    pub fn new(
+        idle_slope_bps: u64,
+        link_rate_bps: u64,
+        hi_credit_bytes: u64,
+        lo_credit_bytes: u64,
+    ) -> Option<Self> {
+        if link_rate_bps == 0 || idle_slope_bps > link_rate_bps {
+            return None;
+        }
+        // sendSlope = idleSlope − linkRate; always ≤ 0 here.
+        let send_slope_bps = (idle_slope_bps as i128) - (link_rate_bps as i128);
+        // Above bounds make this fit in i64 safely (link_rate ≤ u64::MAX
+        // means the difference is in [-(2^63), 0]; clamp defensively).
+        let send_slope_bps = if send_slope_bps < i64::MIN as i128 {
+            i64::MIN
+        } else {
+            send_slope_bps as i64
+        };
+        Some(Self {
+            idle_slope_bps,
+            send_slope_bps,
+            hi_credit_bytes,
+            lo_credit_bytes,
+        })
+    }
+
+    /// Reserved-bandwidth fraction `idleSlope / link_rate` as a
+    /// rational `(num, den)`. Convenience for diagnostics.
+    pub fn reserved_fraction(&self) -> (u64, u64) {
+        // The link rate is recoverable as idle − send (since
+        // sendSlope = idleSlope − linkRate ⇒ linkRate = idleSlope −
+        // sendSlope; sendSlope is non-positive here).
+        let link = (self.idle_slope_bps as i128) - (self.send_slope_bps as i128);
+        let link = if link < 0 { 0 } else { link as u64 };
+        (self.idle_slope_bps, link)
+    }
+}
+
+/// 802.1Qav CBS service curve for a class.
+///
+/// Implements the Le Boudec/Thiran (§1.4.3) rate-latency closed-form
+/// from the AVB/TSN literature (Lim et al., "Delay analysis in CBS for
+/// AVB"):
+///
+/// ```text
+/// β_class(t) = idleSlope · max(0, t − T)
+/// ```
+///
+/// where the service latency T captures the worst-case credit drain
+/// caused by other-class traffic:
+///
+/// ```text
+/// T = max_competing_frame / link_rate
+///     + lo_credit / |sendSlope|
+/// ```
+///
+/// The first term is the maximum-frame blocking from a non-CBS class
+/// (the frame that started transmitting just before the CBS class
+/// became eligible, holding the link until completion). The second term
+/// is the additional credit-recovery time once the CBS queue starts
+/// being serviced — `lo_credit` bytes have to be replenished before
+/// service can resume, at the (positive) recovery rate `|sendSlope|`.
+///
+/// Both terms are converted to picoseconds with rounding *up* so the
+/// returned latency is never an under-estimate, matching the pessimism
+/// direction of `delay_bound` and `residual_service` in `curves.rs`.
+///
+/// `max_competing_frame_bytes` is the maximum frame size of any
+/// non-CBS competing class (in bytes). When unknown, callers default to
+/// the Ethernet MTU (1518 bytes); see [`crate::curves`] for unit
+/// conventions.
+pub fn cbs_residual_service(
+    reservation: &CbsReservation,
+    link_rate_bps: u64,
+    max_competing_frame_bytes: u64,
+) -> ServiceCurve {
+    // The reservation is the service rate. The latency T captures the
+    // worst-case time the credit pool needs to refill from `loCredit`
+    // back to zero, including blocking by other classes.
+    let rate_bps = reservation.idle_slope_bps;
+
+    // Term 1: maximum-frame blocking from non-CBS classes.
+    //
+    //   blocking_ps = max_competing_frame · 8 · 10^12 / link_rate
+    //
+    // Rounded up; saturates to u64::MAX if link_rate is zero (which the
+    // CBS analysis path already guards against, but we keep the
+    // helper safe in isolation).
+    let blocking_ps = if link_rate_bps == 0 {
+        0
+    } else {
+        cbs_time_to_send_ps_rounded_up(max_competing_frame_bytes, link_rate_bps)
+    };
+
+    // Term 2: credit recovery from loCredit. We need to replenish
+    // `lo_credit_bytes` worth of credit at the recovery rate, which is
+    // the *send-slope magnitude*. By the standard sendSlope ≤ 0 here;
+    // we take its absolute value.
+    //
+    // When |sendSlope| == 0 the formula is degenerate (idleSlope ==
+    // link_rate, no other class can take the link, so the CBS class is
+    // never blocked). In that boundary case the credit-recovery term
+    // is zero.
+    let send_slope_abs = if reservation.send_slope_bps >= 0 {
+        0u64
+    } else {
+        // sendSlope is negative; magnitude fits in u64 because sendSlope
+        // = idleSlope − linkRate where both are u64-bounded.
+        reservation.send_slope_bps.unsigned_abs()
+    };
+    let recovery_ps = if send_slope_abs == 0 {
+        0
+    } else {
+        cbs_time_to_send_ps_rounded_up(reservation.lo_credit_bytes, send_slope_abs)
+    };
+
+    let latency_ps = blocking_ps.saturating_add(recovery_ps);
+    ServiceCurve::rate_latency(rate_bps, latency_ps)
+}
+
+/// Internal helper: time in picoseconds to transmit `bytes` at
+/// `rate_bps`, rounding up. Mirrors `curves::time_to_send_ps` (which is
+/// crate-private) so the CBS path does not need to expose that helper.
+fn cbs_time_to_send_ps_rounded_up(bytes: u64, rate_bps: u64) -> u64 {
+    if rate_bps == 0 {
+        return u64::MAX;
+    }
+    // 8 bits per byte · 10^12 ps per second.
+    let numer = (bytes as u128) * 8u128 * 1_000_000_000_000u128;
+    let denom = rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
 }
 
 // ── Property accessors ───────────────────────────────────────────────
@@ -129,6 +313,36 @@ pub fn get_max_frame_size_bytes(props: &PropertyMap) -> Option<u64> {
     parse_size_bytes(raw)
 }
 
+/// Read [`Spar_TSN::Hi_Credit`] as the CBS hiCredit upper bound in
+/// bytes. Per IEEE 802.1Qav §34.5, hiCredit is the maximum positive
+/// credit a class can accumulate before sending; it bounds the
+/// burst-out tolerance. AADL declares the property as `aadlinteger
+/// units Size_Units` so it lowers via the same machinery as
+/// `Max_Frame_Size`. Returns `None` when unset (callers default to
+/// the pre-v0.9.2 behaviour of `Max_Frame_Size`).
+pub fn get_hi_credit_bytes(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Hi_Credit") {
+        return extract_size_bytes(expr);
+    }
+    let raw = get_raw(props, "Hi_Credit")?;
+    parse_size_bytes(raw)
+}
+
+/// Read [`Spar_TSN::Lo_Credit`] as the CBS loCredit lower bound in
+/// bytes (declared as a positive magnitude — the AVB spec uses a
+/// negative value but spar stores the absolute byte count). Per
+/// IEEE 802.1Qav §34.5, loCredit gives the worst-case credit
+/// drain, which combined with `|sendSlope|` yields the recovery
+/// time `T_recovery = loCredit / |sendSlope|` that lands in the
+/// CBS rate-latency service curve. Returns `None` when unset.
+pub fn get_lo_credit_bytes(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Lo_Credit") {
+        return extract_size_bytes(expr);
+    }
+    let raw = get_raw(props, "Lo_Credit")?;
+    parse_size_bytes(raw)
+}
+
 /// Read [`Spar_TSN::Frame_Preemption`] — whether frames in this
 /// class can be pre-empted by Express traffic (802.1Qbu).
 pub fn get_frame_preemption(props: &PropertyMap) -> Option<bool> {
@@ -145,6 +359,25 @@ pub fn get_frame_preemption(props: &PropertyMap) -> Option<bool> {
     }
 }
 
+/// Read [`Spar_TSN::Bandwidth_Reservation`] as the CBS idleSlope, in
+/// bits per second.
+///
+/// This is the per-class reserved bandwidth used by the 802.1Qav
+/// Credit-Based Shaper. AADL declares the property as `aadlinteger
+/// units Data_Rate_Units`, so we accept the standard project units
+/// (`bitsps`, `Bytesps`, `KBytesps`, `MBytesps`, `GBytesps`)
+/// case-insensitively. A bare integer is interpreted as bits per
+/// second, matching `Spar_Network::Output_Rate`.
+pub fn get_bandwidth_reservation_bps(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Bandwidth_Reservation")
+        && let Some(bps) = extract_data_rate_bps_local(expr)
+    {
+        return Some(bps);
+    }
+    let raw = get_raw(props, "Bandwidth_Reservation")?;
+    parse_data_rate_bps_local(raw)
+}
+
 /// Read [`Spar_TSN::Gate_Control_List`] as the raw string blob.
 ///
 /// v0.8.1 commit 1 surface only — the structured form (a list of
@@ -157,6 +390,145 @@ pub fn get_gate_control_list_raw(props: &PropertyMap) -> Option<String> {
         return Some(s.clone());
     }
     get_raw(props, "Gate_Control_List").map(|s| s.trim().trim_matches('"').to_string())
+}
+
+/// Read [`Spar_TSN::Sync_Error`] — the per-hop gPTP (IEEE 802.1AS)
+/// synchronization-error budget ε, returned in picoseconds.
+///
+/// In a real TSN deployment the gate-control list is enforced against
+/// the local synchronized clock, which can differ from the master clock
+/// by up to ε per hop. The TAS service-curve math (v0.9.1 NC soundness
+/// pass) subtracts ε from the effective open time and adds ε to the
+/// worst-case gate latency so the bounds remain sound under realistic
+/// clock accuracy. When the property is unset this accessor returns
+/// `None`, callers treat that as ε = 0 (legacy v0.8.1 behaviour) so
+/// the non-regression contract holds byte-identically.
+///
+/// Accepts the standard AADL time units (`ps`, `ns`, `us`, `ms`, `sec`,
+/// etc.) on both the typed and string-fallback paths. A bare integer
+/// (or string) is interpreted as picoseconds, matching the canonical
+/// unit used elsewhere in the WCTT pass.
+pub fn get_sync_error_ps(props: &PropertyMap) -> Option<u64> {
+    if let Some(expr) = get_typed(props, "Sync_Error")
+        && let Some(ps) = extract_time_ps_local(expr)
+    {
+        return Some(ps);
+    }
+    let raw = get_raw(props, "Sync_Error")?;
+    parse_time_ps_local(raw)
+}
+
+// ── Frame preemption (802.1Qbu) ──────────────────────────────────────
+//
+// 802.1Qbu allows an "express" traffic class to interrupt a
+// "preemptable" frame mid-flight, dramatically shrinking the worst-case
+// blocking term seen by express frames at a port. Without preemption,
+// an express frame may have to wait for an entire preemptable MTU to
+// drain before it can be transmitted (B_no_pmt = max_preemptable_frame
+// / link_rate). With preemption, that blocking shrinks to a single
+// minimum fragment plus the preemption header
+// (B_pmt = (MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) / link_rate).
+//
+// References:
+// - IEEE Std 802.1Qbu-2016 (Frame Preemption), §6.7.2.
+// - IEEE Std 802.3br-2016 (Interspersed Express Traffic), §99.4.7
+//   (mPacket and the 4-byte mCRC / SMD-S preemption header).
+// - Le Boudec & Thiran, *Network Calculus* (2001), §1.5 (FIFO blocking
+//   bounds — the "max_p_size / R" envelope that preemption attacks).
+// - docs/designs/track-d-tsn-wctt-research.md §5.2-5.3.
+
+/// Minimum Ethernet frame payload size, in bytes (IEEE 802.3 §3.2.7
+/// "minFrameSize" — 64 bytes including FCS, the smallest legal
+/// Ethernet frame). When 802.1Qbu preemption is enabled this is the
+/// minimum size of an in-flight preemptable fragment, and so it
+/// dominates the residual blocking seen by an express frame.
+pub const MIN_FRAGMENT_BYTES: u64 = 64;
+
+/// Preemption header overhead per fragment, in bytes (IEEE 802.3br
+/// §99.4.7 — the SMD-S/SMD-C start-of-mPacket delimiter plus the
+/// 4-byte mCRC tail). Charged once per blocking event because the
+/// express frame waits at most one fragment to start transmitting.
+pub const PREEMPTION_HEADER_BYTES: u64 = 4;
+
+/// Picoseconds per second; mirrors `crates/spar-network/src/curves.rs`
+/// to keep the unit conversion auditable in one place.
+const PS_PER_SECOND: u128 = 1_000_000_000_000;
+/// Bits per byte.
+const BITS_PER_BYTE: u128 = 8;
+
+/// Compute the per-hop blocking term, in picoseconds, that an express
+/// frame may encounter at a TSN port before it can begin transmission.
+///
+/// - `link_rate_bps` — egress link rate in bits per second.
+/// - `max_competing_frame_bytes` — the largest preemptable frame size
+///   that could be in flight when the express frame arrives (typically
+///   the link MTU, e.g. 1518 bytes including the 4-byte VLAN tag).
+/// - `preemption_enabled` — whether IEEE 802.1Qbu preemption is active
+///   on both the express stream and the bus. When `true`, the
+///   blocking term shrinks to
+///   `(MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) / link_rate`;
+///   when `false`, the legacy
+///   `max_competing_frame_bytes / link_rate` term is returned.
+///
+/// Returns `0` when `link_rate_bps == 0` (the caller is responsible
+/// for screening that pathological case — a port with zero rate has
+/// already failed the bus-bandwidth check).
+///
+/// The returned value is rounded *up* (ceiling division) so the
+/// blocking term is never an under-estimate; this matches the
+/// pessimism direction used elsewhere in `spar-network::curves`
+/// (`time_to_send_ps` is also a ceiling). See
+/// `docs/designs/track-d-tsn-wctt-research.md` §5.2-5.3 for the
+/// mathematical derivation.
+pub fn preemption_blocking_term_ps(
+    link_rate_bps: u64,
+    max_competing_frame_bytes: u64,
+    preemption_enabled: bool,
+) -> u64 {
+    if link_rate_bps == 0 {
+        return 0;
+    }
+    let bytes = if preemption_enabled {
+        MIN_FRAGMENT_BYTES.saturating_add(PREEMPTION_HEADER_BYTES)
+    } else {
+        max_competing_frame_bytes
+    };
+    let numer = (bytes as u128) * BITS_PER_BYTE * PS_PER_SECOND;
+    let denom = link_rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
+}
+
+/// Decide whether a stream is "express" — entitled to preempt other
+/// traffic — given its source-side properties.
+///
+/// Resolution order, per IEEE 802.1Qbu typical mappings and the v0.8.1
+/// c4 spec:
+///
+/// 1. If the stream has an explicit `Spar_TSN::Frame_Preemption` set,
+///    use it (`true` ⇒ express).
+/// 2. Otherwise default by class-of-service: a stream is express iff
+///    `Class_of_Service >= 6` (the two highest 802.1Q PCP values are
+///    conventionally reserved for network control / time-sensitive
+///    express traffic).
+/// 3. With neither property declared, the stream is *not* express.
+///
+/// The "explicit-then-default" order matches the c4 design spec: an
+/// explicit `Frame_Preemption => false` on a high-priority stream
+/// overrides the CoS heuristic, and an explicit `Frame_Preemption =>
+/// true` on a low-priority stream forces express semantics.
+pub fn is_express_stream(props: &PropertyMap) -> bool {
+    if let Some(b) = get_frame_preemption(props) {
+        return b;
+    }
+    if let Some(cos) = get_class_of_service(props) {
+        return cos.0 >= 6;
+    }
+    false
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
@@ -212,6 +584,79 @@ fn extract_size_bytes(expr: &PropertyExpr) -> Option<u64> {
     }
 }
 
+// ── Data-rate helpers (local) ────────────────────────────────────────
+//
+// We mirror the parsing logic from `extract.rs` instead of cross-importing
+// because those helpers are crate-private to that module's call sites
+// (the Output_Rate accessor) and CBS reads its own property under
+// `Spar_TSN`. Keeping a small local copy avoids exposing internals.
+
+const DATA_RATE_UNIT_FACTORS_BPS: &[(&str, u64)] = &[
+    ("bitsps", 1),
+    ("Bytesps", 8),
+    ("KBytesps", 8 * 1024),
+    ("MBytesps", 8 * 1024 * 1024),
+    ("GBytesps", 8 * 1024 * 1024 * 1024),
+];
+
+fn data_rate_unit_factor_bps(unit: &str) -> Option<u64> {
+    DATA_RATE_UNIT_FACTORS_BPS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(unit))
+        .map(|(_, f)| *f)
+}
+
+fn extract_data_rate_bps_local(expr: &PropertyExpr) -> Option<u64> {
+    match expr {
+        PropertyExpr::Integer(v, Some(unit)) if *v >= 0 => {
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            (*v as u64).checked_mul(factor)
+        }
+        PropertyExpr::Integer(v, None) if *v >= 0 => Some(*v as u64),
+        PropertyExpr::Real(s, Some(unit)) => {
+            let v: f64 = s.parse().ok()?;
+            if v < 0.0 {
+                return None;
+            }
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            Some((v * factor as f64) as u64)
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let factor = data_rate_unit_factor_bps(unit.as_str())?;
+            match inner.as_ref() {
+                PropertyExpr::Integer(v, _) if *v >= 0 => (*v as u64).checked_mul(factor),
+                PropertyExpr::Real(s, _) => {
+                    let v: f64 = s.parse().ok()?;
+                    if v < 0.0 {
+                        return None;
+                    }
+                    Some((v * factor as f64) as u64)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_data_rate_bps_local(s: &str) -> Option<u64> {
+    let s = s.trim();
+    for &(unit, factor) in DATA_RATE_UNIT_FACTORS_BPS {
+        if let Some(num_str) = s.strip_suffix(unit).map(|s| s.trim()) {
+            if let Ok(v) = num_str.parse::<u64>() {
+                return v.checked_mul(factor);
+            }
+            if let Ok(v) = num_str.parse::<f64>() {
+                if v < 0.0 {
+                    return None;
+                }
+                return Some((v * factor as f64) as u64);
+            }
+        }
+    }
+    s.parse::<u64>().ok()
+}
+
 fn parse_size_bytes(s: &str) -> Option<u64> {
     let s = s.trim();
     for &(unit, factor) in SIZE_UNIT_FACTORS_BYTES {
@@ -224,6 +669,476 @@ fn parse_size_bytes(s: &str) -> Option<u64> {
         }
     }
     s.parse::<u64>().ok()
+}
+
+// ── Time-unit helpers (local) ────────────────────────────────────────
+//
+// Mirrors the time-unit table in `crates/spar-network/src/extract.rs`
+// (which is crate-private to that module's call sites). Used by the
+// `Sync_Error` accessor so the property can be declared in any of the
+// standard AADL Time_Units (ps/ns/us/ms/sec/min/hr).
+
+const TIME_UNIT_FACTORS_PS_LOCAL: &[(&str, u64)] = &[
+    ("ps", 1),
+    ("ns", 1_000),
+    ("us", 1_000_000),
+    ("ms", 1_000_000_000),
+    ("sec", 1_000_000_000_000),
+    ("min", 60_000_000_000_000),
+    ("hr", 3_600_000_000_000_000),
+];
+
+fn time_unit_factor_ps_local(unit: &str) -> Option<u64> {
+    TIME_UNIT_FACTORS_PS_LOCAL
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(unit))
+        .map(|(_, f)| *f)
+}
+
+fn extract_time_ps_local(expr: &PropertyExpr) -> Option<u64> {
+    match expr {
+        PropertyExpr::Integer(v, Some(unit)) if *v >= 0 => {
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            (*v as u64).checked_mul(factor)
+        }
+        PropertyExpr::Integer(v, None) if *v >= 0 => Some(*v as u64),
+        PropertyExpr::Real(s, Some(unit)) => {
+            let v: f64 = s.parse().ok()?;
+            if v < 0.0 {
+                return None;
+            }
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            Some((v * factor as f64) as u64)
+        }
+        PropertyExpr::UnitValue(inner, unit) => {
+            let factor = time_unit_factor_ps_local(unit.as_str())?;
+            match inner.as_ref() {
+                PropertyExpr::Integer(v, _) if *v >= 0 => (*v as u64).checked_mul(factor),
+                PropertyExpr::Real(s, _) => {
+                    let v: f64 = s.parse().ok()?;
+                    if v < 0.0 {
+                        return None;
+                    }
+                    Some((v * factor as f64) as u64)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_time_ps_local(s: &str) -> Option<u64> {
+    let s = s.trim();
+    for &(unit, factor) in TIME_UNIT_FACTORS_PS_LOCAL {
+        if let Some(num_str) = s.strip_suffix(unit).map(|s| s.trim()) {
+            if let Ok(v) = num_str.parse::<u64>() {
+                return v.checked_mul(factor);
+            }
+            if let Ok(v) = num_str.parse::<f64>() {
+                if v < 0.0 {
+                    return None;
+                }
+                return Some((v * factor as f64) as u64);
+            }
+        }
+    }
+    s.parse::<u64>().ok()
+}
+
+// ── Frame quantization (v0.9.1 NC soundness) ─────────────────────────
+//
+// Bytes-level NC undercounts by up to one MTU per hop because frames
+// are atomic — once a frame starts transmitting, the link is held
+// until the frame finishes, even if the tagged stream's α slope
+// suggests the link could be released earlier. Adding the per-hop
+// frame-quantization correction
+//
+//     q_ps = ceil(max_frame_bytes · 8 · 10^12 / link_rate_bps)
+//
+// turns a slightly-optimistic answer into a sound one. The correction
+// is applied in the non-preemption / non-CBS arms of the TSN dispatch
+// (preemption replaces this term with the much smaller fragment time;
+// CBS service curve already accounts for max-frame blocking via the
+// 1518-byte default in `cbs_residual_service`). See PR #186 / v0.9.1
+// soundness pass.
+
+/// Per-hop frame-quantization correction in picoseconds.
+///
+/// Returns `ceil(max_frame_bytes · 8 · 10^12 / link_rate_bps)` —
+/// the worst-case time it takes to drain one full preemptable Ethernet
+/// frame at the egress link rate, with rounding *up* so the term is
+/// never an under-estimate. `link_rate_bps == 0` returns `u64::MAX`
+/// (a safe pessimistic placeholder; the caller is responsible for
+/// screening that pathological case).
+///
+/// This is the atomic-frame correction for the bytes-level NC kernel:
+/// without it, the per-hop bound undercounts by up to one MTU because
+/// frames cannot be split mid-transmission. Apply once per hop in the
+/// TAS / FIFO arms of the WCTT dispatch; do *not* apply in the
+/// preemption arm (the fragment-blocking term replaces it) or the CBS
+/// arm (the closed-form latency already absorbs it).
+pub fn frame_quantization_ps(max_frame_bytes: u64, link_rate_bps: u64) -> u64 {
+    if link_rate_bps == 0 {
+        return u64::MAX;
+    }
+    let numer = (max_frame_bytes as u128) * BITS_PER_BYTE * PS_PER_SECOND;
+    let denom = link_rate_bps as u128;
+    let ps = numer.div_ceil(denom);
+    if ps > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ps as u64
+    }
+}
+
+// ── TAS (802.1Qbv) gate-window service curve ─────────────────────────
+//
+// Time-Aware Shaper math kernel (v0.8.1 commit 2). Derives the
+// rate-latency [`ServiceCurve`] offered to a single class-of-service by
+// a TAS-gated egress port from its gate-control list.
+//
+// Per Le Boudec & Thiran "Network Calculus" (Springer 2001) chapter 1
+// and the design discussion in
+// `docs/designs/track-d-tsn-wctt-research.md` §5.3:
+//
+// Let cycle_period = ∑ window.duration over the GCL, and let the open
+// time for class K be sum_K_open = ∑ window.duration over windows whose
+// cos_mask has bit K set. Then:
+//
+//   ρ_K  = sum_K_open / cycle_period            (average open fraction)
+//   T_K  = max contiguous closed duration       (worst-case gate latency)
+//   β_K(t) = (R_link · ρ_K) · max(0, t − T_K)   (rate-latency form)
+//
+// The "max contiguous closed duration" includes wrap-around across the
+// cycle boundary so the bound is correct for arbitrary GCL phasing
+// (single-window, multi-window, or gap-only schedules).
+
+/// A parsed TAS gate-control list — a periodic schedule of
+/// [`GateWindow`] entries that tile the cycle period without gaps or
+/// overlaps.
+///
+/// Constructed by [`GateSchedule::parse`]. The `cycle_ps` field is the
+/// sum of all window durations and is also the GCL cycle period.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateSchedule {
+    /// Windows in declaration order. Successive windows abut: the
+    /// `(offset_ps, duration_ps)` pairs tile `[0, cycle_ps)`.
+    pub windows: Vec<GateWindow>,
+    /// Total cycle period, picoseconds. Equal to `sum(windows.duration_ps)`.
+    pub cycle_ps: u64,
+}
+
+/// Errors returned by [`GateSchedule::parse`] when the
+/// `Gate_Control_List` blob is structurally invalid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateScheduleError {
+    /// The string parsed to zero windows.
+    Empty,
+    /// A window entry could not be split into the three required
+    /// `offset:duration:cos_mask` fields.
+    Malformed(String),
+    /// The numeric component (`offset`, `duration`, or `cos_mask`) of an
+    /// entry could not be parsed.
+    ParseInt(String),
+    /// A window's `[offset, offset+duration)` range overlaps the next
+    /// window's range.
+    Overlap {
+        /// Index of the first window in the overlapping pair.
+        index: usize,
+    },
+    /// A window's `[offset, offset+duration)` range leaves a gap before
+    /// the next window's `offset`.
+    Gap {
+        /// Index of the window before the gap.
+        index: usize,
+    },
+    /// A window's `duration_ns` is zero (would make ρ_K division
+    /// degenerate and the schedule meaningless).
+    ZeroDuration {
+        /// Index of the offending window.
+        index: usize,
+    },
+}
+
+impl core::fmt::Display for GateScheduleError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "empty gate-control list"),
+            Self::Malformed(s) => write!(f, "malformed gate window entry: {:?}", s),
+            Self::ParseInt(s) => write!(f, "could not parse integer in gate window entry: {:?}", s),
+            Self::Overlap { index } => {
+                write!(f, "gate window {} overlaps the next window", index)
+            }
+            Self::Gap { index } => {
+                write!(f, "gap between gate window {} and the next window", index)
+            }
+            Self::ZeroDuration { index } => {
+                write!(f, "gate window {} has zero duration", index)
+            }
+        }
+    }
+}
+
+impl core::error::Error for GateScheduleError {}
+
+impl GateSchedule {
+    /// Parse a `Gate_Control_List` blob into a structured
+    /// [`GateSchedule`].
+    ///
+    /// Format: `"offset_ns:duration_ns:cos_mask;offset_ns:duration_ns:cos_mask;..."`
+    /// where each field is a non-negative decimal integer (the
+    /// `cos_mask` may also be expressed in hex with a `0x`/`0X` prefix
+    /// so the canonical 802.1Q PCP bitmask form `0x80` is accepted).
+    /// Window time units are nanoseconds; the parser converts to
+    /// picoseconds (matching the [`GateWindow::offset_ps`] /
+    /// [`duration_ps`](GateWindow::duration_ps) representation).
+    ///
+    /// Trailing semicolons and surrounding whitespace are tolerated.
+    /// Validates that the windows tile the cycle period without gaps
+    /// or overlaps, returning a [`GateScheduleError`] otherwise.
+    pub fn parse(blob: &str) -> Result<Self, GateScheduleError> {
+        let trimmed = blob.trim();
+        if trimmed.is_empty() {
+            return Err(GateScheduleError::Empty);
+        }
+
+        let mut windows: Vec<GateWindow> = Vec::new();
+        for entry in trimmed.split(';') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = entry.split(':').collect();
+            if parts.len() != 3 {
+                return Err(GateScheduleError::Malformed(entry.to_string()));
+            }
+            let offset_ns = parse_decimal_u64(parts[0].trim())
+                .ok_or_else(|| GateScheduleError::ParseInt(entry.to_string()))?;
+            let duration_ns = parse_decimal_u64(parts[1].trim())
+                .ok_or_else(|| GateScheduleError::ParseInt(entry.to_string()))?;
+            let cos_mask = parse_cos_mask(parts[2].trim())
+                .ok_or_else(|| GateScheduleError::ParseInt(entry.to_string()))?;
+            windows.push(GateWindow {
+                offset_ps: offset_ns.saturating_mul(1_000),
+                duration_ps: duration_ns.saturating_mul(1_000),
+                allowed_cos_mask: cos_mask,
+            });
+        }
+        if windows.is_empty() {
+            return Err(GateScheduleError::Empty);
+        }
+
+        // Validate: windows must tile [0, cycle_ps) in declaration order.
+        // We deliberately rely on declaration order rather than sorting:
+        // the GCL semantics are sequential and a misordered list is a
+        // configuration error (not silently fixable).
+        let mut expected_offset: u64 = 0;
+        for (i, w) in windows.iter().enumerate() {
+            if w.duration_ps == 0 {
+                return Err(GateScheduleError::ZeroDuration { index: i });
+            }
+            match w.offset_ps.cmp(&expected_offset) {
+                core::cmp::Ordering::Less => return Err(GateScheduleError::Overlap { index: i }),
+                core::cmp::Ordering::Greater => return Err(GateScheduleError::Gap { index: i }),
+                core::cmp::Ordering::Equal => {}
+            }
+            expected_offset = w.offset_ps.saturating_add(w.duration_ps);
+        }
+
+        Ok(GateSchedule {
+            windows,
+            cycle_ps: expected_offset,
+        })
+    }
+
+    /// Average open fraction for class `cos`, expressed as a numerator
+    /// and denominator in picoseconds.
+    ///
+    /// Returns `(open_time_ps, cycle_ps)`. The fraction is
+    /// `open_time_ps / cycle_ps`. Computing the raw ratio is left to
+    /// callers so they can carry it in `u128` accumulators where
+    /// needed; [`tas_residual_service`] uses this to derive the
+    /// `R_link · ρ_K` rate without dropping precision.
+    pub fn open_fraction(&self, cos: ClassOfService) -> (u64, u64) {
+        let bit = 1u8 << cos.0;
+        let mut open_ps: u64 = 0;
+        for w in &self.windows {
+            if w.allowed_cos_mask & bit != 0 {
+                open_ps = open_ps.saturating_add(w.duration_ps);
+            }
+        }
+        (open_ps, self.cycle_ps)
+    }
+
+    /// Worst-case gate latency for class `cos`, picoseconds.
+    ///
+    /// Defined as the maximum contiguous closed (gate-shut-for-`cos`)
+    /// duration in the cycle, taken with wrap-around. Equivalently, the
+    /// longest stretch of time during which a frame waiting at the
+    /// queue cannot egress because no window in the GCL has bit
+    /// `cos.0` set.
+    ///
+    /// Returns `cycle_ps` if no window opens for `cos` (the gate is
+    /// permanently closed; all of `cycle_ps` is the closed gap, which
+    /// drives `tas_residual_service` to the unservable `(rate=0,
+    /// latency=cycle_ps)` form).
+    pub fn worst_case_latency(&self, cos: ClassOfService) -> u64 {
+        let bit = 1u8 << cos.0;
+        // Walk windows once and accumulate the longest run of closed
+        // duration. Wrap-around is handled by walking *twice* and
+        // recording the longest run that does not exceed `cycle_ps` —
+        // this captures a closed run that straddles the cycle boundary.
+        let mut max_closed: u64 = 0;
+        let mut current_closed: u64 = 0;
+        let any_open = self.windows.iter().any(|w| w.allowed_cos_mask & bit != 0);
+        if !any_open {
+            return self.cycle_ps;
+        }
+        // Two passes so a closed run that straddles the cycle boundary
+        // is captured. Cap at `cycle_ps` so we never report a latency
+        // greater than the period.
+        for _ in 0..2 {
+            for w in &self.windows {
+                if w.allowed_cos_mask & bit != 0 {
+                    if current_closed > max_closed {
+                        max_closed = current_closed;
+                    }
+                    current_closed = 0;
+                } else {
+                    current_closed = current_closed.saturating_add(w.duration_ps);
+                }
+            }
+        }
+        if current_closed > max_closed {
+            max_closed = current_closed;
+        }
+        max_closed.min(self.cycle_ps)
+    }
+}
+
+/// Derive the rate-latency [`ServiceCurve`] offered to a single
+/// class-of-service by a TAS-gated egress port.
+///
+/// Inputs:
+/// - `schedule` — the parsed gate-control list.
+/// - `cos` — the class-of-service whose service curve is requested.
+/// - `link_rate_bps` — the underlying link rate (`R_link`, in bits per
+///   second), typically read from `Spar_Network::Output_Rate` on the
+///   bus.
+///
+/// Output: `β_K(t) = (R_link · ρ_K) · max(0, t − T_K)` where ρ_K is
+/// [`GateSchedule::open_fraction`] and T_K is
+/// [`GateSchedule::worst_case_latency`].
+///
+/// `link_rate_bps · open_time_ps / cycle_ps` is computed in `u128` to
+/// avoid overflow (a 100 Gbps link yields a u128 product of ~10²² for
+/// millisecond-scale cycles, which still fits). The result is
+/// truncated to `u64` (saturating to `u64::MAX`), matching the
+/// rounding convention in [`crate::curves`].
+///
+/// When `cos` never opens in the schedule, the returned curve is
+/// `(rate=0, latency=cycle_ps)` — semantically "no service" — which
+/// the WCTT pass surfaces via the existing
+/// [`crate::curves::NcError::UnservableFlow`] path.
+pub fn tas_residual_service(
+    schedule: &GateSchedule,
+    cos: ClassOfService,
+    link_rate_bps: u64,
+) -> ServiceCurve {
+    let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+    let latency_ps = schedule.worst_case_latency(cos);
+
+    // R_link · ρ_K = link_rate_bps · open_ps / cycle_ps, in u128 to
+    // avoid overflow on realistic inputs.
+    let rate_bps = if cycle_ps == 0 || open_ps == 0 {
+        0
+    } else {
+        let product = (link_rate_bps as u128).saturating_mul(open_ps as u128);
+        let r = product / (cycle_ps as u128);
+        if r > u64::MAX as u128 {
+            u64::MAX
+        } else {
+            r as u64
+        }
+    };
+    ServiceCurve::rate_latency(rate_bps, latency_ps)
+}
+
+/// Derive the rate-latency [`ServiceCurve`] offered to a single
+/// class-of-service by a TAS-gated egress port, accounting for the
+/// per-hop gPTP synchronization-error budget ε.
+///
+/// This is the v0.9.1 NC soundness wrapper around
+/// [`tas_residual_service`]. In a real TSN deployment the gate-control
+/// list is enforced against the local synchronized clock, which differs
+/// from the master clock by at most ε per hop (IEEE 802.1AS / gPTP).
+/// Without accounting for ε the TAS bound is *technically unsound* — a
+/// frame can miss its window by ε.
+///
+/// The correction is: subtract ε from the effective open time
+/// (clamped at 0 — once ε exceeds the open time, the gate is
+/// effectively closed for that hop) and add ε to the worst-case gate
+/// latency. Both adjustments tighten the envelope in the safe (more
+/// pessimistic) direction.
+///
+/// `sync_error_ps == 0` reproduces [`tas_residual_service`]
+/// byte-identically (legacy v0.8.1 behaviour, non-regression contract).
+pub fn tas_residual_service_with_sync_error(
+    schedule: &GateSchedule,
+    cos: ClassOfService,
+    link_rate_bps: u64,
+    sync_error_ps: u64,
+) -> ServiceCurve {
+    let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+    let latency_ps = schedule.worst_case_latency(cos);
+
+    // Effective open time shrinks by ε (clamped at 0). Once ε ≥ open
+    // time, the gate is effectively closed: rate = 0 with the worst-
+    // case-latency-plus-ε falling back to the closed-gate
+    // `(rate=0, latency=cycle_ps)` form via the saturating add below.
+    let effective_open_ps = open_ps.saturating_sub(sync_error_ps);
+    let effective_latency_ps = latency_ps.saturating_add(sync_error_ps);
+
+    let rate_bps = if cycle_ps == 0 || effective_open_ps == 0 {
+        0
+    } else {
+        let product = (link_rate_bps as u128).saturating_mul(effective_open_ps as u128);
+        let r = product / (cycle_ps as u128);
+        if r > u64::MAX as u128 {
+            u64::MAX
+        } else {
+            r as u64
+        }
+    };
+    ServiceCurve::rate_latency(rate_bps, effective_latency_ps)
+}
+
+/// Parse [`Spar_TSN::Gate_Control_List`] from a [`PropertyMap`] into a
+/// structured [`GateSchedule`].
+///
+/// Returns `None` when the property is unset or the value cannot be
+/// parsed (the latter case is converted to `None` for callers that
+/// already emit a model-level diagnostic at the WCTT pass; deeper
+/// diagnostic surfacing through [`GateScheduleError`] lands in a
+/// follow-up commit alongside the TAS-aware diagnostic kind).
+///
+/// [`Spar_TSN::Gate_Control_List`]: get_gate_control_list_raw
+pub fn get_gate_schedule(props: &PropertyMap) -> Option<GateSchedule> {
+    let raw = get_gate_control_list_raw(props)?;
+    GateSchedule::parse(&raw).ok()
+}
+
+fn parse_decimal_u64(s: &str) -> Option<u64> {
+    s.parse::<u64>().ok()
+}
+
+fn parse_cos_mask(s: &str) -> Option<u8> {
+    if let Some(stripped) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u8::from_str_radix(stripped, 16).ok()
+    } else {
+        s.parse::<u8>().ok()
+    }
 }
 
 #[cfg(test)]
@@ -316,6 +1231,162 @@ mod tests {
         assert_eq!(get_stream_id(&empty), None);
     }
 
+    // ── CBS (802.1Qav) — v0.8.1 commit 3 ─────────────────────────────
+
+    /// 1 Gbps in bits/second — link rate used by the CBS unit tests.
+    const GBPS: u64 = 1_000_000_000;
+
+    #[test]
+    fn cbs_reservation_construct_basic() {
+        // 30% reservation on a 1 Gbps link: idleSlope = 300 Mbps,
+        // sendSlope = 300 Mbps − 1 Gbps = −700 Mbps.
+        let r = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        assert_eq!(r.idle_slope_bps, 300_000_000);
+        assert_eq!(r.send_slope_bps, -700_000_000);
+        assert_eq!(r.hi_credit_bytes, 12_000);
+        assert_eq!(r.lo_credit_bytes, 1500);
+    }
+
+    #[test]
+    fn cbs_reservation_rejects_oversubscription() {
+        // Reservation > link rate is infeasible.
+        assert_eq!(CbsReservation::new(GBPS + 1, GBPS, 0, 0), None);
+        // Zero link rate is also rejected (guards the divisions).
+        assert_eq!(CbsReservation::new(0, 0, 0, 0), None);
+    }
+
+    #[test]
+    fn cbs_reservation_at_link_rate_has_zero_send_slope() {
+        // idleSlope == linkRate ⇒ sendSlope = 0 (boundary, no other
+        // class can use the link).
+        let r = CbsReservation::new(GBPS, GBPS, 0, 0).unwrap();
+        assert_eq!(r.idle_slope_bps, GBPS);
+        assert_eq!(r.send_slope_bps, 0);
+    }
+
+    #[test]
+    fn cbs_reservation_reserved_fraction_recovers_link_rate() {
+        let r = CbsReservation::new(250_000_000, GBPS, 0, 0).unwrap();
+        let (num, den) = r.reserved_fraction();
+        assert_eq!(num, 250_000_000);
+        assert_eq!(den, GBPS);
+    }
+
+    #[test]
+    fn cbs_residual_service_rate_equals_idle_slope() {
+        let r = CbsReservation::new(300_000_000, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(
+            beta.rate_bps, 300_000_000,
+            "service rate must equal idleSlope (the reserved bps)"
+        );
+    }
+
+    #[test]
+    fn cbs_residual_service_blocking_term_dominates_when_lo_credit_zero() {
+        // With lo_credit = 0 the recovery term is 0; latency is purely
+        // the worst-case blocking from the largest competing frame.
+        // 1518-byte frame at 1 Gbps:
+        //   blocking_ps = 1518 · 8 · 10^12 / 10^9
+        //               = 12_144 · 10^3 ps
+        //               = 12_144_000 ps (rounded up — exact here).
+        let r = CbsReservation::new(300_000_000, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(beta.latency_ps, 12_144_000);
+    }
+
+    #[test]
+    fn cbs_residual_service_credit_recovery_term() {
+        // Closed-form latency = blocking + lo_credit / |sendSlope|.
+        //
+        // 1 Gbps link, idleSlope 300 Mbps ⇒ |sendSlope| = 700 Mbps.
+        //
+        //   blocking = 1518 · 8 · 10^12 / 10^9 = 12_144_000 ps.
+        //
+        //   recovery = 1500 · 8 · 10^12 / 7·10^8
+        //            = 12_000 · 10^12 / 7·10^8
+        //            = 17_142_857.14 ps → 17_142_858 (rounded up).
+        //
+        //   total = 12_144_000 + 17_142_858 = 29_286_858 ps.
+        let r = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 1518);
+        assert_eq!(beta.rate_bps, 300_000_000);
+        // Rounding-up on the recovery term is required for safe
+        // pessimism direction.
+        let blocking = 12_144_000u64;
+        let recovery = (1500u128 * 8u128 * 1_000_000_000_000u128).div_ceil(700_000_000u128) as u64;
+        assert_eq!(beta.latency_ps, blocking + recovery);
+    }
+
+    #[test]
+    fn cbs_residual_service_idle_slope_equals_link_rate_no_blocking() {
+        // Boundary: idleSlope == linkRate ⇒ sendSlope == 0. The
+        // closed-form's recovery term is zero, and any "competing
+        // class" cannot exist (the class has the link to itself).
+        // Latency is just the configured blocking term, which we
+        // expect callers to set to zero in this case.
+        let r = CbsReservation::new(GBPS, GBPS, 0, 0).unwrap();
+        let beta = cbs_residual_service(&r, GBPS, 0);
+        assert_eq!(beta.rate_bps, GBPS);
+        assert_eq!(beta.latency_ps, 0);
+    }
+
+    #[test]
+    fn cbs_two_classes_each_30pct_get_each_their_idle_slope() {
+        // Two classes, each reserving 30% of a 1 Gbps link. Both must
+        // see 300 Mbps service rate; the latency captures the same
+        // worst-case blocking (the largest competing frame).
+        let class_a = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let class_b = CbsReservation::new(300_000_000, GBPS, 12_000, 1500).unwrap();
+        let beta_a = cbs_residual_service(&class_a, GBPS, 1518);
+        let beta_b = cbs_residual_service(&class_b, GBPS, 1518);
+        assert_eq!(beta_a.rate_bps, 300_000_000);
+        assert_eq!(beta_b.rate_bps, 300_000_000);
+        assert_eq!(beta_a.latency_ps, beta_b.latency_ps);
+        // 30% + 30% = 60%, leaving 40% for best-effort and the other
+        // CBS class. Reservation feasibility is preserved (both
+        // succeeded above).
+    }
+
+    #[test]
+    fn read_bandwidth_reservation_typed_and_string_paths() {
+        // Typed integer with explicit unit.
+        let props = make_props(
+            SPAR_TSN,
+            "Bandwidth_Reservation",
+            "1000000",
+            Some(PropertyExpr::Integer(
+                1000,
+                Some(spar_hir_def::name::Name::new("KBytesps")),
+            )),
+        );
+        // 1000 KBytesps = 1000 · 8 · 1024 = 8_192_000 bps.
+        assert_eq!(get_bandwidth_reservation_bps(&props), Some(8_192_000));
+
+        // Bare integer (interpreted as bps).
+        let props_bare = make_props(
+            SPAR_TSN,
+            "Bandwidth_Reservation",
+            "300000000",
+            Some(PropertyExpr::Integer(300_000_000, None)),
+        );
+        assert_eq!(
+            get_bandwidth_reservation_bps(&props_bare),
+            Some(300_000_000)
+        );
+
+        // String fallback path — `100 MBytesps` → 100 · 8 · 1024^2.
+        let props_str = make_props(SPAR_TSN, "Bandwidth_Reservation", "100 MBytesps", None);
+        assert_eq!(
+            get_bandwidth_reservation_bps(&props_str),
+            Some(100u64 * 8 * 1024 * 1024)
+        );
+
+        // Missing returns None.
+        let empty = PropertyMap::new();
+        assert_eq!(get_bandwidth_reservation_bps(&empty), None);
+    }
+
     #[test]
     fn read_class_of_service_from_property_map() {
         let props = make_props(
@@ -338,5 +1409,491 @@ mod tests {
         // String fallback path.
         let props_str = make_props(SPAR_TSN, "Class_of_Service", "5", None);
         assert_eq!(get_class_of_service(&props_str), Some(ClassOfService(5)));
+    }
+
+    // ── TAS gate-window service curve tests (v0.8.1 commit 2) ────────
+
+    /// 1 Gbps in bits per second.
+    const TAS_GBPS: u64 = 1_000_000_000;
+
+    #[test]
+    fn parse_single_window_gcl() {
+        // One window covering the whole cycle, mask=0xFF (all classes
+        // open). Each unit is ns; offset 0, 10 us cycle.
+        let s = GateSchedule::parse("0:10000:0xFF").expect("valid GCL");
+        assert_eq!(s.windows.len(), 1);
+        assert_eq!(s.cycle_ps, 10_000 * 1_000); // 10 us in ps
+        assert_eq!(s.windows[0].offset_ps, 0);
+        assert_eq!(s.windows[0].duration_ps, 10_000_000);
+        assert_eq!(s.windows[0].allowed_cos_mask, 0xFF);
+    }
+
+    #[test]
+    fn parse_two_window_gcl_50_50() {
+        // 5 us only CoS 7 open; 5 us all other CoS open. Standard
+        // motivating example from the commit brief.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").expect("valid GCL");
+        assert_eq!(s.windows.len(), 2);
+        assert_eq!(s.cycle_ps, 10_000_000); // 10 us
+        assert_eq!(s.windows[0].offset_ps, 0);
+        assert_eq!(s.windows[0].duration_ps, 5_000_000);
+        assert_eq!(s.windows[0].allowed_cos_mask, 0x80);
+        assert_eq!(s.windows[1].offset_ps, 5_000_000);
+        assert_eq!(s.windows[1].duration_ps, 5_000_000);
+        assert_eq!(s.windows[1].allowed_cos_mask, 0x7F);
+    }
+
+    #[test]
+    fn parse_eight_window_gcl_round_trip_preserves_order() {
+        // 8 successive 1 us windows opening one CoS at a time, in
+        // 7,6,5,4,3,2,1,0 order. The parser must preserve order.
+        let blob = "0:1000:0x80;1000:1000:0x40;2000:1000:0x20;3000:1000:0x10;\
+                    4000:1000:0x08;5000:1000:0x04;6000:1000:0x02;7000:1000:0x01";
+        let s = GateSchedule::parse(blob).expect("valid 8-window GCL");
+        assert_eq!(s.windows.len(), 8);
+        assert_eq!(s.cycle_ps, 8_000_000); // 8 us
+        let masks: Vec<u8> = s.windows.iter().map(|w| w.allowed_cos_mask).collect();
+        assert_eq!(masks, vec![0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01]);
+    }
+
+    #[test]
+    fn parse_overlap_rejected() {
+        // Second window starts at 4000 ns but first runs to 5000 ns —
+        // overlap by 1 us.
+        let err = GateSchedule::parse("0:5000:0x80;4000:5000:0x7F").unwrap_err();
+        assert!(matches!(err, GateScheduleError::Overlap { index: 1 }));
+    }
+
+    #[test]
+    fn parse_gap_rejected() {
+        // Second window starts at 6000 ns, first ends at 5000 ns —
+        // 1 us gap.
+        let err = GateSchedule::parse("0:5000:0x80;6000:5000:0x7F").unwrap_err();
+        assert!(matches!(err, GateScheduleError::Gap { index: 1 }));
+    }
+
+    #[test]
+    fn parse_malformed_rejected() {
+        // Missing the third field.
+        assert!(matches!(
+            GateSchedule::parse("0:5000"),
+            Err(GateScheduleError::Malformed(_))
+        ));
+        // Non-numeric offset.
+        assert!(matches!(
+            GateSchedule::parse("xyz:5000:0x80"),
+            Err(GateScheduleError::ParseInt(_))
+        ));
+        // Empty blob.
+        assert_eq!(GateSchedule::parse(""), Err(GateScheduleError::Empty));
+        assert_eq!(GateSchedule::parse("   "), Err(GateScheduleError::Empty));
+        // Trailing semicolon is tolerated (does not produce an empty
+        // entry in the parser); a single semicolon-only blob is empty.
+        assert!(GateSchedule::parse("0:5000:0x80;").is_ok());
+    }
+
+    #[test]
+    fn open_fraction_two_window_50_50() {
+        // CoS 7 open in window 1 only (5 us / 10 us cycle = 50%).
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let (open_ps, cycle_ps) = s.open_fraction(cos7);
+        assert_eq!(open_ps, 5_000_000);
+        assert_eq!(cycle_ps, 10_000_000);
+
+        // CoS 0 open in window 2 only (also 50%).
+        let cos0 = ClassOfService::new(0).unwrap();
+        let (open0, _) = s.open_fraction(cos0);
+        assert_eq!(open0, 5_000_000);
+    }
+
+    #[test]
+    fn worst_case_latency_two_window() {
+        // CoS 7 open for the first 5 us, closed for the next 5 us. The
+        // longest closed run is 5 us — straight through window 2.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        assert_eq!(s.worst_case_latency(cos7), 5_000_000);
+
+        // CoS 0 closed for the first 5 us, open for the next 5 us. Same
+        // worst-case latency by symmetry.
+        let cos0 = ClassOfService::new(0).unwrap();
+        assert_eq!(s.worst_case_latency(cos0), 5_000_000);
+    }
+
+    #[test]
+    fn worst_case_latency_wrap_around() {
+        // Three windows: closed-open-closed for a particular CoS. The
+        // closed runs straddling the cycle boundary should be combined.
+        // Layout: [0..2us closed for CoS 7][2..4us open for CoS 7][4..10us closed for CoS 7]
+        // Closed runs: window 0 (2 us) + window 2 (6 us). With wrap-around
+        // the longest is window 2 followed by window 0 = 6 + 2 = 8 us.
+        let s = GateSchedule::parse("0:2000:0x7F;2000:2000:0x80;4000:6000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        assert_eq!(s.worst_case_latency(cos7), 8_000_000);
+    }
+
+    #[test]
+    fn worst_case_latency_permanently_closed() {
+        // CoS 0 never opens (no mask has bit 0 set). worst_case_latency
+        // returns the full cycle period — the gate is permanently shut.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0xFE").unwrap();
+        let cos0 = ClassOfService::new(0).unwrap();
+        assert_eq!(s.worst_case_latency(cos0), 10_000_000);
+    }
+
+    #[test]
+    fn tas_residual_service_50_percent_open() {
+        // 50% open, 1 Gbps link → service rate = 500 Mbps.
+        // Latency = 5 us = 5_000_000 ps.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let svc = tas_residual_service(&s, cos7, TAS_GBPS);
+        assert_eq!(svc.rate_bps, 500_000_000);
+        assert_eq!(svc.latency_ps, 5_000_000);
+    }
+
+    #[test]
+    fn tas_residual_service_full_open() {
+        // Single window covering the whole cycle, all CoS open. Service
+        // rate = link rate; latency = 0 (gate is never closed).
+        let s = GateSchedule::parse("0:10000:0xFF").unwrap();
+        let cos3 = ClassOfService::new(3).unwrap();
+        let svc = tas_residual_service(&s, cos3, TAS_GBPS);
+        assert_eq!(svc.rate_bps, TAS_GBPS);
+        assert_eq!(svc.latency_ps, 0);
+    }
+
+    #[test]
+    fn tas_residual_service_unservable_when_class_never_opens() {
+        // CoS 0 never opens → rate = 0, latency = cycle. The wctt pass
+        // surfaces this as an UnservableFlow downstream.
+        let s = GateSchedule::parse("0:10000:0x80").unwrap();
+        let cos0 = ClassOfService::new(0).unwrap();
+        let svc = tas_residual_service(&s, cos0, TAS_GBPS);
+        assert_eq!(svc.rate_bps, 0);
+        assert_eq!(svc.latency_ps, 10_000_000);
+    }
+
+    #[test]
+    fn get_gate_schedule_reads_property_map() {
+        // String-fallback path: the typed PropertyExpr is None, so the
+        // accessor walks the raw blob through GateSchedule::parse.
+        let props = make_props(
+            SPAR_TSN,
+            "Gate_Control_List",
+            "0:5000:0x80;5000:5000:0x7F",
+            None,
+        );
+        let s = get_gate_schedule(&props).expect("schedule parses");
+        assert_eq!(s.windows.len(), 2);
+        assert_eq!(s.cycle_ps, 10_000_000);
+
+        // Missing property returns None.
+        let empty = PropertyMap::new();
+        assert!(get_gate_schedule(&empty).is_none());
+
+        // Malformed blob returns None (full structured-error surfacing
+        // is a follow-up commit; today's caller emits a model-level
+        // diagnostic at the WCTT pass when this returns None).
+        let bad = make_props(SPAR_TSN, "Gate_Control_List", "not a gcl", None);
+        assert!(get_gate_schedule(&bad).is_none());
+    }
+
+    // ── Frame preemption (802.1Qbu) ──────────────────────────────────
+
+    /// 100 Mbps in bits per second.
+    const HUNDRED_MBPS: u64 = 100_000_000;
+
+    #[test]
+    fn preemption_constants_match_802_3br() {
+        // IEEE 802.3 minFrameSize = 64 bytes (incl. FCS).
+        assert_eq!(MIN_FRAGMENT_BYTES, 64);
+        // IEEE 802.3br SMD-S + 4-byte mCRC = 4 bytes preemption header.
+        assert_eq!(PREEMPTION_HEADER_BYTES, 4);
+    }
+
+    #[test]
+    fn preemption_blocking_term_with_preemption_enabled() {
+        // 100 Mbps, MTU=1518 (irrelevant when preemption is enabled).
+        // Bytes blocked = 64 + 4 = 68 bytes.
+        // Blocking time = 68 * 8 * 1e12 / 1e8 = 5_440_000 ps = 5.44 us.
+        let t = preemption_blocking_term_ps(HUNDRED_MBPS, 1518, true);
+        assert_eq!(t, 5_440_000);
+    }
+
+    #[test]
+    fn preemption_blocking_term_without_preemption_falls_back_to_max_frame() {
+        // 100 Mbps, MTU=1518: the legacy term.
+        // Blocking time = 1518 * 8 * 1e12 / 1e8 = 121_440_000 ps ≈ 121 us.
+        let t = preemption_blocking_term_ps(HUNDRED_MBPS, 1518, false);
+        assert_eq!(t, 121_440_000);
+    }
+
+    #[test]
+    fn preemption_blocking_term_zero_rate_returns_zero() {
+        // Pathological zero-rate input is screened by bus_bandwidth
+        // upstream; we just make sure we don't panic / divide by zero.
+        assert_eq!(preemption_blocking_term_ps(0, 1518, true), 0);
+        assert_eq!(preemption_blocking_term_ps(0, 1518, false), 0);
+    }
+
+    #[test]
+    fn preemption_blocking_term_rounds_up_for_pessimism() {
+        // Non-integer-byte boundary: 65 bytes at 100 Mbps with no
+        // preemption enabled. 65 * 8 = 520 bits @ 100 Mbps = 5.2 us.
+        // Integer-rounded numerator/denominator: 5_200_000_000_000_000
+        // / 100_000_000 = 5_200_000 ps exactly. Pick a rate that is
+        // *not* a clean divisor instead.
+        // 1518 bytes at 1 Gbps: 1518 * 8 * 1e12 / 1e9 = 12_144_000 ps
+        // exactly. Use 999_999_999 bps (1 Gbps - 1 bps) so we straddle.
+        let exact = preemption_blocking_term_ps(1_000_000_000, 1518, false);
+        let nearly = preemption_blocking_term_ps(999_999_999, 1518, false);
+        // Nearly-Gbps (lower) takes *strictly more* time than exact Gbps.
+        assert!(nearly > exact);
+        // Difference is at most one ceiling round-up bit (1 ps).
+        assert!(nearly - exact >= 1);
+    }
+
+    #[test]
+    fn is_express_stream_explicit_overrides_cos() {
+        // Explicit Frame_Preemption=>true forces express even at low CoS.
+        let mut props = make_props(
+            SPAR_TSN,
+            "Class_of_Service",
+            "0",
+            Some(PropertyExpr::Integer(0, None)),
+        );
+        props.add(spar_hir_def::properties::PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new(SPAR_TSN)),
+                property_name: Name::new("Frame_Preemption"),
+            },
+            value: "true".to_string(),
+            typed_expr: Some(PropertyExpr::Boolean(true)),
+            is_append: false,
+        });
+        assert!(is_express_stream(&props));
+
+        // Explicit Frame_Preemption=>false forces preemptable even at
+        // high CoS.
+        let mut props = make_props(
+            SPAR_TSN,
+            "Class_of_Service",
+            "7",
+            Some(PropertyExpr::Integer(7, None)),
+        );
+        props.add(spar_hir_def::properties::PropertyValue {
+            name: PropertyRef {
+                property_set: Some(Name::new(SPAR_TSN)),
+                property_name: Name::new("Frame_Preemption"),
+            },
+            value: "false".to_string(),
+            typed_expr: Some(PropertyExpr::Boolean(false)),
+            is_append: false,
+        });
+        assert!(!is_express_stream(&props));
+    }
+
+    #[test]
+    fn is_express_stream_cos_default_threshold() {
+        // No Frame_Preemption set → fall back to CoS-based default.
+        // CoS 0..=5: not express.
+        for cos in 0u8..=5 {
+            let props = make_props(
+                SPAR_TSN,
+                "Class_of_Service",
+                &cos.to_string(),
+                Some(PropertyExpr::Integer(cos as i64, None)),
+            );
+            assert!(
+                !is_express_stream(&props),
+                "CoS {} must default to non-express",
+                cos
+            );
+        }
+        // CoS 6 and 7: express.
+        for cos in 6u8..=7 {
+            let props = make_props(
+                SPAR_TSN,
+                "Class_of_Service",
+                &cos.to_string(),
+                Some(PropertyExpr::Integer(cos as i64, None)),
+            );
+            assert!(
+                is_express_stream(&props),
+                "CoS {} must default to express",
+                cos
+            );
+        }
+    }
+
+    #[test]
+    fn is_express_stream_no_props_is_not_express() {
+        // Neither Frame_Preemption nor Class_of_Service declared: the
+        // safe default is non-express (preemptable).
+        let empty = PropertyMap::new();
+        assert!(!is_express_stream(&empty));
+    }
+
+    // ── Sync_Error / gPTP ε budget (v0.9.1 NC soundness) ─────────────
+
+    #[test]
+    fn read_sync_error_typed_path_picoseconds() {
+        // Bare integer — interpreted as picoseconds.
+        let props = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1000",
+            Some(PropertyExpr::Integer(1_000, None)),
+        );
+        assert_eq!(get_sync_error_ps(&props), Some(1_000));
+    }
+
+    #[test]
+    fn read_sync_error_typed_path_with_units() {
+        // 1 us with explicit Time_Units → 1_000_000 ps.
+        let props = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1us",
+            Some(PropertyExpr::Integer(1, Some(Name::new("us")))),
+        );
+        assert_eq!(get_sync_error_ps(&props), Some(1_000_000));
+
+        // 1 ms.
+        let props_ms = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1ms",
+            Some(PropertyExpr::Integer(1, Some(Name::new("ms")))),
+        );
+        assert_eq!(get_sync_error_ps(&props_ms), Some(1_000_000_000));
+    }
+
+    #[test]
+    fn read_sync_error_string_fallback_matches_typed() {
+        // The string-fallback path should agree with the typed-expr
+        // path for the same human-readable value.
+        let typed = make_props(
+            SPAR_TSN,
+            "Sync_Error",
+            "1us",
+            Some(PropertyExpr::Integer(1, Some(Name::new("us")))),
+        );
+        let stringy = make_props(SPAR_TSN, "Sync_Error", "1us", None);
+        assert_eq!(get_sync_error_ps(&typed), get_sync_error_ps(&stringy));
+        assert_eq!(get_sync_error_ps(&stringy), Some(1_000_000));
+    }
+
+    #[test]
+    fn read_sync_error_missing_returns_none() {
+        // Unset = legacy behaviour (callers treat as ε = 0).
+        let empty = PropertyMap::new();
+        assert_eq!(get_sync_error_ps(&empty), None);
+    }
+
+    // ── Frame quantization (v0.9.1 NC soundness) ─────────────────────
+
+    #[test]
+    fn frame_quantization_1518_at_100mbps() {
+        // 1518-byte MTU at 100 Mbps:
+        //   q_ps = ceil(1518 · 8 · 10^12 / 10^8) = 121_440_000 ps = 121.44 us.
+        // This matches the legacy preemption-disabled blocking term.
+        let q = frame_quantization_ps(1518, 100_000_000);
+        assert_eq!(q, 121_440_000);
+    }
+
+    #[test]
+    fn frame_quantization_64_at_1gbps() {
+        // 64-byte minimum frame at 1 Gbps:
+        //   q_ps = ceil(64 · 8 · 10^12 / 10^9) = 512_000 ps = 512 ns.
+        let q = frame_quantization_ps(64, 1_000_000_000);
+        assert_eq!(q, 512_000);
+    }
+
+    #[test]
+    fn frame_quantization_rounds_up() {
+        // Rate that does not divide evenly — ceiling rounding (pessimism)
+        // must produce a strict over-estimate vs. the exact-divisor case.
+        // 1518 bytes at 1 Gbps is exact (12_144_000 ps). At 999_999_999
+        // bps (1 bps slower) we should round *up*.
+        let exact = frame_quantization_ps(1518, 1_000_000_000);
+        let nearly = frame_quantization_ps(1518, 999_999_999);
+        assert_eq!(exact, 12_144_000);
+        assert!(
+            nearly > exact,
+            "ceiling rounding must over-estimate at non-exact divisors: \
+             exact={} nearly={}",
+            exact,
+            nearly
+        );
+    }
+
+    #[test]
+    fn frame_quantization_zero_rate_guard() {
+        // Pathological zero-rate input: returns u64::MAX so the caller
+        // can detect the unservable hop without panicking on division.
+        assert_eq!(frame_quantization_ps(1518, 0), u64::MAX);
+        assert_eq!(frame_quantization_ps(0, 0), u64::MAX);
+    }
+
+    #[test]
+    fn frame_quantization_zero_bytes_returns_zero() {
+        // Zero bytes is a degenerate but well-defined case: takes zero
+        // time to transmit. Used by tests that want to verify the
+        // correction is a strict additive overhead (i.e., setting it
+        // to zero recovers the v0.8.1 bound).
+        assert_eq!(frame_quantization_ps(0, 1_000_000_000), 0);
+    }
+
+    // ── TAS + gPTP ε budget (v0.9.1 NC soundness) ────────────────────
+
+    #[test]
+    fn tas_residual_service_with_sync_error_zero_matches_legacy() {
+        // ε = 0 must reproduce the legacy `tas_residual_service`
+        // byte-identically — this is the non-regression contract.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let legacy = tas_residual_service(&s, cos7, TAS_GBPS);
+        let with_eps = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 0);
+        assert_eq!(legacy.rate_bps, with_eps.rate_bps);
+        assert_eq!(legacy.latency_ps, with_eps.latency_ps);
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_shrinks_open_grows_latency() {
+        // 50% open (5 us out of 10 us), 1 Gbps. Apply ε = 1 us.
+        //   effective_open  = 5 us − 1 us = 4 us
+        //   rate = 1 Gbps · 4/10 = 400 Mbps
+        //   effective_lat  = 5 us + 1 us = 6 us
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 1_000_000);
+        assert_eq!(svc.rate_bps, 400_000_000);
+        assert_eq!(svc.latency_ps, 6_000_000);
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_clamps_when_eps_equals_open() {
+        // ε equal to the open time → gate is effectively closed
+        // (rate = 0); latency = open_window_latency + ε.
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        // Open time for CoS 7 is 5 us = 5_000_000 ps.
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 5_000_000);
+        assert_eq!(svc.rate_bps, 0, "gate must close once ε ≥ open time");
+        assert_eq!(svc.latency_ps, 10_000_000, "5us legacy + 5us ε");
+    }
+
+    #[test]
+    fn tas_residual_service_with_sync_error_clamps_when_eps_exceeds_open() {
+        // ε strictly greater than open time → still closed; saturating
+        // sub clamps at 0 (the gate cannot have "negative open time").
+        let s = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        let cos7 = ClassOfService::new(7).unwrap();
+        let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 10_000_000);
+        assert_eq!(svc.rate_bps, 0);
+        assert_eq!(svc.latency_ps, 15_000_000);
     }
 }

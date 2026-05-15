@@ -291,6 +291,126 @@ fn unknown_tool_returns_method_not_found_error() {
     );
 }
 
+// ── 11. check_chain_with_variant_returns_bad_input_via_stdio ─────────
+
+#[test]
+fn check_chain_with_variant_returns_bad_input_via_stdio() {
+    // Tier A #7 reproduced through the stdio JSON-RPC envelope: an
+    // agent calling spar.check_chain with a variant must see a tool-
+    // level error (isError=true, code=BAD_INPUT) rather than an
+    // unfiltered success payload.
+    let path = write_model("chain_variant_stdio", CHAIN_MODEL);
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 100,
+        "method": "tools/call",
+        "params": {
+            "name": "spar.check_chain",
+            "arguments": {
+                "model": path.to_string_lossy(),
+                "root": "Chain::Sys.Impl",
+                "source_thread": "producer",
+                "sink_thread": "consumer",
+                "variant": "test-variant",
+            }
+        }
+    });
+    let resp = drive(&req.to_string());
+    let result = &resp["result"];
+    assert_eq!(
+        result["isError"].as_bool(),
+        Some(true),
+        "expected isError=true on BAD_INPUT; got {resp}",
+    );
+    let structured = &result["structuredContent"];
+    assert_eq!(
+        structured["code"].as_str(),
+        Some("BAD_INPUT"),
+        "expected structured code=BAD_INPUT; got {resp}",
+    );
+    let msg = structured["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("not yet supported"),
+        "expected message to explain limitation; got {msg}",
+    );
+    cleanup(&path);
+}
+
+// ── 12. tools_call_rejects_variant_plus_variant_context_via_stdio ────
+
+#[test]
+fn check_chain_rejects_both_variant_args_via_stdio() {
+    // Tier C #50: mutual exclusion is enforced before the not-yet-
+    // supported refusal, so the message points at the conflict rather
+    // than the deferred-feature error.
+    let path = write_model("chain_both_variant_stdio", CHAIN_MODEL);
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": 101,
+        "method": "tools/call",
+        "params": {
+            "name": "spar.check_chain",
+            "arguments": {
+                "model": path.to_string_lossy(),
+                "root": "Chain::Sys.Impl",
+                "source_thread": "producer",
+                "sink_thread": "consumer",
+                "variant": "test-variant",
+                "variant_context": "/tmp/ctx.json",
+            }
+        }
+    });
+    let resp = drive(&req.to_string());
+    let result = &resp["result"];
+    assert_eq!(
+        result["isError"].as_bool(),
+        Some(true),
+        "expected isError=true on conflict; got {resp}",
+    );
+    let structured = &result["structuredContent"];
+    assert_eq!(
+        structured["code"].as_str(),
+        Some("BAD_INPUT"),
+        "expected structured code=BAD_INPUT; got {resp}",
+    );
+    let msg = structured["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("mutually exclusive"),
+        "expected message to mention mutual exclusion; got {msg}",
+    );
+    cleanup(&path);
+}
+
+// ── 13. tools_list_advertises_mutual_exclusion_in_schema ─────────────
+
+#[test]
+fn tools_list_advertises_variant_mutex_in_schema() {
+    // Each tool's input schema must encode the variant <-> variant_context
+    // mutex via JSON Schema `not` so a strict client can reject the
+    // conflicting payload before sending it.
+    let resp = drive(r#"{"jsonrpc":"2.0","id":50,"method":"tools/list"}"#);
+    let tools = resp["result"]["tools"]
+        .as_array()
+        .expect("result.tools must be array");
+    for t in tools {
+        let name = t["name"].as_str().unwrap_or_default();
+        let not_clause = &t["inputSchema"]["not"];
+        assert!(
+            not_clause.is_object(),
+            "tool {name} must declare a top-level `not` clause for variant mutex; got {t}",
+        );
+        let required = not_clause["required"]
+            .as_array()
+            .unwrap_or_else(|| panic!("tool {name} `not.required` missing"));
+        let names: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
+        assert!(
+            names.contains(&"variant") && names.contains(&"variant_context"),
+            "tool {name} must mark both variant and variant_context as forbidden together; \
+             got {names:?}",
+        );
+    }
+}
+
 // ── Bonus: an unknown JSON-RPC method also gets MethodNotFound ───────
 
 #[test]

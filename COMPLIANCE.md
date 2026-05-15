@@ -1,8 +1,8 @@
-# AS5506 AADL v2.2 Compliance Gap Analysis
+# AS5506D AADL v2.2/v2.3 Compliance Gap Analysis
 
-**Updated**: 2026-04-27 (v0.7.1 released; v0.8.0 in progress)
+**Updated**: 2026-04-28 (v0.9.1 released; v0.9.2 in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (2200+ tests passing across 18 crates)
+**Toolchain**: spar (2759+ tests passing across 18 crates)
 
 ---
 
@@ -240,6 +240,102 @@ artifacts at github.com/pulseengine/spar/releases/tag/v0.7.1.
 - Criterion benchmarks for scheduling solver and codegen (#143, closes #137).
 - Lean / Bazel / proptest CI gates (#151, closes #135) — Lean proofs now machine-checked in CI for the first time.
 - Track D and Track E research design docs (#152, #153) and Track F engagement strategy (#160) anchoring v0.8.0+ scope.
+
+---
+
+## v0.9.2 (soundness pass — Lean ↔ Rust reconciliation, in progress)
+
+**Commit 1 of 5 — α(0) = 0 causality fix + first MinPlus sorry discharge**
+
+The 12-persona Wave 3 audit (Lean reviewer) flagged a real spec/impl
+mismatch in the arrival curve at `t = 0`:
+
+- The Lean spec in `proofs/Proofs/Network/MinPlus.lean` gave
+  `α(0) = min(σ + ρ·0, p·0) = min(σ, 0) = 0` for the peak-capped
+  branch, and `α(0) = σ + ρ·0 = σ` for the affine-only branch — an
+  internal inconsistency.
+- The Rust impl in `crates/spar-network/src/curves.rs::ArrivalCurve::at`
+  short-circuited `t_ps == 0` to return `σ` for *both* branches —
+  pre-mature optimisation that violated causality (a zero-length
+  window cannot admit any bytes).
+
+v0.9.2 reconciles toward the **causal answer** (`α(0) = 0` for all
+arrival curves):
+
+- Rust: `ArrivalCurve::at` now short-circuits `t_ps == 0` to `0`, not
+  `σ`. Doc comment + module-level doc updated. The peak-capped branch
+  would give 0 by `min(σ, 0)` natively; the affine-only branch needs
+  the explicit short-circuit because `σ + ρ · 0 = σ`.
+- Lean: `ArrivalCurve.at` adds a matching `if t_ps = 0 then 0`
+  short-circuit so the affine-only branch also returns 0. The
+  `arrival_at_mono` proof is updated to case-split on the
+  short-circuit; structurally identical otherwise.
+- The 5th tracked sorry in `proofs/Proofs/Network/MinPlus.lean`
+  (`arrival_at_zero_is_burst` peak-rate branch) is **discharged**.
+  Theorem renamed `arrival_at_zero_is_zero` (statement now
+  `α.at 0 = 0`), proof is `unfold ArrivalCurve.at; simp`. The Rust
+  test `arrival_curve_at_zero_is_burst` is renamed
+  `arrival_curve_at_zero_is_zero` and asserts `α.at(0) == 0` for both
+  branches.
+- No `WcttBound` numbers change: the Network Calculus *bounds*
+  (`backlog_bound`, `delay_bound`, `output_bound`, `residual_service`)
+  use closed-form expressions in σ and ρ directly; none of them call
+  `α.at(0)`. The fix is therefore semantically scoped to the readout
+  convention and does not perturb any wctt fixture or test bound.
+
+Sorry count delta: `proofs/Proofs/Network/MinPlus.lean` is now down to
+**4** tracked sorrys (was 5 in v0.9.1). The remaining four
+(`backlog_bound_classical`, `delay_bound_classical`,
+`output_dominates_input`, `compose_delays_dominates`) all require the
+Le Boudec & Thiran integer-arithmetic horizontal-distance arguments
+and remain scoped to v0.10 / v1.0.0.
+
+`proofs/README.md` § "Known sorrys" updated; the 5th entry moved to a
+new "Discharged in v0.9.2" sub-section.
+
+---
+
+## v0.9.1 (soundness pass, in progress)
+
+**Wave 3 Tier A #1 — honest "fail on sorry" gate (`.github/workflows/proofs.yml`)**
+
+The 12-persona Wave 3 audit (Lean reviewer + build engineer) confirmed that `lake build` does NOT fail the job on `sorry` warnings without explicit `warningAsError` configuration in `lakefile.toml`. Despite the workflow comment asserting otherwise, CI was passing green even though `proofs/Proofs/Network/MinPlus.lean` carried five active `sorry`s on load-bearing theorems. The README implied these proofs back the WCTT bounds; they did not. The previous gate was decorative.
+
+The v0.9.1 fix adds a post-build "fail on sorry" gate: a `grep` over `proofs/Proofs/` that turns CI red on any line that is bare `sorry` (modulo a same-line `-- TODO` comment exemption that none of the five tracked sorrys use). The grep is a deliberately Lean-version-independent enforcement that does not depend on threading `warningAsError` flags through Lake.
+
+Network calculus closed-form bounds in `MinPlus.lean` carry 5 unsorried theorems; tracked as TODO(v1.0.0) per file. The Lean tree is load-bearing for RTA / RTAJittered / EDF / RMBound but informational for NC bounds at v0.9.1. The five tracked sorrys are listed in `proofs/README.md` § "Known sorrys (tracked in COMPLIANCE.md)" with file:line + one-line context each:
+
+- `Proofs/Network/MinPlus.lean:169` — `backlog_bound_classical` (closed-form `B = σ + ρ·T`)
+- `Proofs/Network/MinPlus.lean:199` — `delay_bound_classical` (closed-form `D = T + σ/R`)
+- `Proofs/Network/MinPlus.lean:240` — `output_dominates_input` (`α'(t) ≥ α(t)`)
+- `Proofs/Network/MinPlus.lean:293` — `compose_delays_dominates` (naive serial-chain composition)
+- `Proofs/Network/MinPlus.lean:318` — `arrival_at_zero_is_burst` (peak-rate branch; real spec/impl mismatch — `min(σ, 0) = 0` per Lean spec vs `σ` per Rust short-circuit)
+
+Discharging the five sorrys is scoped to a separate v0.10 PR. The math is non-trivial Le Boudec & Thiran ch. 1 closed-form reasoning in min-plus algebra, and the `arrival_at_zero_is_burst` peak-rate branch needs spec-vs-impl reconciliation before a proof is even meaningful.
+
+Until the discharge lands, the v0.9.1 gate is **expected to fail on `main`** — that is the *point*: the previous green CI was decorative; the new red CI is honest. The Rust `crates/spar-network/src/curves.rs` integer-arithmetic implementation remains the load-bearing artifact for NC bounds at v0.9.1 and is validated by unit tests against published worked examples.
+
+---
+
+## v0.8.1 (Track D Phase 2 close-out, in progress on main)
+
+**Track D — TSN/Ethernet WCTT analysis, Phase 2 (5/5 commits delivered)**
+
+Phase 2 wires the TSN-shaped service curves the v0.8.0 close-out had explicitly deferred. The four-way dispatch in `crates/spar-analysis/src/wctt.rs` now selects the per-hop service curve based on bus + stream properties, with a deterministic precedence (TAS → CBS → preemption → deferred) so a model that only carries one shaping property gets the matching arm and nothing else.
+
+- Foundation: `Spar_TSN` property set (`Stream_ID`, `Class_of_Service`, `Gate_Control_List`, `Max_Frame_Size`, `Frame_Preemption`) + `spar-network::tsn` skeleton (#177).
+- TAS (802.1Qbv) gate-window service curve (#180): `GateSchedule` parser for the Gate_Control_List string, `tas_residual_service` closed form (`R_K = R_link · open_fraction(K)`, `T_K = max_closed_window(K) + max_frame / R_link`), and `WcttTasGated` Info diagnostic carrying open fraction + worst-case gate latency. Wctt dispatch routes streams whose source declares `Class_of_Service` matching a window in the bus's GCL.
+- CBS (802.1Qav) credit-pool service curve (#182): `CbsReservation::new` (validates idle/link rates, computes `sendSlope = idleSlope − linkRate`), `cbs_residual_service` per Le Boudec/Thiran §1.4.3 + Lim et al., and `WcttCbsShaped` Info diagnostic carrying idle slope + service latency in ns. New property `Spar_TSN::Bandwidth_Reservation`. Wctt dispatch routes streams whose source declares the reservation when no GCL is active.
+- Frame preemption (802.1Qbu) blocking term (#181): `preemption_blocking_term_ps` closed form (legacy `max_frame / R` vs. preempted `(MIN_FRAGMENT + PREEMPTION_HEADER) / R`), `is_express_stream` resolver (explicit `Frame_Preemption` overrides default `CoS >= 6`), and `WcttPreemptionApplied` Info diagnostic carrying both the legacy and preempted blocking terms in ns. Wctt dispatch routes express streams when the bus has `Frame_Preemption => true`.
+- Integration close-out (this commit): single-instance integration test in `crates/spar-analysis/tests/tsn_integration.rs` that exercises all three dispatch arms in one `WcttAnalysis::analyze` run (three sub-systems, one per shaping path; asserts `WcttTasGated`, `WcttCbsShaped`, and `WcttPreemptionApplied` co-exist and carry plausible numeric values; asserts no `WcttDeferred` slips through). COMPLIANCE.md + design-doc Phase 2 status block updated. Total predeclared property count: 128 (Spar_TSN: 6 properties).
+
+Deferred to v0.8.x (research-grade follow-ups, not blockers for the close-out):
+
+- Piecewise-affine NC composition: the v0.8.1 service curves are rate-latency closed forms; multi-class TAS schedules and chained CBS classes both benefit from the more general piecewise-affine min-plus convolution that v0.8.0 deliberately scoped to v0.9.0.
+- Multi-stream sharing of a CBS class: today the CBS service curve is treated as exclusive to the tagged stream (other-class blocking is absorbed into the latency term). Same-class residual decomposition lands when the second CBS-shaped stream model arrives.
+- Advanced TAS guards: GCL gap detection across cascaded switches (the "no-wait packet scheduling" problem) and modal GCL transients are scoped to v0.9.0.
+
+**Test count delta**: v0.8.0 closed at ~2200+ tests across 18 crates; v0.8.1 Phase 2 lands at 2759 passing tests across 18 crates (delta ~+550 tests, dominated by the new spar-mcp / spar-insight surfaces from the v0.9.0 foundations and the TSN unit + integration tests under spar-network::tsn and spar-analysis::wctt).
 
 ---
 

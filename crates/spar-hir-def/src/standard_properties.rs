@@ -40,6 +40,7 @@ pub const STANDARD_PROPERTY_SET_NAMES: &[&str] = &[
     "Spar_Migration",
     "Spar_Power",
     "Spar_TSN",
+    "Spar_Identity",
 ];
 
 // ── Timing_Properties ───────────────────────────────────────────────
@@ -500,6 +501,86 @@ const SPAR_TSN: &[(&str, &str)] = &[
     // Whether frames in this class can be pre-empted by Express
     // traffic (802.1Qbu). Applies to port and connection.
     ("Frame_Preemption", "aadlboolean"),
+    // Per-class reserved bandwidth (CBS idleSlope) for the 802.1Qav
+    // Credit-Based Shaper. Expressed as `aadlinteger units
+    // Data_Rate_Units` so it lowers via the same data-rate machinery
+    // as `Spar_Network::Output_Rate`. The CBS analysis (v0.8.1
+    // commit 3) uses this as the reserved bps for a class — the full
+    // hi/lo credit slope arithmetic is computed inside the analysis.
+    // Applies to bus and port.
+    ("Bandwidth_Reservation", "aadlinteger units Data_Rate_Units"),
+    // Per-hop gPTP (IEEE 802.1AS) synchronization-error budget ε. In
+    // a real TSN deployment the gate-control list is enforced against
+    // the local synchronized clock, which differs from the master
+    // clock by at most ε per hop; v0.9.1 NC soundness pass subtracts
+    // ε from the effective TAS open time and adds ε to the worst-case
+    // gate latency so the bounds remain sound under realistic clock
+    // accuracy. Default unset = 0 (legacy v0.8.1 behaviour).
+    // Applies to bus and processor.
+    ("Sync_Error", "aadlinteger units Time_Units"),
+    // CBS hi-credit / lo-credit (802.1Qav §34.5). Real Qcc/YANG configs
+    // (`ieee802-dot1q-bridge`, `tsn-stream`) carry these explicitly per
+    // traffic class. v0.8.1 hardcoded both to `Spar_TSN::Max_Frame_Size`
+    // (default 1518 bytes) which made the CBS recovery term
+    // `loCredit / |sendSlope|` constant and load-bearing on the bound
+    // for any tight AVB design. v0.9.2 adds explicit overrides; when
+    // unset the v0.8.1 default is preserved (byte-identical).
+    // Applies to port and connection.
+    ("Hi_Credit", "aadlinteger units Size_Units"),
+    ("Lo_Credit", "aadlinteger units Size_Units"),
+];
+
+// ── Spar_Identity ───────────────────────────────────────────────────
+//
+// Non-standard property set defined by spar itself (not AS5506); used
+// for runtime/declared topology reconciliation (v0.10.0 trace-topology
+// foundation, Track G). Provides the AADL vocabulary that lets spar
+// match an OEM's runtime artefacts (PCAPNG captures, LLDP topology
+// snapshots, Qcc YANG configs, gPTP logs) against the AADL declaration
+// of "what should be on the wire" so the v0.11.0 reconciliation engine
+// can emit the five deterministic checks
+// (IdentityUnknown, TopologyMissingWiring, ConfigDrift,
+//  GptpOutOfBudget, BinaryMismatch) and the v1.0 SARIF + signed
+// in-toto attestation artefact.
+//
+// v0.10.0 ships the property surface only; the parsers and the
+// reconciliation engine land in subsequent commits. See
+// `docs/designs/v0.10.0-trace-topology.md` (the v1 design doc) and
+// `docs/contracts/spar-trace-topology-v1.md` (the external-integrator
+// contract).
+
+const SPAR_IDENTITY: &[(&str, &str)] = &[
+    // L2 MAC address of a device or processor — the canonical identity
+    // a PCAPNG capture and LLDP snapshot will report. Applies to
+    // device, processor.
+    ("MAC_Address", "aadlstring"),
+    // 802.1Q VLAN ID carried by frames on a connection or bus
+    // (`0..4094` per 802.1Q-2022, with 0 meaning "priority-tagged, no
+    // VLAN" and 4095 reserved). Applies to connection, bus.
+    ("VLAN_ID", "aadlinteger 0 .. 4094"),
+    // 802.1Qcc CB stream-handle for a reserved stream. The Qcc YANG
+    // config declares the same handle; reconciliation matches against
+    // this value. Applies to connection.
+    ("Stream_Handle", "aadlinteger"),
+    // L2 destination multicast group MAC — for multicast streams the
+    // Qcc reservation declares the destination MAC; PCAPNG captures
+    // observe it. Applies to connection.
+    ("Multicast_Group", "aadlstring"),
+    // LLDP chassis-id of a device, processor, or bus endpoint as
+    // reported by the runtime LLDP topology snapshot (typically a MAC
+    // or interface-name). Applies to device, processor, bus.
+    ("LLDP_Chassis_Id", "aadlstring"),
+    // LLDP port-id of a bus access feature as reported by the runtime
+    // LLDP snapshot. Applies to bus access (feature-level).
+    ("LLDP_Port_Id", "aadlstring"),
+    // L3 IPv4 address of an addressable AADL component as reported by
+    // runtime ARP / DHCP snapshots. Applies to device, processor,
+    // system, bus, abstract.
+    ("IPv4_Address", "aadlstring"),
+    // L3 IPv6 address of an addressable AADL component as reported by
+    // runtime NDP / DHCPv6 snapshots. Applies to device, processor,
+    // system, bus, abstract.
+    ("IPv6_Address", "aadlstring"),
 ];
 
 /// Helper: collect properties from a table into the result vector.
@@ -543,6 +624,7 @@ pub fn all_standard_properties() -> Vec<StandardProperty> {
     collect_properties(SPAR_MIGRATION, "Spar_Migration", &mut result);
     collect_properties(SPAR_POWER, "Spar_Power", &mut result);
     collect_properties(SPAR_TSN, "Spar_TSN", &mut result);
+    collect_properties(SPAR_IDENTITY, "Spar_Identity", &mut result);
 
     result
 }
@@ -574,6 +656,7 @@ fn lookup_table(set_lower: &str) -> Option<&'static [(&'static str, &'static str
         "spar_migration" => Some(SPAR_MIGRATION),
         "spar_power" => Some(SPAR_POWER),
         "spar_tsn" => Some(SPAR_TSN),
+        "spar_identity" => Some(SPAR_IDENTITY),
         _ => None,
     }
 }
@@ -624,6 +707,7 @@ mod tests {
         assert!(is_standard_property_set("Spar_Migration"));
         assert!(is_standard_property_set("Spar_Power"));
         assert!(is_standard_property_set("Spar_TSN"));
+        assert!(is_standard_property_set("Spar_Identity"));
 
         // Case-insensitive
         assert!(is_standard_property_set("timing_properties"));
@@ -1081,12 +1165,16 @@ mod tests {
         assert!(is_standard_property_set("Spar_TSN"));
 
         let props = standard_properties_in_set("Spar_TSN");
-        assert_eq!(props.len(), 5);
+        assert_eq!(props.len(), 9);
         assert!(props.contains(&"Stream_ID"));
         assert!(props.contains(&"Class_of_Service"));
         assert!(props.contains(&"Gate_Control_List"));
         assert!(props.contains(&"Max_Frame_Size"));
         assert!(props.contains(&"Frame_Preemption"));
+        assert!(props.contains(&"Bandwidth_Reservation"));
+        assert!(props.contains(&"Sync_Error"));
+        assert!(props.contains(&"Hi_Credit"));
+        assert!(props.contains(&"Lo_Credit"));
 
         // Each property resolves to its expected type.
         assert_eq!(
@@ -1108,6 +1196,14 @@ mod tests {
         assert_eq!(
             standard_property_type("Spar_TSN", "Frame_Preemption"),
             Some("aadlboolean")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Bandwidth_Reservation"),
+            Some("aadlinteger units Data_Rate_Units")
+        );
+        assert_eq!(
+            standard_property_type("Spar_TSN", "Sync_Error"),
+            Some("aadlinteger units Time_Units")
         );
 
         // Deliberately-wrong name returns None.
@@ -1138,6 +1234,8 @@ mod tests {
             "Gate_Control_List",
             "Max_Frame_Size",
             "Frame_Preemption",
+            "Bandwidth_Reservation",
+            "Sync_Error",
         ] {
             let result = scope.resolve_property(&Name::new("Spar_TSN"), &Name::new(prop_name));
             assert!(
@@ -1166,6 +1264,115 @@ mod tests {
     }
 
     #[test]
+    fn test_standard_properties_in_spar_identity() {
+        // Spar_Identity is a known property set (v0.10.0 trace-topology
+        // foundation).
+        assert!(is_standard_property_set("Spar_Identity"));
+
+        let props = standard_properties_in_set("Spar_Identity");
+        assert_eq!(props.len(), 8);
+        assert!(props.contains(&"MAC_Address"));
+        assert!(props.contains(&"VLAN_ID"));
+        assert!(props.contains(&"Stream_Handle"));
+        assert!(props.contains(&"Multicast_Group"));
+        assert!(props.contains(&"LLDP_Chassis_Id"));
+        assert!(props.contains(&"LLDP_Port_Id"));
+        assert!(props.contains(&"IPv4_Address"));
+        assert!(props.contains(&"IPv6_Address"));
+
+        // Each property resolves to its expected type.
+        assert_eq!(
+            standard_property_type("Spar_Identity", "MAC_Address"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "VLAN_ID"),
+            Some("aadlinteger 0 .. 4094")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "Stream_Handle"),
+            Some("aadlinteger")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "Multicast_Group"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "LLDP_Chassis_Id"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "LLDP_Port_Id"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "IPv4_Address"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("Spar_Identity", "IPv6_Address"),
+            Some("aadlstring")
+        );
+
+        // Deliberately-wrong name returns None.
+        assert_eq!(standard_property_type("Spar_Identity", "Nonexistent"), None);
+
+        // Case-insensitive.
+        assert_eq!(
+            standard_property_type("spar_identity", "mac_address"),
+            Some("aadlstring")
+        );
+        assert_eq!(
+            standard_property_type("SPAR_IDENTITY", "VLAN_ID"),
+            Some("aadlinteger 0 .. 4094")
+        );
+    }
+
+    #[test]
+    fn test_spar_identity_property_set_resolved_via_global_scope() {
+        use crate::name::Name;
+        use crate::resolver::{GlobalScope, ResolvedProperty};
+
+        let scope = GlobalScope::from_trees(vec![]);
+
+        // Each Spar_Identity property is resolvable without explicit `with`.
+        for prop_name in [
+            "MAC_Address",
+            "VLAN_ID",
+            "Stream_Handle",
+            "Multicast_Group",
+            "LLDP_Chassis_Id",
+            "LLDP_Port_Id",
+            "IPv4_Address",
+            "IPv6_Address",
+        ] {
+            let result = scope.resolve_property(&Name::new("Spar_Identity"), &Name::new(prop_name));
+            assert!(
+                matches!(result, ResolvedProperty::PropertyDef { .. }),
+                "expected PropertyDef for Spar_Identity::{}, got {:?}",
+                prop_name,
+                result
+            );
+        }
+
+        // Deliberately-wrong name inside a known spar set is Unresolved.
+        let result = scope.resolve_property(&Name::new("Spar_Identity"), &Name::new("Nonexistent"));
+        assert!(
+            matches!(result, ResolvedProperty::Unresolved),
+            "expected Unresolved for Spar_Identity::Nonexistent, got {:?}",
+            result
+        );
+
+        // Case-insensitive resolution.
+        let result = scope.resolve_property(&Name::new("spar_identity"), &Name::new("mac_address"));
+        assert!(
+            matches!(result, ResolvedProperty::PropertyDef { .. }),
+            "expected case-insensitive match for Spar_Identity::MAC_Address, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_standard_properties_unknown_set() {
         let props = standard_properties_in_set("Nonexistent_Properties");
         assert!(props.is_empty());
@@ -1181,17 +1388,24 @@ mod tests {
     #[test]
     fn test_all_standard_properties_total_count() {
         let all = all_standard_properties();
-        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 5 = 127
+        // 12 + 13 + 14 + 14 + 8 + 25 + 4 + 13 + 5 + 4 + 5 + 4 + 1 + 9 + 8 = 139
         // (Timing + Communication + Memory + Deployment + Thread + Programming
         //  + Modeling + AADL_Project + Spar_Timing + Spar_Trace + Spar_Network
-        //  + Spar_Migration + Spar_Power + Spar_TSN)
+        //  + Spar_Migration + Spar_Power + Spar_TSN + Spar_Identity)
         // Thread_Properties: +1 for Locking_Protocol (v0.7.1 PIP/PCP).
         // Spar_Timing: +1 for Critical_Section_Blocking (v0.7.1 PIP/PCP).
         // Spar_Network: +1 for WCTT_Budget (Track D commit 4).
         // Spar_Power: +1 for Power_Budget (Track E commit 5/8 ranker).
         // Spar_TSN: +5 for Stream_ID, Class_of_Service, Gate_Control_List,
-        //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1).
-        assert_eq!(all.len(), 127);
+        //   Max_Frame_Size, Frame_Preemption (Track D Phase 2 v0.8.1 c1)
+        //   +1 for Bandwidth_Reservation (Track D Phase 2 v0.8.1 c3, CBS).
+        //   +1 for Sync_Error (v0.9.1 NC soundness, gPTP ε budget).
+        // Spar_Identity: +6 for MAC_Address, VLAN_ID, Stream_Handle,
+        //   Multicast_Group, LLDP_Chassis_Id, LLDP_Port_Id (v0.10.0
+        //   trace-topology foundation, Track G).
+        //   +2 for IPv4_Address, IPv6_Address (v0.10.x B-6, L3
+        //   identity for the reconciler).
+        assert_eq!(all.len(), 139);
     }
 
     #[test]

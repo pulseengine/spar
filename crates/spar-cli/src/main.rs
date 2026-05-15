@@ -53,8 +53,13 @@ fn main() {
         "mcp" => cmd_mcp(&args[2..]),
         "moves" => moves::cmd_moves_dispatch(&args[2..]),
         "insight" => insight::cmd_insight(&args[2..]),
+        "help" | "--help" | "-h" => {
+            print_usage();
+            process::exit(0);
+        }
         other => {
             eprintln!("Unknown command: {other}");
+            print_usage();
             process::exit(1);
         }
     }
@@ -87,7 +92,10 @@ fn print_usage() {
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
-    eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
+    eprintln!(
+        "  analyze  --root Package::Type.Impl [--format text|json|sarif] [--per-som] [--pmoo] \
+         [--allow <cat,...>] <file...>"
+    );
     eprintln!(
         "  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>"
     );
@@ -508,6 +516,20 @@ fn cmd_analyze(args: &[String]) {
     let mut files = Vec::new();
     let mut format = None;
     let mut per_som = false;
+    // v0.9.2: `--allow <category>` (comma-separated) demotes specific
+    // analysis findings from Error to Warning. Today the only recognised
+    // category is `arinc-partition-isolation` (Tier A #9 promoted ARINC
+    // 653 cross-partition direct connections from Warning to Error;
+    // legitimate IMA bypasses can opt out here).
+    let mut allow_categories: Vec<String> = Vec::new();
+    // v0.9.3 NC tightness #2: opt-in PMOO/LUDB analysis path for the
+    // WCTT pass. When `--pmoo` is set we enable Pay-Multiplexing-Only-
+    // Once / Bisti-LUDB linear-program bounds for tree-shaped flows
+    // (one tagged + ≥ 2 contiguous-sub-path competing). Bound is
+    // 30-60% tighter on the canonical zonal/automotive pattern; falls
+    // back to SFA on LP infeasibility. Default off → byte-identical
+    // to v0.9.2.
+    let mut pmoo = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -532,6 +554,23 @@ fn cmd_analyze(args: &[String]) {
             }
             "--per-som" => {
                 per_som = true;
+            }
+            "--pmoo" => {
+                pmoo = true;
+            }
+            "--allow" => {
+                i += 1;
+                if i < args.len() {
+                    for cat in args[i].split(',') {
+                        let c = cat.trim();
+                        if !c.is_empty() {
+                            allow_categories.push(c.to_string());
+                        }
+                    }
+                } else {
+                    eprintln!("--allow requires a value (comma-separated category names)");
+                    process::exit(1);
+                }
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
@@ -603,10 +642,14 @@ fn cmd_analyze(args: &[String]) {
 
     // Run instance-level analyses
     if per_som {
-        diagnostics.extend(run_all_analyses_per_som(&inst));
+        diagnostics.extend(run_all_analyses_per_som_with_pmoo(&inst, pmoo));
     } else {
-        diagnostics.extend(run_all_analyses(&inst));
+        diagnostics.extend(run_all_analyses_with_pmoo(&inst, pmoo));
     }
+
+    // Apply --allow demotions before format dispatch so JSON / SARIF
+    // output also reflects the user's policy choices.
+    apply_allow_categories(&mut diagnostics, &allow_categories);
 
     // JSON output path
     if format.as_deref() == Some("json") {
@@ -1501,6 +1544,68 @@ fn run_all_analyses(
     let mut runner = spar_analysis::AnalysisRunner::new();
     runner.register_all();
     runner.run_all(inst)
+}
+
+/// Variant of [`run_all_analyses`] that swaps in the PMOO/LUDB-enabled
+/// [`spar_analysis::wctt::WcttAnalysis`] when `pmoo` is `true`. Default
+/// (`pmoo = false`) is byte-identical to [`run_all_analyses`].
+fn run_all_analyses_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses(inst);
+    }
+    // Register every analysis except `WcttAnalysis`, then add the
+    // PMOO/LUDB-configured variant in its place. Keeps the runner's
+    // diagnostic order stable while flipping just the WCTT pass.
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all(inst)
+}
+
+/// Per-SOM variant of [`run_all_analyses_with_pmoo`].
+fn run_all_analyses_per_som_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses_per_som(inst);
+    }
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all_per_som(inst)
+}
+
+/// Demote diagnostics matching any user-supplied `--allow` category
+/// from Error to Warning. Today the only recognised category is
+/// `arinc-partition-isolation` (matched by message-substring); the
+/// helper is structured so adding new categories is just adding a
+/// new arm here.
+fn apply_allow_categories(
+    diagnostics: &mut [spar_analysis::AnalysisDiagnostic],
+    allow_categories: &[String],
+) {
+    use spar_analysis::Severity;
+    for cat in allow_categories {
+        match cat.as_str() {
+            "arinc-partition-isolation" => {
+                for d in diagnostics.iter_mut() {
+                    if d.analysis == "arinc653"
+                        && d.message.contains("ARINC-PARTITION-ISOLATION")
+                        && d.severity == Severity::Error
+                    {
+                        d.severity = Severity::Warning;
+                    }
+                }
+            }
+            other => {
+                eprintln!("warning: unknown --allow category: '{}'", other);
+            }
+        }
+    }
 }
 
 /// Create an AnalysisRunner and run mode-independent analyses once plus

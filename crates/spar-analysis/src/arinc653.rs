@@ -235,7 +235,13 @@ fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<Analysis
                 let dst_vp_name = instance.component(dvp).name.as_str();
 
                 diags.push(AnalysisDiagnostic {
-                    severity: Severity::Warning,
+                    // v0.9.2: ARINC 653 / DO-297 spatial isolation is a
+                    // hard invariant — a cross-partition direct port
+                    // connection breaks IMA. Promoted from Warning to
+                    // Error per the post-v0.9.0 reviewer's Tier A #9.
+                    // Models that legitimately need this can suppress
+                    // via `spar analyze --allow arinc-partition-isolation`.
+                    severity: Severity::Error,
                     message: format!(
                         "direct connection '{}' crosses partition boundary: \
                          process '{}' (partition '{}') -> process '{}' (partition '{}'). \

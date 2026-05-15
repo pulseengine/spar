@@ -1,4 +1,4 @@
-//! Lexer for AADL v2.2 source text.
+//! Lexer for AADL v2.2/v2.3 source text (SAE AS5506D).
 //!
 //! Produces a flat sequence of `(SyntaxKind, &str)` token pairs from an input
 //! string. The lexer is a simple cursor-based implementation with no external

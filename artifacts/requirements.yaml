@@ -1480,6 +1480,270 @@ artifacts:
     status: planned
     tags: [network, tsn, wctt, v081]
 
+  - id: REQ-TSN-002
+    type: requirement
+    title: TAS (802.1Qbv) gate-window service curve in WCTT analysis
+    description: >
+      System provides a Time-Aware Shaper (IEEE 802.1Qbv) gate-window
+      service curve for TSN-typed switches and dispatches it from the
+      WCTT analysis when both the bus carries a parsed
+      Spar_TSN::Gate_Control_List and the stream carries a
+      Spar_TSN::Class_of_Service. spar-network::tsn parses the
+      gate-control list "offset_ns:duration_ns:cos_mask;..." blob into
+      a GateSchedule, validates that windows tile the cycle period
+      without gaps or overlaps, and exposes (a) the average open
+      fraction ρ_K = open_time_K / cycle_period and (b) the
+      worst-case gate latency T_K = longest contiguous closed run for
+      class K (with wrap-around). tas_residual_service then derives
+      β_K(t) = (R_link · ρ_K) · max(0, t − T_K) from those quantities.
+      Hops dispatched through the TAS curve emit a new Info
+      diagnostic, WcttTasGated, carrying stream id, class-of-service,
+      open fraction (percent) and gate latency (ps); when either the
+      Gate_Control_List or the Class_of_Service is missing the
+      analysis falls back to the v0.8.0 WcttDeferred path. Discharges
+      docs/designs/track-d-tsn-wctt-research.md §5.3 and the v0.8.1
+      Track D Phase 2 commit 2 milestone.
+    status: planned
+    tags: [network, tsn, wctt, v081]
+
+  - id: REQ-TSN-003
+    type: requirement
+    title: 802.1Qav CBS credit-pool service curve
+    description: >
+      Per-class CBS (Credit-Based Shaper, IEEE 802.1Qav) service curve
+      for TSN-switched buses. Adds property
+      Spar_TSN::Bandwidth_Reservation (aadlinteger units
+      Data_Rate_Units; bus and port) declaring per-class idleSlope (the
+      reserved bps for that class). The spar-network::tsn module exposes
+      `CbsReservation` (idle_slope_bps, send_slope_bps, hi_credit_bytes,
+      lo_credit_bytes) plus `cbs_residual_service`, the rate-latency
+      closed-form β_class(t) = idleSlope · max(0, t − T) where the
+      service latency T = max_competing_frame / link_rate
+      + lo_credit / |sendSlope| (Le Boudec & Thiran §1.4.3 plus AVB/TSN
+      AVB delay analysis literature, Lim et al. "Delay analysis in CBS
+      for AVB"). The wctt analysis dispatches CBS service curves at
+      hops where Switch_Type=>TSN and the stream's source declares
+      Bandwidth_Reservation; on those hops the per-class service curve
+      replaces the FIFO residual decomposition and emits a
+      `WcttCbsShaped` Info diagnostic carrying the stream id, CoS,
+      idle_slope, and service-latency. Per
+      docs/designs/track-d-tsn-wctt-research.md §5.2-5.3 and Track D
+      Phase 2 v0.8.1 commit 3.
+    status: implemented
+    tags: [network, tsn, cbs, qav, wctt, v081]
+
+  - id: REQ-TSN-004
+    type: requirement
+    title: 802.1Qbu frame-preemption blocking term in WCTT analysis
+    description: >
+      System computes the IEEE 802.1Qbu frame-preemption blocking
+      term `B_pmt = (MIN_FRAGMENT_BYTES + PREEMPTION_HEADER_BYTES) /
+      link_rate` (with MIN_FRAGMENT_BYTES = 64 — IEEE 802.3 minimum
+      Ethernet frame — and PREEMPTION_HEADER_BYTES = 4 — IEEE 802.3br
+      §99.4.7 SMD-S/mCRC) and substitutes it for the legacy
+      `B_no_pmt = max_preemptable_frame_bytes / link_rate` blocking
+      term at TSN switches when both the bus and the source stream
+      declare `Spar_TSN::Frame_Preemption => true`. Express-stream
+      identification follows the explicit-then-default order:
+      `Spar_TSN::Frame_Preemption` on the stream port wins; otherwise
+      `Class_of_Service >= 6` defaults to express. The reduction in
+      blocking is surfaced via the `WcttPreemptionApplied` Info
+      diagnostic emitted per affected hop, carrying the legacy and
+      preempted blocking figures (in nanoseconds) so users can audit
+      the gain. Implemented as `preemption_blocking_term_ps` and
+      `is_express_stream` in `spar-network::tsn`, hooked into
+      `spar-analysis::wctt::WcttAnalysis` and
+      `compute_network_hop_latency`. Track D Phase 2 v0.8.1 commit 4.
+      Per docs/designs/track-d-tsn-wctt-research.md §5.2-5.3.
+    status: implemented
+    tags: [network, tsn, wctt, preemption, qbu, v081]
+
+  # ── v0.9.1 NC soundness pass ──────────────────────────────────────
+
+  - id: REQ-NETWORK-009
+    type: requirement
+    title: gPTP synchronization-error budget for TAS bounds
+    description: >
+      Spar_TSN::Sync_Error (Time, picoseconds; applies to bus,
+      processor) carries the per-hop 802.1AS-2020 synchronization
+      error ε. The TAS dispatch in wctt.rs subtracts ε from the
+      effective open time and adds ε to the worst-case gate latency,
+      restoring soundness — current TAS bounds are technically
+      unsound without ε because a frame can miss its window by ε in
+      silicon. ε = 0 (unset) reproduces v0.8.1 behaviour
+      byte-identically. Per the post-v0.9.0 reviewer's Tier 2 #5.
+    status: implemented
+    tags: [network, tsn, wctt, soundness, gptp, v091]
+
+  - id: REQ-NETWORK-010
+    type: requirement
+    title: Atomic-frame quantization in NC per-hop bound
+    description: >
+      Bytes-level NC undercounts each hop's bound by up to one MTU
+      because frames are atomic but the kernel treats packets as
+      continuous. wctt.rs adds `ceil(max_frame_bytes · 8e12 /
+      link_rate_bps)` picoseconds per hop on the TAS and FIFO/Priority
+      arms. The CBS arm's closed-form latency already absorbs the
+      max-frame term; the preemption arm replaces it with the
+      fragment-time. New `WcttFrameQuantization` Info diagnostic
+      records the correction per hop. Per the post-v0.9.0 reviewer's
+      Tier 2 #8.
+    status: implemented
+    tags: [network, wctt, soundness, v091]
+
+  - id: REQ-RTA-008
+    type: requirement
+    title: Context_Switch_Time folded into RTA recurrence
+    description: >
+      v0.8.x emitted a STPA-REQ-022 advisory if `Context_Switch_Time`
+      was unset, but never folded the value into the Tindell-Clark /
+      Joseph-Pandya recurrence when it *was* set — silently optimistic.
+      v0.9.2 inflates each thread's WCET by `2 × Context_Switch_Time`
+      (one preemption-in + one preemption-out per Buttazzo §7). New
+      `OverheadInflation` Info diagnostic per thread when CS > 0.
+      Default unset = 0 (preserves v0.8.x byte-identical output).
+      Per the post-v0.9.0 reviewer's Tier A #5 (partial —
+      `Interrupt_Overhead` per ISR firing still deferred).
+    status: implemented
+    tags: [analysis, scheduling, rta, soundness, v092]
+
+  - id: REQ-RTA-009
+    type: requirement
+    title: Stop_For_Lock without explicit blocking emits warning
+    description: >
+      v0.8.x silently used B=0 in the RTA recurrence when a thread
+      declared `Locking_Protocol => Stop_For_Lock` but no
+      `Spar_Timing::Critical_Section_Blocking`. Stop_For_Lock = priority
+      inversion exposure, so silent B=0 is unsound under shared
+      resources. v0.9.2 emits a Warning when the combination is
+      detected: the user must either supply the bound or re-declare
+      the protocol. Per the post-v0.9.0 reviewer's Tier A #6.
+    status: implemented
+    tags: [analysis, scheduling, rta, soundness, v092]
+
+  - id: REQ-ARINC-005
+    type: requirement
+    title: ARINC-PARTITION-ISOLATION promoted to Error severity
+    description: >
+      ARINC 653 / DO-297 spatial isolation is a hard invariant — a
+      cross-partition direct port connection breaks IMA. v0.8.x
+      reported it as Warning, which an analysis-error gate would let
+      pass. v0.9.2 promotes the severity to Error. A new
+      `spar analyze --allow arinc-partition-isolation` flag demotes
+      it back to Warning for legitimate IMA bypasses (rare). Per the
+      post-v0.9.0 reviewer's Tier A #9.
+    status: implemented
+    tags: [analysis, arinc653, safety, v092]
+
+  - id: REQ-TSN-005
+    type: requirement
+    title: Spar_TSN::Hi_Credit + Lo_Credit user-tunable CBS credits
+    description: >
+      Spar_TSN::Hi_Credit and Spar_TSN::Lo_Credit (both
+      `aadlinteger units Size_Units`, applied to port and connection)
+      let users override the v0.8.1-default CBS credit bounds (which
+      were hardcoded to `max_competing_frame_bytes` for both, making
+      the CBS recovery term `loCredit/|sendSlope|` constant and
+      load-bearing on the bound for any tight AVB design). Real
+      Qcc/YANG configs (`ieee802-dot1q-bridge`, `tsn-stream`) carry
+      these per traffic class. v0.9.2 adds the property surface plus
+      the `WcttCbsCredit` Info diagnostic that fires when at least
+      one credit is explicit. Default unset → byte-identical to
+      v0.8.1/v0.9.1. Per the post-v0.9.0 reviewer's Tier A #8.
+    status: implemented
+    tags: [network, tsn, cbs, wctt, v092]
+
+  - id: REQ-NETWORK-012
+    type: requirement
+    title: WCTT sensitivity output (∂σ_self, ∂ρ_competing, ∂T_link)
+    description: >
+      For each `WcttBound` Info diagnostic the `WcttAnalysis` pass also
+      emits a `WcttSensitivity` Info diagnostic carrying worst-hop
+      partial derivatives at the operating point: ∂WCTT/∂σ_self
+      (ps per byte of self-burst, dominated by the worst hop's
+      residual service rate), ∂WCTT/∂ρ_competing (ps per bps of
+      competing rate, σ/(R-ρ)² at the worst hop), and ∂WCTT/∂T_link
+      (chain-rule passthrough = number of hops). Pure post-processing
+      on the existing closed-form delay/output bounds — no new bounds
+      math, no impact on `WcttBound` numeric output. Per the
+      post-v0.9.0 reviewer's NC top-5 #13: cheapest workflow win,
+      turns spar from judge into design partner.
+    status: implemented
+    tags: [network, wctt, sensitivity, v092]
+
+  - id: REQ-NETWORK-013
+    type: requirement
+    title: Piecewise-affine arrival curves (T-SPEC multi-bucket)
+    description: >
+      v0.9.3 adds a `PiecewiseAffineArrivalCurve` Network Calculus
+      primitive alongside the existing single-bucket `ArrivalCurve`.
+      The piecewise form encodes T-SPEC-style multi-leaky-bucket
+      constraints `α(t) = min_i (σ_i + ρ_i · t)` — capturing both
+      short-horizon burst (small σ, high ρ) and long-horizon sustained
+      behaviour (large σ, low ρ) in a single curve. The four operators
+      (`backlog_bound`, `delay_bound`, `output_bound`,
+      `residual_service`) extend per-bucket: backlog/delay take the
+      min over per-bucket bounds (the binding bucket determines the
+      bound at any operating point), output bound preserves the
+      piecewise structure with each bucket inflated independently
+      (Le Boudec & Thiran 1.4.3 applied per-bucket), and residual
+      service lowers conservatively to a single rate-latency curve
+      using `R - max ρ_i` and the worst per-bucket burst-drain time.
+      `From<ArrivalCurve>` round-trips the single-bucket case; the
+      peak-capped affine form lowers to a 2-bucket PWA. wctt.rs
+      consumers continue to use `ArrivalCurve` for v0.9.3 (no test
+      bound changes); switching the WCTT propagation to piecewise is
+      a follow-up commit. Lean theorems on the piecewise form are
+      skeletoned in `proofs/Proofs/Network/MinPlusPwa.lean` for a
+      future v1.0.0 sweep — `MinPlus.lean` (the single-bucket spec)
+      is unchanged. Per the post-v0.9.2 reviewer's NC top-5 #1: the
+      highest-leverage tightness item; typically halves bounds on
+      real ADAS traffic.
+    status: implemented
+    tags: [network, wctt, network-calculus, piecewise, v093]
+
+  - id: REQ-NETWORK-011
+    type: requirement
+    title: RTA→WCTT release-jitter coupling
+    description: >
+      v0.9.2 closes the RTA↔WCTT loop the post-v0.9.0 reviewer flagged
+      as the single biggest credibility lift (NC top-5 #4): when a
+      WCTT stream's source end station declares
+      `Timing_Properties::Dispatch_Jitter`, that value is treated as
+      ingress release-jitter J and inflates the arrival burst by
+      `ρ·J` bytes (ceiling-rounded so the bound is never under-
+      estimated). New `WcttRtaCoupled` Info diagnostic per stream
+      echoes the (jitter_ps, jitter_burst_bytes) pair. Default unset
+      = 0 → byte-identical to v0.8.1 / v0.9.1. The full automatic
+      coupling (consume RTA's *computed* response_time directly
+      without requiring the user to propagate via Dispatch_Jitter)
+      is a v0.9.x follow-up.
+    status: implemented
+    tags: [network, wctt, rta, coupling, v092]
+
+  - id: REQ-NETWORK-014
+    type: requirement
+    title: PMOO/LUDB bound for tree-shaped multiplexing
+    description: >
+      v0.9.3 adds an opt-in Pay-Multiplexing-Only-Once / Bisti-LUDB
+      ("Linear Upper Delay Bound") path in `spar-network::pmoo` that
+      the `WcttAnalysis` pass invokes when (a) the stream's tandem is
+      composed entirely of FIFO/Priority switches, (b) every other
+      stream that crosses any hop on the tandem does so on a contiguous
+      sub-path (PMOO precondition), and (c) ≥ 2 such competing flows
+      exist (otherwise PMOO ≡ SFA). The LP is set up via `good_lp` with
+      the HiGHS backend already vendored for the deployment solver;
+      on infeasibility (`Σ ρ ≥ R_h` at any hop) we silently fall back
+      to per-hop SFA. New `WcttPmooBound` Info diagnostic reports the
+      method (=ludb), the PMOO delay, the SFA delay for comparison,
+      the percentage tightening, and the LP solve time. Closes the
+      external reviewer's NC top-5 #2 (credibility gap with RTaW-Pegase):
+      typical 30-60% tightening on automotive zonal aggregations,
+      observed 23-27% on the in-tree fixtures. CLI `--pmoo` flag opts
+      in; default off → byte-identical to v0.9.2.
+    status: implemented
+    tags: [network, wctt, pmoo, ludb, lp, v093]
+
   # ── Track G: spar-insight discrepancy assistant (v0.9.0) ──────────
 
   - id: REQ-INSIGHT-001
@@ -1541,5 +1805,257 @@ artifacts:
       design.
     status: implemented
     tags: [mcp, migration, track-e, v090, integration]
+
+  # ── Track G — v0.10.0 trace-topology foundation ──────────────────────
+
+  - id: REQ-TRACE-TOPOLOGY-001
+    type: requirement
+    title: Spar_Identity property surface
+    description: >
+      System shall expose a Spar_Identity property set that lets
+      AADL declare runtime-observable identities for the v0.10.0+
+      `spar trace topology` reconciler. The set carries six
+      properties: MAC_Address (aadlstring; device, processor),
+      VLAN_ID (aadlinteger 0 .. 4094; connection, bus),
+      Stream_Handle (aadlinteger; connection), Multicast_Group
+      (aadlstring; connection), LLDP_Chassis_Id (aadlstring;
+      device, processor, bus), and LLDP_Port_Id (aadlstring; bus
+      access feature). The set is registered as a predefined
+      (non-AS5506) property set so AADL annotations resolve without
+      explicit `with` imports, mirroring Spar_TSN, Spar_Network,
+      Spar_Migration, and Spar_Power. Per the v0.10.0 trace-topology
+      foundation design (docs/designs/v0.10.0-trace-topology.md §3).
+    status: planned
+    tags: [trace-topology, track-g, v0100, properties]
+
+  - id: REQ-TRACE-TOPOLOGY-002
+    type: requirement
+    title: spar-trace-topology crate skeleton
+    description: >
+      System shall expose a spar-trace-topology crate carrying the
+      foundation surface for runtime/declared topology
+      reconciliation. v0.10.0 ships four modules: `identity` (typed
+      accessors for the six Spar_Identity properties, typed-first
+      / string-fallback per the existing Spar_TSN pattern),
+      `ingest` (placeholder traits FrameSource / TopologySource /
+      SwitchConfigSource / PtpTimeSource for the v0.10.x parsers),
+      `reconcile` (ReconcileFinding enum with the five
+      deterministic check kinds — IdentityUnknown,
+      TopologyMissingWiring, ConfigDrift, GptpOutOfBudget,
+      BinaryMismatch), and `report` (TopologyReport struct
+      aggregating findings). v0.10.0 ships no real parsing, no
+      reconciliation logic, no SARIF emission, and no in-toto
+      attestation; those land in v0.10.x sibling commits and
+      v0.11.0 / v1.0 respectively per the design doc's
+      §"Implementation phasing". The in-toto attestation predicate
+      URL is `https://pulseengine.eu/spar-trace-topology/v1`. Per
+      docs/designs/v0.10.0-trace-topology.md and the companion
+      external-integrator contract docs/contracts/spar-trace-topology-v1.md.
+    status: planned
+    tags: [trace-topology, track-g, v0100, crate]
+
+  - id: REQ-RTA-010
+    type: requirement
+    title: Interrupt_Overhead folds into ISR WCET (Tier A #5 cont.)
+    description: >
+      System shall fold the `Spar_Timing::Interrupt_Overhead` property
+      into each ISR's effective WCET as 1× per firing — vector dispatch,
+      ISR-context save/restore, EOI ack — when computing RTA. Mirrors the
+      `Context_Switch_Time` 2× inflation for tasks (REQ-RTA-009 / PR
+      #198) but applied 1× because the ISR pays this cost once per
+      firing, not twice. Closes the Tier A #5 reviewer follow-up after
+      v0.9.2's task-side context-switch fix.
+    status: implemented
+    tags: [rta, timing, isr, v093, tier-a-5]
+
+  - id: REQ-TRACE-TOPOLOGY-004
+    type: requirement
+    title: LLDP JSON TopologySource for runtime adjacency ingest
+    description: >
+      System shall provide an `lldpctl -f json`-backed
+      TopologySource implementation in spar-trace-topology that,
+      given a JSON dump produced by lldpd's `lldpctl -f json`, yields
+      a list of LldpNeighbor records carrying local_port, typed
+      remote_chassis_id (with id type), typed remote_port_id (with id
+      type), and optional remote_system_name. Handles both the
+      single-interface object form and the multi-interface array
+      form lldpd emits. Per the v0.10.0 trace-topology design's
+      §"Implementation phasing" LLDP entry.
+    status: implemented
+    tags: [trace-topology, ingest, lldp, v0100]
+
+  - id: REQ-TRACE-TOPOLOGY-003
+    type: requirement
+    title: PCAPNG FrameSource for L2 frame ingest
+    description: >
+      System shall provide a PCAPNG-backed FrameSource implementation
+      in spar-trace-topology that, given a `.pcapng` file recorded
+      with tcpdump / tshark / Wireshark from a TAP/SPAN port, yields
+      a stream of CapturedFrame records carrying mac_src, mac_dst,
+      optional 802.1Q VLAN-ID and PCP, and a Unix-epoch ns timestamp
+      derived from the per-IDB ts_resol option. Built atop the
+      `pcap-parser` crate. Errors carry concrete kinds (Truncated,
+      UnsupportedLinkType, MalformedPcapng, Io). Per the v0.10.0
+      trace-topology design's §"Implementation phasing" PCAPNG entry.
+    status: implemented
+    tags: [trace-topology, ingest, pcapng, v0100]
+
+  - id: REQ-TRACE-TOPOLOGY-005
+    type: requirement
+    title: Qcc YANG SwitchConfigSource for TSN switch-config ingest
+    description: >
+      System shall provide a JSON-backed SwitchConfigSource implementation
+      in spar-trace-topology that, given a `ieee802-dot1q-tsn-types`-shaped
+      JSON dump retrieved over NETCONF/RESTCONF (or extracted from a `tc
+      qdisc` snapshot transformed to the canonical shape), yields a list
+      of PortConfig records carrying port_name plus optional
+      gate_control_list (802.1Qbv TAS gates), bandwidth_reservation_permille
+      (CBS reservation), max_frame_size, and streams (Qci stream filters).
+      Errors carry a concrete MalformedQccJson kind. Per the v0.10.0
+      trace-topology design's §"Implementation phasing" Qcc entry.
+    status: implemented
+    tags: [trace-topology, ingest, qcc, yang, v0100]
+
+  - id: REQ-TRACE-TOPOLOGY-006
+    type: requirement
+    title: gPTP JSON PtpTimeSource for sync-error sample ingest
+    description: >
+      System shall provide a JSON-backed PtpTimeSource implementation
+      in spar-trace-topology that, given a gPTP-shaped JSON dump
+      (typically produced by a wrapper around `pmc -u -b 0` queries or
+      `ptp4l` summary logs), yields the grandmaster identity, PTP
+      domain, and per-port sample streams of (timestamp_ns,
+      sync_error_ns). Sync-error samples are unsigned magnitudes —
+      producers must pre-`abs()` signed offsets before serializing.
+      Errors carry a concrete MalformedPtpJson kind. Per the v0.10.0
+      trace-topology design's §"Implementation phasing" gPTP entry.
+    status: implemented
+    tags: [trace-topology, ingest, gptp, sync, v0100]
+
+  - id: REQ-TRACE-TOPOLOGY-007
+    type: requirement
+    title: IPv4 + IPv6 address properties in Spar_Identity
+    description: >
+      System shall extend the Spar_Identity property set with
+      IPv4_Address and IPv6_Address (aadlstring; applies to device,
+      processor, system, bus, abstract). Typed accessors live in
+      spar-trace-topology::identity following the same typed-first /
+      string-fallback pattern as the existing six identity
+      properties. Enables the v0.11.0 reconciler to check L3
+      identity against runtime-observed ARP / NDP / DHCP state.
+    status: implemented
+    tags: [trace-topology, properties, identity, ip, v0100]
+
+  - id: REQ-BINDING-002
+    type: requirement
+    title: Actual_Processor_Binding accepts nested dotted reference paths
+    description: >
+      System shall resolve `Actual_*_Binding => (reference (a.b.c))`
+      property values whose target is a multi-level dotted instance
+      path, not just a single-component leaf name. Resolution uses
+      suffix-matching against full instance paths plus root-anchored
+      walk, mirroring the existing dotted-path resolver in
+      spar-cli::moves::resolve_component. Single-level references
+      continue to resolve as before; unknown paths emit the existing
+      "does not exist in instance model" diagnostic unchanged.
+    status: implemented
+    tags: [binding, hir-def, overlay, v093]
+
+  - id: REQ-CLASSIFIER-MATCH-002
+    type: requirement
+    title: classifier_match distinguishes delegation from peer access connections
+    description: >
+      Per AADL v2.3 §9.4, access connections come in two kinds:
+      peer (subcomponent-to-subcomponent) connections where the
+      provides/requires directions must oppose, and delegation
+      connections (enclosing-component feature to subcomponent
+      feature) where the directions must match. spar shall apply
+      the correct rule per connection kind based on whether either
+      endpoint references the enclosing component's own feature.
+      Resolves user-reported v0.9.3 false-positive on bus access
+      delegation connections (32 occurrences in OEM SIP-internal
+      wiring).
+    status: implemented
+    tags: [classifier-match, connections, v093]
+
+  - id: REQ-ASSERTION-COMPARISON
+    type: requirement
+    title: Assertion DSL supports count() comparisons against integer literals
+    description: >
+      The assertion DSL shall evaluate pipeline expressions ending in
+      `.count()` followed by a comparison operator and integer literal
+      (`>=`, `>`, `<=`, `<`, `==`, `!=`) and return a Bool result. This
+      applies uniformly to Count, Components, Features, and Diagnostics
+      collection-valued pipelines. Resolves v0.9.x bug where
+      `components.where(...).count() >= n` failed to parse, leaving users
+      unable to express cardinality constraints in [[assertion]] blocks.
+    status: implemented
+    tags: [assertions, eval, v093]
+
+  - id: REQ-HAS-FEATURES
+    type: requirement
+    title: has() predicate matches component features by name
+    description: >
+      The has() predicate in the assertion DSL must return true when
+      the component under evaluation owns a feature (port, bus access,
+      data access, parameter, feature group, etc.) whose name matches
+      the argument string, in addition to the existing property-name
+      match. Bare names (no '::' separator) are checked against both
+      property names and feature names; qualified names (set::name)
+      continue to resolve only against the property namespace.
+    status: implemented
+    tags: [assertions, v093]
+
+  - id: REQ-APPLIES-TO-FEATURE-PATH
+    type: requirement
+    title: applies_to property association accepts feature paths
+    description: >
+      Per AADL v2.3 (SAE AS5506D §11.3), a property association's
+      `applies to` clause may name a feature on a subcomponent
+      (`Some_Property => value applies to fw.input_port;`), not just
+      a subcomponent path. spar shall resolve such paths: when all
+      segments name subcomponents the property attaches to the leaf
+      component; when the final segment names a feature on the
+      penultimate component, the property attaches to that component
+      and the feature is the logical target. Resolves v0.9.x bug where
+      feature-path applies_to clauses emitted spurious "could not be
+      resolved" diagnostics and dropped the property.
+    status: implemented
+    tags: [hir-def, properties, v093]
+
+  # ── Mermaid emission ────────────────────────────────────────────────────
+
+  - id: REQ-MERMAID-001
+    type: requirement
+    title: Flowchart emission from AADL instance models
+    description: >
+      spar shall provide a library crate (spar-mermaid) that accepts a
+      SystemInstance and emits a Mermaid flowchart TD diagram.  Each
+      component instance becomes one labelled node (label format:
+      "category: name").  Each ConnectionInstance whose source and
+      destination both resolve to emitted nodes becomes one directed edge.
+      Callers may filter by ComponentCategory set, by max parent-hop depth
+      from the root, and by whether connection edges are included.  The
+      empty-category filter means "emit all categories".  This crate is
+      emit-only; no CLI subcommand, no round-trip parser, no classDiagram
+      or block-beta — those are follow-on work.
+    status: implemented
+    tags: [mermaid, emission, v0100]
+
+  # ── CI / Verification gate ──────────────────────────────────────────────
+
+  - id: REQ-VERIFY-GATE-001
+    type: requirement
+    title: Rivet-driven verification gate executes artifact steps in CI
+    description: >
+      A CI workflow shall iterate every `type: feature` artifact (filtered by
+      s-expression), execute each artifact's `fields.steps[].run` commands,
+      aggregate per-artifact pass/fail, and post a sticky PR comment listing
+      counts and failed artifact IDs.  Same script (`tools/run_verification.py`)
+      runs locally for fast feedback.  This makes `artifacts/verification.yaml`
+      executable rather than purely descriptive, catching drift between what
+      the YAML claims and what's actually green.
+    status: implemented
+    tags: [ci, rivet, verification, v0100]
 
   # Research findings tracked separately in research/findings.yaml

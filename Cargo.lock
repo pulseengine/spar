@@ -181,6 +181,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "circular"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0fc239e0f6cb375d2402d48afb92f76f5404fd1df208a41930ec81eda078bea"
+
+[[package]]
 name = "clang-sys"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -770,6 +776,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pcap-parser"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f8d57cc6bdf76d7abd6d3cc1113278047dab29c2ff6d97190e8d1c29d4efdac"
+dependencies = [
+ "circular",
+ "nom",
+ "rusticata-macros",
+]
+
+[[package]]
 name = "petgraph"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1034,6 +1051,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
 
 [[package]]
+name = "rusticata-macros"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1215,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "spar"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "etch",
  "la-arena",
@@ -1245,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
@@ -1258,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -1266,7 +1292,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "rowan",
  "salsa",
@@ -1276,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "spar-codegen"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "criterion",
  "la-arena",
@@ -1290,7 +1316,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "salsa",
  "serde",
@@ -1303,7 +1329,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "la-arena",
  "rowan",
@@ -1317,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "spar-insight"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1329,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "spar-mcp"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -1343,16 +1369,26 @@ dependencies = [
 ]
 
 [[package]]
-name = "spar-network"
-version = "0.8.0"
+name = "spar-mermaid"
+version = "0.9.3"
 dependencies = [
+ "la-arena",
+ "rustc-hash 2.1.2",
+ "spar-hir-def",
+]
+
+[[package]]
+name = "spar-network"
+version = "0.9.3"
+dependencies = [
+ "good_lp",
  "spar-base-db",
  "spar-hir-def",
 ]
 
 [[package]]
 name = "spar-parser"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "expect-test",
  "proptest",
@@ -1362,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "spar-render"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "etch",
  "la-arena",
@@ -1373,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "spar-solver"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "criterion",
  "good_lp",
@@ -1387,7 +1423,7 @@ dependencies = [
 
 [[package]]
 name = "spar-syntax"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "expect-test",
  "rowan",
@@ -1396,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "spar-sysml2"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "expect-test",
  "la-arena",
@@ -1406,8 +1442,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-trace-topology"
+version = "0.9.3"
+dependencies = [
+ "pcap-parser",
+ "serde",
+ "serde_json",
+ "spar-base-db",
+ "spar-hir-def",
+ "spar-syntax",
+ "tempfile",
+]
+
+[[package]]
 name = "spar-transform"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "la-arena",
  "serde",
@@ -1418,7 +1467,7 @@ dependencies = [
 
 [[package]]
 name = "spar-variants"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1428,14 +1477,14 @@ dependencies = [
 
 [[package]]
 name = "spar-verify"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "spar-verify-macros",
 ]
 
 [[package]]
 name = "spar-verify-macros"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1444,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "spar-wasm"
-version = "0.8.0"
+version = "0.9.3"
 dependencies = [
  "etch",
  "la-arena",

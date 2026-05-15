@@ -55,6 +55,12 @@ use spar_network::curves::{
 use spar_network::extract::{
     extract_network_graph, read_forwarding_latency_ps, read_output_rate_bps, read_queue_depth,
 };
+use spar_network::tsn::{
+    CbsReservation, ClassOfService, GateSchedule, cbs_residual_service, frame_quantization_ps,
+    get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
+    get_hi_credit_bytes, get_lo_credit_bytes, get_max_frame_size_bytes, get_sync_error_ps,
+    is_express_stream, preemption_blocking_term_ps, tas_residual_service_with_sync_error,
+};
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -72,11 +78,56 @@ const DEFAULT_BURST_BYTES: u64 = 1500;
 /// expressed in frames; we approximate one queue slot as one MTU.
 const FRAME_BYTES: u64 = 1500;
 
+/// Maximum preemptable Ethernet frame size in bytes used for the
+/// legacy blocking term (MTU + 14-byte Ethernet header + 4-byte FCS =
+/// 1518 bytes). This is the worst-case in-flight preemptable frame an
+/// express stream can be blocked behind on a TSN-capable port that
+/// has *not* enabled 802.1Qbu preemption — the value the legacy
+/// blocking term [`preemption_blocking_term_ps`] computes when called
+/// with `preemption_enabled = false`. See IEEE 802.1Qbu §6.7.2 and
+/// `docs/designs/track-d-tsn-wctt-research.md` §5.2-5.3.
+const FRAME_BYTES_PREEMPTION_LEGACY: u64 = 1518;
+
+/// Default maximum competing-class frame size assumed by the CBS
+/// service-curve closed form when no `Spar_TSN::Max_Frame_Size` is
+/// declared on competing flows. Standard Ethernet MTU including the
+/// preamble — pessimistic but safe.
+const CBS_DEFAULT_COMPETING_FRAME_BYTES: u64 = 1518;
+
 /// WCTT analysis pass.
 ///
 /// See the module-level docs for diagnostic kinds and the Phase 1
 /// algorithm.
-pub struct WcttAnalysis;
+///
+/// # Configuration
+///
+/// `pmoo` (default `false`): when `true` and a stream's chain has a
+/// tree shape (one tagged flow with ≥ 2 competing flows on a contiguous
+/// sub-path of the tagged tandem), invoke
+/// [`spar_network::pmoo::ludb_bound`] for a tighter PMOO/LUDB delay.
+/// On LP infeasibility we transparently fall back to per-hop SFA, so
+/// turning the flag on never *worsens* the bound — only ever tightens
+/// it. With `pmoo = false` (the default) the analysis is
+/// byte-identical to v0.9.2.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WcttAnalysis {
+    /// Opt-in PMOO/LUDB path. v0.9.3 NC tightness #2.
+    pub pmoo: bool,
+}
+
+impl WcttAnalysis {
+    /// New analysis with PMOO **disabled** (matches v0.9.2 behaviour).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// New analysis with PMOO **enabled**. The PMOO path is opt-in
+    /// because v0.9.2 output should remain byte-identical for users
+    /// who haven't asked for the tighter bound.
+    pub fn with_pmoo() -> Self {
+        Self { pmoo: true }
+    }
+}
 
 impl Analysis for WcttAnalysis {
     fn name(&self) -> &str {
@@ -110,6 +161,16 @@ impl WcttAnalysis {
         let mut service_for_bus: FxHashMap<ComponentInstanceIdx, ServiceCurve> =
             FxHashMap::default();
         let mut budget_ps_for_bus: FxHashMap<ComponentInstanceIdx, u64> = FxHashMap::default();
+        // Per-bus TAS gate schedule, when present on a TSN-typed bus.
+        // Used to dispatch [`tas_residual_service`] in the per-hop walk
+        // below.
+        let mut gate_schedule_for_bus: FxHashMap<ComponentInstanceIdx, GateSchedule> =
+            FxHashMap::default();
+        // Per-bus link rate (bits per second) — kept separately because
+        // `tas_residual_service` rebuilds the service curve from the raw
+        // R_link rather than the rate-latency form already in
+        // `service_for_bus`.
+        let mut link_rate_for_bus: FxHashMap<ComponentInstanceIdx, u64> = FxHashMap::default();
         for node in graph.switches() {
             if let NodeKind::Switch { switch_type: st } = node.kind {
                 switch_type.insert(node.idx, st);
@@ -120,8 +181,16 @@ impl WcttAnalysis {
             let rate_bps = read_output_rate_bps(props).unwrap_or(0);
             let (_bcet_ps, wcet_ps) = read_forwarding_latency_ps(props).unwrap_or((0, 0));
             service_for_bus.insert(node.idx, ServiceCurve::rate_latency(rate_bps, wcet_ps));
+            link_rate_for_bus.insert(node.idx, rate_bps);
             if let Some(budget) = read_wctt_budget_ps(props) {
                 budget_ps_for_bus.insert(node.idx, budget);
+            }
+            // Spar_TSN::Gate_Control_List on the bus enables the TAS
+            // service-curve dispatch below (v0.8.1 commit 2). Malformed
+            // GCL strings are silently treated as "no schedule" — the
+            // existing WcttDeferred path handles that fall-through.
+            if let Some(schedule) = get_gate_schedule(props) {
+                gate_schedule_for_bus.insert(node.idx, schedule);
             }
         }
 
@@ -195,41 +264,364 @@ impl WcttAnalysis {
             let mut total_delay_ps: u64 = 0;
             let mut unservable_emitted = false;
             let mut deferred_emitted = false;
+            // v0.9.2 sensitivity tracking: capture the *minimum* residual
+            // service rate across hops (worst-case sensitivity) and the
+            // number of hops contributing to total_delay_ps. Both feed
+            // the post-stream WcttSensitivity diagnostic.
+            let mut min_residual_bps: u64 = u64::MAX;
+            let mut max_comp_rate_bps: u64 = 0;
+            let mut hops_counted: u64 = 0;
+
+            // v0.9.2 RTA→WCTT release-jitter coupling diagnostic. The
+            // burst inflation already happened in `collect_streams`;
+            // this is the user-facing Info that the coupling fired.
+            if stream.jitter_burst_bytes > 0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttRtaCoupled: stream '{}' release-jitter {} ns inflates ingress \
+                         burst by {} B (ρ·J coupling — RTA → WCTT per Buttazzo / Le \
+                         Boudec & Thiran)",
+                        stream_name,
+                        stream.release_jitter_ps / 1_000,
+                        stream.jitter_burst_bytes,
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
 
             for (hop_idx, sw_idx) in stream.hops.iter().enumerate() {
                 let st = switch_type.get(sw_idx).copied().unwrap_or(SwitchType::Fifo);
 
-                // TSN switches are opaque in Phase 1: we emit a
-                // deferral diagnostic for the first such hop and
-                // skip the per-hop delay contribution. Subsequent TSN
-                // hops on the same stream stay silent to avoid noise.
-                if matches!(st, SwitchType::Tsn) {
-                    if !deferred_emitted {
+                // ── TSN switch dispatch ──────────────────────────
+                //
+                // Four-way dispatch order (see PR #180 / #181 / #182
+                // and docs/designs/track-d-tsn-wctt-research.md §5.2):
+                //   1. **TAS (802.1Qbv) gate-window service curve** —
+                //      when the bus has a parsed
+                //      `Spar_TSN::Gate_Control_List` *and* the stream
+                //      carries `Spar_TSN::Class_of_Service`. Use
+                //      `tas_residual_service` and emit `WcttTasGated`.
+                //   2. **CBS (802.1Qav) credit-pool service curve** —
+                //      when the stream carries
+                //      `Spar_TSN::Bandwidth_Reservation` (idle-slope).
+                //      The CBS curve absorbs other-class blocking
+                //      (including preemption blocking) into its
+                //      latency term, so we prefer it over the
+                //      preemption arm when both could fire. Emit
+                //      `WcttCbsShaped` and set `cbs_service` so the
+                //      downstream competing-flow residual subtraction
+                //      is suppressed.
+                //   3. **Frame preemption (802.1Qbu) blocking term** —
+                //      when the bus has `Frame_Preemption => true` and
+                //      the stream is express (per `is_express_stream`).
+                //      Use the bus service curve with its forwarding
+                //      latency replaced by the fragment-blocking term;
+                //      emit `WcttPreemptionApplied` reporting the gain
+                //      relative to the legacy max-frame blocking.
+                //   4. **Deferred** — none of the above. Emit
+                //      `WcttDeferred` once per stream and skip the hop.
+                //
+                // CBS is class-isolated: its service-curve latency
+                // already absorbs blocking by other classes, so the
+                // per-hop residual subtraction below is suppressed when
+                // `cbs_service.is_some()` (`cbs_active`). TAS leaves
+                // the residual decomposition in place — the gate is
+                // about *when* class-K can transmit, not about
+                // ownership of bandwidth across competing streams.
+                let mut cbs_service: Option<ServiceCurve> = None;
+                // v0.9.1 NC soundness: a hop is "quantizable" iff its
+                // service curve does not already account for the
+                // atomic-frame max-MTU blocking term. The TAS arm and
+                // the FIFO/Priority fallback arm do not — they undercount
+                // the per-hop bound by up to one MTU because the
+                // bytes-level NC kernel treats packets as continuous.
+                // The CBS arm's `cbs_residual_service` already absorbs
+                // max-frame blocking via its closed-form latency; the
+                // preemption arm's `preemption_blocking_term_ps`
+                // *replaces* the same term with the much smaller
+                // fragment-time. Both of those leave `quantization_ps = 0`.
+                let mut quantization_ps: u64 = 0;
+                let svc = if matches!(st, SwitchType::Tsn) {
+                    let bus_props = instance.properties_for(*sw_idx);
+                    let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
+                    if let (Some(schedule), Some(cos)) =
+                        (gate_schedule_for_bus.get(sw_idx), stream.cos)
+                    {
+                        // Path 1: TAS service curve, with the v0.9.1
+                        // gPTP synchronization-error budget ε applied
+                        // (subtracted from the effective open time,
+                        // added to the worst-case gate latency). When
+                        // `Spar_TSN::Sync_Error` is unset on the bus we
+                        // pass ε = 0, which reproduces the v0.8.1
+                        // service curve byte-identically.
+                        let link_rate = link_rate_for_bus.get(sw_idx).copied().unwrap_or(0);
+                        let sync_error_ps = get_sync_error_ps(bus_props).unwrap_or(0);
+                        let tas_svc = tas_residual_service_with_sync_error(
+                            schedule,
+                            cos,
+                            link_rate,
+                            sync_error_ps,
+                        );
+                        let (open_ps, cycle_ps) = schedule.open_fraction(cos);
+                        // open_fraction is reported as a percentage
+                        // (integer-rounded toward zero) for human
+                        // readability in the diagnostic message.
+                        let open_pct = if cycle_ps == 0 {
+                            0
+                        } else {
+                            ((open_ps as u128) * 100 / (cycle_ps as u128)) as u64
+                        };
+                        let gate_latency_ps = schedule.worst_case_latency(cos);
                         diags.push(AnalysisDiagnostic {
                             severity: Severity::Info,
                             message: format!(
-                                "WcttDeferred: stream '{}' traverses TSN switch '{}' at hop {}; \
-                                 TAS/CBS-shaped service curves are deferred to Phase 2 \
-                                 (tracked in docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                "WcttTasGated: stream '{}' (CoS {}) on TSN switch '{}' at hop \
+                                 {}: open fraction {}% gate latency {} ps sync_error {} ps",
                                 stream_name,
+                                cos.0,
                                 graph
                                     .node(*sw_idx)
                                     .map(|n| n.name.as_str())
                                     .unwrap_or("<unknown>"),
                                 hop_idx,
+                                open_pct,
+                                gate_latency_ps,
+                                sync_error_ps,
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
                         });
-                        deferred_emitted = true;
+                        // TAS service curve: rate = R_link · ρ_K, but the
+                        // link itself still serializes one max-frame per
+                        // hop. Apply atomic-frame quantization at link rate.
+                        let bus_max_frame = get_max_frame_size_bytes(bus_props).unwrap_or(1518);
+                        quantization_ps = frame_quantization_ps(bus_max_frame, link_rate);
+                        tas_svc
+                    } else if let Some(idle_slope_bps) = stream.cbs_idle_slope_bps {
+                        // Path 2: CBS service curve. Stream declares
+                        // Spar_TSN::Bandwidth_Reservation. Build a
+                        // reservation against the bus link rate and
+                        // emit `WcttCbsShaped`. If the reservation
+                        // fails to validate (oversubscription / zero
+                        // link rate) we fall through to the preemption
+                        // / deferred path so the user is asked to fix
+                        // the model.
+                        let link_rate_bps = read_output_rate_bps(bus_props).unwrap_or(0);
+                        let max_competing_frame_bytes = get_max_frame_size_bytes(bus_props)
+                            .unwrap_or(CBS_DEFAULT_COMPETING_FRAME_BYTES);
+                        // v0.9.2: explicit hi/loCredit override the v0.8.1
+                        // default (`max_competing_frame_bytes` for both),
+                        // letting users plug in real Qcc/YANG credit
+                        // numbers. Default unset = byte-identical to v0.8.1
+                        // / v0.9.1.
+                        let hi_credit_bytes =
+                            get_hi_credit_bytes(bus_props).unwrap_or(max_competing_frame_bytes);
+                        let lo_credit_bytes =
+                            get_lo_credit_bytes(bus_props).unwrap_or(max_competing_frame_bytes);
+                        let credits_explicit = get_hi_credit_bytes(bus_props).is_some()
+                            || get_lo_credit_bytes(bus_props).is_some();
+                        let reservation = CbsReservation::new(
+                            idle_slope_bps,
+                            link_rate_bps,
+                            hi_credit_bytes,
+                            lo_credit_bytes,
+                        );
+                        if let Some(reservation) = reservation {
+                            let beta = cbs_residual_service(
+                                &reservation,
+                                link_rate_bps,
+                                max_competing_frame_bytes,
+                            );
+                            cbs_service = Some(beta);
+                            let cos_str = stream
+                                .cos
+                                .map(|c| c.0.to_string())
+                                .unwrap_or_else(|| "?".to_string());
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttCbsShaped: stream '{}' (cos={}) at hop {} on switch \
+                                     '{}': CBS service curve idle_slope={} bps, \
+                                     service_latency={} ns",
+                                    stream_name,
+                                    cos_str,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    idle_slope_bps,
+                                    beta.latency_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            if credits_explicit {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Info,
+                                    message: format!(
+                                        "WcttCbsCredit: stream '{}' at hop {}: explicit \
+                                         hi_credit={} B, lo_credit={} B (override default \
+                                         max_competing_frame={} B)",
+                                        stream_name,
+                                        hop_idx,
+                                        hi_credit_bytes,
+                                        lo_credit_bytes,
+                                        max_competing_frame_bytes,
+                                    ),
+                                    path: stream_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                            }
+                            beta
+                        } else if bus_preemption && stream.is_express {
+                            // CBS reservation invalid → fall back to
+                            // preemption when applicable.
+                            let svc_base = match service_for_bus.get(sw_idx) {
+                                Some(s) => *s,
+                                None => continue,
+                            };
+                            if svc_base.rate_bps == 0 {
+                                continue;
+                            }
+                            let blocking_legacy_ps = preemption_blocking_term_ps(
+                                svc_base.rate_bps,
+                                FRAME_BYTES_PREEMPTION_LEGACY,
+                                false,
+                            );
+                            let blocking_pmt_ps = preemption_blocking_term_ps(
+                                svc_base.rate_bps,
+                                FRAME_BYTES_PREEMPTION_LEGACY,
+                                true,
+                            );
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
+                                     switch '{}': blocking shrinks from {} ns (legacy \
+                                     max-frame) to {} ns (802.1Qbu fragment + header)",
+                                    stream_name,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    blocking_legacy_ps / 1_000,
+                                    blocking_pmt_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            ServiceCurve::rate_latency(
+                                svc_base.rate_bps,
+                                svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                            )
+                        } else {
+                            // CBS reservation invalid and no preemption
+                            // fallback — defer.
+                            if !deferred_emitted {
+                                diags.push(AnalysisDiagnostic {
+                                    severity: Severity::Info,
+                                    message: format!(
+                                        "WcttDeferred: stream '{}' traverses TSN switch '{}' \
+                                         at hop {}; TAS/CBS-shaped service curves are \
+                                         deferred to Phase 2 (tracked in \
+                                         docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                        stream_name,
+                                        graph
+                                            .node(*sw_idx)
+                                            .map(|n| n.name.as_str())
+                                            .unwrap_or("<unknown>"),
+                                        hop_idx,
+                                    ),
+                                    path: stream_path.clone(),
+                                    analysis: self.name().to_string(),
+                                });
+                                deferred_emitted = true;
+                            }
+                            continue;
+                        }
+                    } else if bus_preemption && stream.is_express {
+                        // Path 3: frame preemption when bus enables
+                        // it and the stream is express.
+                        let svc_base = match service_for_bus.get(sw_idx) {
+                            Some(s) => *s,
+                            None => continue,
+                        };
+                        if svc_base.rate_bps == 0 {
+                            continue;
+                        }
+                        let blocking_legacy_ps = preemption_blocking_term_ps(
+                            svc_base.rate_bps,
+                            FRAME_BYTES_PREEMPTION_LEGACY,
+                            false,
+                        );
+                        let blocking_pmt_ps = preemption_blocking_term_ps(
+                            svc_base.rate_bps,
+                            FRAME_BYTES_PREEMPTION_LEGACY,
+                            true,
+                        );
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Info,
+                            message: format!(
+                                "WcttPreemptionApplied: stream '{}' at hop {} on TSN \
+                                 switch '{}': blocking shrinks from {} ns (legacy \
+                                 max-frame) to {} ns (802.1Qbu fragment + header)",
+                                stream_name,
+                                hop_idx,
+                                graph
+                                    .node(*sw_idx)
+                                    .map(|n| n.name.as_str())
+                                    .unwrap_or("<unknown>"),
+                                blocking_legacy_ps / 1_000,
+                                blocking_pmt_ps / 1_000,
+                            ),
+                            path: stream_path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                        ServiceCurve::rate_latency(
+                            svc_base.rate_bps,
+                            svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                        )
+                    } else {
+                        // Path 4: deferred placeholder. Emit at most
+                        // one WcttDeferred per stream.
+                        if !deferred_emitted {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttDeferred: stream '{}' traverses TSN switch '{}' at hop \
+                                     {}; TAS/CBS-shaped service curves are deferred to Phase 2 \
+                                     (tracked in docs/designs/track-d-tsn-wctt-research.md §5.5)",
+                                    stream_name,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    hop_idx,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            deferred_emitted = true;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-
-                let svc = match service_for_bus.get(sw_idx) {
-                    Some(s) => *s,
-                    None => continue,
+                } else {
+                    let s = match service_for_bus.get(sw_idx) {
+                        Some(s) => *s,
+                        None => continue,
+                    };
+                    // FIFO / Priority hop: bytes-level NC undercounts by
+                    // up to one MTU; apply atomic-frame quantization.
+                    let bus_props = instance.properties_for(*sw_idx);
+                    let bus_max_frame = get_max_frame_size_bytes(bus_props).unwrap_or(1518);
+                    quantization_ps = frame_quantization_ps(bus_max_frame, s.rate_bps);
+                    s
                 };
+
                 if svc.rate_bps == 0 {
                     // No bandwidth declared — without a finite service
                     // rate we cannot bound delay; skip the hop with
@@ -244,17 +636,34 @@ impl WcttAnalysis {
                 // that also crosses this switch) into a single
                 // ArrivalCurve. We sum bursts and rates — a standard
                 // (loose but safe) NC aggregation for FIFO servers.
+                //
+                // For the CBS path (`cbs_service.is_some()`) the
+                // service curve is *already* class-isolated: its
+                // latency captures worst-case blocking by other
+                // classes via the closed-form `T = max_competing_frame
+                // / link_rate + lo_credit / |sendSlope|`. Streams in
+                // *other* classes therefore should not be subtracted
+                // again. For v0.8.1 commit 3 we make the conservative
+                // simplification of treating the CBS service curve as
+                // exclusive to the tagged stream — same-class sharing
+                // (residual decomposition between streams of one CBS
+                // class) is a follow-up. The competing-flow set below
+                // is suppressed to a no-op when CBS is active.
+                let cbs_active = cbs_service.is_some();
                 let mut comp_burst: u128 = 0;
                 let mut comp_rate: u128 = 0;
-                for other in &streams {
-                    if std::ptr::eq(other, stream) {
-                        continue;
+                if !cbs_active {
+                    for other in &streams {
+                        if std::ptr::eq(other, stream) {
+                            continue;
+                        }
+                        if !other.hops.contains(sw_idx) {
+                            continue;
+                        }
+                        comp_burst = comp_burst.saturating_add(other.alpha.burst_bytes as u128);
+                        comp_rate =
+                            comp_rate.saturating_add(other.alpha.sustained_rate_bps as u128);
                     }
-                    if !other.hops.contains(sw_idx) {
-                        continue;
-                    }
-                    comp_burst = comp_burst.saturating_add(other.alpha.burst_bytes as u128);
-                    comp_rate = comp_rate.saturating_add(other.alpha.sustained_rate_bps as u128);
                 }
                 let comp_alpha = ArrivalCurve::affine(
                     saturate_u128_to_u64(comp_burst),
@@ -295,11 +704,44 @@ impl WcttAnalysis {
                     }
                 };
 
+                // v0.9.2 sensitivity: capture the residual service rate
+                // and the competing rate at this hop *before* computing
+                // delay. They feed the WcttSensitivity diagnostic.
+                if residual.rate_bps > 0 && residual.rate_bps < min_residual_bps {
+                    min_residual_bps = residual.rate_bps;
+                }
+                if comp_alpha.sustained_rate_bps > max_comp_rate_bps {
+                    max_comp_rate_bps = comp_alpha.sustained_rate_bps;
+                }
+
                 // Per-hop delay using the tagged stream's α and the
-                // residual service.
+                // residual service. Then add `quantization_ps` for
+                // atomic-frame correctness (zero on CBS / preemption arms,
+                // computed at link rate on TAS / FIFO arms).
                 match delay_bound(&alpha, &residual) {
                     Ok(d) => {
                         total_delay_ps = total_delay_ps.saturating_add(d);
+                        hops_counted = hops_counted.saturating_add(1);
+                        if quantization_ps > 0 {
+                            total_delay_ps = total_delay_ps.saturating_add(quantization_ps);
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttFrameQuantization: stream '{}' at hop {} on switch \
+                                     '{}': atomic-frame correction +{} ns (max-frame serialization \
+                                     at link rate)",
+                                    stream_name,
+                                    hop_idx,
+                                    graph
+                                        .node(*sw_idx)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    quantization_ps / 1_000,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                        }
                     }
                     Err(NcError::UnservableFlow) | Err(NcError::UnstableServer) => {
                         // delay_bound also returns UnstableServer when
@@ -339,6 +781,43 @@ impl WcttAnalysis {
                 continue;
             }
 
+            // Step 5b (v0.9.3 NC tightness #2): optional PMOO/LUDB
+            // dispatch. When `self.pmoo` is enabled *and* the
+            // topology is tree-shaped (every other stream that crosses
+            // any hop on this stream's tandem does so on a contiguous
+            // sub-path, with ≥ 2 such competing flows, and every hop
+            // is a plain FIFO/Priority switch — no CBS / TAS shaping),
+            // call `ludb_bound` and use the tighter PMOO delay. On LP
+            // infeasibility we keep the SFA total — fallback is silent.
+            //
+            // With `self.pmoo == false` (the default) this branch is a
+            // no-op and the v0.9.2 output is byte-identical.
+            let sfa_delay_ps = total_delay_ps;
+            if self.pmoo
+                && let Some((pmoo_delay_ps, pmoo_solve_us)) =
+                    pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
+            {
+                let tightening_pct = if sfa_delay_ps > 0 {
+                    100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
+                } else {
+                    0.0
+                };
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
+                         {} ps (tightening {:.1}%, LP solve {} us)",
+                        stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+                // The PMOO bound is no looser than SFA on the LP's
+                // canonical topology (Bondorf et al.); guard with a
+                // min just in case f64 rounding flips that.
+                total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+            }
+
             // Step 6: budget check. If the source bus carried a
             // WCTT_Budget, compare. We use the *first* bound switch's
             // budget as the per-stream budget (matches the doc's
@@ -368,9 +847,61 @@ impl WcttAnalysis {
                     stream.hops.len(),
                     if stream.hops.len() == 1 { "" } else { "s" },
                 ),
-                path: stream_path,
+                path: stream_path.clone(),
                 analysis: self.name().to_string(),
             });
+
+            // v0.9.2 sensitivity output (NC reviewer top-5 #13 — pure
+            // post-processing on closed-form derivatives). For each
+            // bound, report worst-case partial derivatives at the
+            // operating point. Not bounds themselves; informational.
+            //
+            // d_e2e ≈ Σ_h ( T_h + σ / R_residual_h )  [bytes-fluid kernel]
+            //   ∂d/∂σ_self      = Σ 8e12 / R_residual_h ps/B; bound below by
+            //                     8e12 / min(R_residual) (worst hop dominates)
+            //   ∂d/∂ρ_competing ≈ σ_total / (R - ρ_c)^2 at the worst hop
+            //   ∂d/∂T_link      = hops_counted (chain rule across passthrough)
+            //
+            // When `min_residual_bps == u64::MAX` no hop contributed
+            // (all deferred / unservable); skip emission.
+            if hops_counted > 0 && min_residual_bps != u64::MAX && min_residual_bps > 0 {
+                // ps per byte = 8 bits/B · 1e12 ps/s / R bps. Saturate
+                // on the unlikely overflow path.
+                let dsigma_ps_per_byte = (8u128 * 1_000_000_000_000u128)
+                    .checked_div(min_residual_bps as u128)
+                    .unwrap_or(u128::MAX);
+                let dsigma_ns_per_byte = dsigma_ps_per_byte / 1_000;
+                // Aggregate σ_total across the chain (rough proxy is the
+                // self-burst plus max competing burst at any hop). Use
+                // initial alpha + max_comp_rate × stream-period as a
+                // safe upper estimate; lacking that, fall back to the
+                // self-burst alone.
+                let sigma_total_bytes = stream.alpha.burst_bytes as u128;
+                let dt_link_unitless = hops_counted;
+                // For ρ_c sensitivity: closed-form is σ/(R-ρ)^2; we
+                // approximate using residual rate squared.
+                let r_residual_sq = (min_residual_bps as u128).pow(2).max(1);
+                let drho_ps_per_bps = sigma_total_bytes
+                    .saturating_mul(8u128 * 1_000_000_000_000u128)
+                    .checked_div(r_residual_sq)
+                    .unwrap_or(0);
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttSensitivity: stream '{}' end-to-end ∂WCTT (worst hop, residual rate \
+                         {} bps): ∂σ_self={} ns/B, ∂ρ_competing≈{} ps per bps (using σ={} B), \
+                         ∂T_link={} ns/ns",
+                        stream_name,
+                        min_residual_bps,
+                        dsigma_ns_per_byte,
+                        drho_ps_per_bps,
+                        sigma_total_bytes,
+                        dt_link_unitless,
+                    ),
+                    path: stream_path,
+                    analysis: self.name().to_string(),
+                });
+            }
         }
 
         diags
@@ -484,15 +1015,16 @@ pub fn compute_network_hop_latency(
         .as_ref()
         .and_then(|end| resolve_subcomponent(instance, owner_idx, &end.subcomponent));
 
-    let (rate_bps, burst_bytes) = if let Some(idx) = src_idx {
+    let (rate_bps, burst_bytes, src_is_express) = if let Some(idx) = src_idx {
         let src_props = instance.properties_for(idx);
         let rate = read_output_rate_bps(src_props).unwrap_or(0);
         let burst = read_queue_depth(src_props)
             .map(|q| q.saturating_mul(FRAME_BYTES))
             .unwrap_or(DEFAULT_BURST_BYTES);
-        (rate, burst)
+        let express = is_express_stream(src_props);
+        (rate, burst, express)
     } else {
-        (0, DEFAULT_BURST_BYTES)
+        (0, DEFAULT_BURST_BYTES, false)
     };
 
     let mut alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
@@ -543,7 +1075,8 @@ pub fn compute_network_hop_latency(
         let bus_props = instance.properties_for(*sw_idx);
         let rate = read_output_rate_bps(bus_props).unwrap_or(0);
         let (bcet_ps, wcet_ps) = read_forwarding_latency_ps(bus_props).unwrap_or((0, 0));
-        let svc = ServiceCurve::rate_latency(rate, wcet_ps);
+        let bus_preemption = get_frame_preemption(bus_props).unwrap_or(false);
+        let svc_base = ServiceCurve::rate_latency(rate, wcet_ps);
 
         // The min (best-case) bound is the BCET forwarding latency for
         // this hop — purely the propagation/forwarding floor, no
@@ -551,7 +1084,7 @@ pub fn compute_network_hop_latency(
         // BCET is a lower bound.
         total_min_ps = total_min_ps.saturating_add(bcet_ps);
 
-        if svc.rate_bps == 0 {
+        if svc_base.rate_bps == 0 {
             // Without a finite service rate we cannot compute a worst-
             // case bound for this hop. Skip the queuing contribution
             // and trust BCET == WCET on the propagation floor.
@@ -559,15 +1092,32 @@ pub fn compute_network_hop_latency(
             continue;
         }
 
-        // TSN switches: opaque in Phase 1. Skip queuing contribution
-        // (propagate the WCET floor only) — the WcttAnalysis pass also
-        // emits a `WcttDeferred` Info on the same switch.
+        // TSN switches: preemption-aware dispatch (v0.8.1 c4). When
+        // both the bus and the source stream declare
+        // `Frame_Preemption => true`, we replace the bus
+        // forwarding-latency floor with the small fragment-blocking
+        // term and continue with residual_service / delay_bound.
+        // Without preemption active we keep the v0.8.0 Phase 1 fallback
+        // (propagate the WCET floor only) — c2/c3 fill in TAS/CBS later.
+        let mut svc = svc_base;
         if let Some(node) = graph.node(*sw_idx)
             && let NodeKind::Switch { switch_type } = node.kind
             && matches!(switch_type, SwitchType::Tsn)
         {
-            total_max_ps = total_max_ps.saturating_add(wcet_ps);
-            continue;
+            if bus_preemption && src_is_express {
+                let blocking_pmt_ps = preemption_blocking_term_ps(
+                    svc_base.rate_bps,
+                    FRAME_BYTES_PREEMPTION_LEGACY,
+                    true,
+                );
+                svc = ServiceCurve::rate_latency(
+                    svc_base.rate_bps,
+                    svc_base.latency_ps.saturating_add(blocking_pmt_ps),
+                );
+            } else {
+                total_max_ps = total_max_ps.saturating_add(wcet_ps);
+                continue;
+            }
         }
 
         // Build the competing arrival curve for this hop.
@@ -608,6 +1158,112 @@ pub fn compute_network_hop_latency(
         max_ps: total_max_ps,
         unservable,
     })
+}
+
+/// Try the PMOO/LUDB delay for a stream when the topology is
+/// tree-shaped, falling back to `None` when the precondition is not
+/// met. Returns `Some((pmoo_delay_ps, lp_solve_us))` on success.
+///
+/// **Eligibility criteria** (all must hold):
+/// - Every hop on the tagged stream's tandem is a `SwitchType::Fifo`
+///   switch — TSN/CBS/TAS dispatch shapes the per-hop service curve in
+///   ways the present LP doesn't model, so we conservatively skip.
+/// - At least 2 other streams cross at least one of the tagged
+///   stream's hops (otherwise PMOO == SFA trivially, no signal).
+/// - Each competing stream's contact path with the tagged tandem is a
+///   contiguous sub-path of `tagged.hops` (PMOO precondition).
+///
+/// On any failure (eligibility, LP infeasible, malformed inputs) we
+/// return `None` so the caller transparently keeps the SFA bound.
+fn pmoo_or_sfa(
+    tagged: &Stream,
+    all_streams: &[Stream],
+    switch_type: &FxHashMap<ComponentInstanceIdx, SwitchType>,
+    service_for_bus: &FxHashMap<ComponentInstanceIdx, ServiceCurve>,
+) -> Option<(u64, u64)> {
+    use spar_network::pmoo::{
+        CompetingFlow as PmooCompetingFlow, TaggedFlow as PmooTaggedFlow, ludb_bound,
+    };
+
+    if tagged.hops.is_empty() {
+        return None;
+    }
+
+    // 1. All hops must be FIFO; PMOO doesn't model TAS/CBS shapes.
+    for h in &tagged.hops {
+        let st = switch_type.get(h).copied().unwrap_or(SwitchType::Fifo);
+        if !matches!(st, SwitchType::Fifo | SwitchType::Priority) {
+            return None;
+        }
+    }
+
+    // 2. Build position map for the tagged tandem (ComponentInstanceIdx
+    // → position in the local services vector). PMOO works in those
+    // local positions because services are passed as a flat slice.
+    let mut hop_position: FxHashMap<ComponentInstanceIdx, usize> = FxHashMap::default();
+    for (i, h) in tagged.hops.iter().enumerate() {
+        hop_position.insert(*h, i);
+    }
+    let services: Vec<ServiceCurve> = tagged
+        .hops
+        .iter()
+        .map(|h| {
+            service_for_bus
+                .get(h)
+                .copied()
+                .unwrap_or_else(|| ServiceCurve::rate_latency(0, 0))
+        })
+        .collect();
+    if services.iter().any(|s| s.rate_bps == 0) {
+        return None;
+    }
+
+    // 3. Build competing-flow set: every other stream that crosses any
+    // hop on the tagged tandem. Each competing flow's path within the
+    // tandem must be contiguous (PMOO precondition); when it isn't we
+    // bail out so the caller falls back to SFA (which has no such
+    // restriction).
+    let mut competing: Vec<PmooCompetingFlow> = Vec::new();
+    for other in all_streams {
+        if std::ptr::eq(other, tagged) {
+            continue;
+        }
+        let mut local_path: Vec<usize> = Vec::new();
+        for sw in &other.hops {
+            if let Some(&pos) = hop_position.get(sw) {
+                local_path.push(pos);
+            }
+        }
+        if local_path.is_empty() {
+            continue;
+        }
+        // Contiguity check: the local positions must form an
+        // increasing run with no gaps.
+        local_path.sort_unstable();
+        for w in local_path.windows(2) {
+            if w[1] != w[0] + 1 {
+                return None;
+            }
+        }
+        competing.push(PmooCompetingFlow {
+            alpha: other.alpha,
+            path: local_path,
+        });
+    }
+
+    if competing.len() < 2 {
+        return None;
+    }
+
+    let pmoo_input = PmooTaggedFlow {
+        alpha: tagged.alpha,
+        path: (0..tagged.hops.len()).collect(),
+    };
+
+    match ludb_bound(&pmoo_input, &competing, &services) {
+        Ok(b) => Some((b.delay_ps, b.solve_time_us)),
+        Err(_) => None,
+    }
 }
 
 /// Read `Spar_Network::WCTT_Budget` (Time) in picoseconds. Mirrors the
@@ -682,6 +1338,34 @@ struct Stream {
     hops: Vec<ComponentInstanceIdx>,
     /// Source-side arrival curve.
     alpha: ArrivalCurve,
+    /// Stream's `Spar_TSN::Class_of_Service` (0..=7) when annotated on
+    /// the source end station. Required for the TAS service-curve
+    /// dispatch on TSN switches; also surfaced (when present) on
+    /// the CBS dispatch path for diagnostic readability. Streams
+    /// without a CoS that traverse a TSN switch with neither a TAS
+    /// schedule nor a CBS reservation fall back to the
+    /// [`Severity::Info`]-emitting `WcttDeferred` path.
+    cos: Option<ClassOfService>,
+    /// Whether this stream qualifies as "express" for IEEE 802.1Qbu
+    /// preemption purposes (see [`is_express_stream`]). Express
+    /// streams pay only the preemption-fragment blocking at TSN ports
+    /// where the bus also enables `Frame_Preemption`; non-express
+    /// streams keep the legacy `max_frame / R` blocking term.
+    is_express: bool,
+    /// CBS reserved bandwidth (idleSlope) in bits per second when the
+    /// source declares `Spar_TSN::Bandwidth_Reservation`. The full
+    /// `CbsReservation` (with hi/lo credit and send slope) is built at
+    /// each TSN hop because it depends on the bus's link rate.
+    cbs_idle_slope_bps: Option<u64>,
+    /// v0.9.2 RTA→WCTT release-jitter coupling: when the source end
+    /// station declares `Timing_Properties::Dispatch_Jitter`, that
+    /// value (picoseconds) is treated as ingress release-jitter J and
+    /// inflates the arrival burst by ρ·J bytes. Stored here so the
+    /// `WcttRtaCoupled` Info diagnostic at run-time can echo the
+    /// pair (jitter_ps, jitter_burst_bytes) back to the user. `0`
+    /// when the property is unset (= byte-identical v0.8.x behaviour).
+    release_jitter_ps: u64,
+    jitter_burst_bytes: u64,
 }
 
 impl Stream {
@@ -775,11 +1459,71 @@ fn collect_streams(
             // Ethernet MTU (DEFAULT_BURST_BYTES).
             let src_props = instance.properties_for(src_idx);
             let rate_bps = read_output_rate_bps(src_props).unwrap_or(0);
-            let burst_bytes = read_queue_depth(src_props)
+            let burst_base_bytes = read_queue_depth(src_props)
                 .map(|q| q.saturating_mul(FRAME_BYTES))
                 .unwrap_or(DEFAULT_BURST_BYTES);
 
+            // v0.9.2 RTA→WCTT release-jitter coupling (NC reviewer top-5
+            // #4 — single biggest credibility lift, no new math). When
+            // the source end station declares `Timing_Properties::
+            // Dispatch_Jitter`, treat it as release-jitter J: a thread
+            // whose dispatcher fires up to J ps late at any cycle still
+            // produces the same number of bytes per period, but the
+            // *burst seen at the NIC* inflates by ρ·J. This couples
+            // RTA's response-time semantics into the WCTT input.
+            //
+            // Default unset = J=0 = byte-identical to v0.8.1/v0.9.1.
+            //
+            // Future v0.9.x: also consume RTA's *computed*
+            // response_time directly (today the user must propagate it
+            // via Dispatch_Jitter explicitly, which is the existing
+            // AS5506 property semantics).
+            let release_jitter_ps = src_props
+                .get("Timing_Properties", "Dispatch_Jitter")
+                .or_else(|| src_props.get("", "Dispatch_Jitter"))
+                .and_then(parse_time_value)
+                .unwrap_or(0);
+            // ρ·J in bytes = (rate_bps · jitter_ps) / 8 / 1e12, with
+            // ceiling rounding so the burst is never under-estimated.
+            let jitter_burst_bytes = if release_jitter_ps > 0 && rate_bps > 0 {
+                let bits = (rate_bps as u128).saturating_mul(release_jitter_ps as u128);
+                let bytes = bits.div_ceil(8u128 * 1_000_000_000_000u128);
+                u64::try_from(bytes).unwrap_or(u64::MAX)
+            } else {
+                0
+            };
+            let burst_bytes = burst_base_bytes.saturating_add(jitter_burst_bytes);
+
             let alpha = ArrivalCurve::affine(burst_bytes, rate_bps);
+            if jitter_burst_bytes > 0 {
+                // Diagnostic emitted lazily inside `streams_diagnostics`
+                // below since `stream_name` is built later. We thread
+                // the jitter values through the Stream struct.
+            }
+            // TSN dispatch metadata read off the source end station.
+            // Spar_TSN::Class_of_Service drives the TAS gate-window
+            // service curve and is also surfaced on CBS-shaped
+            // diagnostics; Spar_TSN::Bandwidth_Reservation drives the
+            // CBS credit-pool service curve. The wctt walk only
+            // consults these when a hop's switch is classified as
+            // `SwitchType::Tsn`. The lookup follows the same precedence
+            // as the typed/string accessor in spar-network::tsn — we
+            // read from the source end station because these
+            // properties apply to ports / connections; the closest
+            // reachable carrier in the current property model is the
+            // source device's PropertyMap, which the existing rate /
+            // queue-depth reads already use.
+            let cos = get_class_of_service(src_props);
+            let cbs_idle_slope_bps = get_bandwidth_reservation_bps(src_props);
+
+            // Express-stream classification (IEEE 802.1Qbu). Read from
+            // the source-component's PropertyMap so that AADL fixtures
+            // can declare either `Spar_TSN::Frame_Preemption => true`
+            // explicitly or rely on the `Class_of_Service >= 6`
+            // default. A stream that is not express still walks TSN
+            // hops below; it just pays the legacy `max_frame / R`
+            // blocking term rather than the preemption-fragment term.
+            let is_express = is_express_stream(src_props);
 
             streams.push(Stream {
                 name: conn.name.as_str().to_string(),
@@ -787,6 +1531,11 @@ fn collect_streams(
                 sink_idx: dst_idx,
                 hops,
                 alpha,
+                cos,
+                is_express,
+                cbs_idle_slope_bps,
+                release_jitter_ps,
+                jitter_burst_bytes,
             });
         }
     }
@@ -940,7 +1689,7 @@ public
 end Plain;
 "#;
         let inst = instantiate(src, "Plain", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert_eq!(
             count_wctt(&diags),
             0,
@@ -996,17 +1745,148 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info: Vec<&AnalysisDiagnostic> = diags
             .iter()
             .filter(|d| d.message.starts_with("WcttBound"))
             .collect();
         assert_eq!(info.len(), 1, "exactly one stream expected: {:#?}", diags);
+        // v0.9.1 soundness: 12 µs (NC bytes-fluid) + 12.144 µs (atomic-frame
+        // quantization at 1 Gbps for 1518-byte MTU) = 24.144 µs.
         assert!(
-            info[0].message.contains("12000000 ps"),
-            "expected 12 us bound, got: {}",
+            info[0].message.contains("24144000 ps"),
+            "expected 24.144 us bound (12 us NC + 12.144 us frame quantization), got: {}",
             info[0].message
+        );
+    }
+
+    // ── v0.9.2 — RTA→WCTT release-jitter coupling ─────────────────
+    #[test]
+    fn rta_wctt_dispatch_jitter_inflates_burst_and_emits_diagnostic() {
+        // Source device with Dispatch_Jitter = 100 us. At 1 Gbps,
+        // ρ·J = 1e9 × 100e-6 / 8 = 12500 bytes of inflation.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate    => 1000000000 bitsps;
+      Timing_Properties::Dispatch_Jitter => 100 us;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        let coupled = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttRtaCoupled"))
+            .unwrap_or_else(|| panic!("expected WcttRtaCoupled diagnostic, got: {:#?}", diags));
+        assert!(
+            coupled.message.contains("100000 ns"),
+            "expected jitter 100000 ns in message: {}",
+            coupled.message
+        );
+        // ρ·J = 1Gbps × 100us / 8 = 12500 bytes
+        assert!(
+            coupled.message.contains("12500 B"),
+            "expected 12500 B inflation in message: {}",
+            coupled.message
+        );
+    }
+
+    #[test]
+    fn no_dispatch_jitter_no_coupling_diagnostic() {
+        // Without Dispatch_Jitter the coupling diagnostic must not
+        // fire, preserving v0.8.x / v0.9.1 byte-identical output.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttRtaCoupled")),
+            "no Dispatch_Jitter must not emit WcttRtaCoupled: {:#?}",
+            diags
         );
     }
 
@@ -1073,7 +1953,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let infos: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1155,7 +2035,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let unservable: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1220,7 +2100,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info = diags
             .iter()
@@ -1231,9 +2111,11 @@ end Net;
             "expected 3 hops in: {}",
             info.message
         );
+        // v0.9.1 soundness: 51 µs (NC) + 3 × 12.144 µs (atomic-frame
+        // quantization, one per hop) = 87.432 µs.
         assert!(
-            info.message.contains("51000000 ps"),
-            "expected 51 us bound, got: {}",
+            info.message.contains("87432000 ps"),
+            "expected 87.432 us bound (51 us NC + 36.432 us quantization), got: {}",
             info.message
         );
     }
@@ -1285,7 +2167,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let err = diags
             .iter()
@@ -1339,7 +2221,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let errors: Vec<&AnalysisDiagnostic> = diags
             .iter()
@@ -1403,7 +2285,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let info = diags
             .iter()
@@ -1458,7 +2340,7 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
 
         let deferred = diags
             .iter()
@@ -1468,7 +2350,131 @@ end Net;
         assert!(deferred.message.contains("Phase 2"));
     }
 
-    // ── Test 10: bus without Switch_Type is invisible to wctt ───────
+    // ── Test 11: CBS — single-switch, two CBS classes each 30% ──────
+    #[test]
+    fn cbs_dispatch_two_classes_each_get_idle_slope() {
+        // 1 Gbps TSN switch with two streams; each source declares a
+        // 30% Bandwidth_Reservation (300 Mbps) and a CoS. Per the CBS
+        // closed form, each class sees idleSlope = 300 Mbps service
+        // rate + a latency capturing other-class blocking. The
+        // analysis must emit `WcttCbsShaped` Info per stream and a
+        // `WcttBound` per stream, and *no* `WcttDeferred` (CBS
+        // dispatch supersedes the Phase-1 deferral on TSN switches).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device cbs_a
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service        => 6;
+      Spar_TSN::Bandwidth_Reservation   => 300000000 bitsps;
+      Spar_Network::Queue_Depth         => 1;
+  end cbs_a;
+  device implementation cbs_a.impl
+  end cbs_a.impl;
+
+  device cbs_b
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service        => 5;
+      Spar_TSN::Bandwidth_Reservation   => 300000000 bitsps;
+      Spar_Network::Queue_Depth         => 1;
+  end cbs_b;
+  device implementation cbs_b.impl
+  end cbs_b.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device cbs_a.impl;
+      b  : device cbs_b.impl;
+      x  : device d.impl;
+      y  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      c_sw_x : bus access sw -> x.net;
+      c_sw_y : bus access sw -> y.net;
+      data1  : port a.out_p -> x.in_p;
+      data2  : port b.out_p -> y.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        let cbs_shaped: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttCbsShaped"))
+            .collect();
+        assert_eq!(
+            cbs_shaped.len(),
+            2,
+            "expected one WcttCbsShaped per CBS stream: {:#?}",
+            diags
+        );
+        for d in &cbs_shaped {
+            assert!(d.severity == Severity::Info);
+            assert!(
+                d.message.contains("idle_slope=300000000 bps"),
+                "CBS shaped diagnostic must announce idle slope 300 Mbps: {}",
+                d.message
+            );
+        }
+
+        // No `WcttDeferred` — CBS dispatch supersedes deferral.
+        let deferred: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttDeferred"))
+            .collect();
+        assert!(
+            deferred.is_empty(),
+            "expected no WcttDeferred when CBS reservation is set: {:#?}",
+            deferred
+        );
+
+        // One WcttBound per stream.
+        let bounds: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttBound"))
+            .collect();
+        assert_eq!(
+            bounds.len(),
+            2,
+            "expected one WcttBound per stream: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 12: bus without Switch_Type is invisible to wctt ───────
     #[test]
     fn unannotated_bus_skipped() {
         // A regular AADL bus carrying no Spar_Network properties must
@@ -1510,12 +2516,809 @@ public
 end Net;
 "#;
         let inst = instantiate(src, "Net", "Sys", "impl");
-        let diags = WcttAnalysis.analyze(&inst);
+        let diags = WcttAnalysis::default().analyze(&inst);
         assert_eq!(
             count_wctt(&diags),
             0,
             "unswitched bus must not produce Wctt* diagnostics: {:#?}",
             diags
         );
+    }
+
+    // ── Test 11: TAS service curve dispatch (v0.8.1 commit 2) ───────
+    #[test]
+    fn tsn_with_gcl_and_cos_dispatches_tas_service_curve() {
+        // 1 Gbps TSN switch carrying a Gate_Control_List that opens
+        // CoS 7 for 50% of the cycle; the source device declares
+        // Class_of_Service=7. Expect a `WcttTasGated` Info diagnostic
+        // (not `WcttDeferred`) and a finite `WcttBound` whose value
+        // reflects the half-bandwidth, gate-latency-shifted service
+        // curve.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        // We must see a WcttTasGated Info, not WcttDeferred.
+        let tas_gated = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttTasGated"))
+            .unwrap_or_else(|| panic!("expected WcttTasGated: {:#?}", diags));
+        assert!(tas_gated.severity == Severity::Info);
+        assert!(tas_gated.message.contains("CoS 7"));
+        assert!(tas_gated.message.contains("50%"));
+
+        let deferred = diags.iter().find(|d| d.message.starts_with("WcttDeferred"));
+        assert!(
+            deferred.is_none(),
+            "WcttDeferred should not fire when GCL+CoS are present: {:#?}",
+            diags
+        );
+
+        // Bound: D = T_K + σ/R_K. With T_K = 5 us, σ = 1500 bytes,
+        // R_K = 500 Mbps: σ/R_K = 1500·8·10^12 / 500·10^6 = 24·10^6 ps =
+        // 24 us. Total = 29 us.
+        let bound = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {:#?}", diags));
+        assert!(
+            bound.message.contains("41144000 ps"),
+            "expected 41.144 us TAS bound (29 us gated + 12.144 us quantization), got: {}",
+            bound.message
+        );
+    }
+
+    // ── Test 12: TAS bound is strictly larger than ungated ─────────
+    #[test]
+    fn tas_gated_bound_exceeds_ungated_bound_at_half_bandwidth() {
+        // Comparison: a 1 Gbps line-rate, ungated, gives D = 12 us
+        // (single-hop test 2 above). Same topology under TAS with 50%
+        // open and 5 us gate latency gives D = 5 us (latency) + 24 us
+        // (σ/R_K at 500 Mbps) = 29 us. The TAS bound must be strictly
+        // larger than the ungated bound: gate shaping is always at
+        // least as restrictive as line-rate service.
+        let ungated_src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let ungated = instantiate(ungated_src, "Net", "Sys", "impl");
+        let ungated_diags = WcttAnalysis::default().analyze(&ungated);
+        let ungated_bound = ungated_diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap();
+        // v0.9.1 soundness: 12 µs (NC) + 12.144 µs (atomic-frame
+        // quantization, 1518 B at 1 Gbps) = 24.144 µs.
+        assert!(ungated_bound.message.contains("24144000 ps"));
+
+        // Same model, but with TSN+GCL applied (50% open for CoS 7).
+        // The bound must exceed the ungated 12 us.
+        let gated_src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let gated = instantiate(gated_src, "Net", "Sys", "impl");
+        let gated_diags = WcttAnalysis::default().analyze(&gated);
+        let gated_bound = gated_diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound"))
+            .unwrap();
+        // v0.9.1 soundness: 29 µs gated NC + 12.144 µs quantization = 41.144 µs.
+        assert!(gated_bound.message.contains("41144000 ps"));
+
+        // Strictly: 41.144 µs > 24.144 µs — the gated bound is more
+        // pessimistic (and correctly so) than the ungated line-rate bound.
+    }
+
+    // ── Test 13: TSN switch without GCL still defers ────────────────
+    #[test]
+    fn tsn_switch_without_gcl_keeps_deferred_path() {
+        // TSN switch but no Gate_Control_List declared on the bus.
+        // The dispatch must fall back to the v0.8.0 WcttDeferred path
+        // (no TAS service curve; no per-hop contribution).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
+        assert!(
+            diags.iter().all(|d| !d.message.starts_with("WcttTasGated")),
+            "WcttTasGated should not fire when GCL is absent: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 14: TSN switch with GCL but stream lacks CoS defers ────
+    #[test]
+    fn tsn_with_gcl_but_no_stream_cos_still_defers() {
+        // Bus has a Gate_Control_List, but the source device does not
+        // declare Spar_TSN::Class_of_Service. Without the CoS we
+        // cannot pick a window mask; fall back to WcttDeferred.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
+    }
+
+    // ── Test 15: TSN preemption shrinks the per-hop blocking term ────
+    #[test]
+    fn tsn_preemption_emits_applied_diagnostic_and_computes_bound() {
+        // 1-switch TSN network. Bus = 100 Mbps with
+        // `Frame_Preemption => true`; one express stream
+        // (`Frame_Preemption => true` on the source) and one
+        // preemptable stream (no `Frame_Preemption`, CoS = 0).
+        // The express stream must:
+        //   - get a `WcttPreemptionApplied` Info diagnostic
+        //   - get a finite `WcttBound` (no `WcttDeferred`)
+        // The preemptable stream stays opaque (`WcttDeferred`).
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device express_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Frame_Preemption => true;
+  end express_d;
+  device implementation express_d.impl
+  end express_d.impl;
+
+  device pre_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 0;
+  end pre_d;
+  device implementation pre_d.impl
+  end pre_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      ex : device express_d.impl;
+      pr : device pre_d.impl;
+      ex_dst : device d.impl;
+      pr_dst : device d.impl;
+    connections
+      c_sw_ex     : bus access sw -> ex.net;
+      c_sw_pr     : bus access sw -> pr.net;
+      c_sw_ex_dst : bus access sw -> ex_dst.net;
+      c_sw_pr_dst : bus access sw -> pr_dst.net;
+      data_ex     : port ex.out_p -> ex_dst.in_p;
+      data_pr     : port pr.out_p -> pr_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        // The express stream must produce a `WcttPreemptionApplied`
+        // Info diagnostic.
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert_eq!(
+            applied.len(),
+            1,
+            "expected exactly one WcttPreemptionApplied for the express \
+             stream: {:#?}",
+            diags
+        );
+        assert!(applied[0].severity == Severity::Info);
+        // Numbers reported in nanoseconds in the diagnostic message.
+        // Legacy: 1518 B · 8 / 100 Mbps = 121_440 ns.
+        // With preemption: 68 B · 8 / 100 Mbps = 5_440 ns.
+        assert!(
+            applied[0].message.contains("121440 ns"),
+            "expected legacy blocking 121440 ns: {}",
+            applied[0].message
+        );
+        assert!(
+            applied[0].message.contains("5440 ns"),
+            "expected preempted blocking 5440 ns: {}",
+            applied[0].message
+        );
+
+        // The express stream gets a `WcttBound` (computed bound).
+        let express_bound = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttBound") && d.message.contains("data_ex"))
+            .unwrap_or_else(|| panic!("expected WcttBound for data_ex: {:#?}", diags));
+        assert!(express_bound.severity == Severity::Info);
+
+        // The preemptable stream still falls through to `WcttDeferred`.
+        let deferred = diags
+            .iter()
+            .find(|d| d.message.starts_with("WcttDeferred") && d.message.contains("data_pr"))
+            .unwrap_or_else(|| panic!("expected WcttDeferred for data_pr: {:#?}", diags));
+        assert!(deferred.severity == Severity::Info);
+    }
+
+    // ── Test 16: bus without Frame_Preemption keeps deferred path ────
+    #[test]
+    fn tsn_without_bus_preemption_keeps_deferred() {
+        // Even a stream that declares `Frame_Preemption => true` on its
+        // source falls through to `WcttDeferred` when the bus has not
+        // opted in (`Frame_Preemption` unset on the bus). This matches
+        // the c4 spec's "explicit-then-default order" — both sides must
+        // explicitly say yes for the small fragment-blocking term to
+        // apply, and a missing bus property is the safe `false` default.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device express_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Frame_Preemption => true;
+  end express_d;
+  device implementation express_d.impl
+  end express_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      ex : device express_d.impl;
+      ex_dst : device d.impl;
+    connections
+      c_sw_ex     : bus access sw -> ex.net;
+      c_sw_ex_dst : bus access sw -> ex_dst.net;
+      data_ex     : port ex.out_p -> ex_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        // No `WcttPreemptionApplied` because the bus is silent.
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert!(
+            applied.is_empty(),
+            "WcttPreemptionApplied must not fire when the bus omits \
+             Frame_Preemption: {:#?}",
+            diags
+        );
+        // `WcttDeferred` fires instead.
+        assert!(
+            diags.iter().any(|d| d.message.starts_with("WcttDeferred")),
+            "expected WcttDeferred when bus has no Frame_Preemption: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 17: stream without Frame_Preemption keeps deferred ─────
+    #[test]
+    fn tsn_with_low_cos_stream_keeps_deferred() {
+        // Bus declares `Frame_Preemption => true` but the source
+        // stream is preemptable (CoS = 0). No `WcttPreemptionApplied`
+        // is emitted; the stream falls through to `WcttDeferred`.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device pre_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 0;
+  end pre_d;
+  device implementation pre_d.impl
+  end pre_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      pr : device pre_d.impl;
+      pr_dst : device d.impl;
+    connections
+      c_sw_pr     : bus access sw -> pr.net;
+      c_sw_pr_dst : bus access sw -> pr_dst.net;
+      data_pr     : port pr.out_p -> pr_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+
+        let applied: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPreemptionApplied"))
+            .collect();
+        assert!(
+            applied.is_empty(),
+            "WcttPreemptionApplied must not fire for non-express \
+             streams: {:#?}",
+            diags
+        );
+        let deferred: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttDeferred"))
+            .collect();
+        assert!(
+            !deferred.is_empty(),
+            "expected WcttDeferred for non-express stream: {:#?}",
+            diags
+        );
+    }
+
+    // ── Test 18: high-CoS stream is express by default ──────────────
+    #[test]
+    fn tsn_high_cos_stream_is_express_by_default() {
+        // No `Frame_Preemption` set on the source, but `Class_of_Service
+        // => 7` makes it express via the default heuristic. With the
+        // bus also declaring `Frame_Preemption => true`, preemption
+        // applies and `WcttPreemptionApplied` is emitted.
+        let src = r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Frame_Preemption       => true;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device cos_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_TSN::Class_of_Service => 7;
+  end cos_d;
+  device implementation cos_d.impl
+  end cos_d.impl;
+
+  device d
+    features
+      net   : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      hi : device cos_d.impl;
+      hi_dst : device d.impl;
+    connections
+      c_sw_hi     : bus access sw -> hi.net;
+      c_sw_hi_dst : bus access sw -> hi_dst.net;
+      data_hi     : port hi.out_p -> hi_dst.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#;
+        let inst = instantiate(src, "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttPreemptionApplied")),
+            "high-CoS stream must opt into preemption by default: {:#?}",
+            diags
+        );
+    }
+
+    // ── v0.9.3 NC tightness #2 — PMOO/LUDB opt-in flag ──────────────
+
+    /// Helper: instantiate a fixture with multiple competing streams
+    /// sharing a single FIFO switch. Used by both the PMOO-on and
+    /// PMOO-off round-trip tests below.
+    fn pmoo_fixture_aadl() -> &'static str {
+        r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      a2 : device src_d.impl;
+      a3 : device src_d.impl;
+      a4 : device src_d.impl;
+      b  : device d.impl;
+      c  : device d.impl;
+      c2 : device d.impl;
+      c3 : device d.impl;
+    connections
+      c_sw_a  : bus access sw -> a.net;
+      c_sw_a2 : bus access sw -> a2.net;
+      c_sw_a3 : bus access sw -> a3.net;
+      c_sw_a4 : bus access sw -> a4.net;
+      c_sw_b  : bus access sw -> b.net;
+      c_sw_c  : bus access sw -> c.net;
+      c_sw_c2 : bus access sw -> c2.net;
+      c_sw_c3 : bus access sw -> c3.net;
+      data1   : port a.out_p  -> b.in_p;
+      data2   : port a2.out_p -> c.in_p;
+      data3   : port a3.out_p -> c2.in_p;
+      data4   : port a4.out_p -> c3.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#
+    }
+
+    #[test]
+    fn pmoo_flag_off_emits_no_pmoo_diagnostic() {
+        // Default WcttAnalysis (pmoo = false) must produce
+        // byte-identical diagnostics to v0.9.2: no `WcttPmooBound`
+        // ever fires regardless of topology.
+        let inst = instantiate(pmoo_fixture_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::default().analyze(&inst);
+        assert!(
+            !diags.iter().any(|d| d.message.starts_with("WcttPmooBound")),
+            "WcttPmooBound must NOT fire when pmoo flag is off: {:#?}",
+            diags
+        );
+        // Sanity: WcttBound still fires for each stream.
+        let bound_count = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttBound"))
+            .count();
+        assert_eq!(bound_count, 4, "expected 4 streams: {:#?}", diags);
+    }
+
+    #[test]
+    fn pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams() {
+        // With pmoo = true, the PMOO/LUDB path fires for every stream
+        // that meets the eligibility criteria (≥ 2 contiguous-sub-path
+        // competing flows on a FIFO tandem).
+        let inst = instantiate(pmoo_fixture_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+        let pmoo_diags: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPmooBound"))
+            .collect();
+        assert!(
+            !pmoo_diags.is_empty(),
+            "expected at least one WcttPmooBound diagnostic with --pmoo: {:#?}",
+            diags
+        );
+        // The diagnostic must mention the LP method tag.
+        for d in &pmoo_diags {
+            assert!(
+                d.message.contains("method=ludb"),
+                "WcttPmooBound must mention method=ludb: {}",
+                d.message
+            );
+        }
     }
 }
