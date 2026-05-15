@@ -68,9 +68,9 @@ abbrev ThreadBinding := Thread → Partition
 
 /-! ## Execution predicate -/
 
-/-- `Executes t w` is an abstract proposition: thread `t` runs during
-    window `w`. We do not model *how* the OS schedules within a window;
-    we only care about *which* partition's window a thread uses. -/
+-- `Executes t w` is an abstract proposition: thread `t` runs during
+-- window `w`. We do not model *how* the OS schedules within a window;
+-- we only care about *which* partition's window a thread uses.
 -- We introduce this as a section variable so callers supply a concrete
 -- model if needed; all proofs work purely from the conformance hypothesis.
 variable (Executes : Thread → Window → Prop)

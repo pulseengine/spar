@@ -94,7 +94,7 @@ theorem latency_cons_le (s : Time) (e : ExecTime) (path : FlowPath) :
     Latency s path ≤ Latency s (e :: path) := by
   unfold Latency
   simp only [List.sum_cons]
-  omega
+  exact Nat.add_le_add_left (Nat.le_add_left path.sum e) s
 
 /-- Helper: `List.set i e' l` preserves all elements except position `i`. -/
 theorem list_sum_set_le {path : FlowPath} {i : Nat} {e' : ExecTime}
@@ -109,8 +109,10 @@ theorem list_sum_set_le {path : FlowPath} {i : Nat} {e' : ExecTime}
       simp only [List.set, List.sum_cons]
       exact Nat.add_le_add_right he _
     | succ i' =>
-      simp only [List.set, List.sum_cons, List.length_cons, Nat.succ_lt_succ_iff] at *
-      exact Nat.add_le_add_left (ih (by omega) (by simpa using he)) _
+      simp only [List.set, List.sum_cons] at *
+      have hi' : i' < xs.length := Nat.lt_of_succ_lt_succ hi
+      have he' : xs[i']'hi' ≤ e' := by simpa [List.getElem_cons_succ] using he
+      exact Nat.add_le_add_left (ih hi' he') _
 
 /-- Corollary: replacing one component's WCET with a larger value
     yields a larger or equal latency. -/
