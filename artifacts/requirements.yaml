@@ -2038,4 +2038,20 @@ artifacts:
     status: implemented
     tags: [emv2, analysis, v0100, safety]
 
+  # ── CI / Verification gate ──────────────────────────────────────────────
+
+  - id: REQ-VERIFY-GATE-001
+    type: requirement
+    title: Rivet-driven verification gate executes artifact steps in CI
+    description: >
+      A CI workflow shall iterate every `type: feature` artifact (filtered by
+      s-expression), execute each artifact's `fields.steps[].run` commands,
+      aggregate per-artifact pass/fail, and post a sticky PR comment listing
+      counts and failed artifact IDs.  Same script (`tools/run_verification.py`)
+      runs locally for fast feedback.  This makes `artifacts/verification.yaml`
+      executable rather than purely descriptive, catching drift between what
+      the YAML claims and what's actually green.
+    status: implemented
+    tags: [ci, rivet, verification, v0100]
+
   # Research findings tracked separately in research/findings.yaml
