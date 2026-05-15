@@ -1260,6 +1260,7 @@ dependencies = [
  "spar-hir",
  "spar-hir-def",
  "spar-insight",
+ "spar-mermaid",
  "spar-parser",
  "spar-render",
  "spar-solver",
