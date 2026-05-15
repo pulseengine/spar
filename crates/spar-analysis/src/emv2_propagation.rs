@@ -468,7 +468,7 @@ mod tests {
             category: ComponentCategory,
             parent: Option<ComponentInstanceIdx>,
         ) -> ComponentInstanceIdx {
-            let idx = self.components.alloc(ComponentInstance {
+            self.components.alloc(ComponentInstance {
                 name: Name::new(name),
                 category,
                 type_name: Name::new(name),
@@ -483,8 +483,7 @@ mod tests {
                 mode_transitions: Vec::new(),
                 array_index: None,
                 in_modes: Vec::new(),
-            });
-            idx
+            })
         }
 
         fn set_children(
