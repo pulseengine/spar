@@ -2057,6 +2057,33 @@ artifacts:
     status: implemented
     tags: [mermaid, cli, v0100]
 
+  # ── Lean formal proofs — v0.10.0 ────────────────────────────────────────
+
+  - id: REQ-PROOF-LATENCY-001
+    type: requirement
+    title: Lean 4 proof of end-to-end flow latency monotonicity
+    description: >
+      System shall include a sorry-free Lean 4 proof that end-to-end flow
+      latency is monotone in per-component worst-case execution times: if
+      every component WCET in path c1 is pointwise ≤ the corresponding WCET
+      in path c2, then Latency s c1 ≤ Latency s c2 for any sampling delay s.
+      Proof lives in proofs/Proofs/Scheduling/Latency.lean and is exercised
+      by the `lake build` CI gate.
+    status: implemented
+    tags: [proof, latency, lean, v0100]
+
+  - id: REQ-PROOF-ARINC653-001
+    type: requirement
+    title: Lean 4 proof of ARINC 653 partition isolation
+    description: >
+      System shall include a sorry-free Lean 4 proof that, in a conformant
+      ARINC 653 Major Frame schedule, a thread whose static binding differs
+      from a window's owning partition cannot execute within that window.
+      Proof lives in proofs/Proofs/Scheduling/Arinc653Isolation.lean and is
+      exercised by the `lake build` CI gate.
+    status: implemented
+    tags: [proof, arinc653, lean, v0100]
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: REQ-VERIFY-GATE-001
