@@ -2021,6 +2021,21 @@ artifacts:
     status: implemented
     tags: [mermaid, emission, v0100]
 
+  - id: REQ-MERMAID-CLI-001
+    type: requirement
+    title: spar emit --format mermaid CLI subcommand
+    description: >
+      The spar CLI shall expose a top-level `emit` subcommand that accepts
+      --root (required), --format mermaid (default, only valid value), one or
+      more AADL source files, and optional filters --category (comma-separated
+      ComponentCategory names, case-insensitive), --max-depth N, and
+      --no-connections.  Output is written to stdout or to -o/--output path.
+      The subcommand must reuse the existing parse/lower/instantiate pipeline
+      (HirDefDatabase + GlobalScope + SystemInstance::instantiate) and call
+      spar_mermaid::emit_flowchart to produce the diagram text.
+    status: implemented
+    tags: [mermaid, cli, v0100]
+
   # ── Lean formal proofs — v0.10.0 ────────────────────────────────────────
 
   - id: REQ-PROOF-LATENCY-001
