@@ -362,5 +362,13 @@ jobs:
           cargo kani setup
       - name: Run Kani on spar-solver
         run: cargo kani --tests -p spar-solver
-      - name: Run Kani on spar-codegen
-        run: cargo kani --tests -p spar-codegen
+      - name: Run Kani on spar-codegen (schedule harness)
+        run: cargo kani --tests -p spar-codegen --harness kani_emit_preserves_schedule
+      - name: Run Kani on spar-codegen (AADL contract harnesses)
+        # prove_thread_period_preserved  — period round-trip (no truncation)
+        # prove_port_direction_preserved — WIT direction token mapping
+        # prove_access_right_preserved   — Read_Only never widens to &mut
+        run: >-
+          cargo kani --tests -p spar-codegen --harness prove_thread_period_preserved &&
+          cargo kani --tests -p spar-codegen --harness prove_port_direction_preserved &&
+          cargo kani --tests -p spar-codegen --harness prove_access_right_preserved

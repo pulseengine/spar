@@ -855,6 +855,27 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-001
 
+  - id: REQ-KANI-CODEGEN-001
+    type: requirement
+    title: Kani harnesses for generated-code AADL contract preservation
+    description: >
+      Three Kani bounded model-checking harnesses in crates/spar-codegen/tests/
+      kani_contracts.rs prove that each codegen pass preserves the AADL source
+      contract: (1) thread Period is emitted without truncation or off-by-one
+      (prove_thread_period_preserved), (2) port direction is faithfully mapped
+      to the WIT interface token (prove_port_direction_preserved), (3) a
+      bus-access feature with Access_Rights = Read_Only never generates a &mut
+      reference (prove_access_right_preserved).  This is spar's
+      Logika-equivalent strategy: machine-checked proofs on the codegen output
+      path rather than importing a new prover language.
+    status: implemented
+    tags: [codegen, kani, verification, v0100, safety]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-VERIFY-PROOF
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
   - id: REQ-SYSML2-PARSE
     type: requirement
     title: Parse SysML v2 textual notation (KerML grammar)
