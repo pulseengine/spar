@@ -2628,6 +2628,26 @@ artifacts:
       - type: satisfies
         target: REQ-MERMAID-001
 
+  - id: TEST-MERMAID-CLI
+    type: feature
+    title: spar emit --format mermaid integration tests
+    description: >
+      Integration tests in crates/spar-cli/tests/emit_mermaid.rs invoke the
+      `spar emit` binary against a small inline AADL fixture and verify:
+      (a) happy path — stdout starts with "flowchart TD", contains the root
+      system name, and contains at least one node declaration; (b) category
+      filter — `--category thread` includes the thread subcomponent but
+      excludes processor and process components.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test emit_mermaid
+    status: passing
+    tags: [mermaid, cli, v0100]
+    links:
+      - type: satisfies
+        target: REQ-MERMAID-CLI-001
+
   - id: TEST-EMV2-PROPAGATION
     type: feature
     title: EMV2 error-propagation traversal tests
