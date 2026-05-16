@@ -914,6 +914,39 @@ artifacts:
       - type: verifies
         target: REQ-CODEGEN-VERIFY-PROOF
 
+  - id: TEST-KANI-CODEGEN
+    type: feature
+    status: passing
+    title: Kani — AADL contract preservation harnesses for codegen
+    description: >
+      Three #[kani::proof] harnesses in crates/spar-codegen/tests/kani_contracts.rs
+      constitute spar's Logika-equivalent strategy for generated-code correctness.
+      Each harness uses kani::any() + kani::assume() for symbolic inputs and
+      asserts the postcondition that the codegen pass must satisfy:
+        prove_thread_period_preserved — for any Period p in (0, 1_000_000_000] ns,
+          the emitted dispatch-metadata string round-trips back to exactly p ns
+          (no truncation, no off-by-one);
+        prove_port_direction_preserved — Out source maps exclusively to a WIT setter
+          and In sink to a WIT getter; a well-formed Out→In connection always produces
+          a complementary setter+getter pair; same-direction features never produce a
+          complementary pair;
+        prove_access_right_preserved — Access_Rights = Read_Only never produces
+          &mut in the generated access shim (read-only enforcement at the type level),
+          and Read_Write always does.
+    fields:
+      method: formal-bounded
+      steps:
+        - run: cargo kani --tests -p spar-codegen --harness prove_thread_period_preserved
+        - run: cargo kani --tests -p spar-codegen --harness prove_port_direction_preserved
+        - run: cargo kani --tests -p spar-codegen --harness prove_access_right_preserved
+    links:
+      - type: satisfies
+        target: REQ-KANI-CODEGEN-001
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-PROOF
+      - type: satisfies
+        target: REQ-CODEGEN-001
+
   - id: VAL-MUTATION-001
     type: feature
     status: pass

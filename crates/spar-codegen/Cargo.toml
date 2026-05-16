@@ -31,6 +31,16 @@ harness = false
 [target.'cfg(kani)'.dev-dependencies]
 # `kani` is injected by cargo-kani; no version pin needed.
 
+[features]
+# Enable the AADL-contract Kani harnesses in tests/kani_contracts.rs.
+# Under `cargo kani --tests`, the harnesses are compiled via the `#[cfg(kani)]`
+# cfg-guard (injected by the cargo-kani driver).  This feature flag is a
+# no-op at runtime; it exists so `cargo build -p spar-codegen --features
+# kani-harnesses` can verify the harness module compiles under a normal
+# Rust toolchain without requiring the Kani driver.
+kani-harnesses = []
+
 [lints.rust]
-# Permit the `#[cfg(kani)]` gates used by `tests/kani_codegen.rs`.
+# Permit the `#[cfg(kani)]` gates used by `tests/kani_codegen.rs` and
+# `tests/kani_contracts.rs`.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
