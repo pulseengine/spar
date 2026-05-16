@@ -2640,6 +2640,53 @@ artifacts:
 
   # ── Mermaid emission ────────────────────────────────────────────────────
 
+  # ── Lean formal proofs — v0.10.0 ────────────────────────────────────────
+
+  - id: TEST-PROOF-LATENCY
+    type: feature
+    title: Lean 4 latency monotonicity proof typechecks sorry-free
+    description: >
+      proofs/Proofs/Scheduling/Latency.lean defines Latency (sum of
+      per-component WCETs plus a constant sampling delay) and proves
+      latency_monotone: if every component WCET in c1 is pointwise ≤ the
+      corresponding WCET in c2, then Latency s c1 ≤ Latency s c2. Verified
+      by `lake build` under Lean 4 v4.29.0-rc6 + Mathlib with no sorry.
+      Gate runs a sorry-free smoke check; full `lake build` is exercised by
+      the dedicated "Lean proof typecheck (lake build)" CI workflow.
+    fields:
+      method: automated-test
+      steps:
+        - run: "test -f proofs/Proofs/Scheduling/Latency.lean"
+        - run: "! grep -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/Scheduling/Latency.lean"
+    status: passing
+    tags: [proof, latency, lean, v0100]
+    links:
+      - type: satisfies
+        target: REQ-PROOF-LATENCY-001
+
+  - id: TEST-PROOF-ARINC653
+    type: feature
+    title: Lean 4 ARINC 653 partition isolation proof typechecks sorry-free
+    description: >
+      proofs/Proofs/Scheduling/Arinc653Isolation.lean defines
+      PartitionSchedule, ThreadBinding, and the scheduleConformant predicate,
+      then proves partition_isolation: in a conformant schedule, a thread
+      bound to a different partition than a window's owner cannot execute
+      within that window. Verified by `lake build` under Lean 4 v4.29.0-rc6
+      + Mathlib with no sorry.  Gate runs a sorry-free smoke check; full
+      `lake build` is exercised by the dedicated "Lean proof typecheck (lake
+      build)" CI workflow.
+    fields:
+      method: automated-test
+      steps:
+        - run: "test -f proofs/Proofs/Scheduling/Arinc653Isolation.lean"
+        - run: "! grep -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/Scheduling/Arinc653Isolation.lean"
+    status: passing
+    tags: [proof, arinc653, lean, v0100]
+    links:
+      - type: satisfies
+        target: REQ-PROOF-ARINC653-001
+
   - id: TEST-MERMAID-FLOWCHART
     type: feature
     title: Flowchart emitter produces correct Mermaid markup
