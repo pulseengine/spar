@@ -26,6 +26,7 @@ pub mod connection_rules;
 pub mod connectivity;
 pub mod direction_rules;
 pub mod emv2_analysis;
+pub mod emv2_propagation;
 pub mod emv2_stpa_bridge;
 pub mod extends_rules;
 pub mod feature_group_check;
@@ -132,8 +133,8 @@ impl AnalysisRunner {
     /// mode checks, mode rules, modal rules, property rules, connection
     /// rules, subcomponent rules, scheduling, response-time analysis,
     /// latency, memory budget, resource budget, EMV2 fault-tree,
-    /// EMV2-STPA bridge, ARINC 653, wRPC binding, weight/power aggregation,
-    /// and bus bandwidth.
+    /// EMV2 error-propagation traversal, EMV2-STPA bridge, ARINC 653,
+    /// wRPC binding, weight/power aggregation, and bus bandwidth.
     pub fn register_all(&mut self) {
         use ai_ml::AiMlAnalysis;
         use arinc653::Arinc653Analysis;
@@ -146,6 +147,7 @@ impl AnalysisRunner {
         use connectivity::ConnectivityAnalysis;
         use direction_rules::DirectionRuleAnalysis;
         use emv2_analysis::Emv2Analysis;
+        use emv2_propagation::Emv2PropagationAnalysis;
         use emv2_stpa_bridge::Emv2StpaBridgeAnalysis;
         use feature_group_check::FeatureGroupCheckAnalysis;
         use flow_check::FlowCheckAnalysis;
@@ -188,6 +190,7 @@ impl AnalysisRunner {
         self.register(Box::new(MemoryBudgetAnalysis));
         self.register(Box::new(ResourceBudgetAnalysis));
         self.register(Box::new(Emv2Analysis));
+        self.register(Box::new(Emv2PropagationAnalysis));
         self.register(Box::new(Emv2StpaBridgeAnalysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
@@ -216,6 +219,7 @@ impl AnalysisRunner {
         use connectivity::ConnectivityAnalysis;
         use direction_rules::DirectionRuleAnalysis;
         use emv2_analysis::Emv2Analysis;
+        use emv2_propagation::Emv2PropagationAnalysis;
         use emv2_stpa_bridge::Emv2StpaBridgeAnalysis;
         use feature_group_check::FeatureGroupCheckAnalysis;
         use flow_check::FlowCheckAnalysis;
@@ -257,6 +261,7 @@ impl AnalysisRunner {
         self.register(Box::new(MemoryBudgetAnalysis));
         self.register(Box::new(ResourceBudgetAnalysis));
         self.register(Box::new(Emv2Analysis));
+        self.register(Box::new(Emv2PropagationAnalysis));
         self.register(Box::new(Emv2StpaBridgeAnalysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
