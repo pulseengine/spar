@@ -2118,3 +2118,31 @@ artifacts:
     tags: [ci, rivet, verification, v0100]
 
   # Research findings tracked separately in research/findings.yaml
+
+  # ── Mermaid M3 (classDiagram + requirementDiagram) ─────────────────────
+
+  - id: REQ-MERMAID-CLASS-001
+    type: requirement
+    title: classDiagram emitter for AADL component types
+    description: >
+      spar-mermaid shall provide an emit_class_diagram function that walks a
+      SystemInstance and produces a Mermaid classDiagram with one class block
+      per distinct component type, showing the AADL category as a Mermaid
+      stereotype and listing each FeatureInstance as a class attribute.
+      The emitter shall honour the categories and max_depth filters from
+      MermaidOptions.
+    status: implemented
+    tags: [mermaid, emission, v0100]
+
+  - id: REQ-MERMAID-REQ-001
+    type: requirement
+    title: requirementDiagram emitter from rivet artifacts
+    description: >
+      spar-mermaid shall provide an emit_requirement_diagram function that
+      reads artifacts/requirements.yaml and produces a Mermaid
+      requirementDiagram with one block per requirement/feature artifact and
+      relationship edges (satisfies, verifies, derives) derived from the
+      artifact links section.  Artifacts with type design-decision or other
+      non-requirement types shall be silently skipped.
+    status: implemented
+    tags: [mermaid, emission, v0100]
