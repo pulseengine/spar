@@ -2651,13 +2651,10 @@ artifacts:
       latency_monotone: if every component WCET in c1 is pointwise ≤ the
       corresponding WCET in c2, then Latency s c1 ≤ Latency s c2. Verified
       by `lake build` under Lean 4 v4.29.0-rc6 + Mathlib with no sorry.
-      Gate runs a sorry-free smoke check; full `lake build` is exercised by
-      the dedicated "Lean proof typecheck (lake build)" CI workflow.
     fields:
       method: automated-test
       steps:
-        - run: "test -f proofs/Proofs/Scheduling/Latency.lean"
-        - run: "! grep -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/Scheduling/Latency.lean"
+        - run: cd proofs && lake build
     status: passing
     tags: [proof, latency, lean, v0100]
     links:
@@ -2673,14 +2670,11 @@ artifacts:
       then proves partition_isolation: in a conformant schedule, a thread
       bound to a different partition than a window's owner cannot execute
       within that window. Verified by `lake build` under Lean 4 v4.29.0-rc6
-      + Mathlib with no sorry.  Gate runs a sorry-free smoke check; full
-      `lake build` is exercised by the dedicated "Lean proof typecheck (lake
-      build)" CI workflow.
+      + Mathlib with no sorry.
     fields:
       method: automated-test
       steps:
-        - run: "test -f proofs/Proofs/Scheduling/Arinc653Isolation.lean"
-        - run: "! grep -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/Scheduling/Arinc653Isolation.lean"
+        - run: cd proofs && lake build
     status: passing
     tags: [proof, arinc653, lean, v0100]
     links:
