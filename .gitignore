@@ -8,7 +8,11 @@
 proofs/.lake/
 tests/playwright/node_modules/
 tests/playwright/test-results/
+.playwright-mcp/
 dist/
 architecture.yaml
 requirements.yaml
 verification.yaml
+
+# Stale dev artifacts — re-add explicitly if needed.
+/dashboard-render*.png
