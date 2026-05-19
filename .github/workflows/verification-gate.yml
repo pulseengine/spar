@@ -17,7 +17,12 @@ jobs:
   rivet-verification:
     name: Verification Gate (rivet-driven)
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    timeout-minutes: 30
+    # 60m budget: TEST-PROOF-* steps run `cd proofs && lake build`, which
+    # against Mathlib on a cold elan cache takes 25–35 min. Once smithy
+    # adds Lake build-artifact caching across runs, this can drop back
+    # toward 20m. The dedicated "Lean proof typecheck" workflow has its
+    # own budget for the same step.
+    timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -D warnings
