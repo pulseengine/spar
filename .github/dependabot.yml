@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: &ref_0
+      - dependencies
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: cargo
+    directory: /fuzz
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: cargo
+    directory: /crates/spar-analysis
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: cargo
+    directory: /crates/spar-annex
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: cargo
+    directory: /crates/spar-base-db
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: npm
+    directory: /vscode-spar
+    schedule:
+      interval: weekly
+    labels: *ref_0
+  - package-ecosystem: npm
+    directory: /tests/playwright
+    schedule:
+      interval: weekly
+    labels: *ref_0
