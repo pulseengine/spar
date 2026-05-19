@@ -106,8 +106,13 @@ fn print_usage() {
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!(
-        "  emit     --root Package::Type.Impl [--format mermaid] [--category <cat,...>] \
-         [--max-depth N] [--no-connections] [-o output.md] <file...>"
+        "  emit     [--format mermaid|mermaid-class|mermaid-req] \
+         [--root Package::Type.Impl] [--category <cat,...>] \
+         [--max-depth N] [--no-connections] [-o output.md] [<file...>]\n\
+         \n\
+         \t\t  mermaid       flowchart TD (default)\n\
+         \t\t  mermaid-class classDiagram of component types\n\
+         \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml"
     );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -1316,7 +1321,9 @@ fn parse_category(s: &str) -> spar_hir_def::item_tree::ComponentCategory {
 
 fn cmd_emit(args: &[String]) {
     let mut root: Option<String> = None;
-    let mut format: Option<String> = None;
+    // Default format is "mermaid" (flowchart).  Also accepts "mermaid-class"
+    // and "mermaid-req".
+    let mut format: String = "mermaid".to_string();
     let mut categories: Vec<spar_hir_def::item_tree::ComponentCategory> = Vec::new();
     let mut max_depth: Option<usize> = None;
     let mut include_connections = true;
@@ -1338,14 +1345,20 @@ fn cmd_emit(args: &[String]) {
             "--format" => {
                 i += 1;
                 if i < args.len() {
-                    let f = args[i].clone();
-                    if f != "mermaid" {
-                        eprintln!("--format only supports 'mermaid' (got '{f}')");
-                        process::exit(1);
+                    let f = args[i].as_str();
+                    match f {
+                        "mermaid" | "mermaid-class" | "mermaid-req" => {
+                            format = f.to_string();
+                        }
+                        other => {
+                            eprintln!(
+                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' (got '{other}')"
+                            );
+                            process::exit(1);
+                        }
                     }
-                    format = Some(f);
                 } else {
-                    eprintln!("--format requires a value (mermaid)");
+                    eprintln!("--format requires a value (mermaid|mermaid-class|mermaid-req)");
                     process::exit(1);
                 }
             }
@@ -1399,8 +1412,17 @@ fn cmd_emit(args: &[String]) {
         i += 1;
     }
 
-    let _ = format; // "mermaid" is the only valid value; validated above.
+    // ── mermaid-req: no AADL files needed ───────────────────────────────────
+    if format == "mermaid-req" {
+        let req_path = std::path::Path::new("artifacts/requirements.yaml");
+        let diagram = spar_mermaid::emit_requirement_diagram(req_path).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+        return emit_output(diagram, output);
+    }
 
+    // ── mermaid / mermaid-class: require --root and AADL files ──────────────
     let root = root.unwrap_or_else(|| {
         eprintln!("--root Package::Type.Impl is required");
         process::exit(1);
@@ -1450,8 +1472,17 @@ fn cmd_emit(args: &[String]) {
         include_connections,
     };
 
-    let diagram = spar_mermaid::emit_flowchart(&inst, &opts);
+    let diagram = if format == "mermaid-class" {
+        spar_mermaid::emit_class_diagram(&inst, &opts)
+    } else {
+        spar_mermaid::emit_flowchart(&inst, &opts)
+    };
 
+    emit_output(diagram, output);
+}
+
+/// Write `diagram` to `output` path or stdout.
+fn emit_output(diagram: String, output: Option<String>) {
     match output {
         Some(path) => {
             fs::write(&path, &diagram).unwrap_or_else(|e| {

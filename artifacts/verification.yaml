@@ -2765,3 +2765,49 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-VERIFY-GATE-001
+
+  # ── Mermaid M3 ──────────────────────────────────────────────────────────
+
+  - id: TEST-MERMAID-CLASS
+    type: feature
+    title: classDiagram emitter unit + integration tests
+    description: >
+      Unit tests in crates/spar-mermaid/src/lib.rs verify: (a) one class
+      block is emitted per distinct component type_name; (b) the AADL category
+      appears as a Mermaid stereotype (<<system>>, <<thread>>, etc.); (c) the
+      categories filter excludes components whose category is not listed.
+      Integration test in crates/spar-cli/tests/emit_mermaid.rs invokes
+      spar emit --format mermaid-class and asserts classDiagram header plus
+      at least one stereotype.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-mermaid
+        - run: cargo test -p spar --test emit_mermaid emit_mermaid_class_happy_path
+    status: passing
+    tags: [mermaid, emission, v0100]
+    links:
+      - type: satisfies
+        target: REQ-MERMAID-CLASS-001
+
+  - id: TEST-MERMAID-REQ
+    type: feature
+    title: requirementDiagram emitter unit + integration tests
+    description: >
+      Unit tests in crates/spar-mermaid/src/lib.rs verify: (a) the
+      requirementDiagram header and at least one requirement block are present;
+      (b) satisfies edges appear in output for linked requirements; (c)
+      artifacts with type design-decision are excluded from the diagram.
+      Integration test in crates/spar-cli/tests/emit_mermaid.rs invokes
+      spar emit --format mermaid-req from the workspace root and asserts
+      requirementDiagram header plus at least one REQ_*_001 block.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-mermaid
+        - run: cargo test -p spar --test emit_mermaid emit_mermaid_req_happy_path
+    status: passing
+    tags: [mermaid, emission, v0100]
+    links:
+      - type: satisfies
+        target: REQ-MERMAID-REQ-001
