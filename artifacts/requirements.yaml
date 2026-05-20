@@ -2117,6 +2117,22 @@ artifacts:
     status: implemented
     tags: [ci, rivet, verification, v0100]
 
+  - id: REQ-CODEGEN-WIT-STRICT
+    type: requirement
+    title: codegen --format wit emits only WIT interface files
+    description: >
+      `spar codegen --format wit` shall emit exclusively `.wit` interface
+      files.  The deployment config TOML and the Rust/Bazel workspace
+      scaffolding (Cargo.toml, BUILD.bazel) are gated to `--format rust`
+      and `--format both`.  This gives downstream consumers (e.g. the
+      rules_wasm_component Bazel ruleset) a predictably-shaped tree
+      artifact: `wit` yields interfaces, `rust` yields a buildable
+      workspace, `both` yields everything.  Previously config + workspace
+      files were emitted unconditionally, leaking 5 non-WIT files into
+      `--format wit` output.
+    status: implemented
+    tags: [codegen, wit, cli, v0100]
+
   # Research findings tracked separately in research/findings.yaml
 
   # ── Mermaid M3 (classDiagram + requirementDiagram) ─────────────────────
