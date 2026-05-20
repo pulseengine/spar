@@ -2820,3 +2820,25 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-MERMAID-REQ-001
+
+  # ── codegen --format wit strict filter ──────────────────────────────────
+
+  - id: TEST-CODEGEN-WIT-STRICT
+    type: feature
+    title: codegen --format wit strict-filter tests
+    description: >
+      Tests in crates/spar-codegen/tests/golden_test.rs verify that
+      --format wit (OutputFormat::Wit) emits only `.wit` files with no
+      Cargo.toml / BUILD.bazel / config TOML leakage
+      (wit_format_emits_only_wit_files), and that --format rust still
+      emits the Cargo.toml + BUILD.bazel workspace scaffolding
+      (rust_format_still_emits_workspace).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --test golden_test
+    status: passing
+    tags: [codegen, wit, cli, v0100]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-STRICT

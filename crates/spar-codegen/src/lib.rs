@@ -351,9 +351,13 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
         }
     }
 
-    // Generate config files
-    for &(idx, _comp) in &processes {
-        files.push(config_gen::generate_config(inst, idx));
+    // Generate config files. These are deployment TOML for the Rust
+    // components, not interface definitions — `--format wit` must not
+    // emit them (strict-filter semantics: `wit` yields only `.wit`).
+    if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
+        for &(idx, _comp) in &processes {
+            files.push(config_gen::generate_config(inst, idx));
+        }
     }
 
     // Generate test harnesses
@@ -393,16 +397,21 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
         }
     }
 
-    // Generate workspace files
-    let process_names: Vec<String> = processes
-        .iter()
-        .map(|(_, c)| sanitize_ident(c.name.as_str()))
-        .collect();
+    // Generate workspace files (Cargo.toml + BUILD.bazel). A Rust/Bazel
+    // workspace is meaningless without Rust crates to build, so it is
+    // emitted only for `--format rust` and `--format both`. Under
+    // `--format wit` the output is strictly the `.wit` interface files.
+    if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
+        let process_names: Vec<String> = processes
+            .iter()
+            .map(|(_, c)| sanitize_ident(c.name.as_str()))
+            .collect();
 
-    files.extend(workspace_gen::generate_workspace(
-        &config.root_name,
-        &process_names,
-    ));
+        files.extend(workspace_gen::generate_workspace(
+            &config.root_name,
+            &process_names,
+        ));
+    }
 
     CodegenOutput { files }
 }

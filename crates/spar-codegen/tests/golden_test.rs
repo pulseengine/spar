@@ -107,6 +107,71 @@ fn golden_model_generates_wit() {
     );
 }
 
+// ── Strict --format wit filter ─────────────────────────────────────
+
+/// `--format wit` must yield ONLY `.wit` files — no Cargo.toml, no
+/// BUILD.bazel, no deployment config TOML. Regression guard for the
+/// `rules_wasm_component` integration, which consumes the codegen
+/// output as a predictably-shaped tree artifact.
+#[test]
+fn wit_format_emits_only_wit_files() {
+    let inst = golden_instance();
+    let config = CodegenConfig {
+        root_name: "building_system".into(),
+        output_dir: "output".into(),
+        format: OutputFormat::Wit,
+        verify: None,
+        rivet: false,
+        dry_run: true,
+    };
+    let output = generate(&inst, &config);
+
+    assert!(
+        !output.files.is_empty(),
+        "--format wit should still produce the .wit files"
+    );
+    let non_wit: Vec<&str> = output
+        .files
+        .iter()
+        .map(|f| f.path.as_str())
+        .filter(|p| !p.ends_with(".wit"))
+        .collect();
+    assert!(
+        non_wit.is_empty(),
+        "--format wit must emit only .wit files; leaked: {non_wit:?}"
+    );
+}
+
+/// `--format rust` still emits the Rust workspace scaffolding
+/// (Cargo.toml + BUILD.bazel) — gating must not strip it from the
+/// rust/both paths.
+#[test]
+fn rust_format_still_emits_workspace() {
+    let inst = golden_instance();
+    let config = CodegenConfig {
+        root_name: "building_system".into(),
+        output_dir: "output".into(),
+        format: OutputFormat::Rust,
+        verify: None,
+        rivet: false,
+        dry_run: true,
+    };
+    let output = generate(&inst, &config);
+
+    assert!(
+        output.files.iter().any(|f| f.path == "Cargo.toml"),
+        "--format rust should emit root Cargo.toml"
+    );
+    assert!(
+        output.files.iter().any(|f| f.path.ends_with("BUILD.bazel")),
+        "--format rust should emit BUILD.bazel"
+    );
+    assert!(
+        output.files.iter().all(|f| !f.path.ends_with(".wit")),
+        "--format rust should not emit .wit files"
+    );
+}
+
 // ── Rust generation ────────────────────────────────────────────────
 
 #[test]
