@@ -37,6 +37,7 @@
 //! Out of scope for v1: PCAP-classic, BLF, OPC-UA, deep packet
 //! inspection. See the design doc §"Out-of-scope for v1".
 
+pub mod fixtures;
 pub mod identity;
 pub mod ingest;
 pub mod reconcile;

@@ -2162,3 +2162,26 @@ artifacts:
       non-requirement types shall be silently skipped.
     status: implemented
     tags: [mermaid, emission, v0100]
+
+  # ── Trace-topology fixtures (v0.11.0) ────────────────────────────────────
+
+  - id: REQ-TRACE-FIXTURES-001
+    type: requirement
+    title: Rust trace-fixture generator (netns + TSN)
+    description: >
+      spar shall provide a Rust binary (`gen-fixtures`, in the
+      spar-trace-topology crate) that builds a synthetic three-node TSN
+      topology — grandmaster / switch / endpoint connected by multi-queue
+      veth pairs — inside Linux network namespaces, and produces the four
+      runtime artefacts the v0.11.0 reconciliation engine consumes: a PCAPNG
+      L2 capture, an LLDP neighbour JSON, a Qcc YANG switch-config JSON, and
+      a gPTP sync-error JSON.  Every namespace is owned by a `NetnsGuard`
+      RAII type whose Drop runs `ip netns del`, so a panic or early return
+      still tears the topology down.  The tool probes netns capability at
+      startup and exits non-zero with a clear message if run in an
+      unsuitable environment.  The two transform steps — `tc -j qdisc show`
+      JSON to Qcc YANG, and `pmc` text to gPTP JSON with deterministic
+      synthetic timestamps — are pure functions, unit-tested on any host.
+      The CI harness that runs this tool (a KVM guest) lands in a follow-up.
+    status: implemented
+    tags: [trace-topology, fixtures, v0110]

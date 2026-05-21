@@ -2842,3 +2842,34 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CODEGEN-WIT-STRICT
+
+  # ── Trace-topology fixtures (v0.11.0) ────────────────────────────────────
+
+  - id: TEST-TRACE-FIXTURES
+    type: feature
+    title: trace-fixture transformer unit tests
+    description: >
+      Unit tests in crates/spar-trace-topology/src/fixtures/transform.rs
+      verify the two pure transformer functions with no network-namespace
+      or Linux dependency, so they run on any host: tc taprio+CBS JSON
+      round-trips through QccYangSwitchConfigSource
+      (tc_taprio_cbs_round_trips_qcc); a port with neither taprio nor cbs
+      yields a bare entry with no tsn block (tc_no_taprio_no_cbs_yields_bare_port);
+      a gatemask given as a JSON number is accepted (tc_gatemask_as_number_parsed);
+      a negative pmc masterOffset is abs()'d to a non-negative sync_error_ns
+      (pmc_parses_negative_master_offset_as_abs); a positive offset is
+      preserved (pmc_positive_master_offset_unchanged); synthetic timestamp_ns
+      is deterministic across runs (pmc_timestamp_determinism_two_rounds);
+      multi-round pmc output round-trips through GptpJsonPtpTimeSource
+      (pmc_round_trips_gptp_ingest); LLDP JSON validation accepts the
+      canonical shape and rejects a missing lldp.interface key
+      (lldp_validate_passthrough, lldp_validate_rejects_missing_interface).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology fixtures::transform
+    status: passing
+    tags: [trace-topology, fixtures, v0110]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-FIXTURES-001
