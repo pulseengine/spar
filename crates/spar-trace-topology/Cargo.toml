@@ -14,5 +14,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 pcap-parser = "0.16"
 
+[[bin]]
+name = "gen-fixtures"
+path = "src/bin/gen-fixtures.rs"
+
 [dev-dependencies]
 tempfile = "3"
