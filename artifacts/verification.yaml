@@ -2539,6 +2539,31 @@ artifacts:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-007
 
+  - id: TEST-TRACE-TOPOLOGY-IDENTITY-UNKNOWN
+    type: feature
+    title: IdentityUnknown check flags undeclared MACs and chassis-ids
+    description: >
+      Unit tests in crates/spar-trace-topology/src/engine.rs cover MAC
+      parsing (colon / dash / case), malformed-MAC rejection, the
+      multicast group-bit filter, chassis-id normalisation, the clean
+      path, undeclared-MAC and undeclared-chassis-id findings, the
+      multicast / broadcast exemption, finding dedup + sort determinism,
+      a chassis-id equal to a declared MAC, and ingest-failure surfacing.
+      Integration tests in
+      crates/spar-trace-topology/tests/identity_reconcile.rs exercise
+      DeclaredModel::from_instance against a real instantiated AADL model
+      carrying Spar_Identity properties.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- engine::tests
+        - run: cargo test -p spar-trace-topology --test identity_reconcile
+    status: passing
+    tags: [trace-topology, reconcile, engine, v0110, track-g]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-008
+
   - id: TEST-BINDING-NESTED-PATH
     type: feature
     title: Nested binding paths resolve correctly
