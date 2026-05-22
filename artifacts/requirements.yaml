@@ -2165,6 +2165,28 @@ artifacts:
 
   # ── Trace-topology fixtures (v0.11.0) ────────────────────────────────────
 
+  - id: REQ-FIXTURE-VM-001
+    type: requirement
+    title: KVM harness that runs gen-fixtures inside a NixOS guest
+    description: >
+      spar shall provide a CI harness that executes `gen-fixtures` inside a
+      KVM-accelerated NixOS virtual machine, collects the four trace-topology
+      fixture files (capture.pcapng, lldp.json, qcc-yang.json, gptp.json) via
+      a virtio-9p share, and verifies that all four parse cleanly through the
+      spar-trace-topology ingest parsers.  The harness is a Rust binary
+      (`fixture-vm`) that creates a copy-on-write QEMU overlay over a
+      base qcow2 (so each run is pristine), boots qemu-system-x86_64 with
+      -enable-kvm -nographic, applies a 15-minute wall-clock timeout, and
+      cleans up the overlay on exit/drop.  The NixOS guest image is built by a
+      Nix flake in tools/fixture-vm/ and contains the full TSN fixture
+      toolchain (iproute2, lldpd, linuxptp, tcpdump, tshark) plus the
+      gen-fixtures binary built via rustPlatform.buildRustPackage.  The guest
+      runs gen-fixtures as a systemd oneshot service and powers off on
+      completion.  The workflow that drives this runs nightly and on
+      workflow_dispatch; fixtures are uploaded as a CI artefact.
+    status: implemented
+    tags: [trace-topology, fixtures, ci, v0110]
+
   - id: REQ-TRACE-FIXTURES-001
     type: requirement
     title: Rust trace-fixture generator (netns + TSN)
