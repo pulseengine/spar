@@ -18,5 +18,9 @@ pcap-parser = "0.16"
 name = "gen-fixtures"
 path = "src/bin/gen-fixtures.rs"
 
+[[bin]]
+name = "fixture-vm"
+path = "src/bin/fixture-vm.rs"
+
 [dev-dependencies]
 tempfile = "3"

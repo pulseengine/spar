@@ -1,0 +1,63 @@
+# .github/workflows/fixture-vm-flake-lock.yml
+#
+# Resolves tools/fixture-vm/flake.nix inputs and produces flake.lock.
+#
+# This is a deliberate, occasional action — the Nix equivalent of
+# `cargo update`. The nightly Trace-Topology Fixture Generation workflow
+# builds ONLY against a committed flake.lock and never re-resolves inputs
+# itself; that lock is the determinism pin (pinned nixpkgs, kernel, the
+# whole closure).
+#
+# Usage:
+#   1. Dispatch this workflow (manually).
+#   2. Download the `fixture-vm-flake-lock` artifact.
+#   3. Commit the contained flake.lock to tools/fixture-vm/ in a reviewed PR.
+#
+# The first run bootstraps the lock (none committed yet); later runs bump it.
+#
+# Security note: the only ${{ }} interpolation is github.workspace — a
+# trusted, runner-set checkout path — and it is routed through an env var,
+# never inlined into a shell command.
+
+name: fixture-vm flake.lock
+
+on:
+  workflow_dispatch:
+
+jobs:
+  resolve-lock:
+    name: Resolve flake inputs
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Resolving inputs does not build the image, so no /dev/kvm is needed
+      # here — only the nightly build step boots a builder VM.
+      - name: nix flake update (digest-pinned nixos/nix container)
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          DIGEST="sha256:4aba8f0048d5af9623dd61d8c8c80d61765c1a8a26f81afb33e28e2a4d5e9dbf"
+          podman run --rm \
+            --security-opt label=disable \
+            -v "${WORKSPACE}:/spar:Z" \
+            "docker.io/nixos/nix@${DIGEST}" \
+            sh -c '
+              set -euo pipefail
+              mkdir -p /etc/nix
+              echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+              cd /spar/tools/fixture-vm
+              nix flake update
+            '
+
+      - name: Show resolved lock
+        run: cat tools/fixture-vm/flake.lock
+
+      - name: Upload flake.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixture-vm-flake-lock
+          path: tools/fixture-vm/flake.lock
+          if-no-files-found: error
+          retention-days: 30

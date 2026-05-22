@@ -1,0 +1,156 @@
+# .github/workflows/trace-fixtures.yml
+#
+# Nightly job that builds the NixOS KVM guest, runs gen-fixtures inside it,
+# verifies the four fixture files, and uploads them as a CI artefact.
+#
+# Triggers: workflow_dispatch (manual) + schedule (nightly).
+# NOT pull_request — this is a build-and-execute job, not a per-PR check.
+#
+# All 12 CI runners are KVM-capable (bare-metal, /dev/kvm present, runner
+# user in the kvm group, qemu-system-x86_64 8.2.2 installed).  The NixOS
+# guest is built inside a rootless podman container from a digest-pinned
+# nixos/nix image; the container receives --device /dev/kvm because the
+# NixOS qcow2 builder internally boots a transient builder VM.
+#
+# The Nix store is ephemeral (no persistent named volume) — it is rebuilt
+# cold from cache.nixos.org on each run.  This keeps PR 2 simple; a
+# persistent volume can be layered in once the workflow is proven.
+#
+# Determinism: this job builds ONLY against the committed
+# tools/fixture-vm/flake.lock — it never runs `nix flake update`.  The lock
+# IS the pin (the whole reason for the NixOS approach); re-resolving inputs
+# per run would silently un-pin nixpkgs / the kernel.  Updating the lock is
+# a deliberate, reviewed action — see the `fixture-vm flake.lock` workflow
+# (.github/workflows/fixture-vm-flake-lock.yml).
+
+name: Trace-Topology Fixture Generation
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 02:30 UTC every day.
+    - cron: "30 2 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  FIXTURE_OUTPUT_DIR: fixture-output
+
+jobs:
+  generate-fixtures:
+    name: Build guest + generate fixtures
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── 2. Require a committed flake.lock (the determinism pin) ──────────
+      #
+      # The nightly build never re-resolves flake inputs. If the lock is
+      # absent the build must FAIL with a clear pointer rather than silently
+      # run un-pinned.
+      - name: Require committed flake.lock
+        run: |
+          if [ ! -f tools/fixture-vm/flake.lock ]; then
+            echo "::error::tools/fixture-vm/flake.lock is missing."
+            echo "::error::The nightly build runs only against a committed,"
+            echo "::error::reviewed lock. Dispatch the 'fixture-vm flake.lock'"
+            echo "::error::workflow, download its artifact, and commit the"
+            echo "::error::resulting flake.lock in a PR."
+            exit 1
+          fi
+
+      # ── 3. Build the NixOS guest qcow2 via rootless podman ───────────────
+      #
+      # The nixos/nix image is pinned by digest for determinism — the image
+      # is part of the Nix closure, and :latest would silently pull a
+      # different version.  Update the digest here when a newer Nix release
+      # is needed.
+      #
+      # sha256 digest of docker.io/nixos/nix:2.24.9 (amd64).
+      # Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
+      #
+      # Note: "sandbox = false" in nix.conf drops Nix's in-container build
+      # sandbox (not host root — the container is already rootless).
+      # Without it, Nix's sandboxed builds fail inside the already-
+      # containerised environment.  --device /dev/kvm is required because
+      # the NixOS qcow2 builder boots a transient builder VM.
+      #
+      # --no-update-lock-file makes `nix build` FAIL rather than re-resolve
+      # if the committed lock is stale/incomplete — belt-and-suspenders with
+      # the guard step above.
+      - name: Build NixOS fixture-vm qcow2
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          DIGEST="sha256:4aba8f0048d5af9623dd61d8c8c80d61765c1a8a26f81afb33e28e2a4d5e9dbf"
+          podman run --rm \
+            --device /dev/kvm \
+            --security-opt label=disable \
+            -v "${WORKSPACE}:/spar:Z" \
+            "docker.io/nixos/nix@${DIGEST}" \
+            sh -c '
+              set -euo pipefail
+              # Enable flakes + nix-command.
+              mkdir -p /etc/nix
+              echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+              echo "sandbox = false" >> /etc/nix/nix.conf
+              cd /spar/tools/fixture-vm
+              # Build the qcow2 image against the committed flake.lock.
+              nix build --no-update-lock-file \
+                .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
+                --out-link /spar/tools/fixture-vm/result
+            '
+
+      - name: Locate qcow2
+        id: qcow2
+        run: |
+          QCOW2="$(readlink -f tools/fixture-vm/result/nixos.qcow2)"
+          echo "path=${QCOW2}" >> "$GITHUB_OUTPUT"
+          echo "fixture-vm: qcow2 = ${QCOW2}"
+          ls -lh "${QCOW2}"
+
+      # ── 3. Build the fixture-vm Rust harness ─────────────────────────────
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build fixture-vm harness
+        run: cargo build -p spar-trace-topology --bins --release
+
+      # ── 4. Run the harness (boots VM, collects fixtures) ─────────────────
+      - name: Create fixture output directory
+        run: mkdir -p "$FIXTURE_OUTPUT_DIR"
+
+      - name: Run fixture-vm (boot NixOS guest, generate fixtures)
+        env:
+          QCOW2_PATH: ${{ steps.qcow2.outputs.path }}
+        run: |
+          ./target/release/fixture-vm \
+            --base-qcow2 "${QCOW2_PATH}" \
+            --output-dir "${FIXTURE_OUTPUT_DIR}"
+
+      # ── 5. Verify: tshark -r capture.pcapng ──────────────────────────────
+      - name: Verify capture.pcapng with tshark
+        run: |
+          tshark -r "${FIXTURE_OUTPUT_DIR}/capture.pcapng" \
+            -q -z io,stat,0 2>&1 | tee /tmp/tshark-out.txt
+          # tshark exits non-zero if the file is corrupt or empty.
+
+      # ── 6. Round-trip: parse all four fixtures through ingest parsers ─────
+      - name: Verify all four fixtures parse cleanly (ingest round-trip)
+        run: |
+          ./target/release/fixture-vm --verify "${FIXTURE_OUTPUT_DIR}"
+
+      # ── 7. Upload fixtures as a CI artefact ──────────────────────────────
+      - name: Upload fixture artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trace-topology-fixtures-${{ github.run_number }}
+          path: |
+            ${{ env.FIXTURE_OUTPUT_DIR }}/capture.pcapng
+            ${{ env.FIXTURE_OUTPUT_DIR }}/lldp.json
+            ${{ env.FIXTURE_OUTPUT_DIR }}/qcc-yang.json
+            ${{ env.FIXTURE_OUTPUT_DIR }}/gptp.json
+          retention-days: 30
+          if-no-files-found: error

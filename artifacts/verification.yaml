@@ -2873,3 +2873,24 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-TRACE-FIXTURES-001
+
+  - id: TEST-FIXTURE-VM
+    type: feature
+    title: KVM fixture-vm harness build and verify
+    description: >
+      Verifies the fixture-vm Rust harness (crates/spar-trace-topology/src/bin/fixture-vm.rs)
+      builds cleanly alongside gen-fixtures.  The --verify mode parses all
+      four fixture files through the spar-trace-topology ingest parsers and
+      asserts Ok.  The full VM boot and fixture-generation path (NixOS guest,
+      KVM, virtio-9p) runs only in the nightly trace-fixtures workflow on the
+      self-hosted KVM-capable runners; that path is unvalidated in this PR and
+      will be exercised by the first nightly run.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo build -p spar-trace-topology --bin fixture-vm
+    status: passing
+    tags: [trace-topology, fixtures, ci, v0110]
+    links:
+      - type: satisfies
+        target: REQ-FIXTURE-VM-001
