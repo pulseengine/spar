@@ -38,7 +38,7 @@ jobs:
         env:
           WORKSPACE: ${{ github.workspace }}
         run: |
-          DIGEST="sha256:4aba8f0048d5af9623dd61d8c8c80d61765c1a8a26f81afb33e28e2a4d5e9dbf"
+          DIGEST="sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
           podman run --rm \
             --security-opt label=disable \
             -v "${WORKSPACE}:/spar:Z" \
