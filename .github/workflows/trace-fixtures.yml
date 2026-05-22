@@ -15,6 +15,13 @@
 # The Nix store is ephemeral (no persistent named volume) — it is rebuilt
 # cold from cache.nixos.org on each run.  This keeps PR 2 simple; a
 # persistent volume can be layered in once the workflow is proven.
+#
+# Determinism: this job builds ONLY against the committed
+# tools/fixture-vm/flake.lock — it never runs `nix flake update`.  The lock
+# IS the pin (the whole reason for the NixOS approach); re-resolving inputs
+# per run would silently un-pin nixpkgs / the kernel.  Updating the lock is
+# a deliberate, reviewed action — see the `fixture-vm flake.lock` workflow
+# (.github/workflows/fixture-vm-flake-lock.yml).
 
 name: Trace-Topology Fixture Generation
 
@@ -38,7 +45,23 @@ jobs:
       # ── 1. Checkout ──────────────────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Build the NixOS guest qcow2 via rootless podman ───────────────
+      # ── 2. Require a committed flake.lock (the determinism pin) ──────────
+      #
+      # The nightly build never re-resolves flake inputs. If the lock is
+      # absent the build must FAIL with a clear pointer rather than silently
+      # run un-pinned.
+      - name: Require committed flake.lock
+        run: |
+          if [ ! -f tools/fixture-vm/flake.lock ]; then
+            echo "::error::tools/fixture-vm/flake.lock is missing."
+            echo "::error::The nightly build runs only against a committed,"
+            echo "::error::reviewed lock. Dispatch the 'fixture-vm flake.lock'"
+            echo "::error::workflow, download its artifact, and commit the"
+            echo "::error::resulting flake.lock in a PR."
+            exit 1
+          fi
+
+      # ── 3. Build the NixOS guest qcow2 via rootless podman ───────────────
       #
       # The nixos/nix image is pinned by digest for determinism — the image
       # is part of the Nix closure, and :latest would silently pull a
@@ -53,6 +76,10 @@ jobs:
       # Without it, Nix's sandboxed builds fail inside the already-
       # containerised environment.  --device /dev/kvm is required because
       # the NixOS qcow2 builder boots a transient builder VM.
+      #
+      # --no-update-lock-file makes `nix build` FAIL rather than re-resolve
+      # if the committed lock is stale/incomplete — belt-and-suspenders with
+      # the guard step above.
       - name: Build NixOS fixture-vm qcow2
         env:
           WORKSPACE: ${{ github.workspace }}
@@ -70,10 +97,9 @@ jobs:
               echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
               echo "sandbox = false" >> /etc/nix/nix.conf
               cd /spar/tools/fixture-vm
-              # Generate/update the lockfile on first run (or if inputs changed).
-              nix flake update
-              # Build the qcow2 image.
-              nix build .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
+              # Build the qcow2 image against the committed flake.lock.
+              nix build --no-update-lock-file \
+                .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
                 --out-link /spar/tools/fixture-vm/result
             '
 
