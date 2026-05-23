@@ -27,7 +27,11 @@ on:
 jobs:
   resolve-lock:
     name: Resolve flake inputs
-    runs-on: [self-hosted, linux, x64]
+    # `podman` constrains scheduling to a rootless-podman-capable runner
+    # (runner9 at the moment).  The default `[self-hosted, linux, x64]`
+    # set will hit runners without working rootless-podman userns setup
+    # (newuidmap EPERM) — confirmed on runner8 on 2026-05-23.
+    runs-on: [self-hosted, linux, x64, podman]
 
     steps:
       - uses: actions/checkout@v4

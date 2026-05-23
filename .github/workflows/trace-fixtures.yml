@@ -39,7 +39,12 @@ env:
 jobs:
   generate-fixtures:
     name: Build guest + generate fixtures
-    runs-on: [self-hosted, linux, x64]
+    # `podman` constrains scheduling to a rootless-podman-capable runner
+    # (runner9 at the moment).  KVM access is universal on the fleet, so
+    # no `kvm` label is needed; without `podman` we land on runners whose
+    # rootless userns setup is broken (newuidmap EPERM, runner8 on
+    # 2026-05-23).
+    runs-on: [self-hosted, linux, x64, podman]
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
