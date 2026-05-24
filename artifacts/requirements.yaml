@@ -2180,6 +2180,25 @@ artifacts:
     status: implemented
     tags: [codegen, wit, cli, v0100]
 
+  - id: REQ-CODEGEN-SUMMARY
+    type: requirement
+    title: codegen prints a per-category summary and a hint when WIT was requested but none emitted
+    description: >
+      `spar codegen` shall print a one-line summary breaking the
+      generated files down by category (`.wit`, `.rs`, workspace, config,
+      other) together with the requested `--format`, so an operator can
+      tell at a glance both what got produced and whether the requested
+      format was honoured.  When `--format wit` or `--format both` is
+      passed (`both` is the default) and zero `.wit` files are emitted,
+      a diagnostic hint shall follow the summary explaining that WIT
+      interfaces are generated per AADL `process` subcomponent and
+      pointing to `--format rust` as the alternative for models with
+      threads only.  This addresses the silent failure mode that
+      surfaces as "the other files but no wit" when an AADL model has
+      threads but no processes.
+    status: implemented
+    tags: [codegen, wit, cli, diagnostics, v0110]
+
   # Research findings tracked separately in research/findings.yaml
 
   # ── Mermaid M3 (classDiagram + requirementDiagram) ─────────────────────
