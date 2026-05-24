@@ -2947,3 +2947,41 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-FIXTURE-VM-001
+
+  - id: TEST-RELEASE-ASSETS-STANDARD
+    type: feature
+    title: Release workflow matches the synth reference asset + signing shape
+    description: >
+      Static checks on `.github/workflows/release.yml`:
+      `create-release` carries the trio of permissions
+      (`contents: write`, `id-token: write`, `attestations: write`)
+      at job level; the steps run, in order, archive flatten →
+      SHA256SUMS generation → `actions/attest-build-provenance@v2`
+      with both `*.tar.gz` and `*.zip` in `subject-path` →
+      `sigstore/cosign-installer@v3` pinned at `v2.4.1` →
+      `cosign sign-blob --yes --bundle SHA256SUMS.txt.cosign.bundle
+      --output-signature SHA256SUMS.txt.sig
+      --output-certificate SHA256SUMS.txt.pem SHA256SUMS.txt` →
+      `build-env.txt` → `gh release create … --generate-notes
+      release-assets/*` (idempotent: existing releases get
+      `gh release upload --clobber`).  The SBOM job uses
+      `cargo cyclonedx --manifest-path crates/spar-cli/Cargo.toml
+      --format json --spec-version 1.5`.  Smoke runs after the next
+      tag (`gh attestation verify <archive> --repo pulseengine/spar`
+      and `cosign verify-blob --bundle SHA256SUMS.txt.cosign.bundle
+      SHA256SUMS.txt`) confirm consumers can verify with the
+      pulseengine standard one-liners.
+    fields:
+      method: workflow-inspection
+      steps:
+        - run: python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
+        - run: grep -q 'actions/attest-build-provenance@v2' .github/workflows/release.yml
+        - run: grep -q 'sigstore/cosign-installer@v3' .github/workflows/release.yml
+        - run: "grep -q \"cosign-release: 'v2.4.1'\" .github/workflows/release.yml"
+        - run: grep -q 'cosign sign-blob' .github/workflows/release.yml
+        - run: grep -q 'build-env.txt' .github/workflows/release.yml
+    status: passing
+    tags: [release, supply-chain, cosign, slsa, sbom, v0110]
+    links:
+      - type: satisfies
+        target: REQ-RELEASE-ASSETS-STANDARD

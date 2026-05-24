@@ -302,60 +302,177 @@ jobs:
           tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
         run: |
-          cargo cyclonedx --format json --all
-          # Collect per-crate SBOMs into one directory
+          set -euo pipefail
+          # cargo-cyclonedx does not proxy cargo's `-p` package-selection
+          # flag, so we point `--manifest-path` at the CLI crate directly
+          # (mirrors the synth reference). The generated SBOM lands next
+          # to that Cargo.toml.
+          cargo cyclonedx \
+            --manifest-path crates/spar-cli/Cargo.toml \
+            --format json \
+            --spec-version 1.5
           mkdir -p sbom-out
-          find . -name "*.cdx.json" -exec cp {} sbom-out/ \;
-          # Merge into a single SBOM (use the CLI crate as primary)
-          cp crates/spar-cli/spar.cdx.json sbom-out/spar-sbom.cdx.json
+          SBOM_SRC="crates/spar-cli/spar.cdx.json"
+          if [ ! -f "$SBOM_SRC" ]; then
+            SBOM_SRC="$(find crates/spar-cli -maxdepth 2 -name '*.cdx.json' | head -1)"
+          fi
+          test -n "$SBOM_SRC" && test -f "$SBOM_SRC"
+          # Tag-version stamping (`spar-<bare>.cdx.json`) happens at
+          # release-assets flatten time in the create-release job.
+          cp "$SBOM_SRC" sbom-out/spar.cdx.json
           ls -la sbom-out/
       - uses: actions/upload-artifact@v4
         with:
           name: sbom
-          path: sbom-out/spar-sbom.cdx.json
+          path: sbom-out/spar.cdx.json
 
   # ── Create GitHub Release ─────────────────────────────────────────────
+  #
+  # Follows the pulseengine standard release-artifact flow (synth is the
+  # reference; see pulseengine/synth/.github/workflows/release.yml).
+  # Per-tag invariant set of assets:
+  #
+  #   spar-vX.Y.Z-<triple>.{tar.gz|zip}    one per build target
+  #   spar-X.Y.Z.cdx.json                  CycloneDX SBOM (toolchain)
+  #   SHA256SUMS.txt                       single sums file (no per-file sidecars)
+  #   SHA256SUMS.txt.sig                   detached cosign signature
+  #   SHA256SUMS.txt.pem                   Fulcio cert
+  #   SHA256SUMS.txt.cosign.bundle         verifier-friendly cosign bundle
+  #   build-env.txt                        rustc/cargo/cosign/runner versions
+  #
+  # Plus, by historical contract for this repo: the platform VSIXes and
+  # the compliance-report archive, both folded into SHA256SUMS.txt.
   create-release:
     name: Create GitHub Release
     needs: [build-binaries, build-compliance, build-test-evidence, build-vsix, build-sbom]
     runs-on: ubuntu-latest
+    # Restated at job-level: actions/attest-build-provenance + cosign
+    # keyless OIDC need both `id-token: write` and `attestations: write`.
+    # Workflow-level permissions grant the same trio — restated here to
+    # keep the job locally self-explanatory.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Collect assets
+      - name: Flatten release assets
+        env:
+          GH_REF: ${{ github.ref }}
         run: |
-          mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" -o -name "*.cdx.json" \) -exec mv {} release/ \;
-          ls -la release/
+          set -euo pipefail
+          mkdir -p release-assets
+          # tar.gz / zip / vsix flow through unchanged.
+          find artifacts -type f \
+            \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) \
+            -exec cp {} release-assets/ \;
+          # Version-stamp the SBOM per the release-asset naming
+          # standard: <tool>-X.Y.Z.cdx.json (bare version, no `v`).
+          VERSION="${GH_REF#refs/tags/}"
+          BARE="${VERSION#v}"
+          SBOM_SRC="$(find artifacts -type f -name '*.cdx.json' | head -1)"
+          if [ -n "$SBOM_SRC" ]; then
+            cp "$SBOM_SRC" "release-assets/spar-${BARE}.cdx.json"
+          else
+            echo "::error::No CycloneDX SBOM found in downloaded artifacts."
+            exit 1
+          fi
+          ls -la release-assets/
 
-      - name: Generate checksums
+      # Generate SHA256SUMS *before* attest/sign so its content is
+      # stable and the cosign signature pins it. All non-signature
+      # assets get checksummed (SLSA attestation jsonl, .sig/.pem/.bundle
+      # are added after this step and are not in the sums file).
+      - name: Generate SHA256 checksums
         run: |
-          cd release
-          sha256sum * > SHA256SUMS.txt
+          set -euo pipefail
+          cd release-assets
+          sha256sum ./* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          gh release create "$VERSION" \
-            --title "spar $VERSION" \
-            --generate-notes \
-            release/*
+      # ── SLSA build provenance (GitHub-native) ──────────────────────────
+      # actions/attest-build-provenance@v2 generates an in-toto SLSA v1
+      # provenance statement for every binary archive, signs it keyless
+      # via Sigstore (Fulcio cert bound to this workflow's OIDC identity),
+      # and records it in the Rekor transparency log. Consumers verify
+      # with `gh attestation verify <file> --repo pulseengine/spar`.
+      # GitHub-native attestation (not the standalone SLSA generator)
+      # keeps the workflow self-contained. spar ships both .tar.gz
+      # (Unix) and .zip (Windows), so both globs are attested.
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
 
-      - name: Attest release artifacts (SLSA provenance)
+      # ── Sigstore keyless signing (cosign) ──────────────────────────────
+      # Signs SHA256SUMS.txt so a consumer can verify the checksum file
+      # itself was produced by this workflow (closes the gap where an
+      # attacker who can replace a release asset could also replace the
+      # plain checksum file). Mirrors the pulseengine/synth and
+      # pulseengine/witness cosign sign-blob pattern. The .cosign.bundle
+      # is the verifier-friendly artifact; .sig + .pem are the detached
+      # signature and Fulcio certificate. Verify with:
+      #   cosign verify-blob \
+      #     --certificate-identity-regexp \
+      #       'https://github.com/pulseengine/spar/.github/workflows/release.yml@.*' \
+      #     --certificate-oidc-issuer \
+      #       'https://token.actions.githubusercontent.com' \
+      #     --bundle SHA256SUMS.txt.cosign.bundle \
+      #     SHA256SUMS.txt
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign SHA256SUMS with cosign (keyless OIDC)
+        run: |
+          set -euo pipefail
+          cd release-assets
+          cosign sign-blob \
+            --yes \
+            --bundle SHA256SUMS.txt.cosign.bundle \
+            --output-signature SHA256SUMS.txt.sig \
+            --output-certificate SHA256SUMS.txt.pem \
+            SHA256SUMS.txt
+          echo "::notice::SHA256SUMS signed via Sigstore keyless flow."
+          ls -la ./*
+
+      - name: Capture build environment
+        run: |
+          set -euo pipefail
+          {
+            echo "rustc: $(rustc --version)"
+            echo "cargo: $(cargo --version)"
+            echo "cosign: $(cosign version 2>&1 | head -1)"
+            echo "runner: $(uname -srm)"
+          } > release-assets/build-env.txt
+          cat release-assets/build-env.txt
+
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REF_NAME: ${{ github.ref_name }}
         run: |
-          for file in release/*; do
-            echo "Attesting: $file"
-            gh attestation create "$file" \
-              --repo "${{ github.repository }}" \
-              --bundle-output "$file.jsonl" || true
-          done
+          set -euo pipefail
+          VERSION="$GH_REF_NAME"
+          # Idempotent: re-running the workflow for an existing release
+          # uploads/overwrites assets rather than failing. --clobber lets
+          # a re-run replace assets a previous partial run left behind.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::notice::Release $VERSION exists; uploading assets"
+            gh release upload "$VERSION" --clobber release-assets/*
+          else
+            echo "::notice::Creating Release $VERSION with assets"
+            gh release create "$VERSION" \
+              --title "spar $VERSION" \
+              --generate-notes \
+              release-assets/*
+          fi
