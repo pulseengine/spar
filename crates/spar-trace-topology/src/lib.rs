@@ -47,7 +47,9 @@ pub mod ingest;
 pub mod reconcile;
 pub mod report;
 
-pub use engine::{DeclaredModel, ReconcileError, check_identity_unknown, parse_mac};
+pub use engine::{
+    DeclaredModel, ReconcileError, check_gptp_out_of_budget, check_identity_unknown, parse_mac,
+};
 pub use ingest::{
     CapturedFrame, FrameSource, GateOperation, GptpJsonPtpTimeSource, IngestError,
     LldpJsonTopologySource, LldpNeighbor, PcapngFrameSource, PortConfig, PtpPortObservation,

@@ -2564,6 +2564,34 @@ artifacts:
       - type: satisfies
         target: REQ-TRACE-TOPOLOGY-008
 
+  - id: TEST-TRACE-TOPOLOGY-GPTP-OUT-OF-BUDGET
+    type: feature
+    title: GptpOutOfBudget flags worst-case ports exceeding the declared Sync_Error budget
+    description: >
+      Unit tests in crates/spar-trace-topology/src/engine.rs cover the
+      clean path (every port below budget), the over-budget flag, the
+      no-budget-declared case (check is N/A), the multi-budget deferred
+      case (no finding emitted, owner cannot be attributed), worst-sample
+      semantics (max across each port's samples — not first / not mean),
+      max-across-violating-ports for the finding's observed_ps,
+      boundary equality (observed == budget is pass per design §4.4),
+      and the empty-samples no-flag case. Integration tests in
+      crates/spar-trace-topology/tests/gptp_out_of_budget.rs exercise
+      DeclaredModel::from_instance against an instantiated AADL model
+      carrying `Spar_TSN::Sync_Error => 1000 ns;` — confirming unit
+      conversion (ns → ps) is applied via the existing
+      spar-network::tsn::get_sync_error_ps accessor.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-trace-topology --lib -- engine::tests::gptp_
+        - run: cargo test -p spar-trace-topology --test gptp_out_of_budget
+    status: passing
+    tags: [trace-topology, reconcile, engine, gptp, v0110, track-g]
+    links:
+      - type: satisfies
+        target: REQ-TRACE-TOPOLOGY-009
+
   - id: TEST-BINDING-NESTED-PATH
     type: feature
     title: Nested binding paths resolve correctly

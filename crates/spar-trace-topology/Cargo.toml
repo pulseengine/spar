@@ -10,6 +10,7 @@ description = "Runtime/declared topology reconciliation for spar (PCAPNG + LLDP 
 spar-hir-def.workspace = true
 spar-base-db.workspace = true
 spar-syntax.workspace = true
+spar-network.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 pcap-parser = "0.16"

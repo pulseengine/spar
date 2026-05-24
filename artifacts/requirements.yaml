@@ -1968,6 +1968,31 @@ artifacts:
     status: implemented
     tags: [trace-topology, reconcile, engine, v0110, track-g]
 
+  - id: REQ-TRACE-TOPOLOGY-009
+    type: requirement
+    title: GptpOutOfBudget reconciliation check (single-budget case)
+    description: >
+      System shall provide the GptpOutOfBudget reconciliation check in
+      spar-trace-topology::engine — the second of the five v1
+      deterministic checks. The check reads the declared
+      `Spar_TSN::Sync_Error` budget (in picoseconds, via the existing
+      spar-network::tsn::get_sync_error_ps accessor's unit conversion)
+      off every component (bus or processor) of an instantiated AADL
+      SystemInstance, then — if exactly one such budget is declared —
+      flags the owning component when any observed gPTP port's
+      worst-case sync error exceeds it. The finding's `observed_ps`
+      carries the worst-case across all over-budget ports per design
+      §4.4's "worst-case observed error" wording. Multi-budget systems
+      need port→bus ownership mapping (the feature-level
+      `LLDP_Port_Id` surface, deferred with the connection-property
+      surface elsewhere in this module); the check returns no findings
+      in the multi-budget case rather than mis-attributing the owner.
+      Boundary equality (observed == budget) is a pass per §4.4's "does
+      not exceed" wording. Per
+      docs/designs/v0.10.0-trace-topology.md §4.4.
+    status: implemented
+    tags: [trace-topology, reconcile, engine, gptp, v0110, track-g]
+
   - id: REQ-BINDING-002
     type: requirement
     title: Actual_Processor_Binding accepts nested dotted reference paths
