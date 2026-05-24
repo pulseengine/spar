@@ -10,8 +10,8 @@
 //!
 //! ## What this module currently implements
 //!
-//! - [`DeclaredModel`] — the index of identities the AADL model declares,
-//!   built once by walking a [`SystemInstance`].
+//! - [`DeclaredModel`] — the index of identities and budgets the AADL
+//!   model declares, built once by walking a [`SystemInstance`].
 //! - [`check_identity_unknown`] — the `IdentityUnknown` check (design
 //!   §4.1), restricted in this release to the **component-borne**
 //!   identities: `Spar_Identity::MAC_Address` and
@@ -19,6 +19,13 @@
 //!   processors, and buses (all of which are `ComponentInstance`s, so
 //!   their property maps are reachable via
 //!   [`SystemInstance::properties_for`]).
+//! - [`check_gptp_out_of_budget`] — the `GptpOutOfBudget` check (design
+//!   §4.4), restricted in this release to the **single-budget** case:
+//!   if exactly one bus or processor declares `Spar_TSN::Sync_Error`,
+//!   every observed gPTP port's worst-case sync error is checked
+//!   against that one budget. Multi-budget systems need port→bus
+//!   ownership, which lives on the same connection-property surface
+//!   deferred elsewhere in this module.
 //!
 //! ## Deliberately deferred
 //!
@@ -27,8 +34,10 @@
 //!   they are not reachable through the component property-map surface
 //!   this module uses. They land once the connection-property surfacing
 //!   is settled, in a sibling commit.
-//! - **The other four checks** (`TopologyMissingWiring`, `ConfigDrift`,
-//!   `GptpOutOfBudget`, `BinaryMismatch`) and the orchestrating
+//! - **Multi-bus `GptpOutOfBudget`** — needs the same connection-property
+//!   surface to map an observed PTP port to its owning bus or processor.
+//! - **The remaining three checks** (`TopologyMissingWiring`,
+//!   `ConfigDrift`, `BinaryMismatch`) and the orchestrating
 //!   `reconcile()` entry point that composes all five.
 //! - **SARIF 2.1.0 emission** and the **in-toto v1.0 attestation
 //!   envelope** — design §5; later v0.11.0 / v1.0 commits.
@@ -41,12 +50,13 @@
 //! order is a pure function of the input content, never of iteration or
 //! hashing order.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use spar_hir_def::instance::SystemInstance;
+use spar_network::tsn::get_sync_error_ps;
 
 use crate::identity;
-use crate::ingest::{FrameSource, IngestError, TopologySource};
+use crate::ingest::{FrameSource, IngestError, PtpTimeSource, TopologySource};
 use crate::reconcile::ReconcileFinding;
 
 /// An error raised while the reconciliation engine consumes its inputs.
@@ -157,6 +167,12 @@ pub struct DeclaredModel {
     /// Normalised LLDP chassis-ids declared via
     /// `Spar_Identity::LLDP_Chassis_Id`.
     declared_chassis_ids: BTreeSet<String>,
+    /// Declared `Spar_TSN::Sync_Error` budgets in picoseconds, keyed by
+    /// component instance path (FQN). Populated for any component — bus
+    /// or processor — that declares the property. The
+    /// [`check_gptp_out_of_budget`] check runs only when exactly one
+    /// entry is present.
+    declared_sync_budgets_ps: BTreeMap<String, u64>,
 }
 
 impl DeclaredModel {
@@ -185,6 +201,14 @@ impl DeclaredModel {
             .insert(normalise_chassis_id(chassis_id));
     }
 
+    /// Record a declared `Spar_TSN::Sync_Error` budget for the
+    /// component at `component_path` (FQN, e.g. `"Sys::net"`), in
+    /// picoseconds.
+    pub fn declare_sync_budget(&mut self, component_path: &str, budget_ps: u64) {
+        self.declared_sync_budgets_ps
+            .insert(component_path.to_string(), budget_ps);
+    }
+
     /// Build the declared model by walking every component instance of an
     /// instantiated AADL system and reading its `Spar_Identity::*`
     /// property surface.
@@ -202,6 +226,10 @@ impl DeclaredModel {
             if let Some(chassis_id) = identity::get_lldp_chassis_id(props) {
                 model.declare_chassis_id(&chassis_id);
             }
+            if let Some(budget_ps) = get_sync_error_ps(props) {
+                let path = instance.component_instance_path(idx);
+                model.declare_sync_budget(&path, budget_ps);
+            }
         }
         model
     }
@@ -218,6 +246,13 @@ impl DeclaredModel {
     pub fn knows_chassis_id(&self, chassis_id: &str) -> bool {
         self.declared_chassis_ids
             .contains(&normalise_chassis_id(chassis_id))
+    }
+
+    /// Look up a declared `Spar_TSN::Sync_Error` budget for the
+    /// component at `component_path`, in picoseconds.
+    #[must_use]
+    pub fn knows_sync_budget(&self, component_path: &str) -> Option<u64> {
+        self.declared_sync_budgets_ps.get(component_path).copied()
     }
 }
 
@@ -288,10 +323,67 @@ pub fn check_identity_unknown(
     Ok(findings)
 }
 
+/// `GptpOutOfBudget` — design §4.4.
+///
+/// **Pass:** the worst-case gPTP synchronization error observed at every
+/// port over the capture window does not exceed the declared
+/// `Spar_TSN::Sync_Error` (in picoseconds) for the bus or processor that
+/// owns the port.
+///
+/// **Fail:** at least one port observed ε > declared budget. Emits a
+/// single [`ReconcileFinding::GptpOutOfBudget`] for the owning component
+/// carrying the worst-case error observed across all of its over-budget
+/// ports — per the design's "worst-case observed error" wording.
+///
+/// This release supports the **single-budget** case only: if exactly one
+/// AADL component declares `Spar_TSN::Sync_Error`, every observed PTP
+/// port is checked against that one budget. Zero-budget or
+/// multi-budget cases return no findings (the multi-budget case is
+/// deferred — it needs the feature-level `LLDP_Port_Id` surface to map
+/// an observed port to its owning bus, the same connection-property
+/// surface deferred by `IdentityUnknown` and the other open checks).
+/// Choosing the most restrictive declared budget would be unsound: the
+/// finding's `bus_or_processor` field names the *owner*, and naming the
+/// strict-budget bus as the owner of an over-budget port that actually
+/// belongs to a lax bus would mis-attribute the failure.
+pub fn check_gptp_out_of_budget(
+    declared: &DeclaredModel,
+    ptp: &dyn PtpTimeSource,
+) -> Vec<ReconcileFinding> {
+    if declared.declared_sync_budgets_ps.len() != 1 {
+        return Vec::new();
+    }
+    // Safe: len == 1.
+    let (owner, &budget_ps) = declared.declared_sync_budgets_ps.iter().next().unwrap();
+
+    let mut worst_violation_ps: Option<u64> = None;
+    for port in ptp.ports() {
+        let worst_ns = port
+            .samples
+            .iter()
+            .map(|s| s.sync_error_ns)
+            .max()
+            .unwrap_or(0);
+        let worst_ps = worst_ns.saturating_mul(1_000);
+        if worst_ps > budget_ps {
+            worst_violation_ps = Some(worst_violation_ps.map_or(worst_ps, |m| m.max(worst_ps)));
+        }
+    }
+
+    match worst_violation_ps {
+        Some(observed_ps) => vec![ReconcileFinding::GptpOutOfBudget {
+            bus_or_processor: owner.clone(),
+            budget_ps,
+            observed_ps,
+        }],
+        None => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ingest::{CapturedFrame, LldpNeighbor};
+    use crate::ingest::{CapturedFrame, LldpNeighbor, PtpPortObservation, PtpSample};
 
     /// In-memory [`FrameSource`] for tests — single-pass, no real I/O.
     struct VecFrames(Vec<CapturedFrame>);
@@ -329,6 +421,37 @@ mod tests {
             remote_port_id: "p1".to_string(),
             remote_port_id_type: "ifname".to_string(),
             remote_system_name: None,
+        }
+    }
+
+    /// In-memory [`PtpTimeSource`] for tests.
+    struct VecPtp {
+        ports: Vec<PtpPortObservation>,
+    }
+
+    impl PtpTimeSource for VecPtp {
+        fn grandmaster(&self) -> Option<&str> {
+            None
+        }
+        fn domain(&self) -> Option<u8> {
+            None
+        }
+        fn ports(&self) -> &[PtpPortObservation] {
+            &self.ports
+        }
+    }
+
+    fn ptp_port(name: &str, sync_errors_ns: &[u64]) -> PtpPortObservation {
+        PtpPortObservation {
+            name: name.to_string(),
+            samples: sync_errors_ns
+                .iter()
+                .enumerate()
+                .map(|(i, &e)| PtpSample {
+                    timestamp_ns: i as u64,
+                    sync_error_ns: e,
+                })
+                .collect(),
         }
     }
 
@@ -494,5 +617,128 @@ mod tests {
             err,
             ReconcileError::Ingest(IngestError::Truncated)
         ));
+    }
+
+    // ── GptpOutOfBudget ──────────────────────────────────────────────
+
+    #[test]
+    fn gptp_clean_when_all_ports_below_budget() {
+        // Budget = 1_000_000 ps = 1 us; observed worst = 500 ns = 500_000 ps.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[200, 500, 300])],
+        };
+
+        let findings = check_gptp_out_of_budget(&model, &ptp);
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn gptp_flags_port_over_budget() {
+        // Budget = 1000 ps; observed worst = 2000 ns × 1000 = 2_000_000 ps.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[1, 2000, 3])],
+        };
+
+        let findings = check_gptp_out_of_budget(&model, &ptp);
+        assert_eq!(
+            findings,
+            vec![ReconcileFinding::GptpOutOfBudget {
+                bus_or_processor: "Sys::net".to_string(),
+                budget_ps: 1_000,
+                observed_ps: 2_000_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn gptp_no_finding_when_no_budget_declared() {
+        // Empty declared model — check is N/A, returns empty.
+        let model = DeclaredModel::new();
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[5_000_000_000])],
+        };
+        assert!(check_gptp_out_of_budget(&model, &ptp).is_empty());
+    }
+
+    #[test]
+    fn gptp_deferred_when_multiple_components_declare_budget() {
+        // Multi-budget — owner ambiguous without port→bus mapping; deferred.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net_a", 1_000);
+        model.declare_sync_budget("Sys::net_b", 100_000_000_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[1_000_000])],
+        };
+        assert!(check_gptp_out_of_budget(&model, &ptp).is_empty());
+    }
+
+    #[test]
+    fn gptp_uses_worst_sample_per_port() {
+        // Worst sample 1500 ns × 1000 = 1_500_000 ps > 1_000_000 budget.
+        // If the engine averaged or took the first sample it would pass.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[100, 200, 1500, 250])],
+        };
+        let findings = check_gptp_out_of_budget(&model, &ptp);
+        assert_eq!(findings.len(), 1);
+        match &findings[0] {
+            ReconcileFinding::GptpOutOfBudget { observed_ps, .. } => {
+                assert_eq!(*observed_ps, 1_500_000);
+            }
+            other => panic!("unexpected finding: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gptp_reports_max_across_all_violating_ports() {
+        // Two ports both exceed budget; finding's observed_ps is the
+        // greater of the two worst-cases — per design §4.4.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000_000);
+        let ptp = VecPtp {
+            ports: vec![
+                ptp_port("swp1", &[1200]),
+                ptp_port("swp2", &[5000]),
+                ptp_port("swp3", &[500]), // below budget — ignored
+            ],
+        };
+        let findings = check_gptp_out_of_budget(&model, &ptp);
+        assert_eq!(findings.len(), 1);
+        match &findings[0] {
+            ReconcileFinding::GptpOutOfBudget { observed_ps, .. } => {
+                assert_eq!(*observed_ps, 5_000_000);
+            }
+            other => panic!("unexpected finding: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn gptp_observed_equal_to_budget_is_pass() {
+        // Boundary: per design §4.4, ε does not exceed budget — equality
+        // is pass, not fail.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[1000])], // 1000 ns × 1000 = 1_000_000 ps
+        };
+        assert!(check_gptp_out_of_budget(&model, &ptp).is_empty());
+    }
+
+    #[test]
+    fn gptp_port_with_no_samples_does_not_flag() {
+        // Ports with no observations contribute zero — must not synthesise
+        // a finding from absence of data.
+        let mut model = DeclaredModel::new();
+        model.declare_sync_budget("Sys::net", 1_000_000);
+        let ptp = VecPtp {
+            ports: vec![ptp_port("swp1", &[])],
+        };
+        assert!(check_gptp_out_of_budget(&model, &ptp).is_empty());
     }
 }
