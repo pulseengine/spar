@@ -27,8 +27,11 @@
 //!   config source (Qcc YANG), and PTP-time source (gPTP). Real
 //!   parsing lands in v0.10.x sibling commits.
 //! - The [`reconcile`] module declares the `ReconcileFinding` enum
-//!   carrying the five deterministic check kinds. The reconciliation
-//!   engine itself ships in v0.11.0.
+//!   carrying the five deterministic check kinds.
+//! - The [`engine`] module hosts the v0.11.0 reconciliation engine —
+//!   the deterministic checks that compare a declared AADL model against
+//!   the observed runtime artefacts. It lands incrementally; see the
+//!   module docs for what is implemented and what is deferred.
 //! - The [`report`] module declares the `TopologyReport` struct that
 //!   collects findings. SARIF emission and the signed in-toto
 //!   attestation predicate (`https://pulseengine.eu/spar-trace-topology/v1`)
@@ -37,12 +40,14 @@
 //! Out of scope for v1: PCAP-classic, BLF, OPC-UA, deep packet
 //! inspection. See the design doc §"Out-of-scope for v1".
 
+pub mod engine;
 pub mod fixtures;
 pub mod identity;
 pub mod ingest;
 pub mod reconcile;
 pub mod report;
 
+pub use engine::{DeclaredModel, ReconcileError, check_identity_unknown, parse_mac};
 pub use ingest::{
     CapturedFrame, FrameSource, GateOperation, GptpJsonPtpTimeSource, IngestError,
     LldpJsonTopologySource, LldpNeighbor, PcapngFrameSource, PortConfig, PtpPortObservation,

@@ -1946,6 +1946,28 @@ artifacts:
     status: implemented
     tags: [trace-topology, properties, identity, ip, v0100]
 
+  - id: REQ-TRACE-TOPOLOGY-008
+    type: requirement
+    title: IdentityUnknown reconciliation check (component-borne identities)
+    description: >
+      System shall provide the IdentityUnknown reconciliation check in
+      spar-trace-topology::engine — the first of the five v1
+      deterministic checks. The check builds a DeclaredModel index by
+      walking an instantiated AADL SystemInstance and reading the
+      Spar_Identity::MAC_Address and Spar_Identity::LLDP_Chassis_Id
+      properties of every component, then flags any unicast MAC observed
+      in the PCAPNG capture, or any LLDP neighbor chassis-id observed in
+      the topology snapshot, that no AADL component declares.
+      Group-addressed (multicast / broadcast) MACs are exempt — they
+      reconcile against Multicast_Group, a connection-borne surface.
+      Findings are deterministic: PCAPNG findings first then LLDP
+      findings, each ascending, each distinct identity reported once.
+      Connection-borne identities (Stream_Handle, Multicast_Group,
+      VLAN_ID) and the other four checks are deferred to sibling v0.11.0
+      commits. Per docs/designs/v0.10.0-trace-topology.md §4.1.
+    status: implemented
+    tags: [trace-topology, reconcile, engine, v0110, track-g]
+
   - id: REQ-BINDING-002
     type: requirement
     title: Actual_Processor_Binding accepts nested dotted reference paths
