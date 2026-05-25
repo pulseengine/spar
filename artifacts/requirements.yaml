@@ -2254,3 +2254,28 @@ artifacts:
       The CI harness that runs this tool (a KVM guest) lands in a follow-up.
     status: implemented
     tags: [trace-topology, fixtures, v0110]
+
+  - id: REQ-RELEASE-ASSETS-STANDARD
+    type: requirement
+    title: Release-asset flow follows the pulseengine standard (synth reference)
+    description: >
+      `.github/workflows/release.yml` shall produce a fixed asset set per
+      tag — `spar-vX.Y.Z-<triple>.{tar.gz,zip}`, `spar-X.Y.Z.cdx.json`,
+      `SHA256SUMS.txt`, `SHA256SUMS.txt.sig`, `SHA256SUMS.txt.pem`,
+      `SHA256SUMS.txt.cosign.bundle`, `build-env.txt` — and run, in
+      order: archive build, CycloneDX SBOM (via
+      `cargo cyclonedx --manifest-path crates/spar-cli/Cargo.toml
+      --format json --spec-version 1.5`), `sha256sum ./*`,
+      `actions/attest-build-provenance@v2` over the binary archives (SLSA
+      v1 provenance, GitHub-native), `sigstore/cosign-installer@v3` at
+      cosign v2.4.1, `cosign sign-blob --yes` over `SHA256SUMS.txt`
+      (keyless OIDC), `build-env.txt`, then upload everything to the
+      GitHub release.  Required workflow permissions:
+      `contents: write`, `id-token: write`, `attestations: write`.
+      Mirrors the synth reference
+      (pulseengine/synth/.github/workflows/release.yml) so consumers can
+      verify with a single one-liner across every pulseengine tool.
+      Replaces the prior `gh attestation create … || true` step that
+      silently swallowed failures.
+    status: implemented
+    tags: [release, supply-chain, cosign, slsa, sbom, v0110]
