@@ -208,9 +208,12 @@ fn roundtrip_aadl_codegen_produces_all_artifacts() {
     );
 
     let stderr = String::from_utf8_lossy(&codegen.stderr);
+    // Codegen prints a per-category summary of the shape
+    //   codegen: wrote N files (… .wit, … .rs, … workspace) (format: both) to <dir>/
+    // — see crates/spar-cli/src/main.rs `summarise_codegen_output`.
     assert!(
-        stderr.contains("Generated"),
-        "should report generation: {stderr}"
+        stderr.contains("codegen: wrote") && stderr.contains("(format:"),
+        "should report generation summary: {stderr}"
     );
 
     // Verify key files were generated
