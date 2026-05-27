@@ -2073,12 +2073,15 @@ fn cmd_codegen(args: &[String]) {
     let result = spar_codegen::generate(&inst, &config);
 
     if dry_run {
-        eprintln!("Dry run: {} files would be generated", result.files.len());
+        eprintln!(
+            "Dry run: {}",
+            summarise_codegen_output(&result.files, output_format)
+        );
         for file in &result.files {
             println!("{}/{}", output_dir, file.path);
         }
+        maybe_print_empty_wit_hint(&result.files, output_format);
     } else {
-        let mut count = 0;
         for file in &result.files {
             // Validate that the generated file path does not escape the
             // output directory via path traversal (e.g., "../" components).
@@ -2098,10 +2101,110 @@ fn cmd_codegen(args: &[String]) {
                 eprintln!("Cannot write {full_path}: {e}");
                 process::exit(1);
             });
-            count += 1;
         }
-        eprintln!("Generated {count} files in {output_dir}/");
+        eprintln!(
+            "codegen: {} to {output_dir}/",
+            summarise_codegen_output(&result.files, output_format)
+        );
+        maybe_print_empty_wit_hint(&result.files, output_format);
     }
+}
+
+/// Categorise a generated file by extension / well-known name.
+///
+/// `(extension_tag, count_label)` — the tag is used for the empty-WIT
+/// hint, the label is what shows up in the summary line.
+fn codegen_file_categories(files: &[spar_codegen::GeneratedFile]) -> [(u32, &'static str); 5] {
+    let mut wit = 0u32;
+    let mut rust = 0u32;
+    let mut workspace = 0u32;
+    let mut config = 0u32;
+    let mut other = 0u32;
+    for file in files {
+        let path = std::path::Path::new(&file.path);
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        match (ext, name) {
+            ("wit", _) => wit += 1,
+            ("rs", _) => rust += 1,
+            (_, "Cargo.toml" | "Cargo.lock" | "BUILD.bazel" | "WORKSPACE") => workspace += 1,
+            ("toml", _) => config += 1,
+            _ => other += 1,
+        }
+    }
+    [
+        (wit, ".wit"),
+        (rust, ".rs"),
+        (workspace, "workspace"),
+        (config, "config"),
+        (other, "other"),
+    ]
+}
+
+/// One-line summary like
+/// `wrote 7 files (1 .wit, 4 .rs, 2 workspace) (format: both)`.
+///
+/// The format label answers "did spar honour my `--format`?" at a
+/// glance, and the per-category counts answer "what got produced?" —
+/// the silent default-`both` failure mode (Rust + workspace files but
+/// zero `.wit` when the model has no `process` subcomponents) is
+/// immediately visible from this line alone.
+fn summarise_codegen_output(
+    files: &[spar_codegen::GeneratedFile],
+    format: spar_codegen::OutputFormat,
+) -> String {
+    let cats = codegen_file_categories(files);
+    let format_label = match format {
+        spar_codegen::OutputFormat::Rust => "rust",
+        spar_codegen::OutputFormat::Wit => "wit",
+        spar_codegen::OutputFormat::Both => "both",
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for (n, label) in cats {
+        if n > 0 {
+            parts.push(format!("{n} {label}"));
+        }
+    }
+    let body = if parts.is_empty() {
+        "empty".to_string()
+    } else {
+        parts.join(", ")
+    };
+    let total = files.len();
+    let noun = if total == 1 { "file" } else { "files" };
+    format!("wrote {total} {noun} ({body}) (format: {format_label})")
+}
+
+/// Explain the silent failure mode: when WIT was requested (`--format wit`
+/// or the default `--format both`) but zero `.wit` files were emitted,
+/// the AADL model has no `process` subcomponents to generate interfaces
+/// for. This is the most common confusing case — agents see "the other
+/// files but no wit" and don't know why — so the hint is worth a few
+/// lines of stdout.
+fn maybe_print_empty_wit_hint(
+    files: &[spar_codegen::GeneratedFile],
+    format: spar_codegen::OutputFormat,
+) {
+    let asked_for_wit = matches!(
+        format,
+        spar_codegen::OutputFormat::Wit | spar_codegen::OutputFormat::Both
+    );
+    if !asked_for_wit {
+        return;
+    }
+    let wit_count = codegen_file_categories(files)[0].0;
+    if wit_count > 0 {
+        return;
+    }
+    eprintln!(
+        "hint: --format {} emits one .wit interface per AADL `process` subcomponent;",
+        match format {
+            spar_codegen::OutputFormat::Wit => "wit",
+            _ => "both",
+        }
+    );
+    eprintln!("      this model has 0 processes — add `process` declarations to the system");
+    eprintln!("      implementation, or pass --format rust for thread skeletons only.");
 }
 
 /// Check that a generated file path is safe to write under the output directory.

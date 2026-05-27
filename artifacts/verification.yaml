@@ -2896,6 +2896,33 @@ artifacts:
       - type: satisfies
         target: REQ-CODEGEN-WIT-STRICT
 
+  - id: TEST-CODEGEN-SUMMARY-HINT
+    type: feature
+    title: codegen per-category summary line + empty-WIT hint smoke
+    description: >
+      Smoke runs of `spar codegen` confirm the new diagnostic:
+      threads-only model + default `--format both` emits the summary
+      `wrote N files (... .rs, ... workspace) (format: both)` followed
+      by the three-line hint pointing at `process` subcomponents and
+      `--format rust`; process + `--format wit` emits the summary with
+      `.wit` count and no hint; threads + `--format rust` emits the
+      summary with no hint (user did not request WIT). Helpers
+      `summarise_codegen_output` and `maybe_print_empty_wit_hint` in
+      crates/spar-cli/src/main.rs are pure functions of the generated
+      file list + format, ready for promotion to golden tests if the
+      stdout shape is later contracted.
+    fields:
+      method: smoke-test
+      steps:
+        - run: cargo run -q -p spar -- codegen --root Threads::Sys.impl --output /tmp/threads-out /tmp/threads.aadl
+        - run: cargo run -q -p spar -- codegen --root Proc::Sys.impl --format wit --output /tmp/proc-out /tmp/proc.aadl
+        - run: cargo run -q -p spar -- codegen --root Threads::Sys.impl --format rust --output /tmp/threads-rust-out /tmp/threads.aadl
+    status: passing
+    tags: [codegen, wit, cli, diagnostics, v0110]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-SUMMARY
+
   # ── Trace-topology fixtures (v0.11.0) ────────────────────────────────────
 
   - id: TEST-TRACE-FIXTURES
