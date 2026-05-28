@@ -5,11 +5,10 @@
 # spar must never regress on a file it currently accepts.
 #
 # Scoped to parser-relevant changes (plus manual dispatch) rather than
-# every PR: the corpus is a SHA-pinned submodule (deterministic between
-# runs), and the ~50 MB submodule checkout only earns its cost when the
-# lexer / parser / item-tree or the corpus itself changes. The
-# regression baseline lives in
-# test-data/interop/osate-corpus-expected-failures.txt.
+# every PR: the corpus is vendored verbatim (deterministic), and the run
+# only earns its cost when the lexer / parser / item-tree or the corpus
+# itself changes. The regression baselines live in
+# test-data/interop/baseline/ (spar-gaps.txt + unadjudicated.txt).
 name: AADL interop corpus
 
 on:
@@ -29,10 +28,6 @@ jobs:
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The corpus is a submodule; fetch it so the test runs for real
-          # rather than skipping with a "submodule absent" warning.
-          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

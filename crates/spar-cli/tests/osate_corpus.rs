@@ -1,27 +1,29 @@
 //! OSATE interop corpus — Tier-A of the AADL plug-fest (issue #246).
 //!
-//! Walks the vendored `osate/examples` submodule and parses every `.aadl`
-//! file with spar's own parser (`spar_syntax::parse`). The point is **not**
-//! to be all-green — much of the OSATE corpus is annex-heavy (EMV2,
+//! Walks the vendored `osate/examples` corpus (verbatim under
+//! test-data/interop/osate-examples, see PROVENANCE.md) and parses every
+//! `.aadl` file with spar's own parser (`spar_syntax::parse`). The point is
+//! **not** to be all-green — much of the OSATE corpus is annex-heavy (EMV2,
 //! Behavior, Resolute, AGREE) that spar does not yet accept. The point is
 //! to produce a *number* — parsed / total, bucketed by annex usage — and
 //! to ratchet it: spar must never regress on a file it currently accepts.
 //!
 //! ## How the ratchet works
 //!
-//! `test-data/interop/osate-corpus-expected-failures.txt` is the committed
-//! baseline: the set of corpus files spar currently fails to parse. The
-//! test fails only if a file **not** in that baseline fails to parse (a
-//! genuine regression). Files in the baseline that start parsing are
-//! reported as progress — update the baseline to lock the win in:
+//! Two committed baselines under `test-data/interop/baseline/` hold the
+//! files spar currently fails to parse: `spar-gaps.txt` (genuine parser
+//! gaps to fix) and `unadjudicated.txt` (bugtrack-* fixtures that may be
+//! intentionally malformed — not spar bugs until the Tier-B OSATE oracle
+//! confirms OSATE accepts them). The test fails only if a file in **neither**
+//! baseline fails to parse (a genuine regression). Files leaving a baseline
+//! are reported as progress — re-bless to lock the win in:
 //!
 //! ```text
 //! SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus
 //! ```
 //!
-//! If the submodule is not checked out, the test skips with a hint rather
-//! than failing — so a shallow clone without `--recursive` is not a hard
-//! error. CI checks the submodule out explicitly.
+//! If the corpus is absent (it is vendored, so this should not happen on a
+//! normal checkout), the test skips with a hint rather than failing.
 //!
 //! See issue #246 for the full plug-fest design (Tiers A/B/C, OSATE-in-
 //! Docker round-trips, instance-equivalence). This file is Tier-A only.
@@ -33,9 +35,19 @@ const CORPUS_DIR: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../test-data/interop/osate-examples"
 );
-const BASELINE: &str = concat!(
+/// Genuine spar parser gaps — files spar *should* eventually parse.
+/// Ratchet these down by fixing the parser (issue #246).
+const BASELINE_GAPS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../test-data/interop/osate-corpus-expected-failures.txt"
+    "/../../test-data/interop/baseline/spar-gaps.txt"
+);
+/// `bugtrack-*` regression fixtures that may be intentionally malformed —
+/// NOT counted as spar bugs until the Tier-B OSATE oracle confirms OSATE
+/// itself accepts them. Quarantined so a parser gap and a bad fixture are
+/// never conflated.
+const BASELINE_UNADJUDICATED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../test-data/interop/baseline/unadjudicated.txt"
 );
 
 /// Coarse classification by which AADL annex (if any) the file leans on.
@@ -98,8 +110,8 @@ fn collect_aadl(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn load_baseline() -> BTreeSet<String> {
-    std::fs::read_to_string(BASELINE)
+fn read_failure_list(path: &str) -> Vec<String> {
+    std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
         .map(str::trim)
@@ -108,13 +120,37 @@ fn load_baseline() -> BTreeSet<String> {
         .collect()
 }
 
+/// Union of both baselines — the full set of files spar is allowed to
+/// fail on without it being a regression.
+fn load_baseline() -> BTreeSet<String> {
+    read_failure_list(BASELINE_GAPS)
+        .into_iter()
+        .chain(read_failure_list(BASELINE_UNADJUDICATED))
+        .collect()
+}
+
+fn write_baseline(path: &str, header: &str, files: &[String]) {
+    let mut body = String::new();
+    for line in header.lines() {
+        body.push_str("# ");
+        body.push_str(line);
+        body.push('\n');
+    }
+    body.push_str("# Regenerate: SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus\n");
+    for f in files {
+        body.push_str(f);
+        body.push('\n');
+    }
+    std::fs::write(path, body).expect("write baseline");
+}
+
 #[test]
 fn osate_corpus_parses_without_regression() {
     let corpus = Path::new(CORPUS_DIR);
     if !corpus.exists() {
         eprintln!(
-            "::warning::OSATE corpus submodule absent at {CORPUS_DIR}; run \
-             `git submodule update --init test-data/interop/osate-examples`. Skipping."
+            "::warning::OSATE corpus absent at {CORPUS_DIR} (it is vendored — \
+             expected present on a normal checkout). Skipping."
         );
         return;
     }
@@ -124,7 +160,7 @@ fn osate_corpus_parses_without_regression() {
     files.sort();
     assert!(
         !files.is_empty(),
-        "corpus directory present but contains no .aadl files — submodule half-initialised?"
+        "corpus directory present but contains no .aadl files"
     );
 
     // Per-bucket [parsed, total] tallies + the set of failing relative paths.
@@ -153,21 +189,31 @@ fn osate_corpus_parses_without_regression() {
         }
     }
 
-    // Bless mode: rewrite the baseline from the observed failures.
+    // Bless mode: rewrite the two baselines from the observed failures,
+    // splitting `bugtrack-*` regression fixtures (unadjudicated — possibly
+    // intentionally malformed) from genuine spar parser gaps.
     if std::env::var_os("SPAR_CORPUS_BLESS").is_some() {
-        let mut body = String::new();
-        body.push_str("# OSATE corpus files spar does not yet parse (issue #246, Tier-A).\n");
-        body.push_str("# Regenerate: SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus\n");
-        body.push_str("# A file leaving this list = spar improved; a file that fails but is\n");
-        body.push_str("# absent = a regression the test will reject.\n");
-        for f in &failures {
-            body.push_str(f);
-            body.push('\n');
-        }
-        std::fs::write(BASELINE, body).expect("write baseline");
+        let (unadjudicated, gaps): (Vec<String>, Vec<String>) = failures
+            .iter()
+            .cloned()
+            .partition(|f| f.contains("bugtrack"));
+        write_baseline(
+            BASELINE_GAPS,
+            "spar parser gaps (issue #246, Tier-A): files spar should eventually\n\
+             parse. A file leaving this list = spar improved; a file that fails\n\
+             but is absent from EITHER baseline = a regression the test rejects.",
+            &gaps,
+        );
+        write_baseline(
+            BASELINE_UNADJUDICATED,
+            "bugtrack-* regression fixtures — may be intentionally malformed.\n\
+             NOT spar bugs until the Tier-B OSATE oracle confirms OSATE accepts them.",
+            &unadjudicated,
+        );
         eprintln!(
-            "blessed baseline: {} known failures recorded",
-            failures.len()
+            "blessed: {} parser gaps, {} unadjudicated bugtrack fixtures",
+            gaps.len(),
+            unadjudicated.len()
         );
         return;
     }

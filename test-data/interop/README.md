@@ -5,51 +5,52 @@ Tier-A of the spar AADL plug-fest — see **issue #246** for the full design
 
 ## What this is
 
-`osate-examples/` is a **git submodule** pointing at
-[`osate/examples`](https://github.com/osate/examples) — the SEI/CMU OSATE
-example-model collection — pinned at commit `8db5647`. The
-`tests/osate_corpus.rs` test in `spar-cli` parses every `.aadl` file in it
-with spar's own parser and ratchets the result: spar must never regress on
-a file it currently accepts.
+`osate-examples/` is the SEI/CMU [`osate/examples`](https://github.com/osate/examples)
+model collection, **vendored verbatim** (all 548 `.aadl` source models, plus
+the SEI `Notice.txt` files) at commit `8db5647`. Provenance and the SEI
+reproduction grant are in [`PROVENANCE.md`](PROVENANCE.md). It is our body of
+conformance fixtures: we parse it, and we fix **spar** — never the models —
+when spar can't.
 
-Baseline at pin time: **516 / 548 files parse** (core 281/310, emv2 187/190,
-behavior 5/5, annex-other 43/43). The set of currently-unparsed files lives
-in `osate-corpus-expected-failures.txt`; a file leaving that list is
-progress, a file failing that is *not* on it is a regression the test
-rejects.
+The `crates/spar-cli` test `osate_corpus.rs` parses every `.aadl` with spar's
+own parser (`spar_syntax::parse`) and ratchets the result: spar must never
+regress on a file it currently accepts.
 
-## Provenance and licensing — READ BEFORE EXTENDING
+## The two baselines (`baseline/`)
 
-- The upstream repo carries **no explicit `LICENSE` file** and its README
-  states it is **no longer maintained**. We therefore do **not** restate a
-  license for it here, and we do **not** copy its content into this repo's
-  git history.
-- It is referenced as a **submodule** specifically so the example files are
-  *fetched from upstream at build time*, never redistributed inside spar's
-  own blobs. This is a reference, not a redistribution.
-- **Before any Tier-B work that copies, transforms, or redistributes a
-  subset of these models** (e.g. checking adjudicated fixtures into
-  `adjudicated/`), the licensing must be resolved — either by curating only
-  models with a clear license, or by hand-authoring spec-shaped fixtures
-  from the public AS5506 annex examples.
+The set of files spar does not yet parse is split by *why*:
 
-## Updating the pin
+- **`spar-gaps.txt`** — genuine spar parser gaps (12 at last bless). These
+  are real targets: we fix the parser and watch the list shrink. Examples:
+  property-set `applies to` forms, named-constant property-type ranges,
+  nested-list property values in connection blocks.
+- **`unadjudicated.txt`** — `bugtrack-*` regression fixtures (17). These are
+  OSATE's *own* bug-repro models and may be intentionally malformed; they are
+  **not** treated as spar bugs until the Tier-B OSATE oracle confirms OSATE
+  itself accepts them. Quarantining them keeps a parser gap from being
+  conflated with a bad fixture.
+
+A file failing that is absent from **both** baselines is a regression the
+test rejects. Current signal: **519 / 548 parse** (core 284/310, emv2
+187/190, behavior 5/5, annex-other 43/43).
+
+## Workflow: fix spar, never the corpus
 
 ```sh
-git -C test-data/interop/osate-examples fetch origin
-git -C test-data/interop/osate-examples checkout <new-sha>
-git add test-data/interop/osate-examples
-# re-bless the baseline against the new corpus:
+# After improving the parser, re-bless to lock progress in:
 SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus
-git add test-data/interop/osate-corpus-expected-failures.txt
+git add test-data/interop/baseline/
 ```
 
-## Running locally
+The corpus files are reproduced under the SEI "without modification" grant
+(see PROVENANCE.md) — editing them would both break the ratchet's meaning and
+fall outside that grant.
+
+## Running
 
 ```sh
-git submodule update --init test-data/interop/osate-examples
 cargo test -p spar --test osate_corpus -- --nocapture
 ```
 
-The test **skips with a warning** (does not fail) if the submodule is not
-checked out, so a non-recursive clone is not a hard error.
+The dedicated `.github/workflows/aadl-interop.yml` job runs it on
+parser-relevant PRs + `workflow_dispatch`.

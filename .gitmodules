@@ -1,3 +1,0 @@
-[submodule "test-data/interop/osate-examples"]
-	path = test-data/interop/osate-examples
-	url = https://github.com/osate/examples

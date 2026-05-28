@@ -1,0 +1,347 @@
+package train_version1
+
+public
+
+with EMV2;
+with Data_Model;
+with train_errors;
+
+data speed
+end speed;
+
+data boolean
+properties
+	Data_Model::Data_Representation => boolean;
+end boolean;
+
+-- The door is the device itself that represent the device
+-- It is commanded by the controller
+system door
+features
+	open_cmd : in data port boolean;
+annex behavior_specification {**
+	states
+		Closed : initial state;
+		Opened : state;
+	transitions
+		t1 : Closed -[open_cmd? = false]-> Closed;
+		t2 : Closed -[open_cmd? = true]-> Opened;
+		t3 : Opened -[open_cmd? = true]-> Opened;
+		t4 : Opened -[open_cmd? = false]-> Closed;
+**};	
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+
+	component error behavior
+	events
+		Internal_Failure : error event;
+	transitions
+		t0 : Operational -[Internal_Failure]-> Failed;
+	end component;
+	properties
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Door is not operating";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Failed;
+		
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Door is fully operational";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Operational;
+**};
+end door;
+
+ 
+-- The door_controller is the main component (the heart of this example).
+-- The condition for a safe opening of the door is represented
+-- by the behavior annex transitions.
+-- Also, the component may handle the error propagated by the other
+-- components.
+system door_controller
+features
+	speed 			: in data port speed;
+	intransit   	: in data port boolean;
+	alarm      	 	: in data port boolean;
+	door_sensor 	: in data port boolean;
+	door_open_cmd	: out data port boolean;
+annex behavior_specification {**
+	states
+		Doors_Closed : initial state;
+		Doors_Opened : state;
+	transitions
+		t1 : Doors_Closed -[speed? = 0 and intransit? = false and self.safe ]-> Doors_Opened {door_open_cmd := true;};
+		t2 : Doors_Closed -[alarm? = true]-> Doors_Opened {door_open_cmd := true;};
+		t5 : Doors_Opened -[self.safe and speed? = 0 and intransit? = false and door_sensor?= false and alarm? = false]-> Doors_Closed {door_open_cmd := false;};
+**};
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+	 
+	error propagations
+		speed 			: in propagation{ValueError,ServiceError};
+		intransit 		: in propagation{ValueError,ServiceError};
+		alarm 			: in propagation{ValueError};
+		door_sensor 	: in propagation{ValueError};
+	flows
+		f1 			: error sink speed{ValueError,ServiceError};
+		f2 			: error sink intransit{ValueError,ServiceError};
+		f3 			: error sink alarm{ValueError};
+		f4 			: error sink door_sensor{ValueError};
+	end propagations;
+	
+	component error behavior
+	events
+		Internal_Failure : error event;
+	transitions
+		t0 : Operational -[Internal_Failure]-> Failed;
+		t1 : Operational -[speed{ValueError} or speed{ServiceError}]-> Failed;
+		t2 : Operational -[intransit{ValueError} or intransit{ServiceError}]-> Failed;
+		t3 : Operational -[alarm{ValueError}]-> Failed;
+		t4 : Operational -[door_sensor{ValueError}]-> Failed;
+--	propagations
+
+--  TODO: add a propagation rules that will send the event self.safe to null
+--        the idea here is to capture the fact that when we have an error, the self.safe
+--        is set to false so that we cannot trigger any transition.
+--		p0 : Failed -[]-> self{ValueError};
+
+	end component;
+	properties
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Unability to control the door";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Failed;
+		
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "The door controller is fully operational";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Operational;
+**};
+end door_controller;
+
+-- The alarm component is very simple: it sends a boolean
+-- (on/off) value in case the alarm was triggered and they
+-- was an emergency. Upon hazard detection, the alarm continues
+-- to be sent until a reset event has been received.
+-- Also, the alarm can send false alarm, that is captured
+-- by the ValueError being propagated using the Error-Model Annex
+-- description.
+
+device alarm
+features
+	alert   : out data port boolean;
+	reset   : in event port;
+annex behavior_specification {**
+	states
+		Inactive : initial state;
+		Active   : state;
+	transitions
+	
+	-- TODO: we want to trigger the hazard_detected state
+	-- using the EMV annex. Basically, having
+	-- an error propagation that send the self event
+	-- when we are in a particular error state.
+	
+		t1 : Inactive 	-[self.hazard_detected	]-> Active;
+		t2 : Active 	-[reset					]-> Inactive;
+		t3 : Active 	-[						]-> Active {alert := true};
+**};
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+	
+	error propagations
+		alert 		: out propagation{ValueError};
+	flows
+		f1 			: error source alert{ValueError};
+	end propagations;
+	
+	component error behavior
+	events
+		Failure : error event;
+	transitions
+		t0 : Operational -[Failure]-> Failed;
+--      FIXME: how to show the synchronization between behavior and error model annex?
+--      see below
+--		t1 : Failed      -[self.reset]-> Operational;
+	propagations
+		p10 : Failed -[]-> alert{ValueError};
+	end component;
+	properties
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Alarm is not operating";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Failed;
+		
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Alarm is fully operational";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Operational;
+**};
+end alarm;
+
+
+-- The train controller has two interfaces
+-- in order to send the train speed (using a sensor) or
+-- to indicate is the train is parked inside a station
+-- or moving (intransit). This information is then reused
+-- by the door controller to estimate if this is safe or
+-- not to open the door.
+
+system train_controller 
+features
+	speed 		: out data port speed;
+	intransit 	: out data port boolean;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+	
+	error propagations
+		speed 		: out propagation{ValueError,ServiceError};
+		intransit 	: out propagation{ValueError,ServiceError};
+	flows
+		speed 		: error source speed{ValueError,ServiceError};
+		intransit 	: error source speed{ValueError,ServiceError};
+	end propagations;
+	
+	component error behavior
+	events
+		Failure : error event;
+	transitions
+		t0 : Operational -[Failure]-> Failed;
+	propagations
+		p10 : Failed -[]-> speed{ValueError};
+		p11 : Failed -[]-> speed{ServiceError};
+		p20 : Failed -[]-> intransit{ValueError};
+		p21 : Failed -[]-> intransit{ServiceError};
+	end component;
+	properties
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Train Controller is not operating";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Failed;
+		
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Train Controller is fully operational";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Operational;
+**};
+end train_controller;
+
+
+-- The door_sensor component is simple: it is a sensor
+-- that constantly send a boolean value (on/off). If
+-- somebody is behind the sensor, it is on. Otherwise,
+-- this is off. Then, this value is used by the controller
+-- to estimate if this is safe or not to open/close the door.
+--
+-- We also define the error propagates by the sensor
+-- (ValueError) that indicates a bad value has been
+-- sent through the component interfaces.
+device door_sensor
+features
+	value : out data port boolean;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+	
+	error propagations
+		value 		: out propagation{ValueError};
+	flows
+		f1 			: error source value{ValueError};
+	end propagations;
+	
+	component error behavior
+	events
+		Failure : error event;
+	transitions
+		t0 : Operational -[Failure]-> Failed;
+	propagations
+		p10 : Failed -[]-> value{ValueError};
+	end component;
+	properties
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Door sensor is not operating";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Failed;
+		
+		EMV2::hazards => 
+		([	crossreference => "N/A";
+			failure => "Door sensor is fully operational";
+			phases => ("");
+			description => "";
+			comment => "";
+		])
+		applies to Operational;
+**};
+end door_sensor;
+
+
+-- For us, a train is no more than the assembly of the
+-- previously defined components.
+
+system train
+end train;
+
+system implementation train.i1
+subcomponents
+	alarm 		: device alarm;
+	train_ctrl  : system train_controller;
+	door_ctrl  	: system door_controller;
+	door_sensor : device door_sensor;
+connections
+	conn_sensor : port door_sensor.value 		-> door_ctrl.door_sensor;
+	conn_alarm  : port alarm.alert 				-> door_ctrl.alarm;
+	conn_speed  : port train_ctrl.speed 		-> door_ctrl.speed;
+	conn_transit: port train_ctrl.intransit 	-> door_ctrl.intransit;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior train_errors::simple;
+	
+	composite error behavior
+	states
+		[alarm.Operational and door_ctrl.Operational and train_ctrl.Operational and door_sensor.Operational]->Operational;
+		[door_ctrl.Failed and door_sensor.Failed]->Failed;
+		[alarm.Failed]->Failed;
+	end composite;
+**};
+end train.i1;
+
+end train_version1;
