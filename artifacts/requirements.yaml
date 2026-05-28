@@ -2298,3 +2298,28 @@ artifacts:
       silently swallowed failures.
     status: implemented
     tags: [release, supply-chain, cosign, slsa, sbom, v0110]
+
+  - id: REQ-PLUGFEST-001
+    type: requirement
+    title: AADL interop plug-fest — Tier-A OSATE corpus parse ratchet
+    description: >
+      To guard against silently drifting into a spar-specific dialect of
+      AADL, spar shall mechanically parse an external reference corpus
+      (the SEI/CMU `osate/examples` collection, vendored as a SHA-pinned
+      submodule under test-data/interop/) with its own parser
+      (`spar_syntax::parse`) and ratchet the result: a file spar
+      currently accepts must never regress to a parse failure. The set of
+      currently-unparsed files is the committed baseline
+      (test-data/interop/osate-corpus-expected-failures.txt); a file
+      leaving the baseline is progress, a file failing that is absent
+      from it is a regression the test rejects. The test prints a
+      parsed/total breakdown bucketed by annex usage (core / emv2 /
+      behavior / annex-other) — that number, tracked over time, is the
+      drift canary. Baseline at first pin: 516/548 (core 281/310).
+      This is Tier-A of the plug-fest design in issue #246; Tier-B
+      (OSATE-in-Docker round-trip via the AAXL2 instance model) and
+      Tier-C (Ocarina second opinion) are deferred. The corpus is
+      referenced, not redistributed — see test-data/interop/README.md
+      for the licensing note (upstream carries no explicit license file).
+    status: implemented
+    tags: [interop, plugfest, aadl, parser, osate, v0120]

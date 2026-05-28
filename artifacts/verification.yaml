@@ -3038,3 +3038,30 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-RELEASE-ASSETS-STANDARD
+
+  - id: TEST-PLUGFEST-OSATE-CORPUS
+    type: feature
+    title: OSATE corpus parses without regression (plug-fest Tier-A)
+    description: >
+      crates/spar-cli/tests/osate_corpus.rs walks every `.aadl` file in
+      the SHA-pinned osate/examples submodule, parses each with
+      `spar_syntax::parse`, and asserts no file outside the committed
+      expected-failures baseline fails — a regression ratchet. It prints
+      a parsed/total breakdown bucketed core / emv2 / behavior /
+      annex-other (516/548 at the first pin). The test skips with a
+      warning (does not fail) when the submodule is absent, so a
+      non-recursive clone is not a hard error; the dedicated
+      .github/workflows/aadl-interop.yml job checks the submodule out and
+      runs it on parser-relevant PRs + workflow_dispatch. Baseline is
+      regenerated with `SPAR_CORPUS_BLESS=1 cargo test -p spar --test
+      osate_corpus`.
+    fields:
+      method: automated-test
+      steps:
+        - run: git submodule update --init test-data/interop/osate-examples
+        - run: cargo test -p spar --test osate_corpus -- --nocapture
+    status: passing
+    tags: [interop, plugfest, aadl, parser, osate, v0120]
+    links:
+      - type: satisfies
+        target: REQ-PLUGFEST-001

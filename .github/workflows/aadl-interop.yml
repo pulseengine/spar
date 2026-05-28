@@ -1,0 +1,41 @@
+# .github/workflows/aadl-interop.yml
+#
+# Tier-A of the AADL plug-fest (issue #246): parse the vendored
+# osate/examples corpus with spar's own parser and ratchet the result —
+# spar must never regress on a file it currently accepts.
+#
+# Scoped to parser-relevant changes (plus manual dispatch) rather than
+# every PR: the corpus is a SHA-pinned submodule (deterministic between
+# runs), and the ~50 MB submodule checkout only earns its cost when the
+# lexer / parser / item-tree or the corpus itself changes. The
+# regression baseline lives in
+# test-data/interop/osate-corpus-expected-failures.txt.
+name: AADL interop corpus
+
+on:
+  pull_request:
+    paths:
+      - "crates/spar-syntax/**"
+      - "crates/spar-parser/**"
+      - "crates/spar-hir-def/**"
+      - "crates/spar-cli/tests/osate_corpus.rs"
+      - "test-data/interop/**"
+      - ".github/workflows/aadl-interop.yml"
+  workflow_dispatch:
+
+jobs:
+  osate-corpus:
+    name: Parse OSATE corpus (Tier-A)
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The corpus is a submodule; fetch it so the test runs for real
+          # rather than skipping with a "submodule absent" warning.
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Parse corpus + ratchet against baseline
+        run: cargo test -p spar --test osate_corpus -- --nocapture

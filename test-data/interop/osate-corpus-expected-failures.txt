@@ -1,0 +1,36 @@
+# OSATE corpus files spar does not yet parse (issue #246, Tier-A).
+# Regenerate: SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus
+# A file leaving this list = spar improved; a file that fails but is
+# absent = a regression the test will reject.
+EMV2TR_Test_Files/MyErrorProperties.aadl
+E_EnabledAircraft_Security/SecurityPropertiesCopy/SecurityClassificationProperties.aadl
+E_EnabledAircraft_Security/SecurityPropertiesCopy/SecurityEnforcementProperties.aadl
+LargeExamplesforEMV2TR/FG_System_pkg.aadl
+PropertyViewerExamples/mine.aadl
+bugtrack-core/issue120/test-properties.aadl
+bugtrack-core/issue168/traceability.aadl
+bugtrack-core/issue176/test.aadl
+bugtrack-core/issue177/test.aadl
+bugtrack-core/issue189/issue189.aadl
+bugtrack-core/issue220/test.aadl
+bugtrack-core/issue220/test2.aadl
+bugtrack-core/issue222/test.aadl
+bugtrack-core/issue241/test.aadl
+bugtrack-core/issue286/ps.aadl
+bugtrack-core/issue289/test.aadl
+bugtrack-core/issue294/propertysets/Physical_Properties.aadl
+bugtrack-core/issue31/bug31.aadl
+bugtrack-core/issue327/test.aadl
+bugtrack-core/issue412/issue412.aadl
+bugtrack-core/issue459/ps459.aadl
+bugtrack-core/issue471/ClientServer.aadl
+bugtrack-core/issue471/issue471.aadl
+bugtrack-emv2/issue41/Physical_Properties.aadl
+core-examples/arinc653-misc/processor_hm.aadl
+core-examples/avionics-display/RockwellCollins.aadl
+core-examples/feature-array/featurearray.aadl
+core-examples/multi-core/arinc653.aadl
+core-examples/multi-core/processor_properties.aadl
+core-examples/multi-core/simple.aadl
+error-model/DualFGS/ModalDualFGS.aadl
+error-model/DualFGS/ThreeStateDualFGS.aadl
