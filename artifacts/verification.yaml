@@ -2612,6 +2612,32 @@ artifacts:
       - type: satisfies
         target: REQ-BINDING-002
 
+  - id: TEST-BINDING-DOTTED-PATH-ANALYSIS
+    type: feature
+    title: Binding analyses resolve multi-level dotted reference paths
+    description: >
+      Regression for the ee_system.poc user report: the binding_rules
+      and binding_check analyses resolved Actual_Processor_Binding /
+      Actual_Memory_Binding reference targets by bare name, so a
+      multi-level subcomponent reference like `reference
+      (cvc.soc.helix_linux)` was wrongly reported as "does not exist in
+      the instance model" (and skipped category validation). Both
+      analyses now resolve through SystemInstance::resolve_dotted_path,
+      honouring REQ-BINDING-002 at the analysis layer. Tests in
+      crates/spar-analysis/src/binding_rules.rs:
+      nested_dotted_processor_binding_resolves (no false not-found) and
+      nested_dotted_binding_to_nonprocessor_still_flags_category
+      (category checking preserved through dotted resolution).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib -- binding_rules::tests
+    status: passing
+    tags: [binding, analysis, v0111]
+    links:
+      - type: satisfies
+        target: REQ-BINDING-002
+
   - id: TEST-CLASSIFIER-MATCH-DELEGATION
     type: feature
     title: Delegation connections accept matching directions, peer connections require opposing
