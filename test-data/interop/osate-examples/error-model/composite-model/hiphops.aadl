@@ -1,0 +1,131 @@
+package hiphops
+public
+	device sensorinput
+		features
+			output: out data port;
+	annex EMV2 {**
+		use types ErrorLibrary;
+		use behavior ErrorLibrary::FailStop;
+		error propagations
+		output : out propagation {ServiceOmission};
+		flows
+			es1: error source output {ServiceOmission} when FailStop;
+		end propagations;
+		component error behavior
+		propagations
+			Failstop -[]-> output{ServiceOmission};
+		end component;
+	**};
+	end sensorinput;
+	
+	device primary
+		features
+			input: in data port;
+			output: out data port;
+	annex EMV2 {**
+		use types ErrorLibrary;
+		use behavior ErrorLibrary::FailStop;
+		error propagations
+			input : in propagation {ServiceOmission};
+			output : out propagation {ServiceOmission};
+		flows
+			es1: error source output{ServiceOmission} when FailStop;
+			ep1: error path input -> output;
+		end propagations;
+		
+		component error behavior
+		transitions
+			t0 : Operational -[input{ServiceOmission}]-> FailStop;
+		end component;
+	**};
+	end primary;
+	
+	device standby
+		features
+			input: in data port;
+			monitor: in data port;
+			output: out data port;
+	annex EMV2 {**
+		use types ErrorLibrary;
+		use behavior ErrorLibrary::FailStop;
+		error propagations
+		input : in propagation {ServiceOmission};
+		monitor : in propagation {ServiceOmission};
+		output : out propagation {ServiceOmission};
+		flows
+			es1: error source output{ServiceOmission} when FailStop;
+			ep1: error path input -> output;
+		end propagations;
+		component error behavior
+		transitions
+			t0 : Operational -[input{ServiceOmission}]-> FailStop;
+		propagations
+			FailStop -[]-> output{ServiceOmission};
+			Operational -[input{ServiceOmission} and monitor{ServiceOmission}]-> output{ServiceOmission};
+		end component;
+	**};
+	end standby;
+	
+	system SRB
+		features
+			input: in data port;
+			output: out data port;
+	annex EMV2 {**
+		use types ErrorLibrary;
+		error propagations
+		input : in propagation {ServiceOmission};
+		output : out propagation {ServiceOmission};
+		end propagations;
+	**};
+	end SRB;
+	
+	system implementation SRB.impl
+		subcomponents
+			primary: device Primary;
+			standby: device Standby;
+		connections
+			c1: port input -> primary.input;
+			c2: port input -> standby.input;
+			c3: port primary.output -> standby.monitor;
+			c4: port standby.output -> output;
+	annex EMV2 {**
+		use types ErrorLibrary;
+		use behavior ErrorLibrary::FailStop;
+		component error behavior
+		transitions
+		Operational -[primary.output{ServiceOmission} and standby.output{ServiceOmission}]-> FailStop;
+		propagations
+--		Operational-[primary.output{ServiceOmission} and standby.output{ServiceOmission}]->output{ServiceOmission};
+		FailStop-[]-> output{ServiceOmission};
+		end component;
+		composite error behavior
+		states
+		[primary.FailStop and standby.FailStop]-> Failstop;
+		end composite;
+	**};
+	end SRB.impl;
+	
+	system top
+		
+	end top;
+	
+	system implementation top.i
+		subcomponents
+			srb: system SRB.impl;
+			SI: device sensorinput;
+		connections
+			c1: port SI.output -> srb.input;
+annex EMV2{**
+ 	use types ErrorLibrary;
+ 	use behavior ErrorLibrary::FailStop;
+	component error behavior
+	transitions
+		Operational -[srb.output{ServiceOmission}]-> FailStop;
+	end component;
+ 	composite error behavior 
+ 	states
+ 		[ srb.failstop ]-> FailStop;
+ 	end composite;
+ **};
+	end top.i;
+end hiphops;

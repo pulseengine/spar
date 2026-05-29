@@ -1,0 +1,75 @@
+----------------------------------------------
+--  IoT example
+--       Julien Delange <jdelange@sei.cmu.edu>
+--
+-- The  iot::home::integration contains the
+-- integration of the home, which is
+--  1. The sap_node (arduino + sensors/actuators)
+--     which controls the home according to the
+--     requests from the server. 
+--  2. The server that receives request from the
+--     outside and send them to the sap_node.
+----------------------------------------------
+
+
+package iot::home::integration
+public
+	with iot::common::platform;
+	with iot::home::server::integration;
+	with iot::sap_node::integration;
+	with iot::common::datatypes;
+	
+	system router
+	features
+		internal_eth : requires bus access iot::common::platform::ethernet;
+		external_int : requires bus access iot::common::platform::internet;
+	end router;
+	
+	system home
+	features
+		external_net 	: requires bus access iot::common::platform::internet;
+		user_request 	: in event data port iot::common::datatypes::request;
+		user_reply 		: out event data port iot::common::datatypes::reply;
+	flows 
+		flow_request         : flow sink user_request;
+		flow_reply           : flow source user_reply;
+	end home;
+	
+	system implementation home.i
+	subcomponents
+		internal_net : bus iot::common::platform::ethernet;
+		server       : system iot::home::server::integration::server.i;
+		arduino      : system iot::sap_node::integration::sap_node.i;
+		router       : system router;
+	connections
+		-- 
+		--  First, physical connections (hardware)
+		--
+		
+		--  Connections to the internal network
+		eth_arduino  : bus access internal_net <-> arduino.eth;
+		eth_server   : bus access internal_net <-> server.eth;
+		eth_router   : bus access internal_net <-> router.internal_eth;
+		
+		-- Connection from the internet to the router
+		int_router   : bus access external_net <-> router.external_int;
+		
+		
+		--
+		--  Second, logical connections (software)
+		--
+		user_req : port user_request -> server.user_request;
+		user_rep : port server.user_reply -> user_reply;
+		
+		internal_req : port server.internal_request -> arduino.internal_request;
+		internal_rep : port arduino.internal_reply -> server.internal_reply;
+	flows
+		flow_request : flow sink user_request -> user_req -> server.server_flow_request -> internal_req -> arduino.flow_request;
+		flow_reply   : flow source arduino.flow_reply -> internal_rep -> server.server_flow_reply -> user_rep -> user_reply;
+	properties
+		actual_connection_binding => (reference (internal_net)) applies to user_req;
+		actual_connection_binding => (reference (internal_net)) applies to user_rep;
+		actual_connection_binding => (reference (internal_net)) applies to internal_req;
+		actual_connection_binding => (reference (internal_net)) applies to internal_rep;
+	end home.i; 
+end iot::home::integration;

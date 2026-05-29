@@ -1,0 +1,40 @@
+package FHAErrorLib
+public
+annex EMV2 {**
+	error types
+		AnyFunctionalError: type;
+		HydraulicLossBlue : type;
+		HydraulicLossGreen : type;
+		HydraulicLossComponents : type;
+		
+		NoService: type extends AnyFunctionalError;
+		NoValue: type extends NoService;
+		NoPower: type extends NoService;
+	
+		
+		
+		TotalWBLoss: type extends AnyFunctionalError;
+		TotalWBLossAnunciated: type extends TotalWBLoss;
+		TotalWBLossUnanunciated: type extends TotalWBLoss;
+		PartialSymmetricalWBLoss: type extends AnyFunctionalError;
+		PartialSymmetricalWBLossAnunciated: type extends PartialSymmetricalWBLoss;
+		PartialSymmetricalWBLossUnanunciated: type extends PartialSymmetricalWBLoss;
+		AssymetricalWBLoss: type extends AnyFunctionalError;
+		InadvertentWB: type extends AnyFunctionalError;
+		
+		WBErrorSet: type set {TotalWBLossAnunciated,TotalWBLossUnanunciated,PartialSymmetricalWBLoss,
+			AssymetricalWBLoss,InadvertentWB
+		};
+		
+		HydraulicErrors: type set {HydraulicLossBlue,HydraulicLossGreen,HydraulicLossComponents,NoService};
+		end types;
+	
+	error behavior Twostate
+	states
+		Operational:initial state;
+		failed:state {TotalWBLossAnunciated,TotalWBLossUnanunciated,PartialSymmetricalWBLossUnAnunciated,PartialSymmetricalWBLossanunciated};
+	end behavior;
+	
+	
+**};
+end FHAErrorLib;

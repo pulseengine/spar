@@ -1,0 +1,89 @@
+package fha_rbd
+public
+with SEI, MILSTD882, EMV2;
+with ErrorLibrary;
+
+  device PositionSensor
+    features
+      PositionReading: out data port ;
+    flows
+      f1: flow source PositionReading {
+        Latency => 2 ms .. 3 ms;
+        }; 
+    annex EMV2 {** 
+        use types ErrorLibrary; 
+    	use behavior ErrorLibrary::FailStop;  
+    	error propagations  
+    		PositionReading: out propagation  {ServiceOmission,ValueError,ItemOmission};
+    	flows
+		 	ef1:error source PositionReading {ServiceOmission,ValueError,ItemOmission} when FailStop;
+	end propagations;
+	properties
+		EMV2::severity => 1 applies to ef1;
+    **};
+  end PositionSensor;
+
+  device Actuator
+    features
+      ActCmd: in data port ;
+    flows
+      fs: flow sink ActCmd {
+        Latency => 2 ms .. 3 ms;
+        };
+    annex EMV2 {**
+        use types ErrorLibrary;
+    	use behavior ErrorLibrary::FailStop;
+    	error propagations 
+    		ActCmd: in propagation  {ServiceOmission,ValueError,ItemOmission};
+    	flows
+		 ef1:error sink ActCmd{ValueError};
+ 		end propagations;
+
+    **};
+  end Actuator;
+  
+  
+  
+  processor PowerPC
+  properties
+      SEI::MIPSCapacity => 5.0 MIPS;
+  annex EMV2 {** 
+  	use types ErrorLibrary;
+	use behavior ErrorLibrary::FailStop;
+   **};
+  end PowerPC;
+  
+
+  system AircraftFMS
+  end AircraftFMS; 
+  
+  system implementation AircraftFMS.i
+    subcomponents
+      PositionSensor: device PositionSensor;
+      Actuator1: device Actuator ;
+      Actuator2: device Actuator ;
+      FMSProcessor: processor PowerPC;
+    connections
+      sensedPosition: port PositionSensor.PositionReading  -> Actuator1.ActCmd;
+      Actuator2Cmd: port PositionSensor.PositionReading -> Actuator2.ActCmd;
+	properties 
+		Actual_Processor_Binding => (reference (FMSProcessor)) applies to PositionSensor;
+		Actual_Processor_Binding => (reference (FMSProcessor)) applies to Actuator1;
+		Actual_Processor_Binding => (reference (FMSProcessor)) applies to Actuator2;
+annex EMV2 {** 
+	use behavior ErrorLibrary::FailStop;
+	composite error behavior
+		states
+			[PositionSensor.Operational and (Actuator1.Operational or Actuator2.Operational)]-> Operational;
+			[Actuator1.FailStop and Actuator2.FailStop]-> FailStop;
+			[PositionSensor.FailStop]-> FailStop;
+		end composite;  
+	properties  
+		EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.1 ; Distribution => Fixed;] applies to ^Actuator2@FailStop;
+		EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.2 ; Distribution => Fixed;] applies to ^Actuator1@FailStop;
+		EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.5 ; Distribution => Fixed;] applies to ^PositionSensor@FailStop;
+		EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.3 ; Distribution => Fixed;] applies to ^FMSProcessor@FailStop;
+		
+	**};
+  end AircraftFMS.i;
+end fha_rbd;

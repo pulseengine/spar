@@ -1,0 +1,102 @@
+package StateConsistency
+
+public
+
+with EMV2;
+
+system GPS
+	features
+		outp: out data port;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior ErrorLibrary::FailStop;
+	error propagations
+	outp: out propagation {ServiceOmission};
+	flows 
+		es1: error source outp;
+	end propagations;
+	properties
+	EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.1 ; Distribution => Fixed;] applies to Failure;
+**};
+end GPS;
+
+system implementation GPS.impl
+end GPS.impl;
+
+system voter
+	features
+		in1: in data port;
+		in2: in data port;
+		outp: out data port;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior ErrorLibrary::FailStop;
+	error propagations
+	outp: out propagation {ServiceOmission};
+	in1: in propagation {ServiceOmission};
+	in2: in propagation {ServiceOmission};
+	end propagations;
+	component error behavior
+	propagations
+	-- failure only if both fail
+	Operational -[in1{ServiceOmission} and in2{ServiceOmission}]-> outp{ServiceOmission};
+	FailStop -[]-> outp{ServiceOmission};
+	end component;
+	properties
+	EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.1 ; Distribution => Fixed;] applies to Failure;
+**};
+end voter;
+
+system DualGPS
+features
+	outp: out data port;
+annex EMV2 {**
+	use types ErrorLibrary;
+	use behavior ErrorLibrary::FailStop;
+	error propagations
+	outp: out propagation{ServiceOmission};
+	flows 
+		es1: error source outp;
+	end propagations;
+	properties
+		-- probability of failure for DualGPS as a whole
+	EMV2::OccurrenceDistribution => [ ProbabilityValue => 0.3 ; Distribution => Fixed;] applies to Failure;
+**};
+end DualGPS;
+
+
+system implementation DualGPS.parts
+subcomponents
+	sub1 : system GPS.impl;
+	sub2 : system GPS.impl;
+	vote: system voter;
+annex EMV2 {**
+	use types ErrorLibrary;
+	composite error behavior
+	states
+	-- dual redundant GPS that operates as long as one is operational
+		[sub1.FailStop and sub2.FailStop or vote.FailStop]->FailStop;
+	end composite;
+	-- the combination of failure probability of the two parts should be consistent with the whole
+**};
+end DualGPS.parts;
+
+
+system implementation DualGPS.dual
+subcomponents
+	sub1 : system GPS.impl;
+	sub2 : system GPS.impl;
+	vote: system voter;
+	connections
+		c1: port sub1.outp -> vote.in1;
+		c2: port sub2.outp -> vote.in1;
+annex EMV2 {**
+	use types ErrorLibrary;
+	component error behavior
+	transitions
+		Operational-[vote.outp{ServiceOmission}]->FailStop;
+	end component;
+**};
+end DualGPS.dual;
+
+end StateConsistency;

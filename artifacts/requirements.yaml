@@ -2298,3 +2298,29 @@ artifacts:
       silently swallowed failures.
     status: implemented
     tags: [release, supply-chain, cosign, slsa, sbom, v0110]
+
+  - id: REQ-PLUGFEST-001
+    type: requirement
+    title: AADL interop plug-fest — Tier-A OSATE corpus parse ratchet
+    description: >
+      To guard against silently drifting into a spar-specific dialect of
+      AADL, spar shall mechanically parse an external reference corpus
+      (the SEI/CMU `osate/examples` collection — all 548 .aadl models
+      vendored verbatim under test-data/interop/, pinned at 8db5647) with
+      its own parser (`spar_syntax::parse`) and ratchet the result: a
+      file spar currently accepts must never regress to a parse failure.
+      The committed regression baseline is split by cause:
+      baseline/spar-gaps.txt (genuine parser gaps spar should fix) and
+      baseline/unadjudicated.txt (bugtrack-* fixtures that may be
+      intentionally malformed — NOT spar bugs until the Tier-B OSATE
+      oracle confirms OSATE accepts them). A file failing that is absent
+      from both baselines is a regression. The test prints a parsed/total
+      breakdown bucketed by annex usage (core / emv2 / behavior /
+      annex-other) — the drift canary. Signal at first vendor: 519/548
+      (core 284/310). The corpus is reproduced verbatim under the SEI
+      Notice.txt "reproduce in entirety, without modification" grant
+      (see test-data/interop/PROVENANCE.md); spar is fixed, the models
+      never edited. Tier-A of issue #246; Tier-B (OSATE-in-Docker AAXL2
+      round-trip) and Tier-C (Ocarina second opinion) are deferred.
+    status: implemented
+    tags: [interop, plugfest, aadl, parser, osate, v0120]

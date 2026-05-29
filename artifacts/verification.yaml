@@ -3038,3 +3038,28 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-RELEASE-ASSETS-STANDARD
+
+  - id: TEST-PLUGFEST-OSATE-CORPUS
+    type: feature
+    title: OSATE corpus parses without regression (plug-fest Tier-A)
+    description: >
+      crates/spar-cli/tests/osate_corpus.rs walks every `.aadl` file in
+      the vendored osate/examples corpus, parses each with
+      `spar_syntax::parse`, and asserts no file outside the two committed
+      baselines (baseline/spar-gaps.txt + baseline/unadjudicated.txt)
+      fails — a regression ratchet. It prints a parsed/total breakdown
+      bucketed core / emv2 / behavior / annex-other (519/548 after the
+      property-set applies-to fix). Baselines are regenerated and split
+      (bugtrack-* → unadjudicated, rest → gaps) with `SPAR_CORPUS_BLESS=1
+      cargo test -p spar --test osate_corpus`. The dedicated
+      .github/workflows/aadl-interop.yml job runs it on parser-relevant
+      PRs + workflow_dispatch.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test osate_corpus -- --nocapture
+    status: passing
+    tags: [interop, plugfest, aadl, parser, osate, v0120]
+    links:
+      - type: satisfies
+        target: REQ-PLUGFEST-001

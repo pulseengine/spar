@@ -520,13 +520,32 @@ fn numeric_units_designator(p: &mut Parser) {
 }
 
 fn applies_to_category(p: &mut Parser) {
-    if p.at(SyntaxKind::ALL_KW) {
-        p.bump(SyntaxKind::ALL_KW);
+    use SyntaxKind::*;
+    if p.at(ALL_KW) {
+        p.bump(ALL_KW);
+    } else if p.at(FEATURE_KW) {
+        // `feature`, `feature group`, or `feature group type` (AS5506 §11.3
+        // property-owner list).
+        p.bump(FEATURE_KW);
+        if p.eat(GROUP_KW) {
+            p.eat(TYPE_KW);
+        }
     } else if p.current().is_component_category_kw() {
         super::component_category(p);
-    } else if p.at(SyntaxKind::IDENT) {
-        p.bump(SyntaxKind::IDENT);
+    } else if matches!(
+        p.current(),
+        PORT_KW | FLOW_KW | MODE_KW | ACCESS_KW | PARAMETER_KW | CONNECTIONS_KW
+    ) {
+        // Non-component-category property owners (AS5506 §11.3): a property
+        // may also apply to ports, flows, modes, connections, access
+        // features, and parameters — not just component categories.
+        p.bump_any();
+    } else if p.at(IDENT) {
+        p.bump(IDENT);
     } else {
-        p.error("expected component category or `all`");
+        p.error(
+            "expected a property owner: a component category, `all`, `port`, \
+             `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`",
+        );
     }
 }
