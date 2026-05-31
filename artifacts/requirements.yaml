@@ -1040,7 +1040,7 @@ artifacts:
       property set as ISR_Execution_Time (Time_Range). This commit lands
       the property-set surface only; hierarchical RTA consumption ships
       in subsequent Track A commits.
-    status: planned
+    status: implemented
     tags: [timing, irq, rta, v070]
 
   - id: REQ-TIMING-IRQ-002
@@ -1052,7 +1052,7 @@ artifacts:
       plus kernel vectoring). Exposed via Spar_Timing::Interrupt_Latency_Bound
       (Time). Drives the "from wire to handler" latency chain in hierarchical
       RTA.
-    status: planned
+    status: implemented
     tags: [timing, irq, rta, v070]
 
   - id: REQ-TIMING-IRQ-003
@@ -1063,7 +1063,7 @@ artifacts:
       the Spar_Timing::Bottom_Half_Server property (reference to thread).
       Allows ISR bodies to declare the handler thread responsible for
       deferred work, so hierarchical RTA can chain the two layers.
-    status: planned
+    status: implemented
     tags: [timing, irq, rta, v070]
 
   # ── Closed-loop trace verification (v0.8.0 precursor) ──────────────
@@ -1076,7 +1076,7 @@ artifacts:
       runtime trace emission. Exposed via Spar_Trace::Probe_Point
       (aadlboolean). Flags components whose entry/exit codegen should
       emit a trace event (Zephyr CTF k_*-primitive style in v0.8.0).
-    status: planned
+    status: implemented
     tags: [trace, verification, v080]
 
   - id: REQ-TRACE-002
@@ -1089,7 +1089,7 @@ artifacts:
       Distinct from Compute_Execution_Time because these are design-time
       predictions intended for runtime comparison by `spar verify-trace`,
       not the declared WCET the scheduler uses.
-    status: planned
+    status: implemented
     tags: [trace, verification, v080]
 
   # ── TSN/Ethernet WCTT analysis (Track D, v0.8.0) ───────────────────
@@ -1104,7 +1104,7 @@ artifacts:
       Switch_Type enumeration (FIFO, Priority, TSN); Phase 1 covers FIFO
       and Priority disciplines, Phase 2 introduces TSN-specific service
       curves under a separate Spar_TSN property set.
-    status: planned
+    status: implemented
     tags: [network, wctt, tsn, v080]
 
   - id: REQ-NETWORK-002
@@ -1117,7 +1117,7 @@ artifacts:
       Spar_Network::Forwarding_Latency (Time_Range; per-hop BCET..WCET
       switch-fabric/MAC contribution). Both feed the WCTT analysis
       pass that lands later in Track D.
-    status: planned
+    status: implemented
     tags: [network, wctt, v080]
 
   - id: REQ-NETWORK-003
@@ -1130,7 +1130,7 @@ artifacts:
       Communication_Properties::Output_Rate, which is a producer-side
       Rate_Spec; Spar_Network::Output_Rate is the link/port egress
       bandwidth used by the WCTT serialization-time term.
-    status: planned
+    status: implemented
     tags: [network, wctt, v080]
 
   # ── Track E: hypothetical-rebinding oracle (v0.8.0) ────────────────
@@ -1145,7 +1145,7 @@ artifacts:
       queries. Default false (unannotated components are eligible for
       rebinding). Per Track E commit 1/8 of the v0.8.0 migration design
       research (docs/designs/track-e-migration-research.md §6.1).
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080]
 
   - id: REQ-MIGRATION-002
@@ -1159,7 +1159,7 @@ artifacts:
       beyond the platform's frozen set". When both Frozen=true and
       Mobile=true are declared on the same item, Frozen wins (defensive
       — refuse to rebind). Per §6.1 of the v0.8.0 migration design.
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080]
 
   - id: REQ-MIGRATION-003
@@ -1171,7 +1171,7 @@ artifacts:
       (aadlstring). Captures the rationale a reviewer would need to
       certify why an item is platform (e.g., "ASIL-D platform partition",
       "RTOS kernel image"). Per §6.1 of the v0.8.0 migration design.
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080, audit]
 
   - id: REQ-MIGRATION-004
@@ -1193,7 +1193,7 @@ artifacts:
       for spar moves verify (Track E commit 3) and spar moves
       enumerate (Track E commits 4-5). Per Track E commit 2/8 of the
       v0.8.0 migration design research (§6.4).
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080]
 
   - id: REQ-MIGRATION-005
@@ -1221,7 +1221,7 @@ artifacts:
       is overlay-aware; widening the analysis suite itself to consume
       the overlay is commit 4. Per Track E commit 3/8 of the v0.8.0
       migration design research (§6.3).
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080, cli]
 
   - id: REQ-MIGRATION-006
@@ -1253,7 +1253,7 @@ artifacts:
       Exit codes: 0 = at least one admissible candidate, 1 = no
       admissible candidate (or input-resolution error). Per Track E
       commit 4/8 of the v0.8.0 migration design research (§6.3).
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080, cli]
 
   - id: REQ-MIGRATION-007
@@ -1281,7 +1281,7 @@ artifacts:
       participate. Does NOT alter the validity (`ok`) judgement —
       objective changes only re-order the candidate list. Per Track E
       commit 5/8 of the v0.8.0 migration design research (§6.4).
-    status: planned
+    status: implemented
     tags: [migration, track-e, v080, cli, solver]
 
   - id: REQ-MIGRATION-008
@@ -1311,7 +1311,7 @@ artifacts:
       the v0.8.0 migration design research, wiring the spar-variants
       consumer crate (REQ-VARIANT-001) into the verify/enumerate
       pipelines (REQ-MIGRATION-005, REQ-MIGRATION-006).
-    status: planned
+    status: implemented
     tags: [migration, variants, track-e, track-b, v080, cli]
 
   - id: REQ-NETWORK-004
@@ -1326,7 +1326,7 @@ artifacts:
       queue-depth annotations from Spar_Network::*. The graph is the
       bridge between the AADL ItemTree and the Network Calculus
       primitives that follow in subsequent Track D commits.
-    status: planned
+    status: implemented
     tags: [network, wctt, v080]
 
   - id: REQ-NETWORK-005
@@ -1344,7 +1344,7 @@ artifacts:
       specific service curves are deferred to v0.8.x. Track D commit 3
       of the v0.8.0 design (docs/designs/track-d-tsn-wctt-research.md
       §4.3-4.4).
-    status: planned
+    status: implemented
     tags: [network, wctt, v080]
 
   - id: REQ-NETWORK-006
@@ -1367,7 +1367,7 @@ artifacts:
       utilisation > 100%), WcttDeferred (Info note for TSN switches).
       Track D commit 4 of the v0.8.0 design
       (docs/designs/track-d-tsn-wctt-research.md §5.4).
-    status: planned
+    status: implemented
     tags: [network, wctt, v080]
 
   - id: REQ-NETWORK-008
@@ -1392,7 +1392,7 @@ artifacts:
       1 close-out. WcttUnservable in any hop propagates to the chain
       as an Error and aborts aggregation. Track D commit 6 of the
       v0.8.0 design (docs/designs/track-d-tsn-wctt-research.md §6.1).
-    status: planned
+    status: implemented
     tags: [network, wctt, latency, v080]
 
   # ── Track B: rivet ↔ spar variant binding (v0.7.x) ─────────────────
@@ -1410,7 +1410,7 @@ artifacts:
       matching binding has its requires-set satisfied by the variant's
       active features. Items with no matching binding are kept
       unconditionally as variant-independent infrastructure.
-    status: planned
+    status: implemented
     tags: [variants, track-b, v07x]
 
   # ── PIP/PCP blocking term in hierarchical RTA (v0.7.1) ─────────────
@@ -1477,7 +1477,7 @@ artifacts:
       CreditPool types plus property accessors); subsequent commits
       add the analysis math. Per
       docs/designs/track-d-tsn-wctt-research.md §5.1.
-    status: planned
+    status: implemented
     tags: [network, tsn, wctt, v081]
 
   - id: REQ-TSN-002
@@ -1503,7 +1503,7 @@ artifacts:
       analysis falls back to the v0.8.0 WcttDeferred path. Discharges
       docs/designs/track-d-tsn-wctt-research.md §5.3 and the v0.8.1
       Track D Phase 2 commit 2 milestone.
-    status: planned
+    status: implemented
     tags: [network, tsn, wctt, v081]
 
   - id: REQ-TSN-003
@@ -1825,7 +1825,7 @@ artifacts:
       explicit `with` imports, mirroring Spar_TSN, Spar_Network,
       Spar_Migration, and Spar_Power. Per the v0.10.0 trace-topology
       foundation design (docs/designs/v0.10.0-trace-topology.md §3).
-    status: planned
+    status: implemented
     tags: [trace-topology, track-g, v0100, properties]
 
   - id: REQ-TRACE-TOPOLOGY-002
@@ -1851,7 +1851,7 @@ artifacts:
       URL is `https://pulseengine.eu/spar-trace-topology/v1`. Per
       docs/designs/v0.10.0-trace-topology.md and the companion
       external-integrator contract docs/contracts/spar-trace-topology-v1.md.
-    status: planned
+    status: implemented
     tags: [trace-topology, track-g, v0100, crate]
 
   - id: REQ-RTA-010
