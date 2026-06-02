@@ -1454,7 +1454,7 @@ artifacts:
       a TODO(v1.0.0) tag; statements are the load-bearing artifact.
       Track D commit 5 of the v0.8.0 design
       (docs/designs/track-d-tsn-wctt-research.md §4.3-4.4).
-    status: planned
+    status: implemented
     tags: [network, wctt, lean, proofs, v080]
 
   - id: REQ-TSN-001
