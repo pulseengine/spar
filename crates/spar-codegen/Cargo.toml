@@ -19,6 +19,9 @@ spar-hir-def.workspace = true
 spar-base-db.workspace = true
 la-arena.workspace = true
 criterion.workspace = true
+# Parse generated WIT in tests so invalid output (bad identifiers, undefined
+# types) fails at the source rather than downstream in wit-bindgen (issue #254).
+wit-parser = "0.246"
 
 [[bench]]
 name = "codegen_benchmarks"
