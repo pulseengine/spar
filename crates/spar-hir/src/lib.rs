@@ -399,6 +399,10 @@ pub struct InstanceFeature {
     /// Array index for array features: None for non-array, Some(1..N) for array elements.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub array_index: Option<u64>,
+    /// Property values attached to this feature via `applies to <path>.<feature>`
+    /// (AS5506D §11.3). Keyed `PropSet::Name` or `Name` (issue #237).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub properties: std::collections::BTreeMap<String, String>,
 }
 
 /// A connection in the serializable instance tree.
@@ -409,6 +413,29 @@ pub struct InstanceConnection {
     pub is_bidirectional: bool,
     pub source: Option<String>,
     pub destination: Option<String>,
+    /// Property values attached to this connection via
+    /// `applies to <path>.<connection>` (issue #237).
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub properties: std::collections::BTreeMap<String, String>,
+}
+
+/// Flatten a resolved property map into a `PropSet::Name`/`Name` → value-text
+/// map for JSON serialization. Shared by component, feature, and connection
+/// nodes (#129, #237).
+fn prop_map_to_btree(
+    pmap: &spar_hir_def::properties::PropertyMap,
+) -> std::collections::BTreeMap<String, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for (_key, values) in pmap.iter() {
+        let Some(pv) = values.first() else { continue };
+        let name = pv.name.property_name.as_str();
+        let key = match pv.name.property_set.as_ref() {
+            Some(ps) if !ps.as_str().is_empty() => format!("{}::{}", ps.as_str(), name),
+            _ => name.to_string(),
+        };
+        out.insert(key, pv.value.clone());
+    }
+    out
 }
 
 impl Instance {
@@ -493,6 +520,7 @@ impl Instance {
                     kind: f.kind,
                     direction: f.direction,
                     array_index: f.array_index,
+                    properties: prop_map_to_btree(self.inner.properties_for_feature(fi)),
                 }
             })
             .collect();
@@ -504,7 +532,7 @@ impl Instance {
         //
         // We use the semantic connections that have been traced end-to-end,
         // grouped by the component that owns the originating across connection.
-        let connections = self
+        let mut connections: Vec<InstanceConnection> = self
             .inner
             .semantic_connections
             .iter()
@@ -534,15 +562,58 @@ impl Instance {
                         format!("{}.{}", path, feat_name)
                     }
                 };
+                // Properties come from the ORIGINATING raw connection (the named
+                // one the `applies to` clause targets), not the whole traced
+                // path — avoids mis-attributing a hop's property (#237).
+                let properties = sc
+                    .connection_path
+                    .first()
+                    .map(|&ci| prop_map_to_btree(self.inner.properties_for_connection(ci)))
+                    .unwrap_or_default();
                 InstanceConnection {
                     name: sc.name.as_str().to_string(),
                     kind: sc.kind,
                     is_bidirectional: false,
                     source: Some(src_name),
                     destination: Some(dst_name),
+                    properties,
                 }
             })
             .collect();
+
+        // AS5506 Ch.14 emits only "across" connections as semantic instances, so
+        // up/down connections (e.g. `input -> t1.input`) are normally absent. If
+        // such a raw connection carries `applies to` properties, surface it here
+        // so the property isn't silently dropped (#237). Keyed by name to avoid
+        // duplicating a connection already emitted as a semantic instance.
+        let emitted: std::collections::HashSet<&str> =
+            connections.iter().map(|c| c.name.as_str()).collect::<std::collections::HashSet<_>>();
+        let mut extra: Vec<InstanceConnection> = Vec::new();
+        for &ci in &comp.connections {
+            let props = prop_map_to_btree(self.inner.properties_for_connection(ci));
+            if props.is_empty() {
+                continue;
+            }
+            let conn = &self.inner.connections[ci];
+            if emitted.contains(conn.name.as_str()) || extra.iter().any(|e| e.name == conn.name.as_str()) {
+                continue;
+            }
+            let end_str = |e: &Option<spar_hir_def::instance::ConnectionEnd>| {
+                e.as_ref().map(|ce| match &ce.subcomponent {
+                    Some(sub) => format!("{}.{}", sub, ce.feature),
+                    None => ce.feature.as_str().to_string(),
+                })
+            };
+            extra.push(InstanceConnection {
+                name: conn.name.as_str().to_string(),
+                kind: conn.kind,
+                is_bidirectional: conn.is_bidirectional,
+                source: end_str(&conn.src),
+                destination: end_str(&conn.dst),
+                properties: props,
+            });
+        }
+        connections.extend(extra);
 
         let children = comp
             .children
@@ -551,20 +622,7 @@ impl Instance {
             .collect();
 
         // Resolved property values for this instance (fixes #129).
-        let properties = {
-            let mut out = std::collections::BTreeMap::new();
-            let pmap = self.inner.properties_for(idx);
-            for (_key, values) in pmap.iter() {
-                let Some(pv) = values.first() else { continue };
-                let name = pv.name.property_name.as_str();
-                let key = match pv.name.property_set.as_ref() {
-                    Some(ps) if !ps.as_str().is_empty() => format!("{}::{}", ps.as_str(), name),
-                    _ => name.to_string(),
-                };
-                out.insert(key, pv.value.clone());
-            }
-            out
-        };
+        let properties = prop_map_to_btree(self.inner.properties_for(idx));
 
         InstanceNode {
             name: comp.name.as_str().to_string(),
@@ -2155,6 +2213,7 @@ mod serde_round_trip_tests {
             kind: FeatureKind::EventDataPort,
             direction: Some(Direction::In),
             array_index: None,
+            properties: Default::default(),
         };
         round_trip(&feat);
 
@@ -2164,6 +2223,7 @@ mod serde_round_trip_tests {
             kind: FeatureKind::DataPort,
             direction: Some(Direction::Out),
             array_index: Some(3),
+            properties: Default::default(),
         };
         round_trip(&feat_arr);
     }
@@ -2178,6 +2238,7 @@ mod serde_round_trip_tests {
             is_bidirectional: false,
             source: Some("sensor.data_out".to_string()),
             destination: Some("controller.data_in".to_string()),
+            properties: Default::default(),
         };
         round_trip(&conn);
 
@@ -2188,6 +2249,7 @@ mod serde_round_trip_tests {
             is_bidirectional: true,
             source: None,
             destination: None,
+            properties: Default::default(),
         };
         round_trip(&conn2);
     }
@@ -2208,6 +2270,7 @@ mod serde_round_trip_tests {
                 kind: FeatureKind::DataPort,
                 direction: Some(Direction::InOut),
                 array_index: None,
+                properties: Default::default(),
             }],
             connections: vec![InstanceConnection {
                 name: "bus_link".to_string(),
@@ -2215,6 +2278,7 @@ mod serde_round_trip_tests {
                 is_bidirectional: false,
                 source: Some("cpu1.data_out".to_string()),
                 destination: Some("cpu2.data_in".to_string()),
+                properties: Default::default(),
             }],
             properties: std::collections::BTreeMap::new(),
             children: vec![
@@ -2230,6 +2294,7 @@ mod serde_round_trip_tests {
                         kind: FeatureKind::DataPort,
                         direction: Some(Direction::Out),
                         array_index: None,
+                        properties: Default::default(),
                     }],
                     connections: vec![],
                     properties: std::collections::BTreeMap::new(),
@@ -2248,6 +2313,7 @@ mod serde_round_trip_tests {
                         kind: FeatureKind::DataPort,
                         direction: Some(Direction::In),
                         array_index: Some(2),
+                        properties: Default::default(),
                     }],
                     connections: vec![],
                     properties: std::collections::BTreeMap::new(),
@@ -2277,6 +2343,7 @@ mod serde_round_trip_tests {
                 kind: FeatureKind::EventPort,
                 direction: Some(Direction::In),
                 array_index: None,
+                properties: Default::default(),
             }],
             connections: vec![],
             properties: std::collections::BTreeMap::new(),

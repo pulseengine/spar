@@ -545,6 +545,8 @@ mod tests {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps,
+            feature_property_maps: Default::default(),
+            connection_property_maps: Default::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -831,6 +833,8 @@ mod tests {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            feature_property_maps: Default::default(),
+            connection_property_maps: Default::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         };
