@@ -4364,12 +4364,8 @@ end p;
             spar_base_db::SourceFile::new(&db, "p.aadl".to_string(), src.to_string()),
         );
         let scope = GlobalScope::from_trees(vec![tree]);
-        let inst = SystemInstance::instantiate(
-            &scope,
-            &Name::new("p"),
-            &Name::new("S"),
-            &Name::new("i"),
-        );
+        let inst =
+            SystemInstance::instantiate(&scope, &Name::new("p"), &Name::new("S"), &Name::new("i"));
 
         // Property on the connection lands on the connection instance.
         let (conn_idx, _) = inst

@@ -586,8 +586,10 @@ impl Instance {
         // such a raw connection carries `applies to` properties, surface it here
         // so the property isn't silently dropped (#237). Keyed by name to avoid
         // duplicating a connection already emitted as a semantic instance.
-        let emitted: std::collections::HashSet<&str> =
-            connections.iter().map(|c| c.name.as_str()).collect::<std::collections::HashSet<_>>();
+        let emitted: std::collections::HashSet<&str> = connections
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<std::collections::HashSet<_>>();
         let mut extra: Vec<InstanceConnection> = Vec::new();
         for &ci in &comp.connections {
             let props = prop_map_to_btree(self.inner.properties_for_connection(ci));
@@ -595,7 +597,9 @@ impl Instance {
                 continue;
             }
             let conn = &self.inner.connections[ci];
-            if emitted.contains(conn.name.as_str()) || extra.iter().any(|e| e.name == conn.name.as_str()) {
+            if emitted.contains(conn.name.as_str())
+                || extra.iter().any(|e| e.name == conn.name.as_str())
+            {
                 continue;
             }
             let end_str = |e: &Option<spar_hir_def::instance::ConnectionEnd>| {
