@@ -798,31 +798,31 @@ impl WcttAnalysis {
             // analysis keeps the SFA bound — identical to `pmoo == false`.
             #[cfg(feature = "milp-solver")]
             {
-            let sfa_delay_ps = total_delay_ps;
-            if self.pmoo
-                && let Some((pmoo_delay_ps, pmoo_solve_us)) =
-                    pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
-            {
-                let tightening_pct = if sfa_delay_ps > 0 {
-                    100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
-                } else {
-                    0.0
-                };
-                diags.push(AnalysisDiagnostic {
-                    severity: Severity::Info,
-                    message: format!(
-                        "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
+                let sfa_delay_ps = total_delay_ps;
+                if self.pmoo
+                    && let Some((pmoo_delay_ps, pmoo_solve_us)) =
+                        pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
+                {
+                    let tightening_pct = if sfa_delay_ps > 0 {
+                        100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
+                    } else {
+                        0.0
+                    };
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
                          {} ps (tightening {:.1}%, LP solve {} us)",
-                        stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
-                    ),
-                    path: stream_path.clone(),
-                    analysis: self.name().to_string(),
-                });
-                // The PMOO bound is no looser than SFA on the LP's
-                // canonical topology (Bondorf et al.); guard with a
-                // min just in case f64 rounding flips that.
-                total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
-            }
+                            stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
+                        ),
+                        path: stream_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                    // The PMOO bound is no looser than SFA on the LP's
+                    // canonical topology (Bondorf et al.); guard with a
+                    // min just in case f64 rounding flips that.
+                    total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+                }
             } // end #[cfg(milp-solver)] PMOO branch
 
             // Step 6: budget check. If the source bus carried a
