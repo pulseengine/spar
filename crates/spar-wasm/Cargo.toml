@@ -15,7 +15,10 @@ spar-syntax.workspace = true
 spar-base-db.workspace = true
 spar-hir-def.workspace = true
 spar-hir.workspace = true
-spar-analysis.workspace = true
+# Path dep with default-features = false so the MILP solver (good_lp/HiGHS,
+# a cmake build that can't target wasm32) is excluded. The wasm render path
+# uses only solver-free analyses; normal builds keep the solver (#259).
+spar-analysis = { path = "../spar-analysis", default-features = false }
 spar-render.workspace = true
 etch.workspace = true
 serde.workspace = true
