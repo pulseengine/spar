@@ -1484,8 +1484,15 @@ impl<'a> Builder<'a> {
                 let impl_mt_data = impl_chain.mode_transitions;
 
                 let mut child_indices = Vec::new();
-                for (sub_name, _sub_cat, sub_classifier, sub_tree, sub_idx, array_dims, sub_in_modes) in
-                    sub_data
+                for (
+                    sub_name,
+                    _sub_cat,
+                    sub_classifier,
+                    sub_tree,
+                    sub_idx,
+                    array_dims,
+                    sub_in_modes,
+                ) in sub_data
                 {
                     // Determine how many instances to create for this subcomponent.
                     let count = array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
