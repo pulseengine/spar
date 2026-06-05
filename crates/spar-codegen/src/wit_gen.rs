@@ -142,10 +142,43 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
 /// (A representative set covering the WIT keywords an AADL-derived name could
 /// realistically collide with.)
 const WIT_KEYWORDS: &[&str] = &[
-    "use", "type", "func", "record", "enum", "flags", "variant", "resource", "interface", "world",
-    "import", "export", "package", "include", "as", "from", "static", "constructor", "list",
-    "option", "result", "tuple", "future", "stream", "bool", "u8", "u16", "u32", "u64", "s8",
-    "s16", "s32", "s64", "f32", "f64", "char", "string",
+    "use",
+    "type",
+    "func",
+    "record",
+    "enum",
+    "flags",
+    "variant",
+    "resource",
+    "interface",
+    "world",
+    "import",
+    "export",
+    "package",
+    "include",
+    "as",
+    "from",
+    "static",
+    "constructor",
+    "list",
+    "option",
+    "result",
+    "tuple",
+    "future",
+    "stream",
+    "bool",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "s8",
+    "s16",
+    "s32",
+    "s64",
+    "f32",
+    "f64",
+    "char",
+    "string",
 ];
 
 /// Sanitize an arbitrary AADL identifier into a valid WIT identifier.
@@ -302,7 +335,12 @@ end TestPkg;
         let mut resolve = wit_parser::Resolve::new();
         resolve
             .push_str("generated.wit", &file.content)
-            .unwrap_or_else(|e| panic!("generated WIT failed to parse/resolve: {e}\n---\n{}", file.content));
+            .unwrap_or_else(|e| {
+                panic!(
+                    "generated WIT failed to parse/resolve: {e}\n---\n{}",
+                    file.content
+                )
+            });
     }
 
     #[test]
