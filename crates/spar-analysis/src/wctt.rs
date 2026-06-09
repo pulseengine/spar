@@ -792,31 +792,38 @@ impl WcttAnalysis {
             //
             // With `self.pmoo == false` (the default) this branch is a
             // no-op and the v0.9.2 output is byte-identical.
-            let sfa_delay_ps = total_delay_ps;
-            if self.pmoo
-                && let Some((pmoo_delay_ps, pmoo_solve_us)) =
-                    pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
+            // PMOO/LUDB uses the HiGHS MILP solver, gated behind the
+            // `milp-solver` feature (off for wasm targets, #259). When the
+            // feature is disabled this whole branch compiles out and the
+            // analysis keeps the SFA bound — identical to `pmoo == false`.
+            #[cfg(feature = "milp-solver")]
             {
-                let tightening_pct = if sfa_delay_ps > 0 {
-                    100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
-                } else {
-                    0.0
-                };
-                diags.push(AnalysisDiagnostic {
-                    severity: Severity::Info,
-                    message: format!(
-                        "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
+                let sfa_delay_ps = total_delay_ps;
+                if self.pmoo
+                    && let Some((pmoo_delay_ps, pmoo_solve_us)) =
+                        pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
+                {
+                    let tightening_pct = if sfa_delay_ps > 0 {
+                        100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
+                    } else {
+                        0.0
+                    };
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Info,
+                        message: format!(
+                            "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
                          {} ps (tightening {:.1}%, LP solve {} us)",
-                        stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
-                    ),
-                    path: stream_path.clone(),
-                    analysis: self.name().to_string(),
-                });
-                // The PMOO bound is no looser than SFA on the LP's
-                // canonical topology (Bondorf et al.); guard with a
-                // min just in case f64 rounding flips that.
-                total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
-            }
+                            stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
+                        ),
+                        path: stream_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                    // The PMOO bound is no looser than SFA on the LP's
+                    // canonical topology (Bondorf et al.); guard with a
+                    // min just in case f64 rounding flips that.
+                    total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+                }
+            } // end #[cfg(milp-solver)] PMOO branch
 
             // Step 6: budget check. If the source bus carried a
             // WCTT_Budget, compare. We use the *first* bound switch's
@@ -1175,6 +1182,10 @@ pub fn compute_network_hop_latency(
 ///
 /// On any failure (eligibility, LP infeasible, malformed inputs) we
 /// return `None` so the caller transparently keeps the SFA bound.
+///
+/// Compiled only with the `milp-solver` feature (the good_lp/HiGHS backend);
+/// the wasm build omits it (#259).
+#[cfg(feature = "milp-solver")]
 fn pmoo_or_sfa(
     tagged: &Stream,
     all_streams: &[Stream],
@@ -3208,6 +3219,7 @@ end Net;
     /// Helper: instantiate a fixture with multiple competing streams
     /// sharing a single FIFO switch. Used by both the PMOO-on and
     /// PMOO-off round-trip tests below.
+    #[cfg(feature = "milp-solver")]
     fn pmoo_fixture_aadl() -> &'static str {
         r#"
 package Net
@@ -3276,6 +3288,7 @@ end Net;
 "#
     }
 
+    #[cfg(feature = "milp-solver")]
     #[test]
     fn pmoo_flag_off_emits_no_pmoo_diagnostic() {
         // Default WcttAnalysis (pmoo = false) must produce
@@ -3296,6 +3309,7 @@ end Net;
         assert_eq!(bound_count, 4, "expected 4 streams: {:#?}", diags);
     }
 
+    #[cfg(feature = "milp-solver")]
     #[test]
     fn pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams() {
         // With pmoo = true, the PMOO/LUDB path fires for every stream
