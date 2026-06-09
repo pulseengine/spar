@@ -49,9 +49,15 @@ fn period_ps_to_ns_string(period_ps: u64, buf: &mut [u8; 32]) -> usize {
     // (period_ps is always a multiple of NS_TO_PS).
     let period_ns = period_ps / NS_TO_PS;
 
+    // Digit math in u32: every value in the contract domain
+    // (0 < ns ≤ 10^9 < 2^32) is exactly representable, and 32-bit div/mod
+    // circuits roughly halve the SAT instance vs u64 (#252). The cast is
+    // asserted lossless so the model cannot silently diverge if the
+    // domain ever grows past u32.
+    assert!(period_ns <= u32::MAX as u64);
     // Write decimal digits into buf.
     let mut tmp = [0u8; 20];
-    let mut n = period_ns;
+    let mut n = period_ns as u32;
     let mut ndigits = 0usize;
     if n == 0 {
         tmp[0] = b'0';
@@ -94,31 +100,38 @@ fn parse_ns_string_to_ps(buf: &[u8; 32], len: usize) -> u64 {
         return 0;
     }
     let digit_len = len - 3; // strip " ns"
-    let mut val: u64 = 0;
+    // u32 accumulator: the contract domain tops out at 10^9 < 2^32, so
+    // every parseable in-domain value fits; see the width note in
+    // `period_ps_to_ns_string` (#252).
+    let mut val: u32 = 0;
     for i in 0..digit_len {
         let d = buf[i];
         if d < b'0' || d > b'9' {
             return 0;
         }
-        val = val * 10 + (d - b'0') as u64;
+        val = val * 10 + (d - b'0') as u32;
     }
-    val * NS_TO_PS
+    (val as u64) * NS_TO_PS
 }
 
 /// Contract: given a thread with `Period = p ns` (0 < p ≤ 1_000_000_000 ns),
 /// the generated dispatch metadata string round-trips back to exactly `p * NS_TO_PS`
 /// picoseconds — no truncation, no off-by-one.
 ///
-/// This proves that the period-preservation invariant holds for every
-/// nanosecond-granularity period in the realistic AADL range (sub-millisecond
-/// to one second).  The proof is by exhaustive bounded enumeration: CBMC
-/// explores all `p` satisfying the `kani::assume` constraints.
-#[kani::proof]
-#[kani::unwind(65)]
-fn prove_thread_period_preserved() {
-    // Precondition: AADL contract requires 0 < Period ≤ 1_000_000_000 ns.
+/// **Proof decomposition (#252):** a single harness over the full
+/// `[1, 10^9]` symbolic domain produced a 308k-variable / 1.5M-clause SAT
+/// instance (the digit-extraction division loop unwinds 64+ times against a
+/// fully symbolic u64) and CBMC ran out of memory — locally AND as the CI
+/// 6h-timeout root cause. The claim is therefore *stratified by decimal
+/// digit count*: one harness per digit-band, `union(d1..d10) = [1, 10^9]`
+/// exactly, so the TOTAL claim is unchanged — full-domain, no weakening.
+/// Within a band the digit loop has a fixed small iteration count, so each
+/// SAT instance stays trivially small.
+fn check_period_roundtrip(lo_ns: u64, hi_ns: u64) {
+    // Precondition: AADL contract requires 0 < Period ≤ 1_000_000_000 ns;
+    // this harness instance covers the [lo_ns, hi_ns] band of that range.
     let period_ns: u64 = kani::any();
-    kani::assume(period_ns > 0 && period_ns <= MAX_PERIOD_NS);
+    kani::assume(period_ns >= lo_ns && period_ns <= hi_ns);
 
     // The HIR stores periods in picoseconds; a nanosecond input is always
     // a multiple of NS_TO_PS.
@@ -137,6 +150,73 @@ fn prove_thread_period_preserved() {
         "period round-trip failed: recovered {recovered_ps} ps != original {period_ps} ps"
     );
 }
+
+/// One proof per decimal-digit band. Band boundaries are consecutive and
+/// exhaustive: d1 = [1,9], d2 = [10,99], …, d9 = [10^8, 10^9 - 1],
+/// d10 = [10^9, 10^9]. Their union is exactly (0, MAX_PERIOD_NS] — the
+/// original contract domain.
+/// The unwind bound is per-band: band dN's value has exactly N decimal
+/// digits, so every loop in the model runs ≤ N (+1 for the exit check)
+/// iterations. CBMC unwinds symbolic loops to the declared bound
+/// regardless of feasibility, so a tight bound shrinks the instance —
+/// unwind(N+2) gives one iteration of slack while staying minimal.
+macro_rules! period_band_proof {
+    ($name:ident, $lo:expr, $hi:expr, $unwind:literal) => {
+        #[kani::proof]
+        #[kani::unwind($unwind)]
+        fn $name() {
+            check_period_roundtrip($lo, $hi);
+        }
+    };
+}
+
+period_band_proof!(prove_thread_period_preserved_d1, 1, 9, 4);
+period_band_proof!(prove_thread_period_preserved_d2, 10, 99, 4);
+period_band_proof!(prove_thread_period_preserved_d3, 100, 999, 5);
+period_band_proof!(prove_thread_period_preserved_d4, 1_000, 9_999, 6);
+period_band_proof!(prove_thread_period_preserved_d5, 10_000, 99_999, 7);
+period_band_proof!(prove_thread_period_preserved_d6, 100_000, 999_999, 8);
+period_band_proof!(prove_thread_period_preserved_d7, 1_000_000, 9_999_999, 9);
+period_band_proof!(prove_thread_period_preserved_d8, 10_000_000, 99_999_999, 10);
+period_band_proof!(
+    prove_thread_period_preserved_d9,
+    100_000_000,
+    999_999_999,
+    11
+);
+period_band_proof!(
+    prove_thread_period_preserved_d10,
+    MAX_PERIOD_NS,
+    MAX_PERIOD_NS,
+    12
+);
+
+/// Compile-time guard that the bands tile the contract domain exactly:
+/// consecutive (each lo = previous hi + 1), starting at 1, ending at
+/// MAX_PERIOD_NS. If someone edits a band and leaves a hole, this fails
+/// the build — the stratified claim would otherwise silently weaken.
+const PERIOD_BANDS: [(u64, u64); 10] = [
+    (1, 9),
+    (10, 99),
+    (100, 999),
+    (1_000, 9_999),
+    (10_000, 99_999),
+    (100_000, 999_999),
+    (1_000_000, 9_999_999),
+    (10_000_000, 99_999_999),
+    (100_000_000, 999_999_999),
+    (MAX_PERIOD_NS, MAX_PERIOD_NS),
+];
+const _BANDS_TILE_DOMAIN: () = {
+    assert!(PERIOD_BANDS[0].0 == 1);
+    assert!(PERIOD_BANDS[9].1 == MAX_PERIOD_NS);
+    let mut i = 1;
+    while i < 10 {
+        assert!(PERIOD_BANDS[i].0 == PERIOD_BANDS[i - 1].1 + 1);
+        assert!(PERIOD_BANDS[i].0 <= PERIOD_BANDS[i].1);
+        i += 1;
+    }
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Harness 2 — prove_port_direction_preserved

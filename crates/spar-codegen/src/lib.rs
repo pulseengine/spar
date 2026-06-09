@@ -11,6 +11,7 @@
 //! - **doc_gen**: Rivet design documents with YAML frontmatter
 //! - **workspace_gen**: Cargo.toml + BUILD.bazel workspace generation
 
+pub mod build_gen;
 pub mod config_gen;
 pub mod doc_gen;
 pub mod proof_gen;
@@ -367,6 +368,19 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
         for &(idx, _comp) in &threads {
             files.push(test_gen::generate_test_harness(inst, idx));
         }
+    }
+
+    // Generate build-time contract verification (REQ-CODEGEN-VERIFY-BUILD):
+    // a model-derived aadl-contract.toml + a build.rs that fails compilation
+    // when generated timing constants diverge from it. Rust-workspace only —
+    // the Bazel path gets its verification via BUILD actions, not build.rs.
+    if let Some(verify) = config.verify
+        && (verify == VerifyMode::All || verify == VerifyMode::Build)
+        && (config.format == OutputFormat::Rust || config.format == OutputFormat::Both)
+    {
+        let thread_idxs: Vec<_> = threads.iter().map(|&(idx, _)| idx).collect();
+        files.push(build_gen::generate_contract_manifest(inst, &thread_idxs));
+        files.push(build_gen::generate_build_verifier());
     }
 
     // Generate proof artifacts

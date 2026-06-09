@@ -772,7 +772,7 @@ artifacts:
       Dual output: WIT interfaces (component contracts) + Rust crate
       skeletons (implementation). Process → crate, thread → async fn,
       data type → struct, port → typed channel / WIT stream.
-    status: planned
+    status: implemented
     tags: [codegen, competitive-gap, v040]
     links:
       - type: traces-to
@@ -869,7 +869,7 @@ artifacts:
       within deadline, per existing scheduling_verified.rs pattern).
       Generated Kani harnesses for bounded model checking (no deadline
       miss, port type safety). Per Verification Guide multi-track approach.
-    status: planned
+    status: implemented
     tags: [codegen, verification, formal, v040]
     links:
       - type: traces-to
