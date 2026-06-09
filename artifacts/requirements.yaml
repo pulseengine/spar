@@ -123,6 +123,8 @@ artifacts:
       and down patterns to produce end-to-end connection instances.
     status: partial
     tags: [instance, as5506-ch14]
+    fields:
+      release: v0.18.0
 
   - id: REQ-INST-004
     type: requirement
@@ -228,6 +230,8 @@ artifacts:
       subcomponent rules. Target 50+ rules.
     status: partial
     tags: [analysis, legality]
+    fields:
+      release: v0.18.0
 
   - id: REQ-ANALYSIS-008
     type: requirement
@@ -467,6 +471,8 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-INST-004
+    fields:
+      release: v0.18.0
 
   - id: COVERAGE-CH13
     type: requirement
@@ -609,6 +615,8 @@ artifacts:
       bindings) or produce incompatible analysis results.
     status: planned
     tags: [diff, merge, v040]
+    fields:
+      release: v0.20.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -621,6 +629,8 @@ artifacts:
       elements as MCP resources over stdio JSON-RPC transport.
     status: planned
     tags: [mcp, integration, v040]
+    fields:
+      release: v0.14.0
 
   # ── Query Language ───────────────────────────────────────────────────
 
@@ -634,6 +644,8 @@ artifacts:
       and aggregation.
     status: planned
     tags: [query, instance, v040]
+    fields:
+      release: v0.20.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -683,6 +695,8 @@ artifacts:
       cost). Local solutions compose into globally valid configurations.
     status: planned
     tags: [solver, optimization, v040]
+    fields:
+      release: v0.22.0
 
   - id: REQ-SOLVER-005
     type: requirement
@@ -694,6 +708,8 @@ artifacts:
       Uses dual bounds from MILP or exhaustive search proofs from CP-SAT.
     status: planned
     tags: [solver, verification, v040]
+    fields:
+      release: v0.19.0
 
   - id: REQ-SOLVER-006
     type: requirement
@@ -705,6 +721,8 @@ artifacts:
       both exact Pareto (small problems) and approximate (NSGA-II for large).
     status: planned
     tags: [solver, optimization, v040]
+    fields:
+      release: v0.22.0
 
   - id: REQ-SOLVER-007
     type: requirement
@@ -728,6 +746,8 @@ artifacts:
       ASIL, DO-178C DAL, and IEC 61508 SIL.
     status: planned
     tags: [solver, safety, v040]
+    fields:
+      release: v0.19.0
 
   - id: REQ-SOLVER-009
     type: requirement
@@ -739,6 +759,8 @@ artifacts:
       security overhead (TLS latency, MAC computation) in timing analysis.
     status: planned
     tags: [solver, security, v040]
+    fields:
+      release: v0.19.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -755,6 +777,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-TRANSFORM-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-WIT
     type: requirement
@@ -769,6 +793,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.13.0
 
   - id: REQ-CODEGEN-RUST
     type: requirement
@@ -783,6 +809,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-BAZEL
     type: requirement
@@ -798,6 +826,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-VERIFY-BUILD
     type: requirement
@@ -812,6 +842,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-VERIFY-TEST
     type: requirement
@@ -826,6 +858,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-VERIFY-PROOF
     type: requirement
@@ -840,6 +874,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-CODEGEN-RIVET
     type: requirement
@@ -854,6 +890,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
+    fields:
+      release: v0.14.0
 
   - id: REQ-KANI-CODEGEN-001
     type: requirement
@@ -929,6 +967,8 @@ artifacts:
       interactive zoom.
     status: planned
     tags: [visualization, scheduling, competitive-gap, v040]
+    fields:
+      release: v0.22.0
 
   - id: REQ-SECURITY-001
     type: requirement
@@ -944,6 +984,8 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SOLVER-009
+    fields:
+      release: v0.18.0
 
   - id: REQ-RESOLUTE-001
     type: requirement
@@ -955,6 +997,8 @@ artifacts:
       Resolute supports claim trees with sub-claims and computed evidence.
     status: planned
     tags: [verification, competitive-gap, v040]
+    fields:
+      release: v0.20.0
 
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
@@ -1006,6 +1050,8 @@ artifacts:
       Requirements flow into rivet, trace to AADL components via spar verify.
     status: planned
     tags: [interop, requirements, v040]
+    fields:
+      release: v0.21.0
 
   - id: REQ-INTEROP-003
     type: requirement
@@ -2324,3 +2370,144 @@ artifacts:
       round-trip) and Tier-C (Ocarina second opinion) are deferred.
     status: implemented
     tags: [interop, plugfest, aadl, parser, osate, v0120]
+
+  # ── Release-plan artifacts (v0.13.0 … v0.22.0 roadmap, 2026-06-09) ──
+  # Created by the release-planning pass: open issues / deferred work
+  # become requirements assigned to a release via fields.release, so
+  # "what must we implement for vX.Y" is a rivet query, not a document.
+
+  - id: REQ-CODEGEN-WIT-TYPES
+    type: requirement
+    title: "WIT scalar type fidelity from Data_Size"
+    description: >
+      Codegen WIT emission shall map AADL data types with scalar
+      Data_Size to precise WIT types (8 bytes -> u64, 4 bytes -> u32,
+      etc.) instead of the blanket `type x = list<u8>` alias introduced
+      by the #254 validity fix. Requires threading scope/property access
+      into generate_wit. Follow-up recorded in #254/#255.
+    status: proposed
+    tags: [codegen, wit, interop]
+    fields:
+      release: v0.14.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT
+
+  - id: REQ-PROOF-SCHED-001
+    type: requirement
+    title: "Lean scheduling proofs (EDF, RMBound, RTA) wired into CI"
+    description: >
+      The complete Lean 4 scheduling proofs (EDF optimality, RM
+      utilization bound, RTA convergence) shall typecheck in CI via
+      `lake build` as a required gate, anchoring the spar-analysis
+      scheduling passes the way TEST-LEAN-MINPLUS anchors network
+      calculus. Tracks issue #261.
+    status: proposed
+    tags: [proofs, lean, scheduling]
+    fields:
+      release: v0.15.0
+    links:
+      - type: traces-to
+        target: REQ-ANALYSIS-002
+      - type: traces-to
+        target: REQ-RTA-001
+
+  - id: REQ-PLUGFEST-002
+    type: requirement
+    title: "Plug-fest Tier-B — OSATE-in-Docker adjudication oracle + AAXL2 round-trip"
+    description: >
+      An OSATE-in-Docker oracle shall adjudicate the unadjudicated.txt
+      bugtrack corpus baseline (does OSATE accept or reject each
+      fixture) and round-trip spar instance models against OSATE AAXL2
+      output for instance-equivalence. Converts unadjudicated fixtures
+      into either genuine spar gaps or confirmed-malformed models.
+      Tier-B of issue #246.
+    status: proposed
+    tags: [interop, plugfest, osate]
+    fields:
+      release: v0.16.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-PLUGFEST-003
+    type: requirement
+    title: "Core AADL parser gap closure (OSATE corpus ratchet to zero)"
+    description: >
+      The core-bucket entries in test-data/interop/baseline/spar-gaps.txt
+      shall be driven to zero: named-constant property-type ranges,
+      nested-list connection property values, and any Tier-B-confirmed
+      core gaps. Each fix re-blesses the ratchet; the corpus test
+      enforces no regression. Issue #246.
+    status: proposed
+    tags: [parser, plugfest]
+    fields:
+      release: v0.16.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-PLUGFEST-004
+    type: requirement
+    title: "Plug-fest Tier-C — Ocarina second-opinion conformance"
+    description: >
+      An Ocarina-based second oracle shall parse the shared corpus to
+      detect two-vs-one dialect splits (spar+OSATE agree vs Ocarina
+      disagrees), preventing silent two-tool consensus drift. Tier-C of
+      issue #246.
+    status: proposed
+    tags: [interop, plugfest, ocarina]
+    fields:
+      release: v0.21.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-TRACE-TOPOLOGY-010
+    type: requirement
+    title: "TopologyMissingWiring reconciliation check"
+    description: >
+      spar trace topology shall flag declared AADL connections whose
+      endpoints never appear as observed adjacency in the runtime
+      topology sources (LLDP/PCAPNG) — wiring declared but not observed.
+      Third of the five deterministic reconciler checks.
+    status: proposed
+    tags: [trace-topology, reconciler]
+    fields:
+      release: v0.17.0
+    links:
+      - type: traces-to
+        target: REQ-TRACE-TOPOLOGY-002
+
+  - id: REQ-TRACE-TOPOLOGY-011
+    type: requirement
+    title: "ConfigDrift reconciliation check"
+    description: >
+      spar trace topology shall compare declared Spar_TSN/Spar_Network
+      switch configuration (gate schedules, reservations,
+      class-of-service) against observed Qcc YANG switch config and flag
+      drift. Fourth of the five deterministic reconciler checks.
+    status: proposed
+    tags: [trace-topology, reconciler]
+    fields:
+      release: v0.17.0
+    links:
+      - type: traces-to
+        target: REQ-TRACE-TOPOLOGY-005
+
+  - id: REQ-TRACE-TOPOLOGY-012
+    type: requirement
+    title: "BinaryMismatch reconciliation check"
+    description: >
+      spar trace topology shall compare declared binary identities
+      (Spar_Identity hashes/versions) against observed attestation
+      evidence and flag mismatches between the declared deployment and
+      what is actually running. Fifth of the five deterministic
+      reconciler checks.
+    status: proposed
+    tags: [trace-topology, reconciler, attestation]
+    fields:
+      release: v0.17.0
+    links:
+      - type: traces-to
+        target: REQ-TRACE-TOPOLOGY-008
