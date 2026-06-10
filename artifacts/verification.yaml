@@ -771,6 +771,21 @@ artifacts:
         target: REQ-CODEGEN-WIT
       - type: verifies
         target: REQ-CODEGEN-RUST
+      # v0.14.0 link-and-promote batch: the suite's golden tests validate
+      # each generator's output (rust_gen crate skeletons, workspace_gen
+      # BUILD.bazel, doc_gen + verification-yaml for rivet, test_gen
+      # harnesses, and build_gen's aadl-contract.toml + drift-failing
+      # build.rs from #263), so it satisfies those requirements directly.
+      - type: satisfies
+        target: REQ-CODEGEN-RUST
+      - type: satisfies
+        target: REQ-CODEGEN-BAZEL
+      - type: satisfies
+        target: REQ-CODEGEN-RIVET
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-TEST
+      - type: satisfies
+        target: REQ-CODEGEN-VERIFY-BUILD
       - type: satisfies
         target: ARCH-CODEGEN-002
       - type: satisfies
@@ -2394,6 +2409,11 @@ artifacts:
     status: passing
     tags: [mcp, migration, track-e, v090, integration]
     links:
+      # v0.14.0 link-and-promote: the tool-surface tests exercise the MCP
+      # server's analysis tools + model resources end-to-end (in-process
+      # and stdio JSON-RPC), which is REQ-MCP-001's contract.
+      - type: satisfies
+        target: REQ-MCP-001
       - type: satisfies
         target: REQ-MCP-002
       - type: satisfies
