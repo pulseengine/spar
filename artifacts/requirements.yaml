@@ -627,7 +627,7 @@ artifacts:
       Model Context Protocol server running as a spar CLI subcommand,
       exposing AADL analysis passes as MCP tools and instance model
       elements as MCP resources over stdio JSON-RPC transport.
-    status: planned
+    status: implemented
     tags: [mcp, integration, v040]
     fields:
       release: v0.14.0
@@ -804,7 +804,7 @@ artifacts:
       skeleton), ports.rs (typed channels), types.rs (data structs),
       config.rs (#[aadl(...)] scheduling attributes). System generates
       Cargo workspace. Both native and WASM component targets.
-    status: planned
+    status: implemented
     tags: [codegen, rust, v040]
     links:
       - type: traces-to
@@ -821,7 +821,7 @@ artifacts:
       rules_verus (SMT checking), rules_lean (proof checking),
       rules_kani (bounded model checking). Cargo.toml also generated
       for development iteration.
-    status: planned
+    status: implemented
     tags: [codegen, bazel, v040]
     links:
       - type: traces-to
@@ -837,7 +837,7 @@ artifacts:
       checked against AADL model at build time. Proc macro (Cargo) or
       build action (Bazel) reads model and fails compilation if constants
       diverge. Catches structural drift between design and code.
-    status: planned
+    status: implemented
     tags: [codegen, verification, v040]
     links:
       - type: traces-to
@@ -853,7 +853,7 @@ artifacts:
       directions match, all required ports connected, execution time
       within WCET bounds. Test results feed into rivet as verification
       evidence artifacts.
-    status: planned
+    status: implemented
     tags: [codegen, verification, testing, v040]
     links:
       - type: traces-to
@@ -885,7 +885,7 @@ artifacts:
       (links to requirements, architecture decisions), verification.yaml
       with verification-verdict records for each layer. SysML v2 forward
       compatible link types (satisfies, verifies match SysML v2 satisfy, verify).
-    status: planned
+    status: implemented
     tags: [codegen, rivet, traceability, v040]
     links:
       - type: traces-to
