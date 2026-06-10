@@ -204,3 +204,5 @@ artifacts:
     hazards: [H-R3]
     satisfies: [ARCH-R4]
     verified-by: [VAL-R5]
+    fields:
+      release: v0.22.0
