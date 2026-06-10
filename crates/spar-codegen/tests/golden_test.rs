@@ -407,6 +407,49 @@ fn golden_model_generates_build_bazel() {
     );
 }
 
+/// REQ-CODEGEN-VERIFY-BUILD: VerifyMode::All/Build emits the model-derived
+/// contract manifest + a build.rs that fails compilation on drift between
+/// the generated timing constants and the manifest.
+#[test]
+fn golden_model_generates_build_contract() {
+    let output = generate_all();
+    let manifest = output
+        .files
+        .iter()
+        .find(|f| f.path == "aadl-contract.toml")
+        .expect("VerifyMode::All should emit aadl-contract.toml");
+    assert!(
+        manifest.content.contains("[thread."),
+        "contract manifest should carry per-thread sections:\n{}",
+        manifest.content
+    );
+    assert!(
+        manifest.content.contains("period_ps = "),
+        "contract manifest should carry model timing values"
+    );
+    let build_rs = output
+        .files
+        .iter()
+        .find(|f| f.path == "build.rs")
+        .expect("VerifyMode::All should emit build.rs");
+    assert!(
+        build_rs.content.contains("AADL contract violation"),
+        "build.rs should fail the build on contract divergence"
+    );
+    // Every thread named in the manifest must have a generated source the
+    // build script can check (manifest names are `parent/name`).
+    for line in manifest.content.lines() {
+        if let Some(rest) = line.trim().strip_prefix("[thread.\"") {
+            let thread = rest.trim_end_matches("\"]");
+            let src = format!("src/{thread}.rs");
+            assert!(
+                output.files.iter().any(|f| f.path == src),
+                "manifest names {thread} but {src} was not generated"
+            );
+        }
+    }
+}
+
 // ── Cross-module consistency ───────────────────────────────────────
 
 #[test]

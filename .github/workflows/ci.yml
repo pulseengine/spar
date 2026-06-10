@@ -357,18 +357,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Kani
+        # Pinned: 0.63.0's bundled nightly-2025-06-03 cannot compile
+        # smol_str 0.3.6 ([0; _] / generic_arg_infer); 0.67.0 ships
+        # nightly-2025-11-21 which can. Validated locally (#252).
         run: |
-          cargo install --locked kani-verifier
+          cargo install --locked kani-verifier --version 0.67.0
           cargo kani setup
       - name: Run Kani on spar-solver
         run: cargo kani --tests -p spar-solver
       - name: Run Kani on spar-codegen (schedule harness)
         run: cargo kani --tests -p spar-codegen --harness kani_emit_preserves_schedule
       - name: Run Kani on spar-codegen (AADL contract harnesses)
-        # prove_thread_period_preserved  — period round-trip (no truncation)
+        # prove_thread_period_preserved_d1..d10 — period round-trip, stratified
+        #   by decimal digit count; union of bands = (0, 10^9] ns exactly (the
+        #   single full-domain harness OOM'd CBMC / 6h-timed-out CI, #252)
         # prove_port_direction_preserved — WIT direction token mapping
         # prove_access_right_preserved   — Read_Only never widens to &mut
+        # kissat: ~2x faster than the default SAT backend on these
+        # bitvector-heavy instances (measured: d9 378s kissat / never
+        # finished with cadical+u64, #252). `_d` prefix-matches all ten
+        # period bands.
         run: >-
-          cargo kani --tests -p spar-codegen --harness prove_thread_period_preserved &&
-          cargo kani --tests -p spar-codegen --harness prove_port_direction_preserved &&
-          cargo kani --tests -p spar-codegen --harness prove_access_right_preserved
+          cargo kani --tests -p spar-codegen --solver kissat
+          --harness prove_thread_period_preserved_d
+          --harness prove_port_direction_preserved
+          --harness prove_access_right_preserved

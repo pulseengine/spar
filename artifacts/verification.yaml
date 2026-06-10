@@ -919,13 +919,18 @@ artifacts:
     status: passing
     title: Kani — AADL contract preservation harnesses for codegen
     description: >
-      Three #[kani::proof] harnesses in crates/spar-codegen/tests/kani_contracts.rs
+      The #[kani::proof] harnesses in crates/spar-codegen/tests/kani_contracts.rs
       constitute spar's Logika-equivalent strategy for generated-code correctness.
       Each harness uses kani::any() + kani::assume() for symbolic inputs and
       asserts the postcondition that the codegen pass must satisfy:
-        prove_thread_period_preserved — for any Period p in (0, 1_000_000_000] ns,
-          the emitted dispatch-metadata string round-trips back to exactly p ns
-          (no truncation, no off-by-one);
+        prove_thread_period_preserved_d1..d10 — for any Period p in
+          (0, 1_000_000_000] ns, the emitted dispatch-metadata string
+          round-trips back to exactly p ns (no truncation, no off-by-one).
+          Stratified by decimal digit count (one harness per band, the union
+          of the ten bands tiling (0, 10^9] exactly, guarded by a const
+          assertion) because the single full-domain harness produced a
+          308k-var/1.5M-clause SAT instance that OOM'd CBMC (#252) — the
+          decomposition preserves the full claim;
         prove_port_direction_preserved — Out source maps exclusively to a WIT setter
           and In sink to a WIT getter; a well-formed Out→In connection always produces
           a complementary setter+getter pair; same-direction features never produce a
@@ -936,7 +941,18 @@ artifacts:
     fields:
       method: formal-bounded
       steps:
-        - run: cargo kani --tests -p spar-codegen --harness prove_thread_period_preserved
+        - run: >-
+            cargo kani --tests -p spar-codegen
+            --harness prove_thread_period_preserved_d1
+            --harness prove_thread_period_preserved_d2
+            --harness prove_thread_period_preserved_d3
+            --harness prove_thread_period_preserved_d4
+            --harness prove_thread_period_preserved_d5
+            --harness prove_thread_period_preserved_d6
+            --harness prove_thread_period_preserved_d7
+            --harness prove_thread_period_preserved_d8
+            --harness prove_thread_period_preserved_d9
+            --harness prove_thread_period_preserved_d10
         - run: cargo kani --tests -p spar-codegen --harness prove_port_direction_preserved
         - run: cargo kani --tests -p spar-codegen --harness prove_access_right_preserved
     links:
