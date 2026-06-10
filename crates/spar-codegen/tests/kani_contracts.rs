@@ -195,19 +195,22 @@ period_band_proof!(
 /// consecutive (each lo = previous hi + 1), starting at 1, ending at
 /// MAX_PERIOD_NS. If someone edits a band and leaves a hole, this fails
 /// the build — the stratified claim would otherwise silently weaken.
-const PERIOD_BANDS: [(u64, u64); 10] = [
-    (1, 9),
-    (10, 99),
-    (100, 999),
-    (1_000, 9_999),
-    (10_000, 99_999),
-    (100_000, 999_999),
-    (1_000_000, 9_999_999),
-    (10_000_000, 99_999_999),
-    (100_000_000, 999_999_999),
-    (MAX_PERIOD_NS, MAX_PERIOD_NS),
-];
 const _BANDS_TILE_DOMAIN: () = {
+    // Mirrors the period_band_proof! instantiations above. Kept inside the
+    // guard body so dead-code lint (which does not track const-eval uses)
+    // never flags it under CI's -D warnings.
+    const PERIOD_BANDS: [(u64, u64); 10] = [
+        (1, 9),
+        (10, 99),
+        (100, 999),
+        (1_000, 9_999),
+        (10_000, 99_999),
+        (100_000, 999_999),
+        (1_000_000, 9_999_999),
+        (10_000_000, 99_999_999),
+        (100_000_000, 999_999_999),
+        (MAX_PERIOD_NS, MAX_PERIOD_NS),
+    ];
     assert!(PERIOD_BANDS[0].0 == 1);
     assert!(PERIOD_BANDS[9].1 == MAX_PERIOD_NS);
     let mut i = 1;
