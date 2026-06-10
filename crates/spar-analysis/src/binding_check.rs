@@ -184,33 +184,34 @@ fn validate_binding_target(
         None => return, // Can't parse the reference
     };
 
-    // Try to find the target in the instance model
-    for (_idx, comp) in instance.all_components() {
-        if comp.name.as_str().eq_ignore_ascii_case(target_name) {
-            if !allowed_categories.contains(&comp.category) {
-                diags.push(AnalysisDiagnostic {
-                    severity: Severity::Error,
-                    message: format!(
-                        "{} references '{}' which is a {} component, \
-                         expected one of: {}",
-                        binding_name,
-                        target_name,
-                        comp.category,
-                        allowed_categories
-                            .iter()
-                            .map(|c| c.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                    path: path.to_vec(),
-                    analysis: "binding_check".to_string(),
-                });
-            }
-            return;
+    // Resolve the target by dotted instance path (handles multi-level
+    // subcomponent references like `cvc.soc.helix_linux`) as well as by
+    // bare name. A bare-name-only match silently skips category
+    // validation for any nested-path binding. See REQ-BINDING-002.
+    if let Some(idx) = instance.resolve_dotted_path(target_name) {
+        let comp = instance.component(idx);
+        if !allowed_categories.contains(&comp.category) {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "{} references '{}' which is a {} component, \
+                     expected one of: {}",
+                    binding_name,
+                    target_name,
+                    comp.category,
+                    allowed_categories
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                path: path.to_vec(),
+                analysis: "binding_check".to_string(),
+            });
         }
     }
     // Target not found in instance model — not an error, might be
-    // in a different part of the model or use a different naming scheme
+    // in a different part of the model or use a different naming scheme.
 }
 
 #[cfg(test)]
@@ -301,6 +302,8 @@ mod tests {
                 mode_transition_instances: Arena::default(),
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
+                feature_property_maps: Default::default(),
+                connection_property_maps: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
             }

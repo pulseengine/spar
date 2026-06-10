@@ -48,19 +48,20 @@
       "contentName": "string.other.annex.aadl"
     },
     "keyword": {
-      "match": "\\b(package|public|private|with|end|extends|implementation|type|is|none|all|self|applies\\s+to|renames|prototypes|calls|in|out|inout|initial|mode|transition|compute|complete|final|all|not|and|or|true|false|aadlboolean|aadlinteger|aadlreal|aadlstring|enumeration|units|range|of|record|list|reference|classifier|inherit|constant|delta|access|provides|requires|inverse|event|port|parameter|group|bus|virtual|feature|flow|source|sink|path|binding|set|property)\\b",
+      "comment": "AADL is case-insensitive (AS5506 §15) — the leading (?i) lets keywords match in any case, e.g. PACKAGE/Package/package (issue #235).",
+      "match": "(?i)\\b(package|public|private|with|end|extends|implementation|type|is|none|all|self|applies\\s+to|renames|prototypes|calls|in|out|inout|initial|mode|transition|compute|complete|final|all|not|and|or|true|false|aadlboolean|aadlinteger|aadlreal|aadlstring|enumeration|units|range|of|record|list|reference|classifier|inherit|constant|delta|access|provides|requires|inverse|event|port|parameter|group|bus|virtual|feature|flow|source|sink|path|binding|set|property)\\b",
       "name": "keyword.control.aadl"
     },
     "category": {
-      "match": "\\b(system|process|thread|thread\\s+group|processor|memory|device|data|subprogram|subprogram\\s+group|abstract)\\b",
+      "match": "(?i)\\b(system|process|thread|thread\\s+group|processor|memory|device|data|subprogram|subprogram\\s+group|abstract)\\b",
       "name": "entity.name.type.category.aadl"
     },
     "feature-keyword": {
-      "match": "\\b(data\\s+port|event\\s+port|event\\s+data\\s+port|bus\\s+access|data\\s+access|subprogram\\s+access|subprogram\\s+group\\s+access|feature\\s+group)\\b",
+      "match": "(?i)\\b(data\\s+port|event\\s+port|event\\s+data\\s+port|bus\\s+access|data\\s+access|subprogram\\s+access|subprogram\\s+group\\s+access|feature\\s+group)\\b",
       "name": "storage.type.feature.aadl"
     },
     "section": {
-      "match": "\\b(features|subcomponents|connections|properties|flows|modes|annex)\\b",
+      "match": "(?i)\\b(features|subcomponents|connections|properties|flows|modes|annex)\\b",
       "name": "keyword.other.section.aadl"
     },
     "operator": {

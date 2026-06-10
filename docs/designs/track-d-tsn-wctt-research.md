@@ -969,6 +969,44 @@ sees a smaller subgraph.
 breakpoint pairs, typically <100 breakpoints per curve. ~10 KiB per
 stream → ~2 MiB for 200 streams. Negligible.
 
+### 5.8 Phase 2 implementation status (v0.8.1)
+
+Phase 2 of Track D landed across five v0.8.1 commits. The four-way
+WCTT dispatch in `crates/spar-analysis/src/wctt.rs` now selects the
+per-hop service curve based on `(bus_props, stream_props)` with
+deterministic precedence (TAS → CBS → preemption → deferred); the
+table below tracks status at v0.8.1 close-out:
+
+| Phase 2 item | Section | Status | PR |
+|---|---|---|---|
+| `Spar_TSN::*` property set + `spar-network::tsn` skeleton | §5.1 | DONE | #177 |
+| TAS (802.1Qbv) gate-window service curve, `WcttTasGated` | §4.5 / §5.4 | DONE | #180 |
+| CBS (802.1Qav) credit-pool service curve, `WcttCbsShaped` | §4.5 / §5.4 | DONE | #182 |
+| Frame preemption (802.1Qbu) blocking term, `WcttPreemptionApplied` | §4.5 / §5.4 | DONE | #181 |
+| End-to-end integration test + COMPLIANCE close-out | §5.4 / §5.6 | DONE | this commit |
+
+Each shaping diagnostic carries auditable numeric content: TAS reports
+open-fraction percent and worst-case gate latency in picoseconds; CBS
+reports idle slope (bits per second) and service-curve latency (ns);
+preemption reports both legacy max-frame and 802.1Qbu fragment blocking
+terms (ns) so the user can see the gain.
+
+Deferred to v0.8.x or v0.9.0+ (off the v0.8.1 critical path):
+
+- **Piecewise-affine NC composition.** v0.8.1 stays on rate-latency
+  closed forms for the per-hop service curves; multi-class TAS and
+  chained CBS classes need the general piecewise-affine min-plus
+  convolution scoped to v0.9.0.
+- **Multi-stream sharing of a CBS class.** The CBS service curve is
+  currently treated as exclusive to the tagged stream (other-class
+  blocking is folded into its latency term). Same-class residual
+  decomposition between two CBS streams in one class is a v0.8.x
+  follow-up; a fixture is the natural trigger.
+- **Advanced TAS guards.** GCL gap detection across cascaded switches
+  (the "no-wait packet scheduling" problem, [Robust TAS
+  analysis][robust-tas]) and modal GCL transients are v0.9.0 scope
+  per §7.2.
+
 ---
 
 ## Section 6 — Roadmap proposal

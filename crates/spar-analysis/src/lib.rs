@@ -26,6 +26,7 @@ pub mod connection_rules;
 pub mod connectivity;
 pub mod direction_rules;
 pub mod emv2_analysis;
+pub mod emv2_propagation;
 pub mod emv2_stpa_bridge;
 pub mod extends_rules;
 pub mod feature_group_check;
@@ -48,8 +49,11 @@ pub mod rta;
 pub mod scheduling;
 pub mod scheduling_verified;
 pub mod subcomponent_rules;
+pub mod wctt;
 pub mod weight_power;
 pub mod wrpc_binding;
+
+pub use wctt::WcttAnalysis;
 
 use serde::Serialize;
 use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
@@ -129,8 +133,8 @@ impl AnalysisRunner {
     /// mode checks, mode rules, modal rules, property rules, connection
     /// rules, subcomponent rules, scheduling, response-time analysis,
     /// latency, memory budget, resource budget, EMV2 fault-tree,
-    /// EMV2-STPA bridge, ARINC 653, wRPC binding, weight/power aggregation,
-    /// and bus bandwidth.
+    /// EMV2 error-propagation traversal, EMV2-STPA bridge, ARINC 653,
+    /// wRPC binding, weight/power aggregation, and bus bandwidth.
     pub fn register_all(&mut self) {
         use ai_ml::AiMlAnalysis;
         use arinc653::Arinc653Analysis;
@@ -143,6 +147,79 @@ impl AnalysisRunner {
         use connectivity::ConnectivityAnalysis;
         use direction_rules::DirectionRuleAnalysis;
         use emv2_analysis::Emv2Analysis;
+        use emv2_propagation::Emv2PropagationAnalysis;
+        use emv2_stpa_bridge::Emv2StpaBridgeAnalysis;
+        use feature_group_check::FeatureGroupCheckAnalysis;
+        use flow_check::FlowCheckAnalysis;
+        use flow_rules::FlowRuleAnalysis;
+        use hierarchy::HierarchyAnalysis;
+        use latency::LatencyAnalysis;
+        use memory_budget::MemoryBudgetAnalysis;
+        use modal_rules::ModalRuleAnalysis;
+        use mode_check::ModeCheckAnalysis;
+        use mode_reachability::ModeReachabilityAnalysis;
+        use mode_rules::ModeRuleAnalysis;
+        use property_rules::PropertyRuleAnalysis;
+        use resource_budget::ResourceBudgetAnalysis;
+        use rta::RtaAnalysis;
+        use scheduling::SchedulingAnalysis;
+        use subcomponent_rules::SubcomponentRuleAnalysis;
+        use wctt::WcttAnalysis;
+        use weight_power::WeightPowerAnalysis;
+        use wrpc_binding::WrpcBindingAnalysis;
+
+        self.register(Box::new(AiMlAnalysis));
+        self.register(Box::new(ConnectivityAnalysis));
+        self.register(Box::new(HierarchyAnalysis));
+        self.register(Box::new(CompletenessAnalysis));
+        self.register(Box::new(DirectionRuleAnalysis));
+        self.register(Box::new(ClassifierMatchAnalysis));
+        self.register(Box::new(BindingCheckAnalysis));
+        self.register(Box::new(BindingRuleAnalysis));
+        self.register(Box::new(FlowCheckAnalysis));
+        self.register(Box::new(FlowRuleAnalysis));
+        self.register(Box::new(ModeCheckAnalysis));
+        self.register(Box::new(ModeRuleAnalysis));
+        self.register(Box::new(ModalRuleAnalysis));
+        self.register(Box::new(PropertyRuleAnalysis));
+        self.register(Box::new(ConnectionRuleAnalysis));
+        self.register(Box::new(SubcomponentRuleAnalysis));
+        self.register(Box::new(SchedulingAnalysis));
+        self.register(Box::new(RtaAnalysis));
+        self.register(Box::new(LatencyAnalysis));
+        self.register(Box::new(MemoryBudgetAnalysis));
+        self.register(Box::new(ResourceBudgetAnalysis));
+        self.register(Box::new(Emv2Analysis));
+        self.register(Box::new(Emv2PropagationAnalysis));
+        self.register(Box::new(Emv2StpaBridgeAnalysis));
+        self.register(Box::new(Arinc653Analysis));
+        self.register(Box::new(WrpcBindingAnalysis));
+        self.register(Box::new(ModeReachabilityAnalysis));
+        self.register(Box::new(WeightPowerAnalysis));
+        self.register(Box::new(BusBandwidthAnalysis));
+        self.register(Box::new(FeatureGroupCheckAnalysis));
+        self.register(Box::new(WcttAnalysis::default()));
+    }
+
+    /// Register all instance-level analyses **except** [`wctt::WcttAnalysis`].
+    ///
+    /// Used by the CLI's `--pmoo` flag path to register a custom-
+    /// configured `WcttAnalysis` (with PMOO/LUDB enabled) without
+    /// duplicating the v0.9.2 SFA pass. See
+    /// `spar-cli/src/main.rs::run_all_analyses_with_pmoo`.
+    pub fn register_all_except_wctt(&mut self) {
+        use ai_ml::AiMlAnalysis;
+        use arinc653::Arinc653Analysis;
+        use binding_check::BindingCheckAnalysis;
+        use binding_rules::BindingRuleAnalysis;
+        use bus_bandwidth::BusBandwidthAnalysis;
+        use classifier_match::ClassifierMatchAnalysis;
+        use completeness::CompletenessAnalysis;
+        use connection_rules::ConnectionRuleAnalysis;
+        use connectivity::ConnectivityAnalysis;
+        use direction_rules::DirectionRuleAnalysis;
+        use emv2_analysis::Emv2Analysis;
+        use emv2_propagation::Emv2PropagationAnalysis;
         use emv2_stpa_bridge::Emv2StpaBridgeAnalysis;
         use feature_group_check::FeatureGroupCheckAnalysis;
         use flow_check::FlowCheckAnalysis;
@@ -184,6 +261,7 @@ impl AnalysisRunner {
         self.register(Box::new(MemoryBudgetAnalysis));
         self.register(Box::new(ResourceBudgetAnalysis));
         self.register(Box::new(Emv2Analysis));
+        self.register(Box::new(Emv2PropagationAnalysis));
         self.register(Box::new(Emv2StpaBridgeAnalysis));
         self.register(Box::new(Arinc653Analysis));
         self.register(Box::new(WrpcBindingAnalysis));
@@ -191,6 +269,8 @@ impl AnalysisRunner {
         self.register(Box::new(WeightPowerAnalysis));
         self.register(Box::new(BusBandwidthAnalysis));
         self.register(Box::new(FeatureGroupCheckAnalysis));
+        // WcttAnalysis intentionally omitted — caller registers a
+        // PMOO-configured variant.
     }
 
     /// Return the number of registered analyses.

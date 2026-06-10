@@ -20,6 +20,18 @@ pub(crate) enum ExprSyntaxKind {
     R_PAREN,
     /// `==`
     EQ_EQ,
+    /// `!=`
+    NEQ,
+    /// `>=`
+    GE,
+    /// `>`
+    GT,
+    /// `<=`
+    LE,
+    /// `<`
+    LT,
+    /// An integer literal: `0`, `1`, `42`.
+    INT_LIT,
     /// `,`
     COMMA,
 
@@ -59,6 +71,8 @@ pub(crate) enum ExprSyntaxKind {
     IDENT_EXPR,
     /// `message.contains('text')` expression.
     CONTAINS_EXPR,
+    /// Count comparison: `pipeline >= n`, `pipeline == n`, etc.
+    COUNT_COMPARE_EXPR,
 
     /// Sentinel: must be last.
     #[doc(hidden)]

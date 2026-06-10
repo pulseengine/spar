@@ -8,6 +8,15 @@ description = "Network Calculus primitives for AADL WCTT analysis (TSN/Ethernet,
 
 [dependencies]
 spar-hir-def.workspace = true
+# HiGHS-backed MILP solver for the PMOO/LUDB network-calculus bound. Optional
+# because `highs-sys` is a cmake/C++ build that cannot cross-compile to
+# wasm32 — the `milp-solver` feature gates it so spar-wasm can build (#259).
+good_lp = { workspace = true, optional = true }
+
+[features]
+default = ["milp-solver"]
+# Enables the `pmoo` module (PMOO/LUDB delay bound via good_lp + HiGHS).
+milp-solver = ["dep:good_lp"]
 
 [dev-dependencies]
 spar-base-db.workspace = true

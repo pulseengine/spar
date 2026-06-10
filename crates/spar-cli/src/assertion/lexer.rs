@@ -56,6 +56,34 @@ pub(crate) fn lex(input: &str) -> Vec<(ExprSyntaxKind, String)> {
                 pos += 2;
                 tokens.push((ExprSyntaxKind::EQ_EQ, "==".to_string()));
             }
+            b'!' if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' => {
+                pos += 2;
+                tokens.push((ExprSyntaxKind::NEQ, "!=".to_string()));
+            }
+            b'>' if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' => {
+                pos += 2;
+                tokens.push((ExprSyntaxKind::GE, ">=".to_string()));
+            }
+            b'>' => {
+                pos += 1;
+                tokens.push((ExprSyntaxKind::GT, ">".to_string()));
+            }
+            b'<' if pos + 1 < bytes.len() && bytes[pos + 1] == b'=' => {
+                pos += 2;
+                tokens.push((ExprSyntaxKind::LE, "<=".to_string()));
+            }
+            b'<' => {
+                pos += 1;
+                tokens.push((ExprSyntaxKind::LT, "<".to_string()));
+            }
+
+            // Integer literals
+            b if b.is_ascii_digit() => {
+                while pos < bytes.len() && bytes[pos].is_ascii_digit() {
+                    pos += 1;
+                }
+                tokens.push((ExprSyntaxKind::INT_LIT, input[start..pos].to_string()));
+            }
 
             // Identifiers and keywords
             b if is_ident_start(b) => {

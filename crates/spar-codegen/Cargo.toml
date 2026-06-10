@@ -19,6 +19,9 @@ spar-hir-def.workspace = true
 spar-base-db.workspace = true
 la-arena.workspace = true
 criterion.workspace = true
+# Parse generated WIT in tests so invalid output (bad identifiers, undefined
+# types) fails at the source rather than downstream in wit-bindgen (issue #254).
+wit-parser = "0.246"
 
 [[bench]]
 name = "codegen_benchmarks"
@@ -31,6 +34,16 @@ harness = false
 [target.'cfg(kani)'.dev-dependencies]
 # `kani` is injected by cargo-kani; no version pin needed.
 
+[features]
+# Enable the AADL-contract Kani harnesses in tests/kani_contracts.rs.
+# Under `cargo kani --tests`, the harnesses are compiled via the `#[cfg(kani)]`
+# cfg-guard (injected by the cargo-kani driver).  This feature flag is a
+# no-op at runtime; it exists so `cargo build -p spar-codegen --features
+# kani-harnesses` can verify the harness module compiles under a normal
+# Rust toolchain without requiring the Kani driver.
+kani-harnesses = []
+
 [lints.rust]
-# Permit the `#[cfg(kani)]` gates used by `tests/kani_codegen.rs`.
+# Permit the `#[cfg(kani)]` gates used by `tests/kani_codegen.rs` and
+# `tests/kani_contracts.rs`.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

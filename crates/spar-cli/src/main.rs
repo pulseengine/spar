@@ -1,9 +1,18 @@
 mod assertion;
 mod diff;
+mod insight;
 mod lsp;
 mod refactor;
 mod sarif;
 mod verify;
+
+// Re-export shared modules from the library so the binary keeps using
+// the `crate::moves::…` / `crate::variants_bridge::…` paths in its
+// existing call sites without duplicating module bodies. The lib
+// (spar_cli) is the canonical home; spar-mcp consumes the same surface.
+use spar_cli::moves;
+#[allow(unused_imports)]
+use spar_cli::variants_bridge;
 
 use std::{env, fs, process};
 
@@ -34,6 +43,7 @@ fn main() {
         "allocate" => cmd_allocate(&args[2..]),
         "diff" => cmd_diff(&args[2..]),
         "modes" => cmd_modes(&args[2..]),
+        "emit" => cmd_emit(&args[2..]),
         "render" => cmd_render(&args[2..]),
         "verify" => cmd_verify(&args[2..]),
         "codegen" => cmd_codegen(&args[2..]),
@@ -41,8 +51,16 @@ fn main() {
         "extract" => cmd_sysml2_extract(&args[2..]),
         "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
+        "mcp" => cmd_mcp(&args[2..]),
+        "moves" => moves::cmd_moves_dispatch(&args[2..]),
+        "insight" => insight::cmd_insight(&args[2..]),
+        "help" | "--help" | "-h" => {
+            print_usage();
+            process::exit(0);
+        }
         other => {
             eprintln!("Unknown command: {other}");
+            print_usage();
             process::exit(1);
         }
     }
@@ -59,16 +77,27 @@ fn print_usage() {
     eprintln!("  allocate   Allocate threads to processors via bin-packing");
     eprintln!("  diff       Compare two model versions and report changes");
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
+    eprintln!("  emit       Emit a text diagram (Mermaid flowchart) from an instantiated system");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
+    eprintln!(
+        "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
+    );
+    eprintln!("  insight    Discrepancy assistant: compare CTF traces to Expected_BCET/WCET/Mean");
     eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
+    eprintln!(
+        "  mcp        Start MCP server (read-only verification oracles for AI agent integration)"
+    );
     eprintln!();
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
-    eprintln!("  analyze  --root Package::Type.Impl [--format text|json|sarif] <file...>");
+    eprintln!(
+        "  analyze  --root Package::Type.Impl [--format text|json|sarif] [--per-som] [--pmoo] \
+         [--allow <cat,...>] <file...>"
+    );
     eprintln!(
         "  allocate --root Package::Type.Impl [--strategy ffd|bfd] [--format text|json] [--apply] <file...>"
     );
@@ -76,6 +105,15 @@ fn print_usage() {
         "  diff     --root Package::Type.Impl [--base ref] [--head ref] [--old dir] [--new dir] [--format text|json|sarif] <file...>"
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
+    eprintln!(
+        "  emit     [--format mermaid|mermaid-class|mermaid-req] \
+         [--root Package::Type.Impl] [--category <cat,...>] \
+         [--max-depth N] [--no-connections] [-o output.md] [<file...>]\n\
+         \n\
+         \t\t  mermaid       flowchart TD (default)\n\
+         \t\t  mermaid-class classDiagram of component types\n\
+         \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml"
+    );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
         "  verify   --root Package::Type.Impl [--format text|json] requirements.toml <file...>"
@@ -83,10 +121,115 @@ fn print_usage() {
     eprintln!(
         "  codegen  --root Package::Type.Impl [--output dir] [--format rust|wit|both] [--verify all|build|test|proof] [--rivet] [--dry-run] <file...>"
     );
+    eprintln!(
+        "  moves    verify --root Package::Type.Impl --component <fqn> --to <processor> [--format text|json] <file...>"
+    );
+    eprintln!(
+        "  moves    enumerate --root Package::Type.Impl --component <fqn> [--target-filter <s>] [--format text|json] <file...>"
+    );
+    eprintln!(
+        "  insight  verify-trace --root Package::Type.Impl --trace trace.ctf [--format text|json] <file...>"
+    );
 }
 
 fn cmd_lsp() {
     lsp::run_lsp_server();
+}
+
+/// `spar mcp serve` — start the spar-mcp stdio JSON-RPC server.
+///
+/// The actual server lives in the sibling `spar-mcp` crate. To avoid a
+/// Cargo cycle (spar -> spar-mcp -> spar-cli (lib) -> spar binary), we
+/// exec the standalone `spar-mcp` binary that ships alongside `spar`.
+/// We resolve it via:
+///
+/// 1. `$SPAR_MCP_BIN` if set;
+/// 2. a sibling of the current executable (`<dir>/spar-mcp[.exe]`);
+/// 3. the host `$PATH`.
+fn cmd_mcp(args: &[String]) {
+    let usage = || {
+        eprintln!("Usage: spar mcp serve");
+        eprintln!();
+        eprintln!("Subcommands:");
+        eprintln!(
+            "  serve   Start the MCP stdio JSON-RPC server (read-only / idempotent oracle tools)"
+        );
+    };
+
+    let sub = match args.first().map(String::as_str) {
+        None | Some("--help") | Some("-h") => {
+            usage();
+            process::exit(if args.is_empty() { 1 } else { 0 });
+        }
+        Some("serve") => "serve",
+        Some(other) => {
+            eprintln!("Unknown mcp subcommand: {other}");
+            usage();
+            process::exit(1);
+        }
+    };
+
+    if sub != "serve" {
+        // Defensive: should be unreachable given the match above.
+        usage();
+        process::exit(1);
+    }
+
+    let bin = match locate_spar_mcp_binary() {
+        Some(p) => p,
+        None => {
+            eprintln!(
+                "spar-mcp binary not found (searched $SPAR_MCP_BIN, the directory of the \
+                 current spar binary, and $PATH). Build the workspace with `cargo build -p \
+                 spar-mcp` and re-run."
+            );
+            process::exit(1);
+        }
+    };
+
+    // Replace the current process so stdio is shared 1:1 with the
+    // child — no buffering layer between the JSON-RPC client and the
+    // server loop.
+    let err = std::process::Command::new(&bin).args(&args[1..]).status();
+    match err {
+        Ok(status) => process::exit(status.code().unwrap_or(1)),
+        Err(e) => {
+            eprintln!("failed to execute {}: {e}", bin.display());
+            process::exit(1);
+        }
+    }
+}
+
+/// Locate the `spar-mcp` binary on disk. See [`cmd_mcp`] for the
+/// resolution order.
+fn locate_spar_mcp_binary() -> Option<std::path::PathBuf> {
+    if let Some(v) = std::env::var_os("SPAR_MCP_BIN") {
+        let p = std::path::PathBuf::from(v);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    if let Ok(self_exe) = std::env::current_exe()
+        && let Some(dir) = self_exe.parent()
+    {
+        for name in ["spar-mcp", "spar-mcp.exe"] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in ["spar-mcp", "spar-mcp.exe"] {
+                let candidate = dir.join(name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
 }
 
 fn cmd_parse(args: &[String]) {
@@ -384,6 +527,20 @@ fn cmd_analyze(args: &[String]) {
     let mut files = Vec::new();
     let mut format = None;
     let mut per_som = false;
+    // v0.9.2: `--allow <category>` (comma-separated) demotes specific
+    // analysis findings from Error to Warning. Today the only recognised
+    // category is `arinc-partition-isolation` (Tier A #9 promoted ARINC
+    // 653 cross-partition direct connections from Warning to Error;
+    // legitimate IMA bypasses can opt out here).
+    let mut allow_categories: Vec<String> = Vec::new();
+    // v0.9.3 NC tightness #2: opt-in PMOO/LUDB analysis path for the
+    // WCTT pass. When `--pmoo` is set we enable Pay-Multiplexing-Only-
+    // Once / Bisti-LUDB linear-program bounds for tree-shaped flows
+    // (one tagged + ≥ 2 contiguous-sub-path competing). Bound is
+    // 30-60% tighter on the canonical zonal/automotive pattern; falls
+    // back to SFA on LP infeasibility. Default off → byte-identical
+    // to v0.9.2.
+    let mut pmoo = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -408,6 +565,23 @@ fn cmd_analyze(args: &[String]) {
             }
             "--per-som" => {
                 per_som = true;
+            }
+            "--pmoo" => {
+                pmoo = true;
+            }
+            "--allow" => {
+                i += 1;
+                if i < args.len() {
+                    for cat in args[i].split(',') {
+                        let c = cat.trim();
+                        if !c.is_empty() {
+                            allow_categories.push(c.to_string());
+                        }
+                    }
+                } else {
+                    eprintln!("--allow requires a value (comma-separated category names)");
+                    process::exit(1);
+                }
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
@@ -479,10 +653,14 @@ fn cmd_analyze(args: &[String]) {
 
     // Run instance-level analyses
     if per_som {
-        diagnostics.extend(run_all_analyses_per_som(&inst));
+        diagnostics.extend(run_all_analyses_per_som_with_pmoo(&inst, pmoo));
     } else {
-        diagnostics.extend(run_all_analyses(&inst));
+        diagnostics.extend(run_all_analyses_with_pmoo(&inst, pmoo));
     }
+
+    // Apply --allow demotions before format dispatch so JSON / SARIF
+    // output also reflects the user's policy choices.
+    apply_allow_categories(&mut diagnostics, &allow_categories);
 
     // JSON output path
     if format.as_deref() == Some("json") {
@@ -1108,6 +1286,215 @@ fn cmd_modes(args: &[String]) {
     }
 }
 
+fn parse_category(s: &str) -> spar_hir_def::item_tree::ComponentCategory {
+    use spar_hir_def::item_tree::ComponentCategory;
+    match s.to_ascii_lowercase().as_str() {
+        "system" => ComponentCategory::System,
+        "process" => ComponentCategory::Process,
+        "thread" => ComponentCategory::Thread,
+        "threadgroup" | "thread-group" | "thread_group" => ComponentCategory::ThreadGroup,
+        "processor" => ComponentCategory::Processor,
+        "virtualprocessor" | "virtual-processor" | "virtual_processor" => {
+            ComponentCategory::VirtualProcessor
+        }
+        "memory" => ComponentCategory::Memory,
+        "bus" => ComponentCategory::Bus,
+        "virtualbus" | "virtual-bus" | "virtual_bus" => ComponentCategory::VirtualBus,
+        "device" => ComponentCategory::Device,
+        "subprogram" => ComponentCategory::Subprogram,
+        "subprogramgroup" | "subprogram-group" | "subprogram_group" => {
+            ComponentCategory::SubprogramGroup
+        }
+        "data" => ComponentCategory::Data,
+        "abstract" => ComponentCategory::Abstract,
+        other => {
+            eprintln!("Unknown component category: {other}");
+            eprintln!(
+                "Valid categories: system, process, thread, threadgroup, processor, \
+                 virtualprocessor, memory, bus, virtualbus, device, subprogram, \
+                 subprogramgroup, data, abstract"
+            );
+            process::exit(1);
+        }
+    }
+}
+
+fn cmd_emit(args: &[String]) {
+    let mut root: Option<String> = None;
+    // Default format is "mermaid" (flowchart).  Also accepts "mermaid-class"
+    // and "mermaid-req".
+    let mut format: String = "mermaid".to_string();
+    let mut categories: Vec<spar_hir_def::item_tree::ComponentCategory> = Vec::new();
+    let mut max_depth: Option<usize> = None;
+    let mut include_connections = true;
+    let mut output: Option<String> = None;
+    let mut files: Vec<String> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--root" => {
+                i += 1;
+                if i < args.len() {
+                    root = Some(args[i].clone());
+                } else {
+                    eprintln!("--root requires a value (Package::Type.Impl)");
+                    process::exit(1);
+                }
+            }
+            "--format" => {
+                i += 1;
+                if i < args.len() {
+                    let f = args[i].as_str();
+                    match f {
+                        "mermaid" | "mermaid-class" | "mermaid-req" => {
+                            format = f.to_string();
+                        }
+                        other => {
+                            eprintln!(
+                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' (got '{other}')"
+                            );
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("--format requires a value (mermaid|mermaid-class|mermaid-req)");
+                    process::exit(1);
+                }
+            }
+            "--category" => {
+                i += 1;
+                if i < args.len() {
+                    for cat_str in args[i].split(',') {
+                        let cat_str = cat_str.trim();
+                        if !cat_str.is_empty() {
+                            categories.push(parse_category(cat_str));
+                        }
+                    }
+                } else {
+                    eprintln!("--category requires a comma-separated list of component categories");
+                    process::exit(1);
+                }
+            }
+            "--max-depth" => {
+                i += 1;
+                if i < args.len() {
+                    match args[i].parse::<usize>() {
+                        Ok(n) => max_depth = Some(n),
+                        Err(_) => {
+                            eprintln!("--max-depth requires a non-negative integer");
+                            process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("--max-depth requires an integer value");
+                    process::exit(1);
+                }
+            }
+            "--no-connections" => {
+                include_connections = false;
+            }
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires an output file path");
+                    process::exit(1);
+                }
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => files.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    // ── mermaid-req: no AADL files needed ───────────────────────────────────
+    if format == "mermaid-req" {
+        let req_path = std::path::Path::new("artifacts/requirements.yaml");
+        let diagram = spar_mermaid::emit_requirement_diagram(req_path).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+        return emit_output(diagram, output);
+    }
+
+    // ── mermaid / mermaid-class: require --root and AADL files ──────────────
+    let root = root.unwrap_or_else(|| {
+        eprintln!("--root Package::Type.Impl is required");
+        process::exit(1);
+    });
+
+    if files.is_empty() {
+        eprintln!("Missing file argument(s)");
+        process::exit(1);
+    }
+
+    let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+
+    let db = spar_hir_def::HirDefDatabase::default();
+    let mut trees = Vec::new();
+
+    for file_path in &files {
+        let source = read_file(file_path);
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        trees.push(spar_hir_def::file_item_tree(&db, sf));
+    }
+
+    let scope = spar_hir_def::GlobalScope::from_trees(trees);
+    let inst = spar_hir_def::instance::SystemInstance::instantiate(
+        &scope,
+        &spar_hir_def::Name::new(&pkg_name),
+        &spar_hir_def::Name::new(&type_name),
+        &spar_hir_def::Name::new(&impl_name),
+    );
+
+    if !inst.diagnostics.is_empty() {
+        for diag in &inst.diagnostics {
+            eprintln!("warning: {diag:?}");
+        }
+    }
+
+    if inst.component_count() == 0 {
+        eprintln!(
+            "error: root '{}::{}' could not be resolved — check --root spelling and file paths",
+            pkg_name, type_name
+        );
+        process::exit(1);
+    }
+
+    let opts = spar_mermaid::MermaidOptions {
+        categories,
+        max_depth,
+        include_connections,
+    };
+
+    let diagram = if format == "mermaid-class" {
+        spar_mermaid::emit_class_diagram(&inst, &opts)
+    } else {
+        spar_mermaid::emit_flowchart(&inst, &opts)
+    };
+
+    emit_output(diagram, output);
+}
+
+/// Write `diagram` to `output` path or stdout.
+fn emit_output(diagram: String, output: Option<String>) {
+    match output {
+        Some(path) => {
+            fs::write(&path, &diagram).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote {path}");
+        }
+        None => print!("{diagram}"),
+    }
+}
+
 fn cmd_render(args: &[String]) {
     let mut root = None;
     let mut output = None;
@@ -1379,6 +1766,68 @@ fn run_all_analyses(
     runner.run_all(inst)
 }
 
+/// Variant of [`run_all_analyses`] that swaps in the PMOO/LUDB-enabled
+/// [`spar_analysis::wctt::WcttAnalysis`] when `pmoo` is `true`. Default
+/// (`pmoo = false`) is byte-identical to [`run_all_analyses`].
+fn run_all_analyses_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses(inst);
+    }
+    // Register every analysis except `WcttAnalysis`, then add the
+    // PMOO/LUDB-configured variant in its place. Keeps the runner's
+    // diagnostic order stable while flipping just the WCTT pass.
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all(inst)
+}
+
+/// Per-SOM variant of [`run_all_analyses_with_pmoo`].
+fn run_all_analyses_per_som_with_pmoo(
+    inst: &spar_hir_def::instance::SystemInstance,
+    pmoo: bool,
+) -> Vec<spar_analysis::AnalysisDiagnostic> {
+    if !pmoo {
+        return run_all_analyses_per_som(inst);
+    }
+    let mut runner = spar_analysis::AnalysisRunner::new();
+    runner.register_all_except_wctt();
+    runner.register(Box::new(spar_analysis::wctt::WcttAnalysis::with_pmoo()));
+    runner.run_all_per_som(inst)
+}
+
+/// Demote diagnostics matching any user-supplied `--allow` category
+/// from Error to Warning. Today the only recognised category is
+/// `arinc-partition-isolation` (matched by message-substring); the
+/// helper is structured so adding new categories is just adding a
+/// new arm here.
+fn apply_allow_categories(
+    diagnostics: &mut [spar_analysis::AnalysisDiagnostic],
+    allow_categories: &[String],
+) {
+    use spar_analysis::Severity;
+    for cat in allow_categories {
+        match cat.as_str() {
+            "arinc-partition-isolation" => {
+                for d in diagnostics.iter_mut() {
+                    if d.analysis == "arinc653"
+                        && d.message.contains("ARINC-PARTITION-ISOLATION")
+                        && d.severity == Severity::Error
+                    {
+                        d.severity = Severity::Warning;
+                    }
+                }
+            }
+            other => {
+                eprintln!("warning: unknown --allow category: '{}'", other);
+            }
+        }
+    }
+}
+
 /// Create an AnalysisRunner and run mode-independent analyses once plus
 /// mode-dependent analyses per System Operation Mode.
 fn run_all_analyses_per_som(
@@ -1624,12 +2073,15 @@ fn cmd_codegen(args: &[String]) {
     let result = spar_codegen::generate(&inst, &config);
 
     if dry_run {
-        eprintln!("Dry run: {} files would be generated", result.files.len());
+        eprintln!(
+            "Dry run: {}",
+            summarise_codegen_output(&result.files, output_format)
+        );
         for file in &result.files {
             println!("{}/{}", output_dir, file.path);
         }
+        maybe_print_empty_wit_hint(&result.files, output_format);
     } else {
-        let mut count = 0;
         for file in &result.files {
             // Validate that the generated file path does not escape the
             // output directory via path traversal (e.g., "../" components).
@@ -1649,10 +2101,110 @@ fn cmd_codegen(args: &[String]) {
                 eprintln!("Cannot write {full_path}: {e}");
                 process::exit(1);
             });
-            count += 1;
         }
-        eprintln!("Generated {count} files in {output_dir}/");
+        eprintln!(
+            "codegen: {} to {output_dir}/",
+            summarise_codegen_output(&result.files, output_format)
+        );
+        maybe_print_empty_wit_hint(&result.files, output_format);
     }
+}
+
+/// Categorise a generated file by extension / well-known name.
+///
+/// `(extension_tag, count_label)` — the tag is used for the empty-WIT
+/// hint, the label is what shows up in the summary line.
+fn codegen_file_categories(files: &[spar_codegen::GeneratedFile]) -> [(u32, &'static str); 5] {
+    let mut wit = 0u32;
+    let mut rust = 0u32;
+    let mut workspace = 0u32;
+    let mut config = 0u32;
+    let mut other = 0u32;
+    for file in files {
+        let path = std::path::Path::new(&file.path);
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        match (ext, name) {
+            ("wit", _) => wit += 1,
+            ("rs", _) => rust += 1,
+            (_, "Cargo.toml" | "Cargo.lock" | "BUILD.bazel" | "WORKSPACE") => workspace += 1,
+            ("toml", _) => config += 1,
+            _ => other += 1,
+        }
+    }
+    [
+        (wit, ".wit"),
+        (rust, ".rs"),
+        (workspace, "workspace"),
+        (config, "config"),
+        (other, "other"),
+    ]
+}
+
+/// One-line summary like
+/// `wrote 7 files (1 .wit, 4 .rs, 2 workspace) (format: both)`.
+///
+/// The format label answers "did spar honour my `--format`?" at a
+/// glance, and the per-category counts answer "what got produced?" —
+/// the silent default-`both` failure mode (Rust + workspace files but
+/// zero `.wit` when the model has no `process` subcomponents) is
+/// immediately visible from this line alone.
+fn summarise_codegen_output(
+    files: &[spar_codegen::GeneratedFile],
+    format: spar_codegen::OutputFormat,
+) -> String {
+    let cats = codegen_file_categories(files);
+    let format_label = match format {
+        spar_codegen::OutputFormat::Rust => "rust",
+        spar_codegen::OutputFormat::Wit => "wit",
+        spar_codegen::OutputFormat::Both => "both",
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for (n, label) in cats {
+        if n > 0 {
+            parts.push(format!("{n} {label}"));
+        }
+    }
+    let body = if parts.is_empty() {
+        "empty".to_string()
+    } else {
+        parts.join(", ")
+    };
+    let total = files.len();
+    let noun = if total == 1 { "file" } else { "files" };
+    format!("wrote {total} {noun} ({body}) (format: {format_label})")
+}
+
+/// Explain the silent failure mode: when WIT was requested (`--format wit`
+/// or the default `--format both`) but zero `.wit` files were emitted,
+/// the AADL model has no `process` subcomponents to generate interfaces
+/// for. This is the most common confusing case — agents see "the other
+/// files but no wit" and don't know why — so the hint is worth a few
+/// lines of stdout.
+fn maybe_print_empty_wit_hint(
+    files: &[spar_codegen::GeneratedFile],
+    format: spar_codegen::OutputFormat,
+) {
+    let asked_for_wit = matches!(
+        format,
+        spar_codegen::OutputFormat::Wit | spar_codegen::OutputFormat::Both
+    );
+    if !asked_for_wit {
+        return;
+    }
+    let wit_count = codegen_file_categories(files)[0].0;
+    if wit_count > 0 {
+        return;
+    }
+    eprintln!(
+        "hint: --format {} emits one .wit interface per AADL `process` subcomponent;",
+        match format {
+            spar_codegen::OutputFormat::Wit => "wit",
+            _ => "both",
+        }
+    );
+    eprintln!("      this model has 0 processes — add `process` declarations to the system");
+    eprintln!("      implementation, or pass --format rust for thread skeletons only.");
 }
 
 /// Check that a generated file path is safe to write under the output directory.
@@ -1668,7 +2220,7 @@ fn is_safe_generated_path(path: &str) -> bool {
         && !path.starts_with('\\')
 }
 
-fn parse_root_ref(s: &str) -> (String, String, String) {
+pub(crate) fn parse_root_ref(s: &str) -> (String, String, String) {
     // Expected format: Package::Type.Impl
     let parts: Vec<&str> = s.splitn(2, "::").collect();
     if parts.len() != 2 {

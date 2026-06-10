@@ -171,6 +171,8 @@ impl TestInstanceBuilder {
             mode_transition_instances: Arena::default(),
             diagnostics: self.diagnostics,
             property_maps: self.property_maps,
+            feature_property_maps: Default::default(),
+            connection_property_maps: Default::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -1639,8 +1641,8 @@ fn test_register_all_count() {
     runner.register_all();
     assert_eq!(
         runner.count(),
-        29,
-        "register_all should register all 29 instance-level analyses"
+        31,
+        "register_all should register all 31 instance-level analyses"
     );
 }
 

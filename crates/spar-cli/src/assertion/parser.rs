@@ -183,7 +183,7 @@ impl ExprParser {
 
     fn parse_root(&mut self) {
         self.builder.start_node(ExprSyntaxKind::ROOT.into());
-        self.parse_pipeline();
+        self.parse_pipeline_or_count_compare();
         self.eat_ws();
         if !self.at_eof() {
             let text = self.current_text().to_string();
@@ -196,6 +196,54 @@ impl ExprParser {
             }
         }
         self.builder.finish_node();
+    }
+
+    /// Parse a pipeline optionally followed by a count comparison operator and integer.
+    fn parse_pipeline_or_count_compare(&mut self) {
+        // Peek after the pipeline to see if there's a comparison operator.
+        // We do this by checking the token stream ahead. If the pipeline is followed
+        // by a comparison op (>=, >, <=, <, ==, !=) and then an INT_LIT, we wrap
+        // everything in COUNT_COMPARE_EXPR.
+        if self.has_count_compare_ahead() {
+            self.builder
+                .start_node(ExprSyntaxKind::COUNT_COMPARE_EXPR.into());
+            self.parse_pipeline();
+            self.bump(); // comparison operator
+            self.bump(); // integer literal
+            self.builder.finish_node();
+        } else {
+            self.parse_pipeline();
+        }
+    }
+
+    /// Returns true if, looking ahead, there is a comparison operator followed
+    /// by an INT_LIT at the end of the token stream (after the pipeline).
+    /// We scan non-whitespace tokens to find the pattern: ... <comp_op> <INT_LIT> EOF.
+    fn has_count_compare_ahead(&self) -> bool {
+        // Collect non-whitespace token kinds
+        let kinds: Vec<ExprSyntaxKind> = self
+            .tokens
+            .iter()
+            .skip(self.pos)
+            .filter(|(k, _)| *k != ExprSyntaxKind::WHITESPACE)
+            .map(|(k, _)| *k)
+            .collect();
+        // Pattern: last two tokens must be <comp_op> <INT_LIT>
+        if kinds.len() < 2 {
+            return false;
+        }
+        let last = kinds[kinds.len() - 1];
+        let second_last = kinds[kinds.len() - 2];
+        last == ExprSyntaxKind::INT_LIT
+            && matches!(
+                second_last,
+                ExprSyntaxKind::GE
+                    | ExprSyntaxKind::GT
+                    | ExprSyntaxKind::LE
+                    | ExprSyntaxKind::LT
+                    | ExprSyntaxKind::EQ_EQ
+                    | ExprSyntaxKind::NEQ
+            )
     }
 
     /// pipeline = source ( '.' method )*

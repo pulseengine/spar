@@ -46,10 +46,26 @@
 
 pub mod curves;
 pub mod extract;
+/// PMOO/LUDB delay bound via a HiGHS-backed MILP (good_lp). Gated behind the
+/// default `milp-solver` feature so wasm targets (which can't build the cmake
+/// `highs-sys` dependency) can opt out (#259).
+#[cfg(feature = "milp-solver")]
+pub mod pmoo;
+pub mod tsn;
 pub mod types;
 
+pub use curves::piecewise::{PiecewiseAffineArrivalCurve, PwaError};
 pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };
 pub use extract::extract_network_graph;
+#[cfg(feature = "milp-solver")]
+pub use pmoo::{CompetingFlow, LpError, PmooBound, TaggedFlow, ludb_bound};
+pub use tsn::{
+    CbsReservation, ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow,
+    MIN_FRAGMENT_BYTES, PREEMPTION_HEADER_BYTES, cbs_residual_service,
+    get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
+    get_hi_credit_bytes, get_lo_credit_bytes, is_express_stream, preemption_blocking_term_ps,
+    tas_residual_service,
+};
 pub use types::{NetworkGraph, NetworkLink, NetworkNode, NodeKind, SwitchType};

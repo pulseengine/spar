@@ -366,13 +366,21 @@ fn bench_solver_worst_case(c: &mut Criterion) {
     let workload = synth_worst_case(64, 8);
     group.throughput(Throughput::Elements(workload.threads.len() as u64));
 
-    group.bench_function(BenchmarkId::new("milp", "worst_64"), |b| {
-        b.iter(|| {
-            // Worst-case inputs may be infeasible — treat the Result as data.
-            let result = solve_milp(black_box(&workload));
-            let _ = black_box(result);
+    // `milp/worst_64` does not converge in any reasonable time on
+    // ubuntu-latest CI runners — a single MILP solve on the near-saturated
+    // 64-task workload can run for tens of minutes, and criterion needs
+    // multiple iterations per sample. Gate behind `SPAR_BENCH_SLOW_MILP=1`
+    // so the nightly workflow finishes fast; ad-hoc deep-bench runs can
+    // opt in.
+    if std::env::var_os("SPAR_BENCH_SLOW_MILP").is_some() {
+        group.bench_function(BenchmarkId::new("milp", "worst_64"), |b| {
+            b.iter(|| {
+                // Worst-case inputs may be infeasible — treat the Result as data.
+                let result = solve_milp(black_box(&workload));
+                let _ = black_box(result);
+            });
         });
-    });
+    }
 
     group.bench_function(BenchmarkId::new("ffd", "worst_64"), |b| {
         b.iter(|| {

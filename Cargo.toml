@@ -12,6 +12,7 @@ members = [
     "crates/spar-transform",
     "crates/spar-variants",
     "crates/spar-cli",
+    "crates/spar-mcp",
     "crates/spar-codegen",
     "crates/spar-render",
     "crates/spar-solver",
@@ -19,10 +20,13 @@ members = [
     "crates/spar-verify-macros",
     "crates/spar-verify",
     "crates/spar-wasm",
+    "crates/spar-insight",
+    "crates/spar-trace-topology",
+    "crates/spar-mermaid",
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.13.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/pulseengine/spar"
@@ -42,6 +46,9 @@ spar-sysml2 = { path = "crates/spar-sysml2" }
 spar-transform = { path = "crates/spar-transform" }
 spar-variants = { path = "crates/spar-variants" }
 spar-codegen = { path = "crates/spar-codegen" }
+spar-insight = { path = "crates/spar-insight" }
+spar-trace-topology = { path = "crates/spar-trace-topology" }
+spar-mermaid = { path = "crates/spar-mermaid" }
 rowan = "0.16"
 salsa = "0.26"
 la-arena = "0.3"

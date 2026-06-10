@@ -8,9 +8,19 @@ description = "Pluggable analysis framework for AADL models"
 
 [dependencies]
 spar-hir-def.workspace = true
+# Explicit path dep (not workspace inheritance) so we can set
+# default-features = false — inherited deps can't override it. Keeps the MILP
+# solver (good_lp/HiGHS) opt-in; the `milp-solver` feature re-enables it for
+# normal builds, while spar-wasm builds without it (#259).
+spar-network = { path = "../spar-network", default-features = false }
 la-arena.workspace = true
 rustc-hash = "2"
 serde.workspace = true
+
+[features]
+default = ["milp-solver"]
+# Forwards to spar-network: enables the PMOO/LUDB WCTT tightening path.
+milp-solver = ["spar-network/milp-solver"]
 
 [dev-dependencies]
 spar-base-db.workspace = true

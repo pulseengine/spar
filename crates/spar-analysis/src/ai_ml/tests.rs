@@ -89,6 +89,8 @@ fn single_component_instance(category: ComponentCategory, props: PropertyMap) ->
         mode_transition_instances: Arena::new(),
         diagnostics: Vec::new(),
         property_maps,
+        feature_property_maps: Default::default(),
+        connection_property_maps: Default::default(),
         semantic_connections: Vec::new(),
         system_operation_modes: Vec::new(),
     }

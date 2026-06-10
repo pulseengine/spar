@@ -1,4 +1,4 @@
-//! AADL v2.2 grammar rules.
+//! AADL v2.2/v2.3 grammar rules (SAE AS5506D).
 //!
 //! Each function corresponds to a grammar production from AS5506D.
 //! Functions take a `&mut Parser` and build nodes via markers.

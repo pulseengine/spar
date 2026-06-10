@@ -146,13 +146,15 @@ fn check_binding_target(
         None => return,
     };
 
-    // BIND-TARGET-EXISTS: Try to find the target
-    let mut found = false;
-    for (_idx, comp) in instance.all_components() {
-        if comp.name.as_str().eq_ignore_ascii_case(target_name) {
-            found = true;
-
+    // BIND-TARGET-EXISTS: resolve the reference by dotted instance path
+    // (`reference (cvc.soc.helix_linux)`) as well as by bare name. A
+    // bare-name-only match wrongly reports multi-level subcomponent
+    // references as "does not exist" — they name a component by its
+    // containment path, not a top-level identifier. See REQ-BINDING-002.
+    match instance.resolve_dotted_path(target_name) {
+        Some(idx) => {
             // BIND-TARGET-CATEGORY: Check that the category is appropriate
+            let comp = instance.component(idx);
             if !allowed_categories.contains(&comp.category) {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Error,
@@ -171,20 +173,18 @@ fn check_binding_target(
                     analysis: "binding_rules".to_string(),
                 });
             }
-            break;
         }
-    }
-
-    if !found {
-        diags.push(AnalysisDiagnostic {
-            severity: Severity::Error,
-            message: format!(
-                "{} references '{}' which does not exist in the instance model",
-                binding_name, target_name
-            ),
-            path: path.to_vec(),
-            analysis: "binding_rules".to_string(),
-        });
+        None => {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Error,
+                message: format!(
+                    "{} references '{}' which does not exist in the instance model",
+                    binding_name, target_name
+                ),
+                path: path.to_vec(),
+                analysis: "binding_rules".to_string(),
+            });
+        }
     }
 }
 
@@ -275,6 +275,8 @@ mod tests {
                 mode_transition_instances: Arena::default(),
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
+                feature_property_maps: Default::default(),
+                connection_property_maps: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
             }
@@ -694,5 +696,81 @@ mod tests {
         assert_eq!(extract_reference_target("reference(mem)"), Some("mem"));
         assert_eq!(extract_reference_target("invalid"), None);
         assert_eq!(extract_reference_target(""), None);
+    }
+
+    // ── BIND-TARGET-EXISTS: multi-level dotted reference paths ──────
+
+    #[test]
+    fn nested_dotted_processor_binding_resolves() {
+        // Regression (ee_system.poc user report): `reference
+        // (cvc.soc.helix_linux)` names a processor by its multi-level
+        // containment path, not a top-level identifier. A bare-name match
+        // wrongly reported it as "does not exist". It must resolve via the
+        // dotted instance path.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cvc = b.add_component("cvc", ComponentCategory::System, Some(root));
+        let soc = b.add_component("soc", ComponentCategory::System, Some(cvc));
+        let helix = b.add_component("helix_linux", ComponentCategory::Processor, Some(soc));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cvc, proc]);
+        b.set_children(cvc, vec![soc]);
+        b.set_children(soc, vec![helix]);
+        b.set_children(proc, vec![thread]);
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cvc.soc.helix_linux)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingRuleAnalysis.analyze(&inst);
+        let not_found: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("does not exist in the instance model"))
+            .collect();
+        assert!(
+            not_found.is_empty(),
+            "nested dotted binding path should resolve, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn nested_dotted_binding_to_nonprocessor_still_flags_category() {
+        // Dotted-path resolution must not lose category checking: binding a
+        // thread to a nested *memory* component is still a category error.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cvc = b.add_component("cvc", ComponentCategory::System, Some(root));
+        let mem = b.add_component("dram", ComponentCategory::Memory, Some(cvc));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thread = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cvc, proc]);
+        b.set_children(cvc, vec![mem]);
+        b.set_children(proc, vec![thread]);
+        b.set_property(
+            thread,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cvc.dram)",
+        );
+
+        let inst = b.build(root);
+        let diags = BindingRuleAnalysis.analyze(&inst);
+        let cat_err: Vec<_> = diags
+            .iter()
+            .filter(|d| {
+                d.severity == Severity::Error
+                    && d.message
+                        .contains("Actual_Processor_Binding target 'cvc.dram'")
+            })
+            .collect();
+        assert_eq!(
+            cat_err.len(),
+            1,
+            "binding a thread to a nested memory component should flag category: {diags:?}"
+        );
     }
 }

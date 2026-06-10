@@ -1,0 +1,24 @@
+[package]
+name = "spar-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP server exposing spar's verification oracles (read-only) for AI agent integration"
+
+[[bin]]
+name = "spar-mcp"
+path = "src/bin/spar-mcp.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+spar-hir-def.workspace = true
+spar-analysis.workspace = true
+spar-network.workspace = true
+spar-base-db.workspace = true
+spar-syntax.workspace = true
+spar = { path = "../spar-cli" }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,37 @@
+----------------------------------------------
+--  IoT example
+--       Julien Delange <jdelange@sei.cmu.edu>
+--
+-- The iot::common::datatypes package contains
+-- the data types exchanged in the system. It
+-- contains only dummy component, a model with
+-- a better level of fidelity will add details
+-- such as data size or representation constraints.
+----------------------------------------------
+
+package iot::common::datatypes
+public
+with Base_Types;
+
+	data boolean extends Base_Types::Boolean 
+	end boolean;
+
+	data temperature extends Base_Types::Integer_8	
+	end temperature;
+	
+	data distance extends Base_Types::Integer_8	 
+	end distance;
+	
+	data request
+	end request;
+	
+	data reply
+	end reply;
+	
+	data internal_request
+	end internal_request;
+	
+	data internal_reply
+	end internal_reply;	
+	
+end iot::common::datatypes;

@@ -56,6 +56,14 @@ pub struct SystemInstance {
     pub diagnostics: Vec<InstanceDiagnostic>,
     /// Property maps for each component instance.
     pub property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    /// Property maps for feature instances — values attached via
+    /// `applies to <path>.<feature>` (AS5506D §11.3). Keyed by feature index
+    /// so each port keeps its own properties instead of colliding on the
+    /// owning component's map (issue #237).
+    pub feature_property_maps: FxHashMap<FeatureInstanceIdx, PropertyMap>,
+    /// Property maps for connection instances — values attached via
+    /// `applies to <path>.<connection>` (issue #237).
+    pub connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     /// Semantic (end-to-end) connection instances traced through the hierarchy.
     pub semantic_connections: Vec<SemanticConnection>,
     /// System Operation Modes — the cartesian product of modes across all modal components.
@@ -207,6 +215,8 @@ impl SystemInstance {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            feature_property_maps: FxHashMap::default(),
+            connection_property_maps: FxHashMap::default(),
             pending_applies_to: Vec::new(),
             depth: 0,
             max_depth: 100,
@@ -248,6 +258,8 @@ impl SystemInstance {
             mode_transition_instances: builder.mode_transition_instances,
             diagnostics: builder.diagnostics,
             property_maps: builder.property_maps,
+            feature_property_maps: builder.feature_property_maps,
+            connection_property_maps: builder.connection_property_maps,
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         };
@@ -300,6 +312,90 @@ impl SystemInstance {
     pub fn properties_for(&self, idx: ComponentInstanceIdx) -> &PropertyMap {
         static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Resolved properties attached to a feature instance via
+    /// `applies to <path>.<feature>` (issue #237). Empty if none.
+    pub fn properties_for_feature(&self, idx: FeatureInstanceIdx) -> &PropertyMap {
+        static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
+        self.feature_property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Resolved properties attached to a connection instance via
+    /// `applies to <path>.<connection>` (issue #237). Empty if none.
+    pub fn properties_for_connection(&self, idx: ConnectionInstanceIdx) -> &PropertyMap {
+        static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
+        self.connection_property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Build a `/`-separated instance path for a component (root first).
+    ///
+    /// Example: for `ee_system.poc.cvc.soc.a53`, this returns the string
+    /// `"ee_system/poc/cvc/soc/a53"`. Used by [`Self::resolve_dotted_path`]
+    /// to match user-supplied dotted references against the instance
+    /// hierarchy.
+    pub fn component_instance_path(&self, idx: ComponentInstanceIdx) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = Some(idx);
+        while let Some(ci) = current {
+            let comp = &self.components[ci];
+            parts.push(comp.name.as_str().to_string());
+            current = comp.parent;
+        }
+        parts.reverse();
+        parts.join("/")
+    }
+
+    /// Resolve a user-supplied component reference (bare name or dotted
+    /// path) to a [`ComponentInstanceIdx`].
+    ///
+    /// Matching rules (case-insensitive):
+    ///
+    /// 1. **Bare identifier** (no `.` or `/`) — match `component.name`
+    ///    anywhere in the hierarchy. Ties are broken by preferring the
+    ///    deepest match (most specific path wins).
+    /// 2. **Dotted path** (`a.b.c`) — translate `.` to `/`, then suffix-
+    ///    match against full instance paths (`root/sub1/sub2/a/b/c`).
+    ///    Ties are broken by preferring the deepest match.
+    ///
+    /// Returns `None` if no component matches.
+    ///
+    /// This is the canonical resolver used by both `Actual_*_Binding`
+    /// reference values in [`crate::overlay`] and by the
+    /// `spar moves` CLI surface.
+    pub fn resolve_dotted_path(&self, name: &str) -> Option<ComponentInstanceIdx> {
+        let needle = name.replace('.', "/");
+        let needle_lower = needle.to_ascii_lowercase();
+        let is_path = needle.contains('/');
+
+        if is_path {
+            // Path matching: suffix-match against the component's full path.
+            // Prefer the deepest (most specific) match.
+            let mut best: Option<(ComponentInstanceIdx, usize)> = None;
+            for (idx, _comp) in self.all_components() {
+                let path = self.component_instance_path(idx);
+                let path_lower = path.to_ascii_lowercase();
+                if path_lower.ends_with(&needle_lower) {
+                    let depth = path.matches('/').count();
+                    if best.map(|(_, d)| depth >= d).unwrap_or(true) {
+                        best = Some((idx, depth));
+                    }
+                }
+            }
+            return best.map(|(idx, _)| idx);
+        }
+
+        // Bare-name matching: exact name, deepest match wins.
+        let mut best: Option<(ComponentInstanceIdx, usize)> = None;
+        for (idx, comp) in self.all_components() {
+            if comp.name.as_str().eq_ignore_ascii_case(name) {
+                let depth = self.component_instance_path(idx).matches('/').count();
+                if best.map(|(_, d)| depth >= d).unwrap_or(true) {
+                    best = Some((idx, depth));
+                }
+            }
+        }
+        best.map(|(idx, _)| idx)
     }
 
     /// Get the mode instances for a given component.
@@ -1260,6 +1356,11 @@ struct ImplChainResult {
         Name,
         ComponentCategory,
         Option<crate::name::ClassifierRef>,
+        // Tree the subcomponent was DECLARED in. With an `extends` chain that
+        // spans files, an inherited subcomponent's index is only valid in the
+        // tree of the impl that declared it — not the most-derived impl's tree
+        // (issue #236).
+        usize,
         crate::item_tree::SubcomponentIdx,
         Vec<crate::item_tree::ArrayDimension>,
         Vec<Name>,
@@ -1278,6 +1379,24 @@ struct ImplChainResult {
     call_map: FxHashMap<String, Name>,
 }
 
+/// Result of resolving an `applies to <dotted-path>` target.
+///
+/// Used internally by [`Builder::resolve_applies_to_path`].
+enum AppliesTarget {
+    /// All segments named subcomponents; resolved to this component.
+    Component(ComponentInstanceIdx),
+    /// All-but-last segments named subcomponents; the last segment names a
+    /// feature on the resolved component (AADL v2.3 AS5506D §11.3). Carries the
+    /// specific feature instance so the property is stored per-feature (#237).
+    Feature(FeatureInstanceIdx),
+    /// All-but-last segments named subcomponents; the last segment names a
+    /// connection on the resolved component (#237).
+    Connection(ConnectionInstanceIdx),
+    /// No valid resolution: the path contains a segment that matches neither a
+    /// subcomponent nor (for the last segment) a feature or connection.
+    Unresolvable,
+}
+
 struct Builder<'a> {
     scope: &'a GlobalScope,
     components: Arena<ComponentInstance>,
@@ -1289,6 +1408,8 @@ struct Builder<'a> {
     mode_transition_instances: Arena<ModeTransitionInstance>,
     diagnostics: Vec<InstanceDiagnostic>,
     property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    feature_property_maps: FxHashMap<FeatureInstanceIdx, PropertyMap>,
+    connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     /// Property associations with a non-empty `applies to <path>` clause.
     ///
     /// These are collected during instantiation and eagerly attached to
@@ -1395,8 +1516,15 @@ impl<'a> Builder<'a> {
                 let impl_mt_data = impl_chain.mode_transitions;
 
                 let mut child_indices = Vec::new();
-                for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims, sub_in_modes) in
-                    sub_data
+                for (
+                    sub_name,
+                    _sub_cat,
+                    sub_classifier,
+                    sub_tree,
+                    sub_idx,
+                    array_dims,
+                    sub_in_modes,
+                ) in sub_data
                 {
                     // Determine how many instances to create for this subcomponent.
                     let count = array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
@@ -1420,7 +1548,7 @@ impl<'a> Builder<'a> {
                                     &cls_ref.type_name,
                                     sub_impl,
                                     Some(idx),
-                                    Some((loc.tree, sub_idx)),
+                                    Some((sub_tree, sub_idx)),
                                 );
                                 self.components[child_idx].array_index = array_index;
                                 self.components[child_idx].in_modes = sub_in_modes.clone();
@@ -1476,7 +1604,7 @@ impl<'a> Builder<'a> {
                                     child_idx,
                                     &leaf_pkg,
                                     &cls_ref.type_name,
-                                    loc.tree,
+                                    sub_tree,
                                     sub_idx,
                                 );
                                 child_indices.push(child_idx);
@@ -1500,7 +1628,7 @@ impl<'a> Builder<'a> {
                                 in_modes: sub_in_modes.clone(),
                             });
                             // Build property map for anonymous subcomponent
-                            self.build_anon_property_map(child_idx, loc.tree, sub_idx);
+                            self.build_anon_property_map(child_idx, sub_tree, sub_idx);
                             child_indices.push(child_idx);
                         }
                     }
@@ -1683,7 +1811,9 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Collect own subcomponents
+        // Collect own subcomponents. Tag each with `loc.tree` — the tree of the
+        // impl currently being walked — so an inherited subcomponent keeps the
+        // index space of the file it was declared in (issue #236).
         for &sub_idx in &ci.subcomponents {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let sub = &tree.subcomponents[sub_idx];
@@ -1691,6 +1821,7 @@ impl<'a> Builder<'a> {
                     sub.name.clone(),
                     sub.category,
                     sub.classifier.clone(),
+                    loc.tree,
                     sub_idx,
                     sub.array_dimensions.clone(),
                     sub.in_modes.clone(),
@@ -2226,23 +2357,46 @@ impl<'a> Builder<'a> {
     /// eagerly so that downstream analyses and the JSON instance exporter
     /// (#129) see the property on the target.
     ///
-    /// If the path cannot be resolved (bad name, or walks into a feature
-    /// rather than a subcomponent), the property stays on the declaring
-    /// component and a diagnostic is recorded.
+    /// AADL v2.3 (AS5506D §11.3) also allows the `applies to` path to end with
+    /// a feature name: `Some_Property => value applies to subcomp.port;`.
+    /// In that case the property is stored on the component that owns the
+    /// feature (the resolved component at the penultimate segment), so that
+    /// downstream analyses can retrieve it via `properties_for`.  No diagnostic
+    /// is emitted for valid feature paths.
+    ///
+    /// If the path cannot be resolved at all (bad subcomponent name or name
+    /// that matches neither a subcomponent nor a feature), the property stays
+    /// on the declaring component and a diagnostic is recorded.
     fn resolve_pending_applies_to(&mut self) {
         let pending = std::mem::take(&mut self.pending_applies_to);
         for (owner, path, prop) in pending {
             match self.resolve_applies_to_path(owner, &path) {
-                Some(target) => {
+                AppliesTarget::Component(target) => {
                     self.property_maps.entry(target).or_default().add(prop);
                 }
-                None => {
+                AppliesTarget::Feature(feature) => {
+                    // Last segment named a feature (AS5506D §11.3). Store on the
+                    // feature instance so each port keeps its own values instead
+                    // of colliding by property name on the component map (#237).
+                    self.feature_property_maps
+                        .entry(feature)
+                        .or_default()
+                        .add(prop);
+                }
+                AppliesTarget::Connection(connection) => {
+                    // Last segment named a connection — store per-connection (#237).
+                    self.connection_property_maps
+                        .entry(connection)
+                        .or_default()
+                        .add(prop);
+                }
+                AppliesTarget::Unresolvable => {
                     // Unresolvable path: keep on owner (prior behavior) and
                     // emit a diagnostic so the author notices.
                     self.property_maps.entry(owner).or_default().add(prop);
                     self.diagnostics.push(InstanceDiagnostic {
                         message: format!(
-                            "applies_to path '{path}' could not be resolved to a component instance"
+                            "applies_to path '{path}' could not be resolved to a component instance or feature"
                         ),
                         path: vec![self.components[owner].name.clone()],
                     });
@@ -2251,25 +2405,69 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Walk a dotted path (`fw.firmware`) from `owner` down through
-    /// subcomponent children, matching names case-insensitively. Returns
-    /// the resolved target component index, or `None` if any segment fails.
-    fn resolve_applies_to_path(
-        &self,
-        owner: ComponentInstanceIdx,
-        path: &str,
-    ) -> Option<ComponentInstanceIdx> {
+    /// Walk a dotted path (`fw.firmware` or `proc_inst.input_port`) from
+    /// `owner` down through subcomponent children, matching names
+    /// case-insensitively.
+    ///
+    /// Returns:
+    /// - [`AppliesTarget::Component`] when all segments name subcomponents.
+    /// - [`AppliesTarget::Feature`] when all-but-last segments name
+    ///   subcomponents and the final segment names a feature on the resolved
+    ///   component (AADL v2.3 AS5506D §11.3 feature-path support).
+    /// - [`AppliesTarget::Connection`] when the final segment names a connection
+    ///   on the resolved component (#237).
+    /// - [`AppliesTarget::Unresolvable`] when any segment cannot be matched.
+    fn resolve_applies_to_path(&self, owner: ComponentInstanceIdx, path: &str) -> AppliesTarget {
+        let segments: Vec<&str> = path
+            .split('.')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        if segments.is_empty() {
+            return AppliesTarget::Component(owner);
+        }
+
         let mut current = owner;
-        for segment in path.split('.').map(str::trim).filter(|s| !s.is_empty()) {
-            let child = self.components[current].children.iter().find(|&&ci| {
+        for (i, &segment) in segments.iter().enumerate() {
+            // Try to match as a subcomponent child first.
+            if let Some(&child) = self.components[current].children.iter().find(|&&ci| {
                 self.components[ci]
                     .name
                     .as_str()
                     .eq_ignore_ascii_case(segment)
-            })?;
-            current = *child;
+            }) {
+                current = child;
+                continue;
+            }
+
+            // Not a child — check if this is the last segment and names a
+            // feature or a connection on the current component.
+            let is_last = i == segments.len() - 1;
+            if is_last {
+                if let Some(&fi) = self.components[current].features.iter().find(|&&fi| {
+                    self.features[fi]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(segment)
+                }) {
+                    return AppliesTarget::Feature(fi);
+                }
+                if let Some(&ci) = self.components[current].connections.iter().find(|&&ci| {
+                    self.connections[ci]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(segment)
+                }) {
+                    return AppliesTarget::Connection(ci);
+                }
+            }
+
+            // Neither subcomponent, feature, nor connection — unresolvable.
+            return AppliesTarget::Unresolvable;
         }
-        Some(current)
+
+        AppliesTarget::Component(current)
     }
 
     /// STPA-REQ-010: Validate that connection endpoint array indices are within bounds.
@@ -2356,6 +2554,8 @@ mod tests {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            feature_property_maps: FxHashMap::default(),
+            connection_property_maps: FxHashMap::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -4039,6 +4239,161 @@ mod tests {
         assert_eq!(
             parse_connection_pattern("some_unknown"),
             ConnectionPattern::AllToAll
+        );
+    }
+
+    /// Regression for #236: instantiating an implementation whose `extends`
+    /// parent is declared in a *different file* (tree) must not panic. An
+    /// inherited subcomponent's index is only valid in the tree that declared
+    /// it; the builder previously paired it with the most-derived impl's tree,
+    /// which — when that tree declares no subcomponents of its own — indexed an
+    /// empty slice and panicked (`index out of bounds: the len is 0`).
+    ///
+    /// Ignored under Miri: unlike the other instance:: tests (which build
+    /// ItemTrees manually), this one parses AADL source and so pulls rowan
+    /// into the run — upstream rowan UB (rowan#192) trips Miri's borrow
+    /// stack. The test is a panic-regression guard, not a memory-safety
+    /// probe; normal `cargo test` still runs it.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn extends_chain_across_files_does_not_panic() {
+        // Base system + impl (with a subcomponent) live in one file/tree.
+        let base = r#"
+package base_pkg
+public
+    thread T
+    end T;
+    thread implementation T.Impl
+    end T.Impl;
+    system Base
+    end Base;
+    system implementation Base.Impl
+        subcomponents
+            t1: thread T.Impl;
+    end Base.Impl;
+end base_pkg;
+"#;
+        // Derived impl in a SEPARATE file/tree extends the base impl and
+        // declares no subcomponents of its own — so its tree's subcomponent
+        // list is empty, the exact shape that triggered the panic.
+        let derived = r#"
+package derived_pkg
+public
+    with base_pkg;
+    system Derived extends base_pkg::Base
+    end Derived;
+    system implementation Derived.Impl extends base_pkg::Base.Impl
+    end Derived.Impl;
+end derived_pkg;
+"#;
+
+        let db = crate::HirDefDatabase::default();
+        let t_base = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "base.aadl".to_string(), base.to_string()),
+        );
+        let t_derived = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "derived.aadl".to_string(), derived.to_string()),
+        );
+        // base is tree 0, derived is tree 1; derived's tree has no subcomponents.
+        let scope = GlobalScope::from_trees(vec![t_base, t_derived]);
+
+        // Must not panic.
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("derived_pkg"),
+            &Name::new("Derived"),
+            &Name::new("Impl"),
+        );
+
+        // The inherited subcomponent must be instantiated under the derived
+        // system, carrying through from the parent's tree.
+        assert!(
+            inst.all_components().any(|(_, c)| c.name.as_str() == "t1"),
+            "inherited subcomponent `t1` should be instantiated via the cross-file \
+             extends chain; components: {:?}",
+            inst.all_components()
+                .map(|(_, c)| c.name.as_str().to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Regression for #237: a property declared with `applies to <connection>`
+    /// or `applies to <feature>` must be stored on the connection/feature
+    /// instance — not collapsed by property name onto the owning component.
+    ///
+    /// Ignored under Miri for the same reason as
+    /// `extends_chain_across_files_does_not_panic`: it parses AADL source,
+    /// pulling rowan (upstream rowan#192 UB) into the Miri run.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn applies_to_connection_and_feature_store_per_instance() {
+        let src = r#"
+package p
+public
+    data D
+    end D;
+    thread T
+        features
+            tin: in data port D;
+            tout: out data port D;
+    end T;
+    thread implementation T.i
+    end T.i;
+    process Proc
+        features
+            pin: in data port D;
+    end Proc;
+    process implementation Proc.i
+        subcomponents
+            a: thread T.i;
+            b: thread T.i;
+        connections
+            conn1: port a.tout -> b.tin;
+        properties
+            stood::pos => "wire-shape" applies to conn1;
+            stood::pos => "port-shape" applies to pin;
+    end Proc.i;
+    system S
+    end S;
+    system implementation S.i
+        subcomponents
+            proc: process Proc.i;
+    end S.i;
+end p;
+"#;
+        let db = crate::HirDefDatabase::default();
+        let tree = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "p.aadl".to_string(), src.to_string()),
+        );
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst =
+            SystemInstance::instantiate(&scope, &Name::new("p"), &Name::new("S"), &Name::new("i"));
+
+        // Property on the connection lands on the connection instance.
+        let (conn_idx, _) = inst
+            .connections
+            .iter()
+            .find(|(_, c)| c.name.as_str() == "conn1")
+            .expect("conn1 should be instantiated");
+        assert_eq!(
+            inst.properties_for_connection(conn_idx).get("stood", "pos"),
+            Some("\"wire-shape\""),
+            "connection property must be stored per-connection, not on the component (#237)"
+        );
+
+        // Property on the feature lands on the feature instance.
+        let (feat_idx, _) = inst
+            .features
+            .iter()
+            .find(|(_, f)| f.name.as_str() == "pin")
+            .expect("pin feature should exist");
+        assert_eq!(
+            inst.properties_for_feature(feat_idx).get("stood", "pos"),
+            Some("\"port-shape\""),
+            "feature property must be stored per-feature, not on the component (#237)"
         );
     }
 }
