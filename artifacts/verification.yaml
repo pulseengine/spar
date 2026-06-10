@@ -3123,3 +3123,26 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CODEGEN-WIT
+
+  - id: TEST-CODEGEN-WIT-TYPES
+    type: feature
+    title: WIT scalar type fidelity from Data_Size
+    description: >
+      wit_gen's generated_wit_is_valid_and_bindable exercises the full
+      chain for REQ-CODEGEN-WIT-TYPES: instantiation resolves each
+      feature's data classifier to its declared Data_Size (bytes) via
+      Builder::resolve_data_size_bytes and stores it on FeatureInstance;
+      generate_wit maps scalar sizes to precise WIT types (1 -> u8,
+      2 -> u16, 4 -> u32, 8 -> u64; conflicting or undeclared sizes stay
+      list<u8>). Asserts `type clock64 = u64;` for an 8-byte data type,
+      `type flag8 = u8;` for a 1-byte one, list<u8> for an unsized one,
+      and wit-parser Resolve::push_str accepts the result.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --lib -- wit_gen
+    status: passing
+    tags: [codegen, wit, interop, v0140]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-TYPES

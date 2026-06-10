@@ -790,6 +790,7 @@ mod tests {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         };
         let p = feature_to_port(&f);
         assert_eq!(p.port_type, PortType::Data);
@@ -804,6 +805,7 @@ mod tests {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         };
         let p2 = feature_to_port(&f2);
         assert_eq!(p2.port_type, PortType::Event);

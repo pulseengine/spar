@@ -4,7 +4,7 @@
 //! the process's ports as WIT imports/exports, following the WASI Component
 //! Model conventions.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, Direction, FeatureKind};
@@ -43,23 +43,42 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
     // First pass: collect every named data type referenced by a port so we can
     // emit `type` definitions. WIT rejects references to undefined types, so an
     // interface that names `mattermessage` without defining it will not bind.
-    let mut referenced_types: BTreeSet<String> = BTreeSet::new();
+    // The instance model carries each feature's resolved Data_Size (bytes), so
+    // scalar-sized data types map to precise WIT scalars instead of a byte
+    // buffer (REQ-CODEGEN-WIT-TYPES): 1 -> u8, 2 -> u16, 4 -> u32, 8 -> u64;
+    // anything else (or undeclared) stays list<u8>. If two features reference
+    // the same type name with conflicting sizes, fall back to list<u8> rather
+    // than guess.
+    let mut referenced_types: BTreeMap<String, Option<u64>> = BTreeMap::new();
     for &fi in &comp.features {
         let feat = &inst.features[fi];
         if let Some(c) = feat.classifier.as_ref() {
-            referenced_types.insert(wit_ident(&c.to_string()));
+            let ty = wit_ident(&c.to_string());
+            match referenced_types.entry(ty) {
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    e.insert(feat.data_size_bytes);
+                }
+                std::collections::btree_map::Entry::Occupied(mut e) => {
+                    if *e.get() != feat.data_size_bytes {
+                        e.insert(None); // conflicting sizes: stay list<u8>
+                    }
+                }
+            }
         }
     }
 
     // Generate an interface for the process's own ports
     wit.push_str(&format!("interface {name}-ports {{\n"));
 
-    // Emit a type alias for each referenced data type. Without per-type
-    // `Data_Size` resolution (the generator has no scope handle here) every
-    // AADL data type maps to a byte buffer — always valid and bindable.
-    // Refining scalar sizes (8 bytes -> u64, etc.) is tracked as a follow-up.
-    for ty in &referenced_types {
-        wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n"));
+    for (ty, size) in &referenced_types {
+        let wit_ty = match size {
+            Some(1) => "u8",
+            Some(2) => "u16",
+            Some(4) => "u32",
+            Some(8) => "u64",
+            _ => DEFAULT_WIT_TYPE,
+        };
+        wit.push_str(&format!("    type {ty} = {wit_ty};\n"));
     }
     if !referenced_types.is_empty() {
         wit.push('\n');
@@ -238,12 +257,24 @@ public
     data Sample
     end Sample;
 
+    data Clock64
+        properties
+            Data_Size => 8 Bytes;
+    end Clock64;
+
+    data Flag8
+        properties
+            Data_Size => 1 Bytes;
+    end Flag8;
+
     process Controller
         features
             sensor_in: in data port;
             cmd_out: out data port;
             message_in: in event data port Sample;
             announce_out: out event data port Sample;
+            clock_in: in event data port Clock64;
+            flag_in: in event data port Flag8;
     end Controller;
 
     process implementation Controller.Impl
@@ -328,6 +359,18 @@ end TestPkg;
         assert!(
             body.contains("type sample = list<u8>;"),
             "expected a type alias for the `Sample` data type:\n{body}"
+        );
+
+        // Scalar Data_Size maps to precise WIT scalars (REQ-CODEGEN-WIT-TYPES):
+        // Clock64 declares 8 Bytes -> u64, Flag8 declares 1 Bytes -> u8;
+        // Sample declares nothing -> stays list<u8> (asserted above).
+        assert!(
+            body.contains("type clock64 = u64;"),
+            "8-byte Data_Size must map to u64:\n{body}"
+        );
+        assert!(
+            body.contains("type flag8 = u8;"),
+            "1-byte Data_Size must map to u8:\n{body}"
         );
 
         // Authoritative check: feed the WIT to wit-parser. push_str errors on
