@@ -4322,7 +4322,12 @@ end derived_pkg;
     /// Regression for #237: a property declared with `applies to <connection>`
     /// or `applies to <feature>` must be stored on the connection/feature
     /// instance — not collapsed by property name onto the owning component.
+    ///
+    /// Ignored under Miri for the same reason as
+    /// `extends_chain_across_files_does_not_panic`: it parses AADL source,
+    /// pulling rowan (upstream rowan#192 UB) into the Miri run.
     #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn applies_to_connection_and_feature_store_per_instance() {
         let src = r#"
 package p
