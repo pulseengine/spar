@@ -3063,3 +3063,27 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-PLUGFEST-001
+
+  - id: TEST-CODEGEN-WIT-VALID
+    type: feature
+    title: Generated WIT parses and resolves (wit-parser round-trip)
+    description: >
+      crates/spar-codegen/src/wit_gen.rs tests
+      (generated_wit_is_valid_and_bindable + wit_ident_kebab_cases) feed
+      generated WIT through wit-parser's Resolve::push_str, which rejects
+      invalid identifiers AND references to undefined types — the two
+      failure classes of issue #254 (underscored idents from the Rust
+      sanitizer; ports referencing types never defined). Also asserts the
+      kebab-case mapping for the exact identifiers from the issue and
+      that every referenced data type gets a `type x = list<u8>` alias.
+      End-to-end confirmed with wasm-tools 1.243.0 `component wit`
+      (the reporter's repro command) on the fixed output.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --lib -- wit_gen
+    status: passing
+    tags: [codegen, wit, interop, v0130]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT

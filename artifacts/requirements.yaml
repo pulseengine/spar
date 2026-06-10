@@ -788,7 +788,7 @@ artifacts:
       features. Data ports → WIT stream<T>, event ports → WIT future,
       subprogram access → WIT functions. wit-bindgen runs as Bazel build
       action (not proc macro) producing plain Rust bindings.
-    status: planned
+    status: implemented
     tags: [codegen, wit, v040]
     links:
       - type: traces-to
