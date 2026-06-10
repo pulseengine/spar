@@ -1330,6 +1330,11 @@ struct ImplChainResult {
         Name,
         ComponentCategory,
         Option<crate::name::ClassifierRef>,
+        // Tree the subcomponent was DECLARED in. With an `extends` chain that
+        // spans files, an inherited subcomponent's index is only valid in the
+        // tree of the impl that declared it — not the most-derived impl's tree
+        // (issue #236).
+        usize,
         crate::item_tree::SubcomponentIdx,
         Vec<crate::item_tree::ArrayDimension>,
         Vec<Name>,
@@ -1479,8 +1484,15 @@ impl<'a> Builder<'a> {
                 let impl_mt_data = impl_chain.mode_transitions;
 
                 let mut child_indices = Vec::new();
-                for (sub_name, _sub_cat, sub_classifier, sub_idx, array_dims, sub_in_modes) in
-                    sub_data
+                for (
+                    sub_name,
+                    _sub_cat,
+                    sub_classifier,
+                    sub_tree,
+                    sub_idx,
+                    array_dims,
+                    sub_in_modes,
+                ) in sub_data
                 {
                     // Determine how many instances to create for this subcomponent.
                     let count = array_element_count(&array_dims, &mut self.diagnostics, &sub_name);
@@ -1504,7 +1516,7 @@ impl<'a> Builder<'a> {
                                     &cls_ref.type_name,
                                     sub_impl,
                                     Some(idx),
-                                    Some((loc.tree, sub_idx)),
+                                    Some((sub_tree, sub_idx)),
                                 );
                                 self.components[child_idx].array_index = array_index;
                                 self.components[child_idx].in_modes = sub_in_modes.clone();
@@ -1560,7 +1572,7 @@ impl<'a> Builder<'a> {
                                     child_idx,
                                     &leaf_pkg,
                                     &cls_ref.type_name,
-                                    loc.tree,
+                                    sub_tree,
                                     sub_idx,
                                 );
                                 child_indices.push(child_idx);
@@ -1584,7 +1596,7 @@ impl<'a> Builder<'a> {
                                 in_modes: sub_in_modes.clone(),
                             });
                             // Build property map for anonymous subcomponent
-                            self.build_anon_property_map(child_idx, loc.tree, sub_idx);
+                            self.build_anon_property_map(child_idx, sub_tree, sub_idx);
                             child_indices.push(child_idx);
                         }
                     }
@@ -1767,7 +1779,9 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Collect own subcomponents
+        // Collect own subcomponents. Tag each with `loc.tree` — the tree of the
+        // impl currently being walked — so an inherited subcomponent keeps the
+        // index space of the file it was declared in (issue #236).
         for &sub_idx in &ci.subcomponents {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let sub = &tree.subcomponents[sub_idx];
@@ -1775,6 +1789,7 @@ impl<'a> Builder<'a> {
                     sub.name.clone(),
                     sub.category,
                     sub.classifier.clone(),
+                    loc.tree,
                     sub_idx,
                     sub.array_dimensions.clone(),
                     sub.in_modes.clone(),
@@ -4171,6 +4186,83 @@ mod tests {
         assert_eq!(
             parse_connection_pattern("some_unknown"),
             ConnectionPattern::AllToAll
+        );
+    }
+
+    /// Regression for #236: instantiating an implementation whose `extends`
+    /// parent is declared in a *different file* (tree) must not panic. An
+    /// inherited subcomponent's index is only valid in the tree that declared
+    /// it; the builder previously paired it with the most-derived impl's tree,
+    /// which — when that tree declares no subcomponents of its own — indexed an
+    /// empty slice and panicked (`index out of bounds: the len is 0`).
+    ///
+    /// Ignored under Miri: unlike the other instance:: tests (which build
+    /// ItemTrees manually), this one parses AADL source and so pulls rowan
+    /// into the run — upstream rowan UB (rowan#192) trips Miri's borrow
+    /// stack. The test is a panic-regression guard, not a memory-safety
+    /// probe; normal `cargo test` still runs it.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn extends_chain_across_files_does_not_panic() {
+        // Base system + impl (with a subcomponent) live in one file/tree.
+        let base = r#"
+package base_pkg
+public
+    thread T
+    end T;
+    thread implementation T.Impl
+    end T.Impl;
+    system Base
+    end Base;
+    system implementation Base.Impl
+        subcomponents
+            t1: thread T.Impl;
+    end Base.Impl;
+end base_pkg;
+"#;
+        // Derived impl in a SEPARATE file/tree extends the base impl and
+        // declares no subcomponents of its own — so its tree's subcomponent
+        // list is empty, the exact shape that triggered the panic.
+        let derived = r#"
+package derived_pkg
+public
+    with base_pkg;
+    system Derived extends base_pkg::Base
+    end Derived;
+    system implementation Derived.Impl extends base_pkg::Base.Impl
+    end Derived.Impl;
+end derived_pkg;
+"#;
+
+        let db = crate::HirDefDatabase::default();
+        let t_base = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "base.aadl".to_string(), base.to_string()),
+        );
+        let t_derived = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "derived.aadl".to_string(), derived.to_string()),
+        );
+        // base is tree 0, derived is tree 1; derived's tree has no subcomponents.
+        let scope = GlobalScope::from_trees(vec![t_base, t_derived]);
+
+        // Must not panic.
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("derived_pkg"),
+            &Name::new("Derived"),
+            &Name::new("Impl"),
+        );
+
+        // The inherited subcomponent must be instantiated under the derived
+        // system, carrying through from the parent's tree.
+        assert!(
+            inst.all_components().any(|(_, c)| c.name.as_str() == "t1"),
+            "inherited subcomponent `t1` should be instantiated via the cross-file \
+             extends chain; components: {:?}",
+            inst.all_components()
+                .map(|(_, c)| c.name.as_str().to_string())
+                .collect::<Vec<_>>()
         );
     }
 }
