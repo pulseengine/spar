@@ -614,6 +614,8 @@ mod tests {
                 mode_transition_instances: Arena::default(),
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
+                feature_property_maps: Default::default(),
+                connection_property_maps: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
             }

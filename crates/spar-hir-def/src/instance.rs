@@ -56,6 +56,14 @@ pub struct SystemInstance {
     pub diagnostics: Vec<InstanceDiagnostic>,
     /// Property maps for each component instance.
     pub property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    /// Property maps for feature instances — values attached via
+    /// `applies to <path>.<feature>` (AS5506D §11.3). Keyed by feature index
+    /// so each port keeps its own properties instead of colliding on the
+    /// owning component's map (issue #237).
+    pub feature_property_maps: FxHashMap<FeatureInstanceIdx, PropertyMap>,
+    /// Property maps for connection instances — values attached via
+    /// `applies to <path>.<connection>` (issue #237).
+    pub connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     /// Semantic (end-to-end) connection instances traced through the hierarchy.
     pub semantic_connections: Vec<SemanticConnection>,
     /// System Operation Modes — the cartesian product of modes across all modal components.
@@ -207,6 +215,8 @@ impl SystemInstance {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            feature_property_maps: FxHashMap::default(),
+            connection_property_maps: FxHashMap::default(),
             pending_applies_to: Vec::new(),
             depth: 0,
             max_depth: 100,
@@ -248,6 +258,8 @@ impl SystemInstance {
             mode_transition_instances: builder.mode_transition_instances,
             diagnostics: builder.diagnostics,
             property_maps: builder.property_maps,
+            feature_property_maps: builder.feature_property_maps,
+            connection_property_maps: builder.connection_property_maps,
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         };
@@ -300,6 +312,20 @@ impl SystemInstance {
     pub fn properties_for(&self, idx: ComponentInstanceIdx) -> &PropertyMap {
         static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Resolved properties attached to a feature instance via
+    /// `applies to <path>.<feature>` (issue #237). Empty if none.
+    pub fn properties_for_feature(&self, idx: FeatureInstanceIdx) -> &PropertyMap {
+        static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
+        self.feature_property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Resolved properties attached to a connection instance via
+    /// `applies to <path>.<connection>` (issue #237). Empty if none.
+    pub fn properties_for_connection(&self, idx: ConnectionInstanceIdx) -> &PropertyMap {
+        static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
+        self.connection_property_maps.get(&idx).unwrap_or(&EMPTY)
     }
 
     /// Build a `/`-separated instance path for a component (root first).
@@ -1360,10 +1386,14 @@ enum AppliesTarget {
     /// All segments named subcomponents; resolved to this component.
     Component(ComponentInstanceIdx),
     /// All-but-last segments named subcomponents; the last segment names a
-    /// feature on the returned component (AADL v2.3 AS5506D §11.3).
-    FeatureOwner(ComponentInstanceIdx),
-    /// No valid resolution: the path contains a segment that matches neither
-    /// a subcomponent nor (for the last segment) a feature.
+    /// feature on the resolved component (AADL v2.3 AS5506D §11.3). Carries the
+    /// specific feature instance so the property is stored per-feature (#237).
+    Feature(FeatureInstanceIdx),
+    /// All-but-last segments named subcomponents; the last segment names a
+    /// connection on the resolved component (#237).
+    Connection(ConnectionInstanceIdx),
+    /// No valid resolution: the path contains a segment that matches neither a
+    /// subcomponent nor (for the last segment) a feature or connection.
     Unresolvable,
 }
 
@@ -1378,6 +1408,8 @@ struct Builder<'a> {
     mode_transition_instances: Arena<ModeTransitionInstance>,
     diagnostics: Vec<InstanceDiagnostic>,
     property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+    feature_property_maps: FxHashMap<FeatureInstanceIdx, PropertyMap>,
+    connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     /// Property associations with a non-empty `applies to <path>` clause.
     ///
     /// These are collected during instantiation and eagerly attached to
@@ -2342,12 +2374,21 @@ impl<'a> Builder<'a> {
                 AppliesTarget::Component(target) => {
                     self.property_maps.entry(target).or_default().add(prop);
                 }
-                AppliesTarget::FeatureOwner(component) => {
-                    // The last segment named a feature on `component`.  Store
-                    // the property on the owning component — per AS5506D §11.3
-                    // the property association applies to the feature instance,
-                    // and the component is the natural retrieval point.
-                    self.property_maps.entry(component).or_default().add(prop);
+                AppliesTarget::Feature(feature) => {
+                    // Last segment named a feature (AS5506D §11.3). Store on the
+                    // feature instance so each port keeps its own values instead
+                    // of colliding by property name on the component map (#237).
+                    self.feature_property_maps
+                        .entry(feature)
+                        .or_default()
+                        .add(prop);
+                }
+                AppliesTarget::Connection(connection) => {
+                    // Last segment named a connection — store per-connection (#237).
+                    self.connection_property_maps
+                        .entry(connection)
+                        .or_default()
+                        .add(prop);
                 }
                 AppliesTarget::Unresolvable => {
                     // Unresolvable path: keep on owner (prior behavior) and
@@ -2370,9 +2411,11 @@ impl<'a> Builder<'a> {
     ///
     /// Returns:
     /// - [`AppliesTarget::Component`] when all segments name subcomponents.
-    /// - [`AppliesTarget::FeatureOwner`] when all-but-last segments name
+    /// - [`AppliesTarget::Feature`] when all-but-last segments name
     ///   subcomponents and the final segment names a feature on the resolved
     ///   component (AADL v2.3 AS5506D §11.3 feature-path support).
+    /// - [`AppliesTarget::Connection`] when the final segment names a connection
+    ///   on the resolved component (#237).
     /// - [`AppliesTarget::Unresolvable`] when any segment cannot be matched.
     fn resolve_applies_to_path(&self, owner: ComponentInstanceIdx, path: &str) -> AppliesTarget {
         let segments: Vec<&str> = path
@@ -2398,21 +2441,29 @@ impl<'a> Builder<'a> {
                 continue;
             }
 
-            // Not a child — check if this is the last segment and names a feature.
+            // Not a child — check if this is the last segment and names a
+            // feature or a connection on the current component.
             let is_last = i == segments.len() - 1;
             if is_last {
-                let is_feature = self.components[current].features.iter().any(|&fi| {
+                if let Some(&fi) = self.components[current].features.iter().find(|&&fi| {
                     self.features[fi]
                         .name
                         .as_str()
                         .eq_ignore_ascii_case(segment)
-                });
-                if is_feature {
-                    return AppliesTarget::FeatureOwner(current);
+                }) {
+                    return AppliesTarget::Feature(fi);
+                }
+                if let Some(&ci) = self.components[current].connections.iter().find(|&&ci| {
+                    self.connections[ci]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(segment)
+                }) {
+                    return AppliesTarget::Connection(ci);
                 }
             }
 
-            // Neither subcomponent nor feature — unresolvable.
+            // Neither subcomponent, feature, nor connection — unresolvable.
             return AppliesTarget::Unresolvable;
         }
 
@@ -2503,6 +2554,8 @@ mod tests {
             mode_transition_instances: Arena::default(),
             diagnostics: Vec::new(),
             property_maps: FxHashMap::default(),
+            feature_property_maps: FxHashMap::default(),
+            connection_property_maps: FxHashMap::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -4263,6 +4316,84 @@ end derived_pkg;
             inst.all_components()
                 .map(|(_, c)| c.name.as_str().to_string())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// Regression for #237: a property declared with `applies to <connection>`
+    /// or `applies to <feature>` must be stored on the connection/feature
+    /// instance — not collapsed by property name onto the owning component.
+    ///
+    /// Ignored under Miri for the same reason as
+    /// `extends_chain_across_files_does_not_panic`: it parses AADL source,
+    /// pulling rowan (upstream rowan#192 UB) into the Miri run.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn applies_to_connection_and_feature_store_per_instance() {
+        let src = r#"
+package p
+public
+    data D
+    end D;
+    thread T
+        features
+            tin: in data port D;
+            tout: out data port D;
+    end T;
+    thread implementation T.i
+    end T.i;
+    process Proc
+        features
+            pin: in data port D;
+    end Proc;
+    process implementation Proc.i
+        subcomponents
+            a: thread T.i;
+            b: thread T.i;
+        connections
+            conn1: port a.tout -> b.tin;
+        properties
+            stood::pos => "wire-shape" applies to conn1;
+            stood::pos => "port-shape" applies to pin;
+    end Proc.i;
+    system S
+    end S;
+    system implementation S.i
+        subcomponents
+            proc: process Proc.i;
+    end S.i;
+end p;
+"#;
+        let db = crate::HirDefDatabase::default();
+        let tree = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "p.aadl".to_string(), src.to_string()),
+        );
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst =
+            SystemInstance::instantiate(&scope, &Name::new("p"), &Name::new("S"), &Name::new("i"));
+
+        // Property on the connection lands on the connection instance.
+        let (conn_idx, _) = inst
+            .connections
+            .iter()
+            .find(|(_, c)| c.name.as_str() == "conn1")
+            .expect("conn1 should be instantiated");
+        assert_eq!(
+            inst.properties_for_connection(conn_idx).get("stood", "pos"),
+            Some("\"wire-shape\""),
+            "connection property must be stored per-connection, not on the component (#237)"
+        );
+
+        // Property on the feature lands on the feature instance.
+        let (feat_idx, _) = inst
+            .features
+            .iter()
+            .find(|(_, f)| f.name.as_str() == "pin")
+            .expect("pin feature should exist");
+        assert_eq!(
+            inst.properties_for_feature(feat_idx).get("stood", "pos"),
+            Some("\"port-shape\""),
+            "feature property must be stored per-feature, not on the component (#237)"
         );
     }
 }
