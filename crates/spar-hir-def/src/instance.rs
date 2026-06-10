@@ -4195,7 +4195,14 @@ mod tests {
     /// it; the builder previously paired it with the most-derived impl's tree,
     /// which — when that tree declares no subcomponents of its own — indexed an
     /// empty slice and panicked (`index out of bounds: the len is 0`).
+    ///
+    /// Ignored under Miri: unlike the other instance:: tests (which build
+    /// ItemTrees manually), this one parses AADL source and so pulls rowan
+    /// into the run — upstream rowan UB (rowan#192) trips Miri's borrow
+    /// stack. The test is a panic-regression guard, not a memory-safety
+    /// probe; normal `cargo test` still runs it.
     #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn extends_chain_across_files_does_not_panic() {
         // Base system + impl (with a subcomponent) live in one file/tree.
         let base = r#"
