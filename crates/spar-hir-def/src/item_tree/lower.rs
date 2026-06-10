@@ -2236,7 +2236,16 @@ fn extract_category(node: &SyntaxNode) -> Option<ComponentCategory> {
 }
 
 fn parse_category(text: &str) -> Option<ComponentCategory> {
-    let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // AADL is case-insensitive (AS5506 §15). The lexer's keyword lookup
+    // already lowercases, but this matcher reads raw CST text — `SYSTEM`
+    // must match like `system`, otherwise the whole declaration is
+    // silently dropped from the item tree and instantiation comes back
+    // empty (#235).
+    let normalized: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
     match normalized.as_str() {
         "system" => Some(ComponentCategory::System),
         "process" => Some(ComponentCategory::Process),
@@ -2261,7 +2270,12 @@ fn extract_direction(node: &SyntaxNode) -> Option<Direction> {
         .children()
         .find(|c| c.kind() == SyntaxKind::DIRECTION)?;
     let text = dir_node.text().to_string();
-    let normalized: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Case-insensitive like parse_category — `IN OUT` ≡ `in out` (#235).
+    let normalized: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
     match normalized.as_str() {
         "in" => Some(Direction::In),
         "out" => Some(Direction::Out),
@@ -3310,5 +3324,87 @@ mod text_fallback_tests {
             }
             other => panic!("expected Record, got {:?}", other),
         }
+    }
+
+    /// Regression for #235 (second report): AADL is case-insensitive
+    /// (AS5506 §15), and the lexer's keyword lookup lowercases — but
+    /// `parse_category`/`extract_direction` matched raw CST text, so
+    /// `SYSTEM IMPLEMENTATION` lowered to NOTHING: every declaration was
+    /// silently dropped from the item tree and `spar instance` returned
+    /// an empty model.
+    #[test]
+    fn parse_category_and_direction_are_case_insensitive() {
+        assert_eq!(parse_category("SYSTEM"), Some(ComponentCategory::System));
+        assert_eq!(parse_category("Thread"), Some(ComponentCategory::Thread));
+        assert_eq!(
+            parse_category("THREAD   GROUP"),
+            Some(ComponentCategory::ThreadGroup)
+        );
+        assert_eq!(
+            parse_category("Virtual PROCESSOR"),
+            Some(ComponentCategory::VirtualProcessor)
+        );
+        assert_eq!(parse_category("not_a_category"), None);
+    }
+
+    /// End-to-end: an all-uppercase-keyword package must lower to the same
+    /// item-tree shape as its lowercase twin (the #235 instantiation repro).
+    /// Ignored under Miri: parses via rowan (upstream rowan#192 UB).
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn uppercase_keywords_lower_to_full_item_tree() {
+        let src = r#"
+PACKAGE up_pkg
+PUBLIC
+
+THREAD T
+  FEATURES
+    din: IN DATA PORT;
+END T;
+
+THREAD IMPLEMENTATION T.Impl
+END T.Impl;
+
+SYSTEM Top
+END Top;
+
+SYSTEM IMPLEMENTATION Top.Impl
+SUBCOMPONENTS
+  t1: THREAD T.Impl;
+END Top.Impl;
+
+END up_pkg;
+"#;
+        let db = crate::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "u.aadl".to_string(), src.to_string());
+        let tree = crate::file_item_tree(&db, sf);
+
+        assert_eq!(
+            tree.component_types.iter().count(),
+            2,
+            "both component types must survive lowering"
+        );
+        assert_eq!(
+            tree.component_impls.iter().count(),
+            2,
+            "both implementations must survive lowering"
+        );
+        let top_impl = tree
+            .component_impls
+            .iter()
+            .find(|(_, i)| i.type_name.as_str() == "Top")
+            .map(|(_, i)| i)
+            .expect("Top.Impl lowered");
+        assert_eq!(top_impl.category, ComponentCategory::System);
+        assert_eq!(top_impl.subcomponents.len(), 1, "subcomponent retained");
+        // Direction extraction must also be case-insensitive (`IN DATA PORT`).
+        let t = tree
+            .component_types
+            .iter()
+            .find(|(_, c)| c.name.as_str() == "T")
+            .map(|(_, c)| c)
+            .expect("T lowered");
+        let feat_idx = *t.features.first().expect("feature lowered");
+        assert_eq!(tree.features[feat_idx].direction, Some(Direction::In));
     }
 }
