@@ -487,6 +487,7 @@ mod tests {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         });
 
         // Add features to thread2: an in data port
@@ -498,6 +499,7 @@ mod tests {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         });
 
         // Unconnected out port on thread2
@@ -509,6 +511,7 @@ mod tests {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         });
 
         // Connect thread1.sensor_out -> thread2.cmd_in

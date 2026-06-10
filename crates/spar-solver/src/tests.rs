@@ -89,6 +89,7 @@ impl TestBuilder {
             classifier: None,
             access_kind: None,
             array_index: None,
+            data_size_bytes: None,
         });
         self.components[owner].features.push(idx);
         idx

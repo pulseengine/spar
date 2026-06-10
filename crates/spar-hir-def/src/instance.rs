@@ -105,6 +105,11 @@ pub struct FeatureInstance {
     pub access_kind: Option<AccessKind>,
     /// Array index for array features: None for non-array, Some(1..N) for array elements.
     pub array_index: Option<u64>,
+    /// Resolved `Data_Size` (in bytes) of the feature's data classifier, when
+    /// the classifier resolves to a `data` component type that declares one.
+    /// Lets consumers (e.g. WIT codegen scalar mapping, REQ-CODEGEN-WIT-TYPES)
+    /// use the size without re-resolving against the global scope.
+    pub data_size_bytes: Option<u64>,
 }
 
 /// A connection instance.
@@ -1977,6 +1982,46 @@ impl<'a> Builder<'a> {
     /// Populate features, flows, modes, and mode transitions from a resolved component type.
     ///
     /// Walks the extends chain to include inherited features from parent types.
+    /// Resolve a feature's data classifier to its declared `Data_Size`, in
+    /// bytes (REQ-CODEGEN-WIT-TYPES). Returns `None` when the classifier
+    /// does not resolve to a `data` component type, declares no `Data_Size`,
+    /// or the value does not parse as a size.
+    fn resolve_data_size_bytes(
+        &self,
+        from_package: &Name,
+        classifier: &ClassifierRef,
+    ) -> Option<u64> {
+        let resolved = self.scope.resolve_classifier(from_package, classifier);
+        let loc = match &resolved {
+            ResolvedClassifier::ComponentType { loc, .. } => *loc,
+            _ => return None,
+        };
+        let ct = self.scope.get_component_type(loc)?;
+        if ct.category != ComponentCategory::Data {
+            return None;
+        }
+        let tree = self.scope.tree(loc.tree)?;
+        for &pa_idx in &ct.property_associations {
+            let pa = &tree.property_associations[pa_idx];
+            if pa
+                .name
+                .property_name
+                .as_str()
+                .eq_ignore_ascii_case("Data_Size")
+                || pa
+                    .name
+                    .property_name
+                    .as_str()
+                    .eq_ignore_ascii_case("Source_Data_Size")
+            {
+                // parse_size_value returns BITS ("8 Bytes" -> 64).
+                let bits = crate::property_value::parse_size_value(&pa.value)?;
+                return Some(bits / 8);
+            }
+        }
+        None
+    }
+
     fn populate_from_type(
         &mut self,
         idx: ComponentInstanceIdx,
@@ -2035,6 +2080,9 @@ impl<'a> Builder<'a> {
         for (name, kind, direction, classifier, access_kind, array_dims) in feat_data {
             let feat_count = array_element_count(&array_dims, &mut self.diagnostics, &name);
             let feat_is_array = !array_dims.is_empty();
+            let data_size_bytes = classifier
+                .as_ref()
+                .and_then(|c| self.resolve_data_size_bytes(type_package, c));
 
             for fi_i in 0..feat_count {
                 let feat_array_index = if feat_is_array { Some(fi_i + 1) } else { None };
@@ -2051,6 +2099,7 @@ impl<'a> Builder<'a> {
                     classifier: classifier.clone(),
                     access_kind,
                     array_index: feat_array_index,
+                    data_size_bytes,
                 });
                 feat_indices.push(fi);
             }
@@ -2745,6 +2794,7 @@ mod tests {
                 classifier: None,
                 access_kind: None,
                 array_index: Some(i),
+                data_size_bytes: None,
             });
             feat_indices.push(fi);
         }
@@ -2939,6 +2989,7 @@ mod tests {
                     classifier: None,
                     access_kind: None,
                     array_index: Some(fi),
+                    data_size_bytes: None,
                 });
                 feat_indices.push(feat);
             }

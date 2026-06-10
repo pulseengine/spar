@@ -396,6 +396,7 @@ mod tests {
                 classifier,
                 access_kind,
                 array_index: None,
+                data_size_bytes: None,
             });
             self.components[owner].features.push(idx);
             idx

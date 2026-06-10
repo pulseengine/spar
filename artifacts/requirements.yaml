@@ -2385,7 +2385,7 @@ artifacts:
       etc.) instead of the blanket `type x = list<u8>` alias introduced
       by the #254 validity fix. Requires threading scope/property access
       into generate_wit. Follow-up recorded in #254/#255.
-    status: proposed
+    status: implemented
     tags: [codegen, wit, interop]
     fields:
       release: v0.14.0
