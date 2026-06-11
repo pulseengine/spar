@@ -2402,7 +2402,7 @@ artifacts:
       `lake build` as a required gate, anchoring the spar-analysis
       scheduling passes the way TEST-LEAN-MINPLUS anchors network
       calculus. Tracks issue #261.
-    status: proposed
+    status: implemented
     tags: [proofs, lean, scheduling]
     fields:
       release: v0.15.0
