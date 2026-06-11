@@ -1957,6 +1957,36 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-007
 
+  - id: TEST-LEAN-SCHEDULING
+    type: feature
+    title: Lean scheduling theorems gated in CI (EDF, RM bound, RTA)
+    description: >
+      The complete (zero-sorry) Lean 4 / Mathlib scheduling proofs in
+      proofs/Proofs/Scheduling/ — RTA fixed-point convergence (Joseph &
+      Pandya 1986), RM utilization bound (Liu & Layland 1973), EDF
+      optimality for implicit deadlines (Dertouzos 1974), jittered RTA
+      convergence (Tindell & Clark 1994), flow-latency monotonicity
+      (Feiertag 2009), ARINC 653 partition isolation — underpinning the
+      spar-analysis scheduling passes (crates/spar-analysis/src/
+      scheduling.rs, rta.rs, latency.rs, arinc653.rs). All are imported
+      by the proofs/Proofs.lean root module, so the
+      `.github/workflows/proofs.yml` "Lean proof typecheck (lake build)"
+      job typechecks them on every PR. As of v0.15.0 that job is a
+      REQUIRED, GATING status check on main (branch protection), plus an
+      honest post-build grep gate that fails on any bare `sorry` in
+      proofs/Proofs/ — so a Lean/Mathlib bump that breaks a scheduling
+      proof blocks the merge. Closes the "wired + gating + complete"
+      full-circle audit (#261).
+    fields:
+      method: formal-proof
+      steps:
+        - run: cd proofs && lake build
+    status: passing
+    tags: [v0.15.0, scheduling, lean, proofs, rta, edf]
+    links:
+      - type: satisfies
+        target: REQ-PROOF-SCHED-001
+
   - id: TEST-TSN-PROPS
     type: feature
     title: Spar_TSN property-set + spar-network::tsn surface
