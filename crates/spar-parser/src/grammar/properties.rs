@@ -280,14 +280,37 @@ fn containment_path(p: &mut Parser) {
     let m = p.start();
     if p.at(SyntaxKind::IDENT) {
         p.bump(SyntaxKind::IDENT);
+        array_subscripts(p);
         while p.at(SyntaxKind::DOT) {
             p.bump(SyntaxKind::DOT);
             if p.at(SyntaxKind::IDENT) {
                 p.bump(SyntaxKind::IDENT);
+                array_subscripts(p);
             }
         }
     }
     m.complete(p, SyntaxKind::CONTAINMENT_PATH);
+}
+
+/// Consume zero or more array subscripts on a path segment, e.g. the
+/// `[1]` in `reference(pc[1])` or `cpu.cores[0]` (AS5506B §10.6.2
+/// contained-element array selection). The index is an integer literal,
+/// an integer range (`[1 .. 3]`), or a named constant — accept all three
+/// rather than just literals so property-constant indices parse too.
+fn array_subscripts(p: &mut Parser) {
+    while p.at(SyntaxKind::L_BRACKET) {
+        p.bump(SyntaxKind::L_BRACKET);
+        // index ::= INTEGER_LIT [ '..' INTEGER_LIT ] | IDENT (named constant)
+        if p.at(SyntaxKind::INTEGER_LIT) {
+            p.bump(SyntaxKind::INTEGER_LIT);
+            if p.eat(SyntaxKind::DOT_DOT) && p.at(SyntaxKind::INTEGER_LIT) {
+                p.bump(SyntaxKind::INTEGER_LIT);
+            }
+        } else if p.at(SyntaxKind::IDENT) {
+            p.bump(SyntaxKind::IDENT);
+        }
+        p.expect(SyntaxKind::R_BRACKET);
+    }
 }
 
 /// Parse `in binding (Classifier)`
@@ -397,6 +420,7 @@ fn property_type(p: &mut Parser) {
         SyntaxKind::AADLBOOLEAN_KW => p.bump(SyntaxKind::AADLBOOLEAN_KW),
         SyntaxKind::AADLINTEGER_KW => {
             p.bump(SyntaxKind::AADLINTEGER_KW);
+            numeric_range_opt(p);
             if p.at(SyntaxKind::UNITS_KW) {
                 p.bump(SyntaxKind::UNITS_KW);
                 numeric_units_designator(p);
@@ -404,6 +428,7 @@ fn property_type(p: &mut Parser) {
         }
         SyntaxKind::AADLREAL_KW => {
             p.bump(SyntaxKind::AADLREAL_KW);
+            numeric_range_opt(p);
             if p.at(SyntaxKind::UNITS_KW) {
                 p.bump(SyntaxKind::UNITS_KW);
                 numeric_units_designator(p);
@@ -453,20 +478,15 @@ fn property_type(p: &mut Parser) {
         }
         SyntaxKind::CLASSIFIER_KW => {
             p.bump(SyntaxKind::CLASSIFIER_KW);
-            // Optional category constraint
-            if p.at(SyntaxKind::L_PAREN) {
-                p.bump(SyntaxKind::L_PAREN);
-                super::classifier_ref(p);
-                p.expect(SyntaxKind::R_PAREN);
-            }
+            // Optional category constraint: a comma-separated list of
+            // classifier references (AS5506B §11.3), e.g.
+            // `classifier (process, thread)`.
+            classifier_ref_list_in_parens(p);
         }
         SyntaxKind::REFERENCE_KW => {
             p.bump(SyntaxKind::REFERENCE_KW);
-            if p.at(SyntaxKind::L_PAREN) {
-                p.bump(SyntaxKind::L_PAREN);
-                super::classifier_ref(p);
-                p.expect(SyntaxKind::R_PAREN);
-            }
+            // `reference (processor, system)` — multiple referent categories.
+            classifier_ref_list_in_parens(p);
         }
         SyntaxKind::IDENT => {
             // Type reference
@@ -477,6 +497,62 @@ fn property_type(p: &mut Parser) {
         }
     }
     m.complete(p, SyntaxKind::PROPERTY_TYPE);
+}
+
+/// Parse an optional `( ref [, ref]* )` category/classifier list following
+/// `reference` / `classifier` in a property type (AS5506B §11.3). No-op when
+/// no parenthesis follows (the constraint is optional).
+fn classifier_ref_list_in_parens(p: &mut Parser) {
+    if !p.at(SyntaxKind::L_PAREN) {
+        return;
+    }
+    p.bump(SyntaxKind::L_PAREN);
+    super::classifier_ref(p);
+    while p.eat(SyntaxKind::COMMA) {
+        super::classifier_ref(p);
+    }
+    p.expect(SyntaxKind::R_PAREN);
+}
+
+/// Parse an optional numeric range constraint on `aadlinteger`/`aadlreal`
+/// in a property-type definition (AS5506B §11.3): `lower .. upper`, where
+/// each bound is a signed numeric literal — optionally carrying a unit
+/// (`1.5 meter`) — or a named property constant (`Max_Aadlinteger`).
+///
+/// Only entered on a numeric/sign start so a bare `units`/`applies` clause
+/// is left for the caller; the range keyword grammar (`range of …`) is
+/// handled separately.
+fn numeric_range_opt(p: &mut Parser) {
+    if !(p.at(SyntaxKind::INTEGER_LIT)
+        || p.at(SyntaxKind::REAL_LIT)
+        || p.at(SyntaxKind::MINUS)
+        || p.at(SyntaxKind::PLUS))
+    {
+        return;
+    }
+    numeric_bound(p);
+    if p.eat(SyntaxKind::DOT_DOT) {
+        numeric_bound(p);
+    }
+}
+
+/// One bound of a numeric range: `[+|-] (INTEGER_LIT | REAL_LIT) [unit]`
+/// or a named constant `IDENT`.
+fn numeric_bound(p: &mut Parser) {
+    let _ = p.eat(SyntaxKind::PLUS) || p.eat(SyntaxKind::MINUS);
+    if p.at(SyntaxKind::INTEGER_LIT) || p.at(SyntaxKind::REAL_LIT) {
+        p.bump_any();
+        // Optional unit identifier on the bound, e.g. `1.5 meter`.
+        if p.at(SyntaxKind::IDENT) {
+            p.bump(SyntaxKind::IDENT);
+        }
+    } else if p.at(SyntaxKind::IDENT) {
+        // Named property constant bound (possibly qualified `set::Name`).
+        p.bump(SyntaxKind::IDENT);
+        if p.eat(SyntaxKind::COLON_COLON) && p.at(SyntaxKind::IDENT) {
+            p.bump(SyntaxKind::IDENT);
+        }
+    }
 }
 
 /// Parse `(uA, mA => uA * 1000, ...)` — body of a `units` designator.

@@ -3,14 +3,6 @@
 # but is absent from EITHER baseline = a regression the test rejects.
 # Regenerate: SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus
 EMV2TR_Test_Files/MyErrorProperties.aadl
-E_EnabledAircraft_Security/SecurityPropertiesCopy/SecurityEnforcementProperties.aadl
 LargeExamplesforEMV2TR/FG_System_pkg.aadl
-PropertyViewerExamples/mine.aadl
-core-examples/arinc653-misc/processor_hm.aadl
-core-examples/avionics-display/RockwellCollins.aadl
-core-examples/feature-array/featurearray.aadl
-core-examples/multi-core/arinc653.aadl
-core-examples/multi-core/processor_properties.aadl
-core-examples/multi-core/simple.aadl
 error-model/DualFGS/ModalDualFGS.aadl
 error-model/DualFGS/ThreeStateDualFGS.aadl

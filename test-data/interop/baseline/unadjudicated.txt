@@ -9,12 +9,7 @@ bugtrack-core/issue220/test.aadl
 bugtrack-core/issue220/test2.aadl
 bugtrack-core/issue222/test.aadl
 bugtrack-core/issue241/test.aadl
-bugtrack-core/issue286/ps.aadl
 bugtrack-core/issue289/test.aadl
-bugtrack-core/issue294/propertysets/Physical_Properties.aadl
 bugtrack-core/issue31/bug31.aadl
-bugtrack-core/issue327/test.aadl
-bugtrack-core/issue412/issue412.aadl
 bugtrack-core/issue471/ClientServer.aadl
 bugtrack-core/issue471/issue471.aadl
-bugtrack-emv2/issue41/Physical_Properties.aadl

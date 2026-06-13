@@ -2425,24 +2425,51 @@ artifacts:
     status: proposed
     tags: [interop, plugfest, osate]
     fields:
-      release: v0.16.0
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
 
   - id: REQ-PLUGFEST-003
     type: requirement
-    title: "Core AADL parser gap closure (OSATE corpus ratchet to zero)"
+    title: "Core AADL parser gap closure (OSATE corpus ratchet)"
     description: >
-      The core-bucket entries in test-data/interop/baseline/spar-gaps.txt
-      shall be driven to zero: named-constant property-type ranges,
-      nested-list connection property values, and any Tier-B-confirmed
-      core gaps. Each fix re-blesses the ratchet; the corpus test
-      enforces no regression. Issue #246.
-    status: proposed
+      Close the core-bucket parser gaps surfaced by the OSATE interop
+      corpus (test-data/interop/baseline/spar-gaps.txt). v0.16.0 closes
+      four constructs: array subscripts on reference paths
+      (reference(pc[1])), named-constant property-type ranges
+      (aadlinteger 0 .. Max_Aadlinteger), parenthesised classifier
+      reference lists (reference(processor, system)), and in-mode
+      property associations on mode declarations
+      (mode {ARINC653::State_Information => [...]}; AS5506 §12.1).
+      Corpus advances 519->532 parsed, core bucket 284->297. Each fix
+      re-blesses the ratchet; the corpus test enforces no regression.
+      The remaining genuine gaps are all EMV2/error-model annex-path
+      applies-to clauses ({EMV2}**error detection) -> tracked by
+      REQ-PLUGFEST-005 under the Tier-B EMV2 oracle work. Issue #246.
+    status: implemented
     tags: [parser, plugfest]
     fields:
       release: v0.16.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-PLUGFEST-005
+    type: requirement
+    title: "EMV2 annex-path applies-to clause parsing"
+    description: >
+      Parse OSATE EMV2 annex-specific containment paths in property
+      applies-to clauses, e.g. `applies to ({EMV2}**error detection)`.
+      Four OSATE-corpus files remain gapped on this construct
+      (MyErrorProperties, FG_System_pkg, ModalDualFGS, ThreeStateDualFGS).
+      Deferred to the Tier-B plug-fest track because annex-path
+      acceptance must be adjudicated against the OSATE oracle (a path
+      spar invents but OSATE rejects is a false win). Issue #246.
+    status: proposed
+    tags: [parser, plugfest, emv2]
+    fields:
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001

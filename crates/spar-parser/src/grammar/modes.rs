@@ -49,6 +49,11 @@ fn mode_or_transition(p: &mut Parser) {
             // initial mode
         }
         p.expect(SyntaxKind::MODE_KW);
+        // Optional in-mode property associations: `mode { Prop => val; ... }`
+        // (AS5506 §12.1 — e.g. ARINC653::State_Information on a partition mode).
+        if p.at(SyntaxKind::L_CURLY) {
+            super::properties::property_block(p);
+        }
         p.expect(SyntaxKind::SEMICOLON);
         m.complete(p, SyntaxKind::MODE);
     } else if p.at_name() || at_unnamed_transition(p) {
