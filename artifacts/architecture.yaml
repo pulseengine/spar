@@ -1096,6 +1096,10 @@ artifacts:
       - type: satisfies
         target: REQ-INGEST-ARXML-001
       - type: satisfies
+        target: REQ-INGEST-DBC-001
+      - type: satisfies
+        target: REQ-INGEST-DBC-FLOWS-001
+      - type: satisfies
         target: REQ-TSN-SYNTH-MILP-001
       - type: satisfies
         target: REQ-PROOF-NC-CERT-001

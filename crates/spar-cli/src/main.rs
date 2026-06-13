@@ -48,6 +48,7 @@ fn main() {
         "verify" => cmd_verify(&args[2..]),
         "codegen" => cmd_codegen(&args[2..]),
         "sysml2" => cmd_sysml2(&args[2..]),
+        "dbc" => cmd_dbc(&args[2..]),
         "extract" => cmd_sysml2_extract(&args[2..]),
         "generate" => cmd_sysml2_generate(&args[2..]),
         "lsp" => cmd_lsp(),
@@ -81,6 +82,7 @@ fn print_usage() {
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
+    eprintln!("  dbc        Ingest a CAN .dbc file and emit AADL (bus + devices + frames)");
     eprintln!(
         "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
     );
@@ -2346,6 +2348,80 @@ fn cmd_sysml2_lower(args: &[String]) {
         None => {
             print!("{aadl}");
         }
+    }
+}
+
+/// `spar dbc <file.dbc> [-o out.aadl] [--package Name]`
+///
+/// Ingest a Vector CAN database (`.dbc`) and emit AADL v2.3 source text
+/// describing the CAN network (bus + one device per node + message frames as
+/// data types). The emitted text is ordinary AADL — feed it to `spar instance`
+/// / `spar analyze` like any other model.
+fn cmd_dbc(args: &[String]) {
+    let mut output_path: Option<String> = None;
+    let mut package = String::from("Can_Network");
+    let mut input: Option<String> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" | "--output" => {
+                i += 1;
+                if i < args.len() {
+                    output_path = Some(args[i].clone());
+                } else {
+                    eprintln!("-o requires a value");
+                    process::exit(1);
+                }
+            }
+            "--package" | "-p" => {
+                i += 1;
+                if i < args.len() {
+                    package = args[i].clone();
+                } else {
+                    eprintln!("--package requires a value");
+                    process::exit(1);
+                }
+            }
+            "--help" | "-h" => {
+                eprintln!("Usage: spar dbc <file.dbc> [-o output.aadl] [--package Name]");
+                process::exit(0);
+            }
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                process::exit(1);
+            }
+            s => {
+                if input.is_some() {
+                    eprintln!("Only one .dbc file may be given");
+                    process::exit(1);
+                }
+                input = Some(s.to_string());
+            }
+        }
+        i += 1;
+    }
+
+    let Some(input) = input else {
+        eprintln!("Usage: spar dbc <file.dbc> [-o output.aadl] [--package Name]");
+        process::exit(1);
+    };
+
+    let source = read_file(&input);
+    let aadl = spar_dbc::dbc_to_aadl(&source, &package).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        process::exit(1);
+    });
+
+    match output_path {
+        Some(path) => {
+            fs::write(&path, &aadl).unwrap_or_else(|e| {
+                eprintln!("Cannot write {path}: {e}");
+                process::exit(1);
+            });
+            eprintln!("Wrote AADL output to {path}");
+        }
+        None => print!("{aadl}"),
     }
 }
 
