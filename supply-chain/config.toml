@@ -437,7 +437,7 @@ version = "6.0.0"
 criteria = "safe-to-run"
 
 [[exemptions.rand]]
-version = "0.9.2"
+version = "0.9.3"
 criteria = "safe-to-run"
 
 [[exemptions.rand_chacha]]
