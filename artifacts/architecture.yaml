@@ -1051,3 +1051,49 @@ artifacts:
     links:
       - type: satisfies
         target: RENDER-REQ-004
+
+  - id: DEC-TSN-OSS-001
+    type: design-decision
+    title: OSS TSN-config-synthesis direction on a fabric-agnostic timing substrate
+    description: >
+      Maintainer decision (2026-06-13): build an open-source Rust
+      competitor to tsnkit / TTTech Slate / RTaW-Pegase, with AADL as
+      the front-end/IR and ARXML/DBC as the ingest feed, structured as
+      three tiers (see docs/strategy/tsn-competitor-roadmap.md). Tier 1
+      (ingest + PLP/TFA network calculus) and Tier 3 (min-plus proofs)
+      are the durable, already-demanded substrate; Tier 2 (TSN-config
+      synthesis → export) is the product bet, kill-gated per release.
+    status: proposed
+    fields:
+      rationale: >
+        The synthesis vacuum is real [SOLID]: no Rust project synthesizes
+        Qbv GCLs, and outside RTaW/Slate no vendor synthesizes at all.
+        spar already owns the two hardest pieces — an MBSE/AADL front-end
+        and sound network-calculus checking (PMOO/LUDB/TFA). The decision
+        overrides the earlier "wait for a named buyer" park, NOT the
+        underlying risk, which is why every Tier-2 requirement carries a
+        kill-gate and nothing promises a "verified end-to-end delay bound"
+        (a certificate certifies the min-plus computation/trace only).
+
+        What de-risks the bet: the timing/NC math is a FABRIC-AGNOSTIC
+        substrate already needed across PulseEngine — WCET analysis, the
+        kiln async-scheduler math, and drone software in relay/jess going
+        multi-fabric (Ethernet + air/wireless + PCIe + CAN). So Tiers 1
+        and 3 pay for themselves through internal demand even if the
+        TSN-config product never finds a single enterprise buyer. As OSS,
+        adoption = users/contributors, not one buyer, with application
+        pull from home automation (Wohl) and pro-audio AVB — the original
+        802.1Qav use case spar already implements. The substrate is to be
+        kept network-technology-agnostic, not TSN-scoped.
+      interfaces:
+        provides: [ARXML/DBC ingest, PLP/TFA NC bounds, Qbv/CQF synthesis, YANG export, min-plus certificate]
+    tags: [tsn, network-calculus, oss, strategy, substrate]
+    links:
+      - type: satisfies
+        target: REQ-NC-PLP-001
+      - type: satisfies
+        target: REQ-INGEST-ARXML-001
+      - type: satisfies
+        target: REQ-TSN-SYNTH-MILP-001
+      - type: satisfies
+        target: REQ-PROOF-NC-CERT-001
