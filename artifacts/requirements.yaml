@@ -2412,6 +2412,59 @@ artifacts:
       - type: traces-to
         target: REQ-RTA-001
 
+  - id: REQ-PROOF-SCHED-002
+    type: requirement
+    title: "Expose Scheduling proofs as a reusable dependency for kiln-async"
+    description: >
+      The Lean scheduling theory (Proofs/Scheduling/{RTA,RMBound,EDF},
+      fully proved — zero sorry/admit/axiom, generic over Nat cost
+      units) shall be consumable by kiln-async's fuel-quantum scheduler
+      without vendoring. Three asks from issue #272: (1) expose
+      Proofs/Scheduling as a stable importable module boundary — a
+      dedicated Lake package and a Bazel `lean_library` target via
+      rules_lean — so a spar refactor cannot silently break kiln's
+      proof gate; (2) provide a shared abstract task model OR a
+      documented "instantiate with your own cost unit" contract
+      confirming the theorems are unit-agnostic, turning re-prove-the-glue
+      into import-and-instantiate; (3) extend `lake exe codegen` to emit
+      `rm_schedulable` (RMBound) and `edf_schedulable` (EDF demand-bound)
+      to Rust alongside the existing RTA extraction, so kiln-async's
+      Phase-4 admission test runs spar-verified analysis. Forward-looking
+      coordination (kiln-async lands the dependency at its Phase 4/5);
+      filed to shape the surface before kiln depends on it. Tracks #272;
+      builds on REQ-PROOF-SCHED-001. Cross-PulseEngine substrate export,
+      the scheduling analog of the network-calculus export in
+      DEC-TSN-OSS-001.
+    status: proposed
+    tags: [proofs, lean, scheduling, kiln, substrate]
+    fields:
+      release: v0.18.0
+    links:
+      - type: traces-to
+        target: REQ-PROOF-SCHED-001
+
+  - id: REQ-INGEST-SYSML2-DIFF-001
+    type: requirement
+    title: "Track SysML v2 grammar drift against the finalized standard"
+    description: >
+      spar-sysml2 shall grammar-diff its pinned SysML-v2
+      Pilot-Implementation tag against a current OMG SysML v2 release
+      tag and reconcile divergences. SysML v2 reached OMG final adoption
+      2025-07-21 (published 2025-09-03) but the textual-notation grammar
+      still ships monthly incremental tags (current 2026-04), so the
+      parser tracks a stabilized-but-not-frozen target. At least one
+      breaking change is known (exponentiation `**`/`^` became
+      right-associative). Per-release GitHub notes are the only
+      authoritative change record — prose changelogs are insufficient;
+      diff the grammar files. Confirms the research conclusion that
+      ARXML ingest stays on the direct autosar-data track (no
+      ARXML→SysML v2 path exists — a synthesis/category mismatch), so
+      sysml2 and REQ-INGEST-ARXML-001 remain peer front-ends.
+    status: proposed
+    tags: [ingest, sysml2, grammar]
+    fields:
+      release: v0.19.0
+
   - id: REQ-PLUGFEST-002
     type: requirement
     title: "Plug-fest Tier-B — OSATE-in-Docker adjudication oracle + AAXL2 round-trip"
@@ -2538,3 +2591,201 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
+
+  # ── TSN-competitor roadmap (DEC-TSN-OSS-001) ──────────────────────────
+  # Three tiers, captured 2026-06-13 after maintainer sign-off. Tier 1 +
+  # Tier 3 are the already-demanded OSS substrate (WCET, kiln async
+  # scheduler, drone multi-fabric in relay/jess); Tier 2 is the
+  # TSN-config product bet, kill-gated per release. All status: proposed
+  # (unstarted). See docs/strategy/tsn-competitor-roadmap.md.
+
+  # --- Tier 1: committed spine (ingest + network-calculus upgrade) ---
+
+  - id: REQ-INGEST-DBC-001
+    type: requirement
+    title: "DBC (CAN) model ingest"
+    description: >
+      spar shall ingest CAN bus descriptions from DBC files via the
+      can-dbc crate (MIT/Apache), mapping signals/messages/nodes onto
+      the spar instance model so existing analysis passes run on real
+      CAN models rather than hand-written .aadl. The cheap CAN-only
+      secondary to ARXML ingest; license-clean, no XSD to bundle.
+    status: proposed
+    tags: [ingest, dbc, can, tier1]
+    fields:
+      release: v0.17.0
+
+  - id: REQ-INGEST-ARXML-001
+    type: requirement
+    title: "ARXML (AUTOSAR) model ingest"
+    description: >
+      spar shall ingest AUTOSAR ARXML via autosar-data +
+      autosar-data-specification (dual MIT/Apache, schema derived from
+      official XSDs — no AUTOSAR XSD bundled). ARXML uniquely carries
+      multi-bus topology AND TIMEX timing constraints, carrying spar's
+      analysis engine to where TSN-config demand actually lives. Role:
+      load-bearing enabler, not a standalone wedge (RTaW already does
+      ARXML→TSN). KILL-GATE: kill ARXML-beyond-DBC if the AADL↔ARXML
+      mapping needs full SWC/TIMEX fidelity we can't justify and DBC
+      carries enough for the target analysis.
+    status: proposed
+    tags: [ingest, arxml, autosar, tier1]
+    fields:
+      release: v0.18.0
+
+  - id: REQ-NC-TFA-001
+    type: requirement
+    title: "FP-TFA / TFA++ network-calculus bounds"
+    description: >
+      spar-network shall provide Total Flow Analysis (FP-TFA/TFA++) NC
+      bounds: cheap, valid bounds under cyclic dependencies, and the
+      initialization phase for PLP (REQ-NC-PLP-001). Part of the
+      fabric-agnostic timing substrate also consumed by WCET analysis
+      and the kiln async-scheduler math. [SOLID — Bouillard 2021]
+    status: proposed
+    tags: [network-calculus, tfa, substrate, tier1]
+    fields:
+      release: v0.17.0
+
+  - id: REQ-NC-PLP-001
+    type: requirement
+    title: "PLP (polynomial-LP, generic-topology) network-calculus bounds"
+    description: >
+      spar-network shall provide Polynomial-LP (PLP) network-calculus
+      bounds on the existing HiGHS/good_lp backend. PLP DOMINATES the
+      TFA spar already has — bounds always ≤ TFA, converging where TFA
+      does not at high utilization — and works on GENERIC topology
+      where the existing LUDB/PMOO are tandem-only. Validate output
+      against Panco/Saihu reference implementations. Highest
+      value-to-risk item in the analysis; pure analyzer win, zero
+      dependency on synthesis. [SOLID — Bouillard arXiv:2010.09263;
+      Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
+    status: proposed
+    tags: [network-calculus, plp, substrate, tier1]
+    fields:
+      release: v0.18.0
+
+  - id: REQ-NC-CBS-AUDIT-001
+    type: requirement
+    title: "CBS/SP service-curve packetization audit"
+    description: >
+      spar-network shall audit its CBS/SP (802.1Qav) service curves
+      against Jiang (arXiv:2403.13656, 2024), which shows packetization
+      was overlooked in standard CBS/SP service curves, INVALIDATING
+      some bounds. Audit-before-trust gate before any synthesis or
+      export leans on CBS curves (REQ-TSN-003). [SOLID]
+    status: proposed
+    tags: [network-calculus, cbs, qav, audit, tier1]
+    fields:
+      release: v0.19.0
+
+  # --- Tier 2: the product bet (synthesis → export), kill-gated ---
+
+  - id: REQ-TSN-SYNTH-QBV-001
+    type: requirement
+    title: "802.1Qbv GCL synthesis — dependency-aware, mixed-criticality"
+    description: >
+      spar shall synthesize 802.1Qbv gate-control lists directly
+      (inverse of the existing TAS checking, REQ-TSN-002) via
+      dependency-aware priority adjustment (arXiv:2407.00987, 2024):
+      ~300 flows, mixed-criticality, +20.6% success over SOTA. The
+      first, smaller-scale, directly-Qbv synthesis step. KILL-GATE: kill
+      the AADL→TSN bridge if we cannot articulate why our integrated
+      architecture-to-timing story beats RTaW's already-cert-accepted
+      ARXML→TSN+NC. [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, qbv, tier2]
+    fields:
+      release: v0.19.0
+
+  - id: REQ-TSN-SYNTH-MILP-001
+    type: requirement
+    title: "TSN schedule synthesis — MIP→VNS-GA scale handoff"
+    description: >
+      spar shall synthesize TSN schedules on the existing HiGHS/good_lp
+      MILP backend via the MIP→VNS-GA handoff (Wang et al., Sensors
+      2025): exact MIP ≤ ~1,000 flows, then VNS-GA (genetic +
+      2-opt/or-opt/exchange) up to ~3,000 flows. The cleanest concrete
+      scale recipe sitting directly on the current solver. [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, milp, tier2]
+    fields:
+      release: v0.20.0
+
+  - id: REQ-TSN-SYNTH-CQF-001
+    type: requirement
+    title: "CQF / Multi-CQF synthesis (simpler-config, larger scale)"
+    description: >
+      spar shall synthesize CQF/Multi-CQF configurations — the
+      simpler-config, larger-scale direction with real 2026 momentum
+      (TCQF adopted as IETF DetNet WG item draft-ietf-detnet-tcqf-00,
+      14 Jan 2026; CENI 2,000 km / 100 Gbps). Candidate methods:
+      hyper-flow graph decomposition (arXiv:2309.06690 — 2,000 flows,
+      <100 ms @1,000) or GASA injection planning (arXiv:2506.22671 —
+      GA+SA, +15% flows). [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, cqf, tier2]
+    fields:
+      release: v0.20.0
+
+  - id: REQ-TSN-EXPORT-YANG-001
+    type: requirement
+    title: "TSN config export (802.1Qcw YANG / NETCONF)"
+    description: >
+      spar shall export synthesized TSN configuration as 802.1Qcw YANG
+      / NETCONF. ONLY meaningful as the output stage of a working
+      synthesizer (REQ-TSN-SYNTH-*) — the weakest standalone case in the
+      analysis. KILL-GATE: premature if no synthesis target consumes the
+      export.
+    status: proposed
+    tags: [tsn, export, yang, netconf, tier2]
+    fields:
+      release: v0.21.0
+
+  - id: REQ-TSN-SYNTH-ONLINE-001
+    type: requirement
+    title: "Online / incremental TSN admission & reconfiguration"
+    description: >
+      spar shall admit/reject new flows and reconfigure incrementally
+      without full recompute (NC deadline-adaptive admission,
+      arXiv:2503.09093, 2025) — the runtime reconfiguration story tsnkit
+      lacks entirely. Later-stage Tier 2. [SOLID relative]
+    status: proposed
+    tags: [tsn, synthesis, online, reconfiguration, tier2]
+    fields:
+      release: v0.22.0
+
+  # --- Tier 3: internal soundness ratchet (parallel, never marketed) ---
+
+  - id: REQ-PROOF-NC-MINPLUS-001
+    type: requirement
+    title: "Discharge the four min-plus network-calculus sorries"
+    description: >
+      Discharge the four Lean `sorry`s in
+      proofs/Proofs/Network/MinPlus.lean (backlog_bound_classical,
+      delay_bound_classical, output_dominates_input,
+      compose_delays_dominates; all TODO(v1.0.0)). Internal correctness
+      ratchet for the NC substrate; never gates a near-term feature.
+      Lean has nothing in NC today [SOLID, absence].
+    status: proposed
+    tags: [proof, lean, network-calculus, soundness, tier3]
+    fields:
+      release: v0.20.0
+
+  - id: REQ-PROOF-NC-CERT-001
+    type: requirement
+    title: "Min-plus computation certificate checker"
+    description: >
+      A trusted checker shall re-validate the min-plus computation
+      trace emitted by the (untrusted) NC engine (Minerve / Isabelle
+      result-checker pattern; CertiCAN is the only template, for CAN
+      not NC). HONEST CEILING (non-negotiable): the certificate
+      certifies the min-plus COMPUTATION / TRACE, NOT a proven
+      end-to-end delay bound — the operation→delay theorem link is
+      unmechanized in any prover. MARKETING RULE: do not market
+      "verified network calculus" until REQ-PROOF-NC-MINPLUS-001 closes
+      and a concrete cert-driven buyer asks. [SOLID]
+    status: proposed
+    tags: [proof, certificate, network-calculus, soundness, tier3]
+    fields:
+      release: v0.21.0
