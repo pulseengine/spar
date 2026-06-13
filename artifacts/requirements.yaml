@@ -2412,6 +2412,59 @@ artifacts:
       - type: traces-to
         target: REQ-RTA-001
 
+  - id: REQ-PROOF-SCHED-002
+    type: requirement
+    title: "Expose Scheduling proofs as a reusable dependency for kiln-async"
+    description: >
+      The Lean scheduling theory (Proofs/Scheduling/{RTA,RMBound,EDF},
+      fully proved — zero sorry/admit/axiom, generic over Nat cost
+      units) shall be consumable by kiln-async's fuel-quantum scheduler
+      without vendoring. Three asks from issue #272: (1) expose
+      Proofs/Scheduling as a stable importable module boundary — a
+      dedicated Lake package and a Bazel `lean_library` target via
+      rules_lean — so a spar refactor cannot silently break kiln's
+      proof gate; (2) provide a shared abstract task model OR a
+      documented "instantiate with your own cost unit" contract
+      confirming the theorems are unit-agnostic, turning re-prove-the-glue
+      into import-and-instantiate; (3) extend `lake exe codegen` to emit
+      `rm_schedulable` (RMBound) and `edf_schedulable` (EDF demand-bound)
+      to Rust alongside the existing RTA extraction, so kiln-async's
+      Phase-4 admission test runs spar-verified analysis. Forward-looking
+      coordination (kiln-async lands the dependency at its Phase 4/5);
+      filed to shape the surface before kiln depends on it. Tracks #272;
+      builds on REQ-PROOF-SCHED-001. Cross-PulseEngine substrate export,
+      the scheduling analog of the network-calculus export in
+      DEC-TSN-OSS-001.
+    status: proposed
+    tags: [proofs, lean, scheduling, kiln, substrate]
+    fields:
+      release: v0.18.0
+    links:
+      - type: traces-to
+        target: REQ-PROOF-SCHED-001
+
+  - id: REQ-INGEST-SYSML2-DIFF-001
+    type: requirement
+    title: "Track SysML v2 grammar drift against the finalized standard"
+    description: >
+      spar-sysml2 shall grammar-diff its pinned SysML-v2
+      Pilot-Implementation tag against a current OMG SysML v2 release
+      tag and reconcile divergences. SysML v2 reached OMG final adoption
+      2025-07-21 (published 2025-09-03) but the textual-notation grammar
+      still ships monthly incremental tags (current 2026-04), so the
+      parser tracks a stabilized-but-not-frozen target. At least one
+      breaking change is known (exponentiation `**`/`^` became
+      right-associative). Per-release GitHub notes are the only
+      authoritative change record — prose changelogs are insufficient;
+      diff the grammar files. Confirms the research conclusion that
+      ARXML ingest stays on the direct autosar-data track (no
+      ARXML→SysML v2 path exists — a synthesis/category mismatch), so
+      sysml2 and REQ-INGEST-ARXML-001 remain peer front-ends.
+    status: proposed
+    tags: [ingest, sysml2, grammar]
+    fields:
+      release: v0.19.0
+
   - id: REQ-PLUGFEST-002
     type: requirement
     title: "Plug-fest Tier-B — OSATE-in-Docker adjudication oracle + AAXL2 round-trip"

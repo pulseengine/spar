@@ -73,6 +73,32 @@ delay bound"** — a certificate would certify the *min-plus computation / a
 computation trace*, not a proven end-to-end delay. The moat's proof-third arrives
 *late*; near-term releases ship the OSS + AADL-native two-thirds.
 
+### Research log (2026-06-13) — validations that *confirmed* the plan
+
+- **ARXML ingest stays on the direct `autosar-data` track; do NOT route it
+  through sysml2.** Background research found **no ARXML→SysML v2 path** in any
+  vendor, OSS project, OMG working group, or paper as of mid-2026 — all real flow
+  is one-way *SysML→AUTOSAR refinement*, and reverse ingest is a synthesis/
+  abstraction problem (the **same category mismatch as DBC→YANG**). Routing ARXML
+  through sysml2 would mean inventing the very abstraction step the industry has
+  not built. `spar-sysml2` and REQ-INGEST-ARXML-001 stay **peer front-ends**.
+  [LIKELY — negative result across the angles checked]
+- **SysML v2 is now a finalized standard but a moving grammar.** OMG final
+  adoption **2025-07-21**, published **2025-09-03**; the textual notation still
+  ships **monthly** Pilot-Implementation tags (current **2026-04**), with at least
+  one breaking change (exponentiation `**`/`^` is now right-associative). So
+  `spar-sysml2` tracks a *stabilized-but-not-frozen* target → it must **grammar-
+  diff its pinned tag against a current tag** (prose changelogs are insufficient).
+  Captured as **REQ-INGEST-SYSML2-DIFF-001** (v0.19.0). [SOLID on adoption dates]
+- **kiln cross-repo dependency triaged.** spar issue **#272** (the maintainer's
+  own filing, correctly in spar where the proofs live — *not* in kiln) asks spar
+  to expose its fully-proved scheduling theory (RTA/RMBound/EDF) as a reusable
+  Lake/Bazel `lean_library` boundary for kiln-async's fuel-quantum scheduler.
+  This is the **scheduling analog of the NC-substrate export** — concrete
+  evidence for the cross-PulseEngine-substrate thesis above. Captured as
+  **REQ-PROOF-SCHED-002** (v0.18.0), building on the already-shipped
+  REQ-PROOF-SCHED-001. [SOLID]
+
 ---
 
 ## Tier 1 — Committed spine (build regardless of the product bet)
