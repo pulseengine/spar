@@ -1090,6 +1090,8 @@ artifacts:
     tags: [tsn, network-calculus, oss, strategy, substrate]
     links:
       - type: satisfies
+        target: REQ-NC-TFA-001
+      - type: satisfies
         target: REQ-NC-PLP-001
       - type: satisfies
         target: REQ-INGEST-ARXML-001

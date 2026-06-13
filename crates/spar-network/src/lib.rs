@@ -51,6 +51,7 @@ pub mod extract;
 /// `highs-sys` dependency) can opt out (#259).
 #[cfg(feature = "milp-solver")]
 pub mod pmoo;
+pub mod tfa;
 pub mod tsn;
 pub mod types;
 
@@ -61,6 +62,9 @@ pub use curves::{
 pub use extract::extract_network_graph;
 #[cfg(feature = "milp-solver")]
 pub use pmoo::{CompetingFlow, LpError, PmooBound, TaggedFlow, ludb_bound};
+pub use tfa::{
+    TFA_BURST_CEILING_BYTES, TFA_MAX_ITER, TfaError, TfaFlow, TfaResult, aggregate, tfa_bound,
+};
 pub use tsn::{
     CbsReservation, ClassOfService, CreditPool, GateSchedule, GateScheduleError, GateWindow,
     MIN_FRAGMENT_BYTES, PREEMPTION_HEADER_BYTES, cbs_residual_service,

@@ -2642,7 +2642,7 @@ artifacts:
       initialization phase for PLP (REQ-NC-PLP-001). Part of the
       fabric-agnostic timing substrate also consumed by WCET analysis
       and the kiln async-scheduler math. [SOLID — Bouillard 2021]
-    status: proposed
+    status: implemented
     tags: [network-calculus, tfa, substrate, tier1]
     fields:
       release: v0.17.0

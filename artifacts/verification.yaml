@@ -3176,3 +3176,33 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CODEGEN-WIT-TYPES
+
+  - id: TEST-NC-TFA
+    type: feature
+    title: FP-TFA / TFA++ total-flow bounds, golden + soundness
+    description: >
+      spar-network::tfa unit tests exercise REQ-NC-TFA-001. The golden
+      tandem fixture (tandem_cross_golden) pins the exact picosecond/byte
+      arithmetic against the curves.rs operators: a 2-server tandem with a
+      cross-flow joining at server 0 yields D_0 = 34_000_000 ps,
+      D_1 = 20_400_000 ps, tagged end-to-end 54_400_000 ps. The
+      discriminating assertion is the output burst 1925 B (= sigma + rho*D,
+      NOT sigma + rho*T = 1625 B): burst_propagation_uses_rho_d_not_rho_t
+      isolates that an SFA-style output_bound would under-count and
+      produce an invalid (optimistic) bound. Soundness coverage:
+      cyclic_converges and cyclic_high_util_still_converges confirm the
+      fixed point converges on stable cyclic topologies where the
+      feed-forward walk has no answer; revisiting_cycle_diverges confirms
+      that a rate-stable but spectral-radius>=1 topology (path [0,1,2,0])
+      returns NonConvergent rather than a finite-but-invalid bound;
+      unstable_when_aggregate_exceeds_service and empty_and_out_of_range
+      cover the precheck and input guards.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib -- tfa
+    status: passing
+    tags: [network-calculus, tfa, substrate, tier1, v0170]
+    links:
+      - type: satisfies
+        target: REQ-NC-TFA-001
