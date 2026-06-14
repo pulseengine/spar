@@ -16,3 +16,7 @@ verification.yaml
 
 # Stale dev artifacts — re-add explicitly if needed.
 /dashboard-render*.png
+
+# LP solver problem dumps written into the repo root by HiGHS/good_lp
+# during network-calculus (PLP/TFA) test runs — regenerable scratch.
+*.lp
