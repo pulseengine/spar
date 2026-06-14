@@ -2699,6 +2699,32 @@ artifacts:
     fields:
       release: v0.18.0
 
+  - id: REQ-NC-VALIDATION-001
+    type: requirement
+    title: "NC-bound cross-validation against panco reference"
+    description: >
+      spar-network's NC bounds shall be cross-validated against an
+      INDEPENDENT reference implementation (panco — Bouillard's own
+      LP-based DNC tool) on a shared FIFO benchmark set. Two checks per
+      fixture: (1) SOUNDNESS — spar's bound >= panco's EXACT ELP bound
+      (Bouillard-Stea ValueTools 2012), the true worst-case no sound
+      method may undercut; an unsound (optimistic) bound is also <= TFA,
+      so this floor is the only check that catches it; (2) AGREEMENT —
+      spar's TFA tracks panco's TFA within rounding, confirming the
+      METHOD is implemented (not merely some sound bound). This is the
+      oracle-kind-(b) NC-tool-agreement validator; the stronger
+      OMNeT++/INET simulation floor is REQ-NC-SIM-FLOOR-001. SERVICE-
+      MODEL-MATCH constraint: panco/xTFA/DNC validate FIFO/CBS/ATS
+      bounds, NOT 802.1Qbv TAS gates — a TAS schedule must be validated
+      against a TAS-matched simulator. Reference numbers are pinned
+      offline (panco not vendored, Python not in CI); provenance and
+      regen recipe in crates/spar-network/tests/oracles/panco/.
+      [SOLID — Bouillard arXiv:2010.09263; Bouillard-Stea ValueTools 2012]
+    status: implemented
+    tags: [network-calculus, validation, oracle, substrate, tier1]
+    fields:
+      release: v0.18.0
+
   - id: REQ-NC-CBS-AUDIT-001
     type: requirement
     title: "CBS/SP service-curve packetization audit"

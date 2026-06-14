@@ -1794,6 +1794,36 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-005
 
+  - id: TEST-NC-VALIDATION
+    type: feature
+    title: NC-bound cross-validation against panco reference
+    description: >
+      Integration test crates/spar-network/tests/nc_validation.rs rebuilds
+      three FIFO fixtures (tandem_cross, single_flow_tandem,
+      three_server_line) in spar's TfaFlow/ServiceCurve types and checks
+      tfa_bound against bounds computed offline by panco (Bouillard's
+      reference LP-DNC implementation, github.com/Huawei-Paris-Research-
+      Center/panco @ fc35089, lp_solve 5.5.2.14). Per flow it asserts
+      SOUNDNESS (spar bound >= panco EXACT ELP bound — the true worst case)
+      and AGREEMENT (spar TFA tracks panco TFA within 2% rounding). The
+      exact-bound floor is the only check that can catch an unsound
+      (optimistic) bound, which a self-consistent hand-golden cannot. panco
+      is not vendored; the reference numbers are pinned in-test with
+      provenance + regen recipe in tests/oracles/panco/README.md (Python is
+      not in spar's CI path). Establishes the soundness floor that
+      REQ-NC-PLP-001 is gated against (sandwich EXACT <= plp <= TFA).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --test nc_validation
+    status: passing
+    tags: [v0.18.0, network, network-calculus, validation, oracle]
+    links:
+      - type: satisfies
+        target: REQ-NC-VALIDATION-001
+      - type: satisfies
+        target: REQ-NC-TFA-001
+
   - id: TEST-WCTT
     type: feature
     title: Per-stream WCTT analysis pass tests
