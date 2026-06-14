@@ -116,14 +116,13 @@ pub enum PlpError {
     /// relation is single-valued), so branching is rejected here too.
     /// Generic feed-forward (forks) and cyclic topology are REQ-NC-PLP-002.
     NotFeedForward,
-    /// The topology is a single-successor sink-tree, but its server indices
-    /// are not a topological order: some edge `j → s` has `s < j`, so the
-    /// sink is not the highest-numbered server. [`SubNetwork`] re-indexes
-    /// its per-flow projection by ascending global index and assumes the
-    /// sink is the last local index, so a non-topological labelling would
-    /// otherwise misplace the sink (and panic in `solve`). Reordering a
-    /// converging tree into topological order so PLP can fire on it is
-    /// REQ-NC-PLP-002; callers should reorder before retrying.
+    /// Internal invariant violation: after the topological relabel
+    /// (REQ-NC-PLP-CONVERGE-001) an edge `j → s` still has `s < j`, so the
+    /// labelling handed to the per-flow projection is not topological and
+    /// `solve` would misplace the sink (panic). `plp_bound` now reorders any
+    /// single-successor converging tree into topological order itself, so a
+    /// caller should never see this — it fires only if the relabel pass is
+    /// buggy, surfaced as an error rather than the `.expect` panic in `solve`.
     NonTopologicalSinkTree,
     /// Aggregate sustained rate `≥` service rate at some server: the
     /// necessary stability condition fails and no finite bound exists, so
@@ -155,7 +154,7 @@ impl core::fmt::Display for PlpError {
             ),
             Self::NonTopologicalSinkTree => write!(
                 f,
-                "PLP: sink-tree server indices are not in topological order (an edge points to a lower index, so the sink is not the highest-numbered server) — reorder before retrying; see REQ-NC-PLP-002"
+                "PLP: internal invariant: server labelling is still non-topological after the converging-tree relabel (REQ-NC-PLP-CONVERGE-001) — the relabel pass is buggy"
             ),
             Self::Unstable {
                 server,
@@ -196,19 +195,7 @@ pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBoun
     // successors[j]: servers reachable in one hop from j (across all flows).
     // predecessors[j]: the reverse. A feed-forward sink-tree has ≤ 1
     // successor per server; > 1 means branching/cyclic → REQ-NC-PLP-002.
-    let mut successors: Vec<Vec<usize>> = vec![Vec::new(); n_servers];
-    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); n_servers];
-    for flow in flows {
-        for w in flow.path.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            if !successors[a].contains(&b) {
-                successors[a].push(b);
-            }
-            if !predecessors[b].contains(&a) {
-                predecessors[b].push(a);
-            }
-        }
-    }
+    let (successors, predecessors) = adjacency(flows, n_servers);
     for s in &successors {
         if s.len() > 1 {
             return Err(PlpError::NotFeedForward);
@@ -219,16 +206,55 @@ pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBoun
     if has_cycle(&successors, n_servers) {
         return Err(PlpError::NotFeedForward);
     }
-    // Topological-order precondition. `SubNetwork::project` re-indexes each
-    // per-flow projection by ascending global index and assumes the flow's
-    // sink is the highest local index. That holds iff the global labelling
-    // is a topological order — every edge `j → s` points to a higher index.
-    // A converging sink-tree handed to us in first-appearance order (e.g.
-    // two talkers whose shared sink switch was indexed before one talker)
-    // violates this: the sink lands off the last index, which `solve` would
-    // hit as `successor[sink] = None` on a server it treats as non-sink
-    // (panic). Reject it cleanly here instead. Topological reordering so PLP
-    // can fire on converging trees is REQ-NC-PLP-002.
+
+    // ── Topological relabel (REQ-NC-PLP-CONVERGE-001) ────────────────────
+    // `SubNetwork::project` re-indexes each per-flow projection by ascending
+    // global index and `solve` assumes the flow's sink is the highest local
+    // index — true iff the global labelling is a topological order (every
+    // edge `j → s` points to a higher index). A converging sink-tree handed
+    // in first-appearance order (two talkers whose shared sink switch was
+    // indexed before one talker) violates this. A single-successor acyclic
+    // graph — verified by the two checks above — is a rooted in-forest and
+    // ALWAYS admits a topological order, so we compute one and relabel by
+    // that PURE permutation. This is sound with NO change to the bound
+    // because TFA/PLP are invariant under server renumbering, and it places
+    // every flow's sink at the highest index of its cone (the invariant the
+    // projection + solve need). Per-flow delays are keyed by FLOW index,
+    // which a server permutation leaves untouched, so no inverse map is
+    // needed. When the input is already topological the permutation is the
+    // identity and these stay borrowing the originals.
+    let new_of = topological_relabel(&successors, n_servers);
+    let relabelled_flows: Vec<PlpFlow>;
+    let relabelled_services: Vec<ServiceCurve>;
+    let (flows, services, successors, predecessors) =
+        if new_of.iter().enumerate().all(|(old, &new)| old == new) {
+            (flows, services, successors, predecessors)
+        } else {
+            let mut svc = services.to_vec();
+            for (old, s) in services.iter().enumerate() {
+                svc[new_of[old]] = *s;
+            }
+            relabelled_services = svc;
+            relabelled_flows = flows
+                .iter()
+                .map(|f| PlpFlow {
+                    alpha: f.alpha,
+                    path: f.path.iter().map(|&h| new_of[h]).collect(),
+                })
+                .collect();
+            let (succ, pred) = adjacency(&relabelled_flows, n_servers);
+            (
+                relabelled_flows.as_slice(),
+                relabelled_services.as_slice(),
+                succ,
+                pred,
+            )
+        };
+
+    // Post-relabel invariant (the guard REQ-NC-PLP-001 added, repurposed):
+    // the labelling is now topological, so every edge `j → s` has `s > j`. A
+    // violation means `topological_relabel` is buggy — return an error rather
+    // than hit the `.expect("non-sink has a successor")` panic in `solve`.
     for (j, succ) in successors.iter().enumerate() {
         if succ.first().is_some_and(|&s| s < j) {
             return Err(PlpError::NonTopologicalSinkTree);
@@ -273,6 +299,59 @@ pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBoun
     }
 
     Ok(PlpBound { flow_delay_ps })
+}
+
+/// Build the `(successors, predecessors)` adjacency from flow paths. An edge
+/// `a → b` exists when some flow crosses `a` immediately before `b`; each
+/// neighbour is recorded once.
+fn adjacency(flows: &[PlpFlow], n: usize) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+    let mut successors: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for flow in flows {
+        for w in flow.path.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if !successors[a].contains(&b) {
+                successors[a].push(b);
+            }
+            if !predecessors[b].contains(&a) {
+                predecessors[b].push(a);
+            }
+        }
+    }
+    (successors, predecessors)
+}
+
+/// Compute a topological relabelling `new_of[old] = new_index` of an acyclic,
+/// ≤1-successor graph (a rooted in-forest) via Kahn's algorithm, taking the
+/// smallest available old index first so the result is deterministic. Sources
+/// (talkers, in-degree 0) take the low indices and sinks the high ones, so
+/// every edge `old → succ` ends up with `new_of[old] < new_of[succ]` — the
+/// order `SubNetwork`/`solve` require. Returns the identity permutation when
+/// the input is already topological. Caller must have ruled out cycles
+/// (`has_cycle`); on an acyclic graph the Kahn loop always assigns all `n`.
+fn topological_relabel(successors: &[Vec<usize>], n: usize) -> Vec<usize> {
+    let mut in_degree = vec![0usize; n];
+    for succ in successors {
+        for &b in succ {
+            in_degree[b] += 1;
+        }
+    }
+    let mut new_of = vec![0usize; n];
+    let mut assigned = vec![false; n];
+    // On an acyclic graph each iteration places exactly one node, so the loop
+    // index `next` is the new index to assign (0 = first source … n-1 = sink).
+    for next in 0..n {
+        // Smallest-index ready node (in-degree 0, not yet placed).
+        let Some(u) = (0..n).find(|&v| !assigned[v] && in_degree[v] == 0) else {
+            break; // unreachable on an acyclic graph; a cycle would leave nodes
+        };
+        assigned[u] = true;
+        new_of[u] = next;
+        for &w in &successors[u] {
+            in_degree[w] -= 1;
+        }
+    }
+    new_of
 }
 
 /// Does following the unique successor from any node revisit a node? On a
@@ -834,36 +913,56 @@ mod tests {
         );
     }
 
-    /// A converging sink-tree (two talkers → one shared sink) is a valid
-    /// single-successor feed-forward shape, but here its server indices are
-    /// NOT topological: flow A `0→1`, flow B `2→1` — the sink (server 1) is
-    /// not the highest-numbered server (talker 2 outranks it). `SubNetwork`
-    /// assumes the sink is the last local index, so without the entry guard
-    /// `solve` would panic (`successor[sink] = None` on a server it treats as
-    /// non-sink). It must be REJECTED, not panic — reordering converging
-    /// trees so PLP can fire is REQ-NC-PLP-002.
+    /// A converging sink-tree handed in NON-topological order is no longer
+    /// rejected — `plp_bound` relabels it (REQ-NC-PLP-CONVERGE-001). This is a
+    /// pure permutation, so the per-flow bounds must be IDENTICAL to the same
+    /// physical network presented already-topologically. Distinct per-server
+    /// latencies make the check bite: a relabel that misassigns a service
+    /// curve to a server would change the numbers (and swap flow A vs B).
     #[test]
-    fn non_topological_sink_tree_rejected() {
-        let services = vec![
-            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
-            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
-            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+    fn non_topological_relabel_is_permutation_invariant() {
+        // One physical converging net: two talkers (sA latency 5 µs,
+        // sB latency 8 µs) into one shared sink switch (latency 20 µs).
+        // (a) Topological labelling: sink is the highest index (2).
+        let topo_services = vec![
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS),  // sA = 0
+            ServiceCurve::rate_latency(GBPS, 8 * US_PS),  // sB = 1
+            ServiceCurve::rate_latency(GBPS, 20 * US_PS), // sink = 2
         ];
-        // sink is server 1; talker 2 has a higher index → edge 2→1 descends.
-        let flows = vec![
-            flow(FRAME, HUNDRED_MBPS, &[0, 1]),
-            flow(FRAME, HUNDRED_MBPS, &[2, 1]),
+        let topo_flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[0, 2]), // A: sA → sink
+            flow(FRAME, HUNDRED_MBPS, &[1, 2]), // B: sB → sink
         ];
-        assert_eq!(
-            plp_bound(&flows, &services).unwrap_err(),
-            PlpError::NonTopologicalSinkTree
+        let topo = plp_bound(&topo_flows, &topo_services).expect("topological in scope");
+
+        // (b) Same physical net, NON-topological labelling: sink = 0 (not
+        //     last), sA = 1, sB = 2 — edges 1→0 and 2→0 both descend.
+        let shuf_services = vec![
+            ServiceCurve::rate_latency(GBPS, 20 * US_PS), // sink = 0
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS),  // sA = 1
+            ServiceCurve::rate_latency(GBPS, 8 * US_PS),  // sB = 2
+        ];
+        let shuf_flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[1, 0]), // A: sA → sink
+            flow(FRAME, HUNDRED_MBPS, &[2, 0]), // B: sB → sink
+        ];
+        let shuf = plp_bound(&shuf_flows, &shuf_services)
+            .expect("non-topological converging tree is reordered, not rejected");
+
+        // Per-flow bounds match exactly (flow A == flow A, flow B == flow B);
+        // the relabel did not perturb the result. A and B differ (5 vs 8 µs
+        // talker), so the element-wise equality also catches a transpose bug.
+        assert_eq!(shuf.flow_delay_ps, topo.flow_delay_ps);
+        assert!(shuf.flow_delay_ps.iter().all(|&d| d > 0));
+        assert_ne!(
+            topo.flow_delay_ps[0], topo.flow_delay_ps[1],
+            "asymmetric talkers should give distinct bounds"
         );
     }
 
-    /// The same converging tree, but with the sink relabelled to the highest
-    /// index (flow A `0→2`, flow B `1→2`), IS in scope and solves — proving
-    /// the guard rejects only the *labelling*, not the *shape*. (REQ-NC-PLP-002
-    /// will reorder automatically; until then callers pre-order.)
+    /// A converging tree already in topological order (sink at the highest
+    /// index: flow A `0→2`, flow B `1→2`) solves directly — the relabel is the
+    /// identity here, exercising the no-op path. (REQ-NC-PLP-CONVERGE-001)
     #[test]
     fn topological_sink_tree_accepted() {
         let services = vec![

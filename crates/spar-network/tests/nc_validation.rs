@@ -182,8 +182,13 @@ fn panco_three_server_line_sound_and_agrees() {
 // LP and the exact floor is *also* panco's, so the agreement check here is
 // **port-fidelity** (a solver-precision regression pin), not independent
 // soundness — that is the deferred simulation floor REQ-NC-SIM-FLOOR-001.
-// What stays independent is the sandwich: `EXACT ≤ plp ≤ TFA`, where the TFA
-// ceiling is spar's own engine.
+// What stays independent is the EXACT soundness floor (`plp ≥ panco exact`),
+// where panco's exact ELP is the true worst case. We ALSO assert `plp ≤ TFA`
+// here, but note that is a *per-fixture* observation on these benign nets,
+// NOT a universal law: pure polynomial PLP and TFA are incomparable
+// over-approximations (neither dominates), and under extreme cross-burst PLP
+// can exceed TFA — see the `network_wide_tfa_index_aligns_on_converging_tree`
+// counterexample in spar-analysis, where panco's own PLP > panco's own TFA.
 #[cfg(feature = "milp-solver")]
 mod plp_xval {
     use super::*;
@@ -204,9 +209,12 @@ mod plp_xval {
         }
     }
 
-    /// For one fixture: spar PLP must (1) be `≥` panco EXACT (soundness
-    /// floor), (2) match the pinned pure-PLP value within `PLP_TOL`, and
-    /// (3) be `≤` spar's own TFA bound (the sandwich ceiling).
+    /// For one fixture: spar PLP must (1) be `≥` panco EXACT (the independent
+    /// soundness floor), (2) match the pinned pure-PLP value within `PLP_TOL`,
+    /// and (3) be `≤` spar's own TFA bound. Check (3) is a *per-fixture* pin —
+    /// PLP ≤ TFA holds on these benign nets but is NOT universal (the two are
+    /// incomparable; see the converging-tree counterexample), so it is a
+    /// regression pin on these inputs, not a soundness law.
     fn check_plp(
         name: &str,
         flows: &[PlpFlow],
@@ -246,10 +254,13 @@ mod plp_xval {
                 rel * 100.0,
                 PLP_TOL * 100.0,
             );
-            // (3) SANDWICH ceiling — plp ≤ spar TFA (the dominance claim).
+            // (3) PER-FIXTURE pin — plp ≤ spar TFA on these benign nets. NOT a
+            // universal law: PLP and TFA are incomparable (see the converging-
+            // tree counterexample); this catches regressions on these inputs.
             assert!(
                 plp_ps <= tfa.flow_delay_ps[i],
-                "{name} flow {i}: plp {plp_ps} ps exceeds spar TFA {} ps (sandwich violated)",
+                "{name} flow {i}: plp {plp_ps} ps exceeds spar TFA {} ps \
+                 (per-fixture PLP≤TFA pin broke)",
                 tfa.flow_delay_ps[i],
             );
         }
@@ -298,13 +309,94 @@ mod plp_xval {
             plp_flow(FRAME, HUNDRED_MBPS, &[1, 2]),
         ];
         // Pure PLP `[72.22, 61.11, 57.98]` — looser than EXACT `[68.4, 58.4,
-        // 57.98]` but strictly inside the sandwich (TFA `[134.7, 86.8, 100.7]`).
+        // 57.98]` but, on this benign net, strictly below TFA `[134.7, 86.8,
+        // 100.7]` (PLP ≤ TFA is per-fixture here, not universal).
         check_plp(
             "three_server_line",
             &flows,
             &services,
             &[72.22, 61.11, 57.98],
             &[68.4, 58.4, 57.98],
+        );
+    }
+
+    // ── Converging sink-trees (REQ-NC-PLP-CONVERGE-001) ───────────────────
+    // The many-talkers→one-listener TSN shape. Each fixture is handed in
+    // NON-topological order (sink at index 0, talkers above it) so the path
+    // edges all *descend* — exercising `plp_bound`'s topological relabel. The
+    // pinned panco values were regenerated fresh from the offline panco venv
+    // (pure FifoLP(polynomial=True, tfa=False), lp_solve backend). Because the
+    // bound is invariant under the relabel, these equal what panco reports for
+    // the same physical net in topological order. The PLP ≪ TFA gap here is the
+    // converging-tree dominance LUDB/PMOO cannot show.
+
+    /// 2 talkers → 1 sink (1 hop each). panco: PLP 48.89 ≪ TFA 60.39 µs.
+    #[test]
+    fn panco_converge_2to1_plp() {
+        // sink = 0; talkers = 1, 2. Edges 1→0 and 2→0 both descend.
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // sink = 0
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker A = 1
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker B = 2
+        ];
+        let flows = vec![
+            plp_flow(FRAME, HUNDRED_MBPS, &[1, 0]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[2, 0]),
+        ];
+        check_plp(
+            "converge_2to1",
+            &flows,
+            &services,
+            &[48.89, 48.89],
+            &[46.2, 46.2],
+        );
+    }
+
+    /// 2 talkers → shared tail switch → 1 sink (2 hops each). The 1.77× wedge:
+    /// panco PLP 60.0 ≪ TFA 106.44 µs.
+    #[test]
+    fn panco_converge_2to1_tail2_plp() {
+        // sink = 0; shared tail = 1; talkers = 2, 3. Paths 2→1→0 and 3→1→0.
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // sink = 0
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // shared tail = 1
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker A = 2
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker B = 3
+        ];
+        let flows = vec![
+            plp_flow(FRAME, HUNDRED_MBPS, &[2, 1, 0]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[3, 1, 0]),
+        ];
+        check_plp(
+            "converge_2to1_tail2",
+            &flows,
+            &services,
+            &[60.0, 60.0],
+            &[56.2, 56.2],
+        );
+    }
+
+    /// 3 talkers → 1 sink (1 hop each). panco: PLP 70.0 ≪ TFA 74.59 µs.
+    #[test]
+    fn panco_converge_3to1_plp() {
+        // sink = 0; talkers = 1, 2, 3. Edges 1→0, 2→0, 3→0 all descend.
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // sink = 0
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker A = 1
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker B = 2
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS), // talker C = 3
+        ];
+        let flows = vec![
+            plp_flow(FRAME, HUNDRED_MBPS, &[1, 0]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[2, 0]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[3, 0]),
+        ];
+        check_plp(
+            "converge_3to1",
+            &flows,
+            &services,
+            &[70.0, 70.0, 70.0],
+            &[60.4, 60.4, 60.4],
         );
     }
 }
