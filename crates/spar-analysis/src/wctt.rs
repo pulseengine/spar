@@ -1045,9 +1045,14 @@ fn network_wide_nc_bounds(
         });
     }
 
-    // PLP: the tighter feed-forward bound (PLP ≤ TFA per flow on a
-    // sink-tree). HiGHS/good_lp-backed, so gated behind `milp-solver`
-    // (off for wasm, #259). A multi-successor / cyclic topology returns
+    // PLP: the polynomial-LP feed-forward bound (Bouillard arXiv:2010.09263).
+    // Usually tighter than TFA, but PLP and TFA are *incomparable*
+    // over-approximations — both sound (≥ exact), neither dominates: under
+    // extreme cross-burst pure PLP can exceed TFA (see the
+    // `network_wide_tfa_index_aligns_on_converging_tree` counterexample). We
+    // emit both; the authoritative per-flow bound is min(PLP, TFA).
+    // HiGHS/good_lp-backed, so gated behind `milp-solver` (off for wasm,
+    // #259). A multi-successor / cyclic topology returns
     // `PlpError::NotFeedForward`; we then omit the PLP lines and the TFA
     // numbers above remain the network-wide result.
     #[cfg(feature = "milp-solver")]
@@ -1066,7 +1071,7 @@ fn network_wide_nc_bounds(
                     severity: Severity::Info,
                     message: format!(
                         "WcttPlpBound: stream '{}' network-wide PLP end-to-end delay {} ps \
-                         (≤ TFA; {} hop{})",
+                         ({} hop{})",
                         s.display_name(instance),
                         delay_ps,
                         s.hops.len(),
@@ -3830,13 +3835,14 @@ end NetDiv;
     // `sw_c`. Every server's out-degree is ≤ 1, so it is a genuine
     // feed-forward sink-tree — but first-appearance global indexing
     // (sw_a→0, sw_c→1, sw_b→2) places the sink (sw_c) OFF the highest index,
-    // which is not a topological labelling. `plp_bound` rejects that with
-    // `NonTopologicalSinkTree` (reordering converging trees so PLP can fire
-    // is REQ-NC-PLP-002), so the PLP arm cleanly skips here. The value of
-    // this fixture is twofold: (1) it guards the *TFA* global index on a
-    // converging shape (complementing the diverging fixture's), and (2) it
-    // proves the bridge's `if let Ok(plp)` contract survives a sink-tree the
-    // solver declines — no panic, TFA bounds still emitted.
+    // which is not a topological labelling. As of REQ-NC-PLP-CONVERGE-001
+    // `plp_bound` relabels that into topological order internally and FIRES
+    // (the v0.18 `NonTopologicalSinkTree` reject path is now an internal
+    // post-relabel invariant, not a caller-visible skip). The value of this
+    // fixture is twofold: (1) it guards the *TFA* and *PLP* global index on a
+    // converging shape (complementing the diverging fixture's), and (2) it is
+    // a deliberately pathological 10000-µs-slow-switch network where pure PLP
+    // exceeds TFA — the live counterexample to a universal `PLP ≤ TFA`.
     fn bridge_converge_aadl() -> &'static str {
         r#"
 package NetConv
@@ -3950,20 +3956,46 @@ end NetConv;
              index would alias its slow hop onto the fast curve. delays={delays:#?}",
         );
 
-        // Soundness end-to-end: the converging tree's first-appearance index
-        // is non-topological (sink sw_c is slot 1, not the last slot), so
-        // `plp_bound` returns `NonTopologicalSinkTree` and the bridge skips
-        // the PLP arm WITHOUT panicking. Before the plp.rs entry guard this
-        // path panicked at `solve` (`successor[sink] = None` on a server it
-        // treated as non-sink). Converging PLP via reordering is
-        // REQ-NC-PLP-002.
+        // Index alignment end-to-end: the converging tree's first-appearance
+        // index is non-topological (sink sw_c is slot 1, not the last slot). As
+        // of REQ-NC-PLP-CONVERGE-001 the bridge no longer skips this —
+        // `plp_bound` relabels the tree into topological order and FIRES,
+        // emitting one bound per stream. Before the relabel this path skipped
+        // (the v0.18 `NonTopologicalSinkTree` guard); before that guard it
+        // panicked at `solve` (`successor[sink] = None`).
+        //
+        // NOTE — no `PLP ≤ TFA` sandwich is asserted here, and that is
+        // deliberate: pure polynomial PLP and TFA are *incomparable*
+        // over-approximations. Both are sound (≥ exact), but on this
+        // 10000-µs-slow-switch network the cross-burst at the shared sink
+        // inflates the fast stream's PLP *above* its TFA. panco's own
+        // reference confirms it (panco PLP dataA = 1148.33µs > panco TFA
+        // dataA = 1048.09µs ≥ panco EXACT 1035.2µs), and spar reproduces
+        // panco's PLP to the decimal — see `nc_validation::plp_xval`. The
+        // authoritative per-flow bound is therefore min(PLP, TFA), tracked as
+        // a follow-on NC item; this test asserts only the index alignment that
+        // is its purpose.
         #[cfg(feature = "milp-solver")]
         {
             let plp = collect_delays(&diags, "WcttPlpBound");
+            assert_eq!(
+                plp.len(),
+                2,
+                "PLP now fires on the relabelled converging tree \
+                 (REQ-NC-PLP-CONVERGE-001), one bound per stream: {plp:#?}",
+            );
+            // Same index-alignment guard as the TFA arm: the stream through
+            // the slow switch must dominate. A local (per-stream) index would
+            // alias dataB's slow first hop onto sw_a's fast curve and the two
+            // PLP bounds would be near-equal. The real PLP gap here is ~8.7×
+            // (10032µs vs 1148µs), so ×5 is a safe, non-flaky margin.
+            let mut plp_sorted: Vec<u64> = plp.values().copied().collect();
+            plp_sorted.sort_unstable();
+            let (plp_fast, plp_slow) = (plp_sorted[0], plp_sorted[1]);
             assert!(
-                plp.is_empty(),
-                "PLP must cleanly skip a non-topological converging tree \
-                 (REQ-NC-PLP-002), not fire or panic: {plp:#?}",
+                plp_fast > 0 && plp_slow > plp_fast.saturating_mul(5),
+                "the PLP bound through the slow switch must dominate; a local \
+                 index would alias its slow hop onto the fast curve. plp={plp:#?}",
             );
         }
     }

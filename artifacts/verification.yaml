@@ -1810,8 +1810,10 @@ artifacts:
       (optimistic) bound, which a self-consistent hand-golden cannot. panco
       is not vendored; the reference numbers are pinned in-test with
       provenance + regen recipe in tests/oracles/panco/README.md (Python is
-      not in spar's CI path). Establishes the soundness floor that
-      REQ-NC-PLP-001 is gated against (sandwich EXACT <= plp <= TFA).
+      not in spar's CI path). Establishes the EXACT soundness floor that
+      REQ-NC-PLP-001 is gated against (plp >= EXACT). PLP <= TFA holds on
+      these fixtures but is NOT a universal law (PLP and TFA are
+      incomparable — see TEST-NC-PLP's incomparability note).
     fields:
       method: automated-test
       steps:
@@ -1837,22 +1839,26 @@ artifacts:
       the SOUNDNESS floor (plp >= panco EXACT ELP bound), PORT-FIDELITY
       (spar's HiGHS solve reproduces panco's lp_solve pure-PLP optimum to
       <= 0.05% — solver precision: 39.0/34.0, 27.0, and the discriminating
-      72.22/61.11/57.98 µs), and the SANDWICH ceiling (plp <= spar's own
-      TFA bound). Pure PLP equals EXACT on the tandems and is strictly
-      inside the sandwich on the 3-hop line (72.22 vs 68.4 µs EXACT,
-      << 134.7 µs TFA) — the dominance LUDB/PMOO cannot show on a line.
+      72.22/61.11/57.98 µs), and a PER-FIXTURE pin plp <= spar's own TFA
+      bound. That ≤ TFA pin is NOT a universal law: pure polynomial PLP and
+      TFA are INCOMPARABLE over-approximations (both sound, neither
+      dominates) — under extreme cross-burst PLP can exceed TFA (panco's own
+      PLP 1148 > TFA 1048 ≥ EXACT 1035 µs on the converging-bridge net; see
+      network_wide_tfa_index_aligns_on_converging_tree). The authoritative
+      bound is min(PLP, TFA) (REQ-NC-PLP-MIN-001). On these benign fixtures
+      pure PLP equals EXACT on the tandems and is strictly below TFA on the
+      3-hop line (72.22 vs 68.4 µs EXACT, << 134.7 µs TFA) — the dominance
+      LUDB/PMOO cannot show on a line.
       Because the LP is transcribed from panco and the floor is also
       panco's, this is port-fidelity (a regression pin), NOT independent
       method-soundness; the latter is the deferred simulation floor
       REQ-NC-SIM-FLOOR-001. Cyclic / branching topology is rejected
       (NotFeedForward, REQ-NC-PLP-002); the tfa=True tightening to EXACT is
-      REQ-NC-PLP-003. Two guard tests pin the soundness boundary of the
-      sink-tree projection: non_topological_sink_tree_rejected asserts a
-      valid converging tree whose sink is NOT the highest-numbered server
-      returns PlpError::NonTopologicalSinkTree (no panic in solve), and
-      topological_sink_tree_accepted asserts the same shape relabelled with
-      the sink last solves cleanly — proving the guard rejects the labelling,
-      not the topology (reordering is REQ-NC-PLP-002).
+      REQ-NC-PLP-003. As of REQ-NC-PLP-CONVERGE-001 a non-topological
+      single-successor converging tree is no longer rejected but topologically
+      RELABELLED and solved (see TEST-NC-PLP-CONVERGE); the former
+      NonTopologicalSinkTree guard is retained as a post-relabel invariant
+      that still prevents the .expect panic if the topo sort is buggy.
     fields:
       method: automated-test
       steps:
@@ -1865,6 +1871,45 @@ artifacts:
         target: REQ-NC-PLP-001
       - type: satisfies
         target: REQ-NC-VALIDATION-001
+
+  - id: TEST-NC-PLP-CONVERGE
+    type: feature
+    title: PLP on converging sink-trees via topological relabel
+    description: >
+      Exercises the topological-relabel path added to plp_bound for
+      single-successor CONVERGING sink-trees handed in non-topological order
+      (many-talkers→one-listener). Two layers of oracle. (1) PERMUTATION
+      INVARIANCE — the primary property, needing no external numbers: the
+      plp.rs unit test non_topological_relabel_is_permutation_invariant builds
+      a converging tree whose sink is NOT the highest-numbered server, asserts plp_bound
+      now returns Ok (no PlpError::NonTopologicalSinkTree, no panic in solve),
+      and asserts its per-flow bound equals — exactly — the bound of the SAME
+      physical network presented already-topologically (sink last). This
+      proves the relabel is a sound pure permutation. topological_sink_tree_
+      accepted is retained unchanged as the already-ordered baseline. (2)
+      SOUNDNESS FLOOR — the plp_converge_xval module in nc_validation.rs
+      (feature milp-solver) runs the three pinned converging panco fixtures in
+      non-topological first-appearance order and asserts per-flow PLP matches
+      panco's pure-PLP reference to solver precision, sound (≥ EXACT) and —
+      on these benign converging nets — below TFA (PLP ≤ TFA holds per-fixture
+      here; it is NOT universal, see TEST-NC-PLP's incomparability note):
+      converge_2to1 PLP 48.89 ≪ TFA 60.39, converge_2to1_
+      tail2 60.0 ≪ 106.44 (the 1.77× wedge), converge_3to1 70.0 ≪ 74.59 µs.
+      Values regenerated fresh from the pinned panco venv (lp_solve backend).
+      The relabel closes the sink==num_servers-1 assumption the sub-network
+      solve depends on (lines that .expect a successor for every non-sink
+      server), so the converging shape — the dominant TSN topology — now
+      yields the PLP≪TFA dominance LUDB/PMOO cannot show on a tree.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib plp::"
+        - run: "cargo test -p spar-network --test nc_validation plp_xval::panco_converge"
+    status: passing
+    tags: [v0.19.0, network, network-calculus, plp, converging, validation, oracle]
+    links:
+      - type: satisfies
+        target: REQ-NC-PLP-CONVERGE-001
 
   - id: TEST-NC-BRIDGE
     type: feature
@@ -1898,7 +1943,16 @@ artifacts:
       Non-FIFO hops, unstable servers, and PLP
       NotFeedForward skip the arm transparently, leaving the per-stream SFA
       bounds authoritative. The production caller is the CLI --pmoo path
-      (run_all_analyses_with_pmoo, package spar).
+      (run_all_analyses_with_pmoo, package spar). A fourth test,
+      network_wide_tfa_index_aligns_on_converging_tree, guards the global
+      index on a CONVERGING (many-talkers→one-sink) shape; as of
+      REQ-NC-PLP-CONVERGE-001 the PLP arm fires there (topological relabel)
+      rather than skipping. That fixture is a deliberately pathological
+      10000-µs-slow-switch net and doubles as the live counterexample to a
+      universal PLP ≤ TFA: pure PLP exceeds TFA there (panco PLP 1148 > TFA
+      1048 ≥ EXACT 1035 µs, reproduced to the decimal), so the test asserts
+      only index alignment (slow-stream PLP dominates fast), not a sandwich.
+      The authoritative bound min(PLP, TFA) is REQ-NC-PLP-MIN-001.
     fields:
       method: automated-test
       steps:

@@ -2688,13 +2688,19 @@ artifacts:
       server — e.g. a converging tree handed in first-appearance order) is
       likewise rejected (PlpError::NonTopologicalSinkTree) rather than
       panicking inside the sink-tree projection; reordering such trees so
-      PLP can fire is REQ-NC-PLP-002. This ports
-      panco's PURE polynomial PLP LP (no TFA/SFA strengthening):
-      bounds are always ≤ TFA and strictly inside the soundness sandwich
-      EXACT ≤ plp ≤ TFA, matching panco's polynomial-PLP reference to
-      solver precision — exact on 2 of 3 validation fixtures, within
-      5.6% of EXACT on the 3-hop line (72.22 vs 68.4 µs, still ≪ the
-      134.7 µs TFA). PLP works beyond the tandem-only LUDB/PMOO: 72.22
+      PLP can fire is the follow-on REQ-NC-PLP-CONVERGE-001 (which
+      repurposes that same guard as a post-relabel invariant). This ports
+      panco's PURE polynomial PLP LP (no TFA/SFA strengthening): bounds are
+      SOUND (≥ EXACT) and, on the validation fixtures, also ≤ TFA. But pure
+      PLP and TFA are INCOMPARABLE over-approximations — neither dominates;
+      under extreme cross-burst pure PLP can exceed TFA (panco's own
+      reference does so on the converging-bridge net: PLP 1148 > TFA 1048 ≥
+      EXACT 1035 µs — the network_wide_tfa_index_aligns_on_converging_tree
+      counterexample). The authoritative per-flow bound is therefore
+      min(PLP, TFA) (tracked as REQ-NC-PLP-MIN-001). On the validation
+      fixtures PLP matches panco's polynomial-PLP reference to solver
+      precision — exact on 2 of 3, within 5.6% of EXACT on the 3-hop line
+      (72.22 vs 68.4 µs, still ≪ the 134.7 µs TFA). PLP works beyond the tandem-only LUDB/PMOO: 72.22
       ≪ 134.7 on a 3-server LINE is the dominance the existing tools
       cannot show. NOTE: this is PORT-FIDELITY against panco, not
       independent method-soundness (the LP is transcribed from panco and
@@ -2719,14 +2725,12 @@ artifacts:
       spar-network shall extend PLP (REQ-NC-PLP-001) from feed-forward
       sink-trees to GENERIC topology — including CYCLIC service
       dependencies — via panco's forest decomposition (edges_forest) and
-      the LP fixpoint over the decomposed trees. Includes the smaller
-      precursor of topologically REORDERING a single-successor converging
-      sink-tree whose indices arrive non-topological (today rejected by
-      REQ-NC-PLP-001 as PlpError::NonTopologicalSinkTree) so PLP fires on
-      the common many-talkers→one-listener TSN shape — a relabelling, sound
-      because TFA/PLP are invariant under server renumbering, but gated on
-      the same converging-tree panco fixtures below before emitting numbers.
-      This carries the
+      the LP fixpoint over the decomposed trees. The smaller single-
+      successor precursor (topologically RELABELLING a converging sink-tree
+      whose indices arrive non-topological so PLP fires on the common
+      many-talkers→one-listener TSN shape) is split out as the now-shipped
+      REQ-NC-PLP-CONVERGE-001; this requirement is the GENERIC/CYCLIC core
+      that remains. This carries the
       headline claim REQ-NC-PLP-001 cannot test: PLP CONVERGES where TFA
       diverges at high utilization. That divergence is a cyclic-
       dependency phenomenon (TFA's fixpoint terminates on any feed-
@@ -2739,6 +2743,43 @@ artifacts:
       arXiv:2010.09263; Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
+    fields:
+      release: v0.20.0
+
+  - id: REQ-NC-PLP-CONVERGE-001
+    type: requirement
+    title: "PLP on converging sink-trees via topological relabel"
+    description: >
+      spar-network shall fire PLP (REQ-NC-PLP-001) on single-successor
+      CONVERGING sink-trees whose server indices arrive in NON-topological
+      order — the common many-talkers→one-listener TSN shape handed in
+      first-appearance order, which REQ-NC-PLP-001 shipped REJECTING
+      (PlpError::NonTopologicalSinkTree) rather than panicking inside the
+      sink-tree projection. plp_bound computes a topological relabelling of
+      servers and applies it as a pure permutation BEFORE projection, so the
+      sink lands at the highest index — the invariant the per-flow sub-network
+      solve assumes (sink == num_servers-1). This is SOUND with no change to
+      the bound because TFA/PLP are invariant under server renumbering, and a
+      graph already validated single-successor + acyclic is a rooted in-forest
+      that ALWAYS admits a topological order. The former NonTopologicalSinkTree
+      guard is not deleted but REPURPOSED as a post-relabel invariant check
+      (after relabel no edge may point to a lower-numbered server; a violation
+      means the topo sort is buggy → Err, never the .expect panic this guard
+      was added to prevent). GATE: per-flow bounds (a) match panco's pinned
+      converging-tree reference to solver precision, sound (≥ EXACT) and —
+      on these benign converging nets — below TFA (PLP ≤ TFA holds per-
+      fixture here; it is NOT universal, see REQ-NC-PLP-001's incomparability
+      note and counterexample), and (b) equal — exactly — the bounds of the SAME
+      physical network presented already-topologically (permutation
+      invariance, the primary property). Pinned converging fixtures from
+      panco: converge_2to1 (PLP 48.89 ≪ TFA 60.39 µs), converge_2to1_tail2
+      (60.0 ≪ 106.44, the 1.77× wedge), converge_3to1 (70.0 ≪ 74.59). This is
+      the single-successor precursor split out of REQ-NC-PLP-002; the
+      GENERIC/CYCLIC core and the "PLP converges where TFA diverges" headline
+      remain in REQ-NC-PLP-002 (gated on not-yet-generated cyclic fixtures).
+      [SOLID — Bouillard arXiv:2010.09263]
+    status: implemented
+    tags: [network-calculus, plp, converging, substrate, tier1]
     fields:
       release: v0.19.0
 
@@ -2763,6 +2804,31 @@ artifacts:
     tags: [network-calculus, plp, substrate, tier1]
     fields:
       release: v0.19.0
+
+  - id: REQ-NC-PLP-MIN-001
+    type: requirement
+    title: "Authoritative per-flow NC bound = min(PLP, TFA)"
+    description: >
+      The network-wide NC bridge (REQ-NC-BRIDGE-001) shall report, per flow,
+      the TIGHTER of its PLP and TFA bounds as the authoritative end-to-end
+      delay. MOTIVATION: pure polynomial PLP (REQ-NC-PLP-001) and TFA are
+      INCOMPARABLE over-approximations — both sound (≥ exact), but neither
+      dominates. PLP is usually tighter, yet under extreme cross-burst it can
+      exceed TFA (the live counterexample
+      network_wide_tfa_index_aligns_on_converging_tree: panco's own PLP 1148
+      > TFA 1048 ≥ EXACT 1035 µs, reproduced to the decimal by spar). Taking
+      min(PLP, TFA) makes the reported bound never worse than TFA while
+      keeping the PLP win wherever it helps — so "PLP > TFA sometimes" is a
+      non-issue, not a regression. SCOPE: pure presentation/selection over the
+      two already-computed bounds; does NOT change either engine. This is
+      DISTINCT from REQ-NC-PLP-003 (which tightens the LP itself via TFA-
+      strengthening so PLP ≤ TFA holds by construction) — MIN-001 is the
+      cheap, always-correct selection that holds even for the pure LP.
+      GATE: on the converging-bridge fixture the bridge's authoritative bound
+      equals TFA (1048 µs) for the cross-burst flow, not the looser PLP.
+      [SOLID — Bouillard arXiv:2010.09263]
+    status: proposed
+    tags: [network-calculus, plp, bridge, substrate, tier1]
 
   - id: REQ-NC-BRIDGE-001
     type: requirement
@@ -2796,8 +2862,11 @@ artifacts:
       tagged tandem): TFA/PLP take ALL flows + ALL services at once. Use
       pmoo_or_sfa as the pattern for HOW to bridge (Stream -> solver input,
       fall back on failure), not WHAT to compute. Output: the network-wide
-      TFA and PLP end-to-end delay bound, where PLP <= TFA is the
-      demonstrable competitor wedge on a real model.
+      TFA and PLP end-to-end delay bound. PLP is usually the tighter bound
+      (the demonstrable competitor wedge on a real model), but PLP and TFA
+      are incomparable in general (REQ-NC-PLP-001) — the authoritative
+      per-flow bound is min(PLP, TFA) (REQ-NC-PLP-MIN-001); the bridge emits
+      both.
 
       FABRIC: TSN-first and TSN-only. NC (FIFO/CBS) is the CORRECT model
       for TSN/AVB and extract_network_graph already yields the NetworkGraph.
