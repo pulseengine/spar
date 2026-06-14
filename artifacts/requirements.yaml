@@ -2690,7 +2690,13 @@ artifacts:
       sink-trees (per-flow sub-networks) on the existing HiGHS/good_lp
       backend. Multi-successor forks — still feed-forward, but not
       single-successor — are rejected (PlpError::NotFeedForward) and
-      deferred with the cyclic case to REQ-NC-PLP-002. This ports
+      deferred with the cyclic case to REQ-NC-PLP-002. A valid sink-tree
+      whose server indices are NOT a topological order (some edge points to
+      a lower-numbered server, so the sink is not the highest-numbered
+      server — e.g. a converging tree handed in first-appearance order) is
+      likewise rejected (PlpError::NonTopologicalSinkTree) rather than
+      panicking inside the sink-tree projection; reordering such trees so
+      PLP can fire is REQ-NC-PLP-002. This ports
       panco's PURE polynomial PLP LP (no TFA/SFA strengthening):
       bounds are always ≤ TFA and strictly inside the soundness sandwich
       EXACT ≤ plp ≤ TFA, matching panco's polynomial-PLP reference to
@@ -2721,7 +2727,14 @@ artifacts:
       spar-network shall extend PLP (REQ-NC-PLP-001) from feed-forward
       sink-trees to GENERIC topology — including CYCLIC service
       dependencies — via panco's forest decomposition (edges_forest) and
-      the LP fixpoint over the decomposed trees. This carries the
+      the LP fixpoint over the decomposed trees. Includes the smaller
+      precursor of topologically REORDERING a single-successor converging
+      sink-tree whose indices arrive non-topological (today rejected by
+      REQ-NC-PLP-001 as PlpError::NonTopologicalSinkTree) so PLP fires on
+      the common many-talkers→one-listener TSN shape — a relabelling, sound
+      because TFA/PLP are invariant under server renumbering, but gated on
+      the same converging-tree panco fixtures below before emitting numbers.
+      This carries the
       headline claim REQ-NC-PLP-001 cannot test: PLP CONVERGES where TFA
       diverges at high utilization. That divergence is a cyclic-
       dependency phenomenon (TFA's fixpoint terminates on any feed-
@@ -2758,6 +2771,71 @@ artifacts:
     tags: [network-calculus, plp, substrate, tier1]
     fields:
       release: v0.19.0
+
+  - id: REQ-NC-BRIDGE-001
+    type: requirement
+    title: "AADL instance -> network-wide NC solver inputs (TfaFlow/PlpFlow)"
+    description: >
+      spar shall feed an instantiated AADL TSN model to the NETWORK-WIDE
+      network-calculus solvers (tfa_bound REQ-NC-TFA-001, plp_bound
+      REQ-NC-PLP-001) so the stack runs end-to-end: model -> bound ->
+      result. This closes the disconnected-pipeline gap: tfa_bound /
+      plp_bound currently have ZERO production callers; nothing constructs
+      TfaFlow / PlpFlow outside unit tests. The inputs they need ALREADY
+      exist assembled inside the wctt analysis — the bridge reuses them
+      rather than re-deriving: (a) collect_streams(instance, graph) yields
+      Stream { alpha: ArrivalCurve, hops: Vec<ComponentInstanceIdx> } per
+      stream, routed by Deployment_Properties::Actual_Connection_Binding =>
+      reference(sw) (NOT end-to-end flows — the binding is the real routing
+      mechanism), resolved PER CONNECTION: a connection-level binding
+      (declared `applies to <connection>`, lowered onto the connection's
+      property map) takes precedence over the system-level binding, with
+      owner fallback, so different streams route over different switch
+      subsets — the multi-route TSN topology that makes the GLOBAL dense
+      switch index (not per-tandem positions) the bridge's job; (b)
+      service_for_bus maps each switch to a rate-latency
+      ServiceCurve from read_output_rate_bps + read_forwarding_latency_ps.
+      The bridge step that does NOT yet exist: a GLOBAL dense index over all
+      switches, every Stream's hops mapped into that global index to build
+      one TfaFlow/PlpFlow per stream, fed in a SINGLE network-wide
+      tfa_bound/plp_bound call -> per-flow + per-server delays. This is
+      distinct from the EXISTING per-tandem bridge (wctt::pmoo_or_sfa, which
+      builds PmooTaggedFlow + local positions and calls ludb_bound for ONE
+      tagged tandem): TFA/PLP take ALL flows + ALL services at once. Use
+      pmoo_or_sfa as the pattern for HOW to bridge (Stream -> solver input,
+      fall back on failure), not WHAT to compute. Output: the network-wide
+      TFA and PLP end-to-end delay bound, where PLP <= TFA is the
+      demonstrable competitor wedge on a real model.
+
+      FABRIC: TSN-first and TSN-only. NC (FIFO/CBS) is the CORRECT model
+      for TSN/AVB and extract_network_graph already yields the NetworkGraph.
+      CAN is explicitly OUT of scope here: a broadcast CAN bus is not a
+      switch, DBC emits no rate/period, and CAN's correct analysis is
+      Tindell WCRT, NOT NC-FIFO (an NC bound on CAN would be sound but
+      misleadingly loose). CAN timing is a SEPARATE track (its own future
+      REQ-CAN-WCRT requirement consuming REQ-INGEST-DBC-FLOWS-001); this
+      bridge does NOT serve CAN and REQ-INGEST-DBC-FLOWS-001 is NOT a
+      dependency of it.
+
+      DONE-DEFINITION (a capability with no caller is worthless — the same
+      orphan finding this requirement closes): not satisfied by unit tests
+      alone. Must ship a PRODUCTION caller — a new wctt arm emitting a
+      network-wide WcttTfaBound / WcttPlpBound diagnostic alongside the
+      existing per-hop SFA / PMOO diagnostics — that runs on a real .aadl
+      TSN model file. That caller is also the demonstrable artifact: AADL
+      TSN config in -> PLP bound out, tighter than TFA. SCOPE: feed-forward
+      TSN models (matches REQ-NC-PLP-001's feed-forward limit); a flow whose
+      route does not map onto a switch path, or a non-FIFO (TAS/CBS) hop the
+      network-wide FIFO solver cannot model, is diagnosed and the network-
+      wide arm skipped — never silently dropped, and the per-hop SFA bound
+      is preserved (the pmoo_or_sfa fallback contract). Gated on the
+      milp-solver feature for the PLP half (the wasm build omits it).
+      [SOLID — Bouillard arXiv:2010.09263; builds on REQ-NC-TFA-001,
+      REQ-NC-PLP-001, extract_network_graph, wctt::collect_streams]
+    status: implemented
+    tags: [network-calculus, bridge, tsn, substrate, tier1]
+    fields:
+      release: v0.18.0
 
   - id: REQ-NC-VALIDATION-001
     type: requirement

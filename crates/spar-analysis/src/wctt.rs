@@ -911,7 +911,172 @@ impl WcttAnalysis {
             }
         }
 
+        // Step 5 (v0.18.0, REQ-NC-BRIDGE-001): network-wide NC bounds.
+        // The per-stream walk above gives each stream an independent
+        // SFA-style end-to-end bound. TFA (and, under `milp-solver`, PLP)
+        // instead analyse the *whole* feed-forward network jointly: every
+        // stream becomes a flow over a single global server index, so
+        // cross-flow interference at shared switches is captured at once.
+        // Gated behind `self.pmoo` — the same opt-in the PMOO/LUDB path
+        // uses — so the default diagnostic set stays byte-identical and
+        // the existing golden fixtures are untouched. The production
+        // trigger is the CLI `--pmoo` flag (`run_all_analyses_with_pmoo`).
+        if self.pmoo {
+            network_wide_nc_bounds(
+                &streams,
+                &switch_type,
+                &service_for_bus,
+                instance,
+                self.name(),
+                &mut diags,
+            );
+        }
+
         diags
+    }
+}
+
+/// Network-wide TFA — and, under the `milp-solver` feature, PLP — bounds
+/// for the whole feed-forward stream set (REQ-NC-BRIDGE-001).
+///
+/// This is the AADL-instance → network-wide solver bridge. The inputs are
+/// already assembled by [`WcttAnalysis::compute`]: `streams` (each a
+/// `Stream { alpha, hops }` routed by `Actual_Connection_Binding`) and
+/// `service_for_bus` (a rate-latency [`ServiceCurve`] per switch). The
+/// missing step this function supplies is a **global dense server index**
+/// over every switch some stream traverses, into which all streams' hops
+/// are mapped — yielding one [`TfaFlow`]/`PlpFlow` per stream fed to a
+/// single network-wide [`tfa_bound`]/`plp_bound` call.
+///
+/// Distinct from [`pmoo_or_sfa`], which bounds *one* tagged tandem in
+/// local positions; here every stream is a flow in one global network.
+///
+/// Mirrors `pmoo_or_sfa`'s fallback contract: any ineligibility — a
+/// non-FIFO hop, a zero-rate (unstable) service curve, a missing curve, a
+/// solver error, or PLP's `NotFeedForward` on a non-sink-tree topology —
+/// skips the affected arm transparently. The per-stream SFA bounds
+/// already emitted remain the authoritative output; the network-wide
+/// lines are strictly additional `Info` diagnostics.
+fn network_wide_nc_bounds(
+    streams: &[Stream],
+    switch_type: &FxHashMap<ComponentInstanceIdx, SwitchType>,
+    service_for_bus: &FxHashMap<ComponentInstanceIdx, ServiceCurve>,
+    instance: &SystemInstance,
+    analysis: &str,
+    diags: &mut Vec<AnalysisDiagnostic>,
+) {
+    use spar_network::tfa::{TfaFlow, tfa_bound};
+
+    if streams.is_empty() {
+        return;
+    }
+
+    // Eligibility: every hop of every stream must be plain FIFO. TFA's
+    // aggregate (arbitrary-multiplexing) model and PLP's FIFO sink-tree
+    // projection are both sound under FIFO. A Priority/TSN hop changes
+    // the joint arrival at a shared switch, so rather than risk an
+    // unsound network-wide number we skip the *entire* arm and let those
+    // streams keep the per-hop SFA bound already emitted above. One
+    // non-FIFO hop anywhere disqualifies the whole network (conservative
+    // and sound — partial inclusion would understate shared-switch load).
+    for s in streams {
+        if s.hops.is_empty() {
+            return;
+        }
+        for h in &s.hops {
+            let st = switch_type.get(h).copied().unwrap_or(SwitchType::Fifo);
+            if !matches!(st, SwitchType::Fifo) {
+                return;
+            }
+        }
+    }
+
+    // Global dense server index over only the switches that some stream
+    // actually traverses — an untraversed switch would just spin the TFA
+    // fixpoint for nothing. Deterministic order: first appearance across
+    // the stream/hop walk.
+    let mut global_index: FxHashMap<ComponentInstanceIdx, usize> = FxHashMap::default();
+    let mut services: Vec<ServiceCurve> = Vec::new();
+    for s in streams {
+        for h in &s.hops {
+            if !global_index.contains_key(h) {
+                let Some(svc) = service_for_bus.get(h).copied() else {
+                    return; // missing service curve → cannot build the network
+                };
+                global_index.insert(*h, services.len());
+                services.push(svc);
+            }
+        }
+    }
+    // A zero-rate server is structurally unstable; `tfa_bound` would
+    // reject it as `Unstable`. Bail early to match `pmoo_or_sfa`.
+    if services.iter().any(|s| s.rate_bps == 0) {
+        return;
+    }
+
+    // One flow per stream; its path is its hop sequence mapped into the
+    // global index. `global_index[h]` is total because every hop was
+    // inserted in the pass above.
+    let flows: Vec<TfaFlow> = streams
+        .iter()
+        .map(|s| TfaFlow {
+            alpha: s.alpha,
+            path: s.hops.iter().map(|h| global_index[h]).collect(),
+        })
+        .collect();
+
+    // TFA: pure-Rust, always compiled. On any solver error (unstable /
+    // non-convergent) we skip silently — the SFA bounds stand.
+    let Ok(tfa) = tfa_bound(&flows, &services) else {
+        return;
+    };
+    for (s, &delay_ps) in streams.iter().zip(&tfa.flow_delay_ps) {
+        diags.push(AnalysisDiagnostic {
+            severity: Severity::Info,
+            message: format!(
+                "WcttTfaBound: stream '{}' network-wide TFA end-to-end delay {} ps ({} hop{})",
+                s.display_name(instance),
+                delay_ps,
+                s.hops.len(),
+                if s.hops.len() == 1 { "" } else { "s" },
+            ),
+            path: component_path(instance, s.src_idx),
+            analysis: analysis.to_string(),
+        });
+    }
+
+    // PLP: the tighter feed-forward bound (PLP ≤ TFA per flow on a
+    // sink-tree). HiGHS/good_lp-backed, so gated behind `milp-solver`
+    // (off for wasm, #259). A multi-successor / cyclic topology returns
+    // `PlpError::NotFeedForward`; we then omit the PLP lines and the TFA
+    // numbers above remain the network-wide result.
+    #[cfg(feature = "milp-solver")]
+    {
+        use spar_network::plp::{PlpFlow, plp_bound};
+        let plp_flows: Vec<PlpFlow> = streams
+            .iter()
+            .map(|s| PlpFlow {
+                alpha: s.alpha,
+                path: s.hops.iter().map(|h| global_index[h]).collect(),
+            })
+            .collect();
+        if let Ok(plp) = plp_bound(&plp_flows, &services) {
+            for (s, &delay_ps) in streams.iter().zip(&plp.flow_delay_ps) {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttPlpBound: stream '{}' network-wide PLP end-to-end delay {} ps \
+                         (≤ TFA; {} hop{})",
+                        s.display_name(instance),
+                        delay_ps,
+                        s.hops.len(),
+                        if s.hops.len() == 1 { "" } else { "s" },
+                    ),
+                    path: component_path(instance, s.src_idx),
+                    analysis: analysis.to_string(),
+                });
+            }
+        }
     }
 }
 
@@ -1432,11 +1597,26 @@ fn collect_streams(
                 continue;
             }
 
-            // Lookup binding on the connection itself first, then on
-            // the owner. Connection-level binding takes precedence.
-            let binding_owner_props = instance.properties_for(owner_idx);
-            let bound_buses =
-                resolve_connection_binding(binding_owner_props, conn.name.as_str(), bus_by_name);
+            // Lookup binding on the connection itself first, then on the
+            // owner. A connection-level `Actual_Connection_Binding`
+            // (declared `applies to <connection>`, lowered onto the
+            // connection's property map) takes precedence so different
+            // streams can be routed over different switch subsets — the
+            // multi-route topology a real TSN model needs, and the
+            // network-wide solver bridge's reason to maintain a *global*
+            // dense switch index rather than reuse per-tandem positions
+            // (REQ-NC-BRIDGE-001). When the connection carries no binding
+            // of its own we fall back to the system-level binding, so
+            // single-route models (every connection sharing one
+            // `(reference (..))`) are byte-identical to before.
+            let conn_props = instance.properties_for_connection(conn_idx);
+            let mut bound_buses =
+                resolve_connection_binding(conn_props, conn.name.as_str(), bus_by_name);
+            if bound_buses.is_empty() {
+                let owner_props = instance.properties_for(owner_idx);
+                bound_buses =
+                    resolve_connection_binding(owner_props, conn.name.as_str(), bus_by_name);
+            }
 
             // Filter to buses that the extractor classified as
             // switches; non-switched binding targets are ignored
@@ -3332,6 +3512,458 @@ end Net;
                 d.message.contains("method=ludb"),
                 "WcttPmooBound must mention method=ludb: {}",
                 d.message
+            );
+        }
+    }
+
+    // ── REQ-NC-BRIDGE-001: network-wide TFA/PLP arm ─────────────────
+    //
+    // Two streams share a 3-hop FIFO line (sw1 → sw2 → sw3). A single
+    // system-level `Actual_Connection_Binding` routes both connections
+    // over all three switches, so each stream's `hops` is
+    // `[sw1, sw2, sw3]` and they contend at every switch — the
+    // canonical scenario where the network-wide solvers earn their
+    // keep over the independent per-stream walk.
+    fn bridge_line_aadl() -> &'static str {
+        r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device src_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  device sink_d
+    features
+      net  : requires bus access;
+      in_p : in data port;
+  end sink_d;
+  device implementation sink_d.impl
+  end sink_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw1 : bus eth.impl;
+      sw2 : bus eth.impl;
+      sw3 : bus eth.impl;
+      a   : device src_d.impl;
+      a2  : device src_d.impl;
+      b   : device sink_d.impl;
+      c   : device sink_d.impl;
+    connections
+      c_sw1_a  : bus access sw1 -> a.net;
+      c_sw1_a2 : bus access sw1 -> a2.net;
+      c_sw3_b  : bus access sw3 -> b.net;
+      c_sw3_c  : bus access sw3 -> c.net;
+      data1    : port a.out_p  -> b.in_p;
+      data2    : port a2.out_p -> c.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw1), reference (sw2), reference (sw3));
+  end Sys.impl;
+end Net;
+"#
+    }
+
+    #[test]
+    fn network_wide_tfa_fires_only_under_pmoo() {
+        // The network-wide arm is gated behind `--pmoo`: the default
+        // pass must stay byte-identical (no `WcttTfaBound`), and the
+        // pmoo pass must emit exactly one network-wide TFA bound per
+        // stream over the 3-hop line.
+        let inst = instantiate(bridge_line_aadl(), "Net", "Sys", "impl");
+
+        let default_diags = WcttAnalysis::default().analyze(&inst);
+        assert!(
+            !default_diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttTfaBound")),
+            "network-wide arm must stay off by default: {:#?}",
+            default_diags
+        );
+
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+        let tfa: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttTfaBound"))
+            .collect();
+        assert_eq!(
+            tfa.len(),
+            2,
+            "expected one network-wide TFA bound per stream: {:#?}",
+            diags
+        );
+        for d in &tfa {
+            assert!(
+                d.message.contains("3 hops"),
+                "expected a 3-hop line bound: {}",
+                d.message
+            );
+        }
+    }
+
+    /// Extract `stream name → delay_ps` from every diagnostic whose
+    /// message starts with `prefix`. Both arms format the stream name
+    /// between the first pair of single quotes and the delay as the
+    /// integer immediately preceding ` ps`. Used by both the pure-Rust
+    /// TFA tests and the `milp-solver`-gated PLP test.
+    fn collect_delays(
+        diags: &[AnalysisDiagnostic],
+        prefix: &str,
+    ) -> std::collections::HashMap<String, u64> {
+        let mut out = std::collections::HashMap::new();
+        for d in diags.iter().filter(|d| d.message.starts_with(prefix)) {
+            let name = d
+                .message
+                .split('\'')
+                .nth(1)
+                .unwrap_or_else(|| panic!("no quoted stream name in: {}", d.message))
+                .to_string();
+            let ps = d
+                .message
+                .split(" ps")
+                .next()
+                .and_then(|head| {
+                    head.rsplit(|c: char| !c.is_ascii_digit())
+                        .find(|s| !s.is_empty())
+                })
+                .and_then(|n| n.parse::<u64>().ok())
+                .unwrap_or_else(|| panic!("no ps value in: {}", d.message));
+            out.insert(name, ps);
+        }
+        out
+    }
+
+    #[cfg(feature = "milp-solver")]
+    #[test]
+    fn network_wide_plp_is_at_most_tfa_on_fifo_line() {
+        // Bouillard PLP on a feed-forward line: the per-flow PLP delay
+        // is ≤ the TFA delay (PLP pays burst-and-multiplexing once;
+        // TFA inflates the burst hop-by-hop). We assert only ≤ — they
+        // are different methods and a degenerate flow makes them
+        // coincide. This is the done-definition demo for the bridge:
+        // a real AADL model in → both network-wide bounds out. (On this
+        // shared 3-hop line PLP is ~2.7× tighter: 39 us vs 105.5 us.)
+        let inst = instantiate(bridge_line_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        let tfa = collect_delays(&diags, "WcttTfaBound");
+        let plp = collect_delays(&diags, "WcttPlpBound");
+        assert!(
+            !plp.is_empty(),
+            "expected network-wide PLP bounds with --pmoo: {:#?}",
+            diags
+        );
+        assert_eq!(
+            tfa.len(),
+            plp.len(),
+            "one TFA and one PLP bound per stream: {:#?}",
+            diags
+        );
+        for (name, &plp_ps) in &plp {
+            let tfa_ps = tfa
+                .get(name)
+                .copied()
+                .unwrap_or_else(|| panic!("no TFA bound for stream {name}: {diags:#?}"));
+            assert!(
+                plp_ps <= tfa_ps,
+                "PLP ({plp_ps} ps) must be ≤ TFA ({tfa_ps} ps) for stream '{name}'",
+            );
+        }
+    }
+
+    // Two streams that *diverge*: they share switch `f1` (both route
+    // through it first) then split — stream `dataA` continues to a
+    // deliberately slow switch `sl`, stream `dataB` to a fast switch
+    // `f2`. Per-connection `Actual_Connection_Binding` (`applies to
+    // <connection>`) routes each over its own switch subset, which only
+    // works because `collect_streams` consults the connection-level
+    // binding before the system-level one.
+    //
+    // This is the fixture the network-wide arm's *global* dense switch
+    // index exists for. First appearance assigns `f1 → slot 0`,
+    // `sl → slot 1` (from `dataA`), then `dataB`'s shared `f1` must reuse
+    // slot 0 and its `f2` take slot 2 — NOT a fresh per-stream `[0, 1]`
+    // that would alias `dataB`'s second hop onto `sl`'s slow curve. A
+    // refactor to per-tandem local indexing would silently misalign the
+    // `services` vector and nothing in the line fixture (identical
+    // curves) would catch it; here the slow switch makes a misalignment
+    // observable as an order-of-magnitude delay blow-up.
+    fn bridge_diverge_aadl() -> &'static str {
+        r#"
+package NetDiv
+public
+
+  bus fast
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end fast;
+  bus implementation fast.impl
+  end fast.impl;
+
+  bus slow
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 10000 us .. 10000 us;
+      Spar_Network::Queue_Depth        => 1;
+  end slow;
+  bus implementation slow.impl
+  end slow.impl;
+
+  device src_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  device sink_d
+    features
+      net  : requires bus access;
+      in_p : in data port;
+  end sink_d;
+  device implementation sink_d.impl
+  end sink_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      f1 : bus fast.impl;
+      f2 : bus fast.impl;
+      sl : bus slow.impl;
+      a  : device src_d.impl;
+      a2 : device src_d.impl;
+      b  : device sink_d.impl;
+      c  : device sink_d.impl;
+    connections
+      acc_f1_a  : bus access f1 -> a.net;
+      acc_f1_a2 : bus access f1 -> a2.net;
+      acc_sl_b  : bus access sl -> b.net;
+      acc_f2_c  : bus access f2 -> c.net;
+      dataA     : port a.out_p  -> b.in_p;
+      dataB     : port a2.out_p -> c.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (f1), reference (sl)) applies to dataA;
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (f1), reference (f2)) applies to dataB;
+  end Sys.impl;
+end NetDiv;
+"#
+    }
+
+    #[test]
+    fn network_wide_index_aligns_shared_switch() {
+        // Pure-Rust TFA (no milp needed): PLP correctly does NOT fire
+        // here — `f1` has two successors, so the topology is not a
+        // sink-tree and `plp_bound` returns `NotFeedForward`. We assert
+        // only the TFA arm.
+        let inst = instantiate(bridge_diverge_aadl(), "NetDiv", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        // Per-connection routing must produce two distinct 2-hop streams.
+        let tfa: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttTfaBound"))
+            .collect();
+        assert_eq!(
+            tfa.len(),
+            2,
+            "expected one network-wide TFA bound per stream: {:#?}",
+            diags
+        );
+        for d in &tfa {
+            assert!(
+                d.message.contains("2 hops"),
+                "each diverging stream is a 2-hop path: {}",
+                d.message
+            );
+        }
+
+        // The alignment guard. Exactly one stream (`dataA`) traverses the
+        // slow switch; the other (`dataB`) is all-fast. If the shared
+        // `f1` or `dataB`'s second hop were slotted onto `sl`'s curve,
+        // BOTH delays would be in the slow regime and the ratio would be
+        // ~1. A wide gap proves the global index reused `f1`'s slot for
+        // `dataB` and kept its fast hops on fast curves.
+        let delays = collect_delays(&diags, "WcttTfaBound");
+        let mut sorted: Vec<u64> = delays.values().copied().collect();
+        sorted.sort_unstable();
+        let (fast, slow) = (sorted[0], sorted[1]);
+        assert!(
+            slow > fast.saturating_mul(10),
+            "exactly one stream should hit the slow switch; the global \
+             index misaligned a shared hop if both are slow. delays={delays:#?}",
+        );
+    }
+
+    // Converging *sink-tree*: two streams enter on different first
+    // switches (`sw_a` fast, `sw_b` slow) and merge at a shared sink hop
+    // `sw_c`. Every server's out-degree is ≤ 1, so it is a genuine
+    // feed-forward sink-tree — but first-appearance global indexing
+    // (sw_a→0, sw_c→1, sw_b→2) places the sink (sw_c) OFF the highest index,
+    // which is not a topological labelling. `plp_bound` rejects that with
+    // `NonTopologicalSinkTree` (reordering converging trees so PLP can fire
+    // is REQ-NC-PLP-002), so the PLP arm cleanly skips here. The value of
+    // this fixture is twofold: (1) it guards the *TFA* global index on a
+    // converging shape (complementing the diverging fixture's), and (2) it
+    // proves the bridge's `if let Ok(plp)` contract survives a sink-tree the
+    // solver declines — no panic, TFA bounds still emitted.
+    fn bridge_converge_aadl() -> &'static str {
+        r#"
+package NetConv
+public
+
+  bus fast
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end fast;
+  bus implementation fast.impl
+  end fast.impl;
+
+  bus slow
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 10000 us .. 10000 us;
+      Spar_Network::Queue_Depth        => 1;
+  end slow;
+  bus implementation slow.impl
+  end slow.impl;
+
+  device src_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  device sink_d
+    features
+      net  : requires bus access;
+      in_p : in data port;
+  end sink_d;
+  device implementation sink_d.impl
+  end sink_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw_a : bus fast.impl;
+      sw_b : bus slow.impl;
+      sw_c : bus fast.impl;
+      a    : device src_d.impl;
+      a2   : device src_d.impl;
+      b    : device sink_d.impl;
+      c    : device sink_d.impl;
+    connections
+      acc_a  : bus access sw_a -> a.net;
+      acc_b  : bus access sw_b -> a2.net;
+      acc_c1 : bus access sw_c -> b.net;
+      acc_c2 : bus access sw_c -> c.net;
+      dataA  : port a.out_p  -> b.in_p;
+      dataB  : port a2.out_p -> c.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw_a), reference (sw_c)) applies to dataA;
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw_b), reference (sw_c)) applies to dataB;
+  end Sys.impl;
+end NetConv;
+"#
+    }
+
+    #[test]
+    fn network_wide_tfa_index_aligns_on_converging_tree() {
+        // First appearance assigns sw_a → slot 0, sw_c → slot 1 (from
+        // dataA), then dataB's sw_b → slot 2, sw_c → slot 1 (shared). A
+        // per-stream LOCAL index would instead map dataB to [0, 1],
+        // aliasing its slow first hop onto sw_a's FAST curve — making the
+        // slow stream look fast. Because dataB routes through the slow
+        // switch, its TFA bound must be the larger of the two; the wide gap
+        // only holds when the flow paths use the global index. This is the
+        // converging-shape twin of `network_wide_index_aligns_shared_switch`
+        // (which shares a FIRST hop); here the shared hop is the SINK.
+        let inst = instantiate(bridge_converge_aadl(), "NetConv", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        let tfa: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttTfaBound"))
+            .collect();
+        assert_eq!(
+            tfa.len(),
+            2,
+            "expected one network-wide TFA bound per stream: {diags:#?}",
+        );
+        for d in &tfa {
+            assert!(
+                d.message.contains("2 hops"),
+                "each converging stream is a 2-hop path: {}",
+                d.message
+            );
+        }
+
+        let delays = collect_delays(&diags, "WcttTfaBound");
+        let mut sorted: Vec<u64> = delays.values().copied().collect();
+        sorted.sort_unstable();
+        let (fast, slow) = (sorted[0], sorted[1]);
+        assert!(
+            slow > fast.saturating_mul(10),
+            "the stream through the slow switch must dominate; a local \
+             index would alias its slow hop onto the fast curve. delays={delays:#?}",
+        );
+
+        // Soundness end-to-end: the converging tree's first-appearance index
+        // is non-topological (sink sw_c is slot 1, not the last slot), so
+        // `plp_bound` returns `NonTopologicalSinkTree` and the bridge skips
+        // the PLP arm WITHOUT panicking. Before the plp.rs entry guard this
+        // path panicked at `solve` (`successor[sink] = None` on a server it
+        // treated as non-sink). Converging PLP via reordering is
+        // REQ-NC-PLP-002.
+        #[cfg(feature = "milp-solver")]
+        {
+            let plp = collect_delays(&diags, "WcttPlpBound");
+            assert!(
+                plp.is_empty(),
+                "PLP must cleanly skip a non-topological converging tree \
+                 (REQ-NC-PLP-002), not fire or panic: {plp:#?}",
             );
         }
     }
