@@ -1880,7 +1880,16 @@ artifacts:
       default (byte-identical contract — golden fixtures untouched), fires
       one bound per stream over a shared 3-hop FIFO line, and that per-flow
       PLP <= TFA (39 us vs 105.5 us here — the line-topology dominance that
-      LUDB/PMOO cannot show). Non-FIFO hops, unstable servers, and PLP
+      LUDB/PMOO cannot show). A third test,
+      network_wide_index_aligns_shared_switch, exercises DIVERGENT routing:
+      two streams share switch f1 then split (one to a deliberately slow
+      switch, one all-fast) via per-connection Actual_Connection_Binding
+      (applies to <connection>) — proving collect_streams honors the
+      connection-level binding over the system-level one, and that the
+      global dense index reuses the shared switch's slot across streams
+      (a misalignment would alias the second stream onto the slow curve;
+      the test asserts a >10x delay gap that only holds when slots align).
+      Non-FIFO hops, unstable servers, and PLP
       NotFeedForward skip the arm transparently, leaving the per-stream SFA
       bounds authoritative. The production caller is the CLI --pmoo path
       (run_all_analyses_with_pmoo, package spar).

@@ -2774,7 +2774,13 @@ artifacts:
       Stream { alpha: ArrivalCurve, hops: Vec<ComponentInstanceIdx> } per
       stream, routed by Deployment_Properties::Actual_Connection_Binding =>
       reference(sw) (NOT end-to-end flows — the binding is the real routing
-      mechanism); (b) service_for_bus maps each switch to a rate-latency
+      mechanism), resolved PER CONNECTION: a connection-level binding
+      (declared `applies to <connection>`, lowered onto the connection's
+      property map) takes precedence over the system-level binding, with
+      owner fallback, so different streams route over different switch
+      subsets — the multi-route TSN topology that makes the GLOBAL dense
+      switch index (not per-tandem positions) the bridge's job; (b)
+      service_for_bus maps each switch to a rate-latency
       ServiceCurve from read_output_rate_bps + read_forwarding_latency_ps.
       The bridge step that does NOT yet exist: a GLOBAL dense index over all
       switches, every Stream's hops mapped into that global index to build
