@@ -2550,11 +2550,16 @@ artifacts:
       spar trace topology shall flag declared AADL connections whose
       endpoints never appear as observed adjacency in the runtime
       topology sources (LLDP/PCAPNG) — wiring declared but not observed.
-      Third of the five deterministic reconciler checks.
+      Third of the five deterministic reconciler checks. DEFERRED out of
+      v0.17.0 (2026-06-14): the v0.17.0 cut is the TSN-competitor Tier-1
+      spine (DBC ingest + FP-TFA), and this check is still a
+      defined-but-unemitted ReconcileFinding stub gated on the
+      connection-property surfacing prerequisite (spar-trace-topology
+      engine.rs §"Deliberately deferred"). Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.17.0
+      release: v0.19.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -2566,11 +2571,14 @@ artifacts:
       spar trace topology shall compare declared Spar_TSN/Spar_Network
       switch configuration (gate schedules, reservations,
       class-of-service) against observed Qcc YANG switch config and flag
-      drift. Fourth of the five deterministic reconciler checks.
+      drift. Fourth of the five deterministic reconciler checks. DEFERRED
+      out of v0.17.0 (2026-06-14): unemitted ReconcileFinding stub gated on
+      the connection-property surfacing prerequisite; v0.17.0 ships the
+      DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.17.0
+      release: v0.19.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -2583,11 +2591,14 @@ artifacts:
       (Spar_Identity hashes/versions) against observed attestation
       evidence and flag mismatches between the declared deployment and
       what is actually running. Fifth of the five deterministic
-      reconciler checks.
+      reconciler checks. DEFERRED out of v0.17.0 (2026-06-14): unemitted
+      ReconcileFinding stub gated on the connection-property surfacing
+      prerequisite (and observed-attestation ingest); v0.17.0 ships the
+      DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler, attestation]
     fields:
-      release: v0.17.0
+      release: v0.19.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
