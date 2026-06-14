@@ -116,6 +116,15 @@ pub enum PlpError {
     /// relation is single-valued), so branching is rejected here too.
     /// Generic feed-forward (forks) and cyclic topology are REQ-NC-PLP-002.
     NotFeedForward,
+    /// The topology is a single-successor sink-tree, but its server indices
+    /// are not a topological order: some edge `j → s` has `s < j`, so the
+    /// sink is not the highest-numbered server. [`SubNetwork`] re-indexes
+    /// its per-flow projection by ascending global index and assumes the
+    /// sink is the last local index, so a non-topological labelling would
+    /// otherwise misplace the sink (and panic in `solve`). Reordering a
+    /// converging tree into topological order so PLP can fire on it is
+    /// REQ-NC-PLP-002; callers should reorder before retrying.
+    NonTopologicalSinkTree,
     /// Aggregate sustained rate `≥` service rate at some server: the
     /// necessary stability condition fails and no finite bound exists, so
     /// the LP is unbounded. (Mirrors [`crate::tfa::TfaError::Unstable`].)
@@ -143,6 +152,10 @@ impl core::fmt::Display for PlpError {
             Self::NotFeedForward => write!(
                 f,
                 "PLP: topology out of scope (cyclic, or branching/fork beyond single-successor sink-trees) — see REQ-NC-PLP-002"
+            ),
+            Self::NonTopologicalSinkTree => write!(
+                f,
+                "PLP: sink-tree server indices are not in topological order (an edge points to a lower index, so the sink is not the highest-numbered server) — reorder before retrying; see REQ-NC-PLP-002"
             ),
             Self::Unstable {
                 server,
@@ -205,6 +218,21 @@ pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBoun
     // the unique successor from any server must terminate.
     if has_cycle(&successors, n_servers) {
         return Err(PlpError::NotFeedForward);
+    }
+    // Topological-order precondition. `SubNetwork::project` re-indexes each
+    // per-flow projection by ascending global index and assumes the flow's
+    // sink is the highest local index. That holds iff the global labelling
+    // is a topological order — every edge `j → s` points to a higher index.
+    // A converging sink-tree handed to us in first-appearance order (e.g.
+    // two talkers whose shared sink switch was indexed before one talker)
+    // violates this: the sink lands off the last index, which `solve` would
+    // hit as `successor[sink] = None` on a server it treats as non-sink
+    // (panic). Reject it cleanly here instead. Topological reordering so PLP
+    // can fire on converging trees is REQ-NC-PLP-002.
+    for (j, succ) in successors.iter().enumerate() {
+        if succ.first().is_some_and(|&s| s < j) {
+            return Err(PlpError::NonTopologicalSinkTree);
+        }
     }
 
     // Stability precheck (once, on the full network): aggregate sustained
@@ -804,6 +832,53 @@ mod tests {
             plp_bound(&flows, &services).unwrap_err(),
             PlpError::NotFeedForward
         );
+    }
+
+    /// A converging sink-tree (two talkers → one shared sink) is a valid
+    /// single-successor feed-forward shape, but here its server indices are
+    /// NOT topological: flow A `0→1`, flow B `2→1` — the sink (server 1) is
+    /// not the highest-numbered server (talker 2 outranks it). `SubNetwork`
+    /// assumes the sink is the last local index, so without the entry guard
+    /// `solve` would panic (`successor[sink] = None` on a server it treats as
+    /// non-sink). It must be REJECTED, not panic — reordering converging
+    /// trees so PLP can fire is REQ-NC-PLP-002.
+    #[test]
+    fn non_topological_sink_tree_rejected() {
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+        ];
+        // sink is server 1; talker 2 has a higher index → edge 2→1 descends.
+        let flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[0, 1]),
+            flow(FRAME, HUNDRED_MBPS, &[2, 1]),
+        ];
+        assert_eq!(
+            plp_bound(&flows, &services).unwrap_err(),
+            PlpError::NonTopologicalSinkTree
+        );
+    }
+
+    /// The same converging tree, but with the sink relabelled to the highest
+    /// index (flow A `0→2`, flow B `1→2`), IS in scope and solves — proving
+    /// the guard rejects only the *labelling*, not the *shape*. (REQ-NC-PLP-002
+    /// will reorder automatically; until then callers pre-order.)
+    #[test]
+    fn topological_sink_tree_accepted() {
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+        ];
+        // sink is server 2 (highest index); talkers 0 and 1 feed it.
+        let flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[0, 2]),
+            flow(FRAME, HUNDRED_MBPS, &[1, 2]),
+        ];
+        let r = plp_bound(&flows, &services).expect("topological sink-tree is in scope");
+        assert_eq!(r.flow_delay_ps.len(), 2);
+        assert!(r.flow_delay_ps.iter().all(|&d| d > 0));
     }
 
     #[test]

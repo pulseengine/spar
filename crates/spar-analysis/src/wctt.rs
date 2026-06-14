@@ -3824,4 +3824,147 @@ end NetDiv;
              index misaligned a shared hop if both are slow. delays={delays:#?}",
         );
     }
+
+    // Converging *sink-tree*: two streams enter on different first
+    // switches (`sw_a` fast, `sw_b` slow) and merge at a shared sink hop
+    // `sw_c`. Every server's out-degree is ≤ 1, so it is a genuine
+    // feed-forward sink-tree — but first-appearance global indexing
+    // (sw_a→0, sw_c→1, sw_b→2) places the sink (sw_c) OFF the highest index,
+    // which is not a topological labelling. `plp_bound` rejects that with
+    // `NonTopologicalSinkTree` (reordering converging trees so PLP can fire
+    // is REQ-NC-PLP-002), so the PLP arm cleanly skips here. The value of
+    // this fixture is twofold: (1) it guards the *TFA* global index on a
+    // converging shape (complementing the diverging fixture's), and (2) it
+    // proves the bridge's `if let Ok(plp)` contract survives a sink-tree the
+    // solver declines — no panic, TFA bounds still emitted.
+    fn bridge_converge_aadl() -> &'static str {
+        r#"
+package NetConv
+public
+
+  bus fast
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end fast;
+  bus implementation fast.impl
+  end fast.impl;
+
+  bus slow
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 10000 us .. 10000 us;
+      Spar_Network::Queue_Depth        => 1;
+  end slow;
+  bus implementation slow.impl
+  end slow.impl;
+
+  device src_d
+    features
+      net   : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  device sink_d
+    features
+      net  : requires bus access;
+      in_p : in data port;
+  end sink_d;
+  device implementation sink_d.impl
+  end sink_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw_a : bus fast.impl;
+      sw_b : bus slow.impl;
+      sw_c : bus fast.impl;
+      a    : device src_d.impl;
+      a2   : device src_d.impl;
+      b    : device sink_d.impl;
+      c    : device sink_d.impl;
+    connections
+      acc_a  : bus access sw_a -> a.net;
+      acc_b  : bus access sw_b -> a2.net;
+      acc_c1 : bus access sw_c -> b.net;
+      acc_c2 : bus access sw_c -> c.net;
+      dataA  : port a.out_p  -> b.in_p;
+      dataB  : port a2.out_p -> c.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw_a), reference (sw_c)) applies to dataA;
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw_b), reference (sw_c)) applies to dataB;
+  end Sys.impl;
+end NetConv;
+"#
+    }
+
+    #[test]
+    fn network_wide_tfa_index_aligns_on_converging_tree() {
+        // First appearance assigns sw_a → slot 0, sw_c → slot 1 (from
+        // dataA), then dataB's sw_b → slot 2, sw_c → slot 1 (shared). A
+        // per-stream LOCAL index would instead map dataB to [0, 1],
+        // aliasing its slow first hop onto sw_a's FAST curve — making the
+        // slow stream look fast. Because dataB routes through the slow
+        // switch, its TFA bound must be the larger of the two; the wide gap
+        // only holds when the flow paths use the global index. This is the
+        // converging-shape twin of `network_wide_index_aligns_shared_switch`
+        // (which shares a FIRST hop); here the shared hop is the SINK.
+        let inst = instantiate(bridge_converge_aadl(), "NetConv", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        let tfa: Vec<&AnalysisDiagnostic> = diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttTfaBound"))
+            .collect();
+        assert_eq!(
+            tfa.len(),
+            2,
+            "expected one network-wide TFA bound per stream: {diags:#?}",
+        );
+        for d in &tfa {
+            assert!(
+                d.message.contains("2 hops"),
+                "each converging stream is a 2-hop path: {}",
+                d.message
+            );
+        }
+
+        let delays = collect_delays(&diags, "WcttTfaBound");
+        let mut sorted: Vec<u64> = delays.values().copied().collect();
+        sorted.sort_unstable();
+        let (fast, slow) = (sorted[0], sorted[1]);
+        assert!(
+            slow > fast.saturating_mul(10),
+            "the stream through the slow switch must dominate; a local \
+             index would alias its slow hop onto the fast curve. delays={delays:#?}",
+        );
+
+        // Soundness end-to-end: the converging tree's first-appearance index
+        // is non-topological (sink sw_c is slot 1, not the last slot), so
+        // `plp_bound` returns `NonTopologicalSinkTree` and the bridge skips
+        // the PLP arm WITHOUT panicking. Before the plp.rs entry guard this
+        // path panicked at `solve` (`successor[sink] = None` on a server it
+        // treated as non-sink). Converging PLP via reordering is
+        // REQ-NC-PLP-002.
+        #[cfg(feature = "milp-solver")]
+        {
+            let plp = collect_delays(&diags, "WcttPlpBound");
+            assert!(
+                plp.is_empty(),
+                "PLP must cleanly skip a non-topological converging tree \
+                 (REQ-NC-PLP-002), not fire or panic: {plp:#?}",
+            );
+        }
+    }
 }

@@ -1846,7 +1846,13 @@ artifacts:
       method-soundness; the latter is the deferred simulation floor
       REQ-NC-SIM-FLOOR-001. Cyclic / branching topology is rejected
       (NotFeedForward, REQ-NC-PLP-002); the tfa=True tightening to EXACT is
-      REQ-NC-PLP-003.
+      REQ-NC-PLP-003. Two guard tests pin the soundness boundary of the
+      sink-tree projection: non_topological_sink_tree_rejected asserts a
+      valid converging tree whose sink is NOT the highest-numbered server
+      returns PlpError::NonTopologicalSinkTree (no panic in solve), and
+      topological_sink_tree_accepted asserts the same shape relabelled with
+      the sink last solves cleanly — proving the guard rejects the labelling,
+      not the topology (reordering is REQ-NC-PLP-002).
     fields:
       method: automated-test
       steps:

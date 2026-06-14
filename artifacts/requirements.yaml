@@ -2690,7 +2690,13 @@ artifacts:
       sink-trees (per-flow sub-networks) on the existing HiGHS/good_lp
       backend. Multi-successor forks — still feed-forward, but not
       single-successor — are rejected (PlpError::NotFeedForward) and
-      deferred with the cyclic case to REQ-NC-PLP-002. This ports
+      deferred with the cyclic case to REQ-NC-PLP-002. A valid sink-tree
+      whose server indices are NOT a topological order (some edge points to
+      a lower-numbered server, so the sink is not the highest-numbered
+      server — e.g. a converging tree handed in first-appearance order) is
+      likewise rejected (PlpError::NonTopologicalSinkTree) rather than
+      panicking inside the sink-tree projection; reordering such trees so
+      PLP can fire is REQ-NC-PLP-002. This ports
       panco's PURE polynomial PLP LP (no TFA/SFA strengthening):
       bounds are always ≤ TFA and strictly inside the soundness sandwich
       EXACT ≤ plp ≤ TFA, matching panco's polynomial-PLP reference to
@@ -2721,7 +2727,14 @@ artifacts:
       spar-network shall extend PLP (REQ-NC-PLP-001) from feed-forward
       sink-trees to GENERIC topology — including CYCLIC service
       dependencies — via panco's forest decomposition (edges_forest) and
-      the LP fixpoint over the decomposed trees. This carries the
+      the LP fixpoint over the decomposed trees. Includes the smaller
+      precursor of topologically REORDERING a single-successor converging
+      sink-tree whose indices arrive non-topological (today rejected by
+      REQ-NC-PLP-001 as PlpError::NonTopologicalSinkTree) so PLP fires on
+      the common many-talkers→one-listener TSN shape — a relabelling, sound
+      because TFA/PLP are invariant under server renumbering, but gated on
+      the same converging-tree panco fixtures below before emitting numbers.
+      This carries the
       headline claim REQ-NC-PLP-001 cannot test: PLP CONVERGES where TFA
       diverges at high utilization. That divergence is a cyclic-
       dependency phenomenon (TFA's fixpoint terminates on any feed-
