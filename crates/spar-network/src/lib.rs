@@ -49,6 +49,12 @@ pub mod extract;
 /// PMOO/LUDB delay bound via a HiGHS-backed MILP (good_lp). Gated behind the
 /// default `milp-solver` feature so wasm targets (which can't build the cmake
 /// `highs-sys` dependency) can opt out (#259).
+/// PLP (polynomial-size LP) feed-forward FIFO delay bound via a
+/// HiGHS-backed LP (good_lp). Gated behind the default `milp-solver`
+/// feature alongside [`pmoo`] so wasm targets can opt out (#259).
+/// REQ-NC-PLP-001.
+#[cfg(feature = "milp-solver")]
+pub mod plp;
 #[cfg(feature = "milp-solver")]
 pub mod pmoo;
 pub mod tfa;
@@ -60,6 +66,8 @@ pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,
 };
 pub use extract::extract_network_graph;
+#[cfg(feature = "milp-solver")]
+pub use plp::{PlpBound, PlpError, PlpFlow, plp_bound};
 #[cfg(feature = "milp-solver")]
 pub use pmoo::{CompetingFlow, LpError, PmooBound, TaggedFlow, ludb_bound};
 pub use tfa::{

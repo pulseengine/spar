@@ -98,12 +98,21 @@ cross2 `[1→2]`; all `α = (1500 B, 100 Mbps)`.
 
 | flow | TFA | SFA | PLP | **EXACT** |
 |---|---|---|---|---|
-| tagged `[0,1,2]` | 134.7037 | 99.04 | 68.4 | **68.4** |
-| cross1 `[0,1]` | 86.7784 | 73.2 | 58.4 | **58.4** |
+| tagged `[0,1,2]` | 134.7037 | 99.04 | 72.22 | **68.4** |
+| cross1 `[0,1]` | 86.7784 | 73.2 | 61.11 | **58.4** |
 | cross2 `[1,2]` | 100.7037 | 81.22 | 57.98 | **57.98** |
 
 The **PLP** column is the target for REQ-NC-PLP-001: spar's `plp_bound`
-must land on these values (PLP = EXACT on these small feed-forward trees),
-inside the sandwich `EXACT ≤ plp ≤ TFA`.
+must land on these values inside the sandwich `EXACT ≤ plp ≤ TFA`. These
+are panco's **pure** polynomial LP (`FifoLP(polynomial=True, tfa=False)`) —
+the only variant spar can build *byte-identically* from its own model, so
+the cross-validation is a solver-precision port-fidelity pin, not an
+independent soundness proof. Pure PLP equals EXACT on the two tandems
+(fixtures 1–2) but is looser on the 3-hop line (72.22 vs 68.4 µs on the
+tagged flow) — still far below the 134.7 µs TFA, which is the dominance
+LUDB/PMOO cannot show on a *line*. Driving PLP to EXACT needs panco's
+TFA-strengthened LP (`tfa=True`), which embeds panco's own per-server TFA
+delays and so cannot be reproduced byte-identically — that tightening is
+REQ-NC-PLP-003.
 
 [panco]: https://github.com/Huawei-Paris-Research-Center/panco
