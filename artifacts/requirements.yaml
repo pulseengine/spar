@@ -123,8 +123,6 @@ artifacts:
       and down patterns to produce end-to-end connection instances.
     status: partial
     tags: [instance, as5506-ch14]
-    fields:
-      release: v0.18.0
 
   - id: REQ-INST-004
     type: requirement
@@ -230,8 +228,6 @@ artifacts:
       subcomponent rules. Target 50+ rules.
     status: partial
     tags: [analysis, legality]
-    fields:
-      release: v0.18.0
 
   - id: REQ-ANALYSIS-008
     type: requirement
@@ -471,8 +467,6 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-INST-004
-    fields:
-      release: v0.18.0
 
   - id: COVERAGE-CH13
     type: requirement
@@ -984,8 +978,6 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SOLVER-009
-    fields:
-      release: v0.18.0
 
   - id: REQ-RESOLUTE-001
     type: requirement
@@ -2438,7 +2430,7 @@ artifacts:
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
     fields:
-      release: v0.18.0
+      release: v0.20.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -2647,7 +2639,7 @@ artifacts:
     status: proposed
     tags: [ingest, dbc, can, flows, tier1]
     fields:
-      release: v0.18.0
+      release: v0.19.0
 
   - id: REQ-INGEST-ARXML-001
     type: requirement
@@ -2665,7 +2657,7 @@ artifacts:
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
     fields:
-      release: v0.18.0
+      release: v0.19.0
 
   - id: REQ-NC-TFA-001
     type: requirement
