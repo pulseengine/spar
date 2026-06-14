@@ -17,6 +17,7 @@ members = [
     "crates/spar-render",
     "crates/spar-solver",
     "crates/spar-sysml2",
+    "crates/spar-dbc",
     "crates/spar-verify-macros",
     "crates/spar-verify",
     "crates/spar-wasm",
@@ -43,6 +44,7 @@ spar-network = { path = "crates/spar-network" }
 spar-render = { path = "crates/spar-render" }
 spar-solver = { path = "crates/spar-solver" }
 spar-sysml2 = { path = "crates/spar-sysml2" }
+spar-dbc = { path = "crates/spar-dbc" }
 spar-transform = { path = "crates/spar-transform" }
 spar-variants = { path = "crates/spar-variants" }
 spar-codegen = { path = "crates/spar-codegen" }

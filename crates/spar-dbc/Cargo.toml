@@ -1,0 +1,21 @@
+[package]
+name = "spar-dbc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CAN .dbc ingest: parse a DBC network and emit AADL v2.3 source text"
+
+[dependencies]
+# default features off: we only read the parsed model, so we drop the optional
+# `encodings` (encoding_rs / cp1252) and `serde` features — smaller supply-chain
+# surface to audit. `Dbc::try_from(&str)` works without them.
+can-dbc = { version = "9.1.0", default-features = false }
+
+[dev-dependencies]
+# The emitted AADL is verified by round-tripping it through spar's own
+# parser + instantiation pipeline — the parser is the test oracle.
+spar-syntax.workspace = true
+spar-base-db.workspace = true
+spar-hir-def.workspace = true
+expect-test = "1"

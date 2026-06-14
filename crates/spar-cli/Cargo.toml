@@ -23,6 +23,7 @@ spar-hir.workspace = true
 spar-annex.workspace = true
 spar-analysis.workspace = true
 spar-sysml2.workspace = true
+spar-dbc.workspace = true
 spar-solver.workspace = true
 spar-render.workspace = true
 spar-codegen.workspace = true

@@ -2606,14 +2606,37 @@ artifacts:
     title: "DBC (CAN) model ingest"
     description: >
       spar shall ingest CAN bus descriptions from DBC files via the
-      can-dbc crate (MIT/Apache), mapping signals/messages/nodes onto
-      the spar instance model so existing analysis passes run on real
-      CAN models rather than hand-written .aadl. The cheap CAN-only
-      secondary to ARXML ingest; license-clean, no XSD to bundle.
-    status: proposed
+      can-dbc crate (MIT/Apache), mapping nodes/messages onto the spar
+      instance model so existing analysis passes run on real CAN models
+      rather than hand-written .aadl. Implemented in the spar-dbc crate
+      by emitting AADL v2.3 source text (CAN bus -> `bus`, each node ->
+      `device` with `requires bus access`, each message -> `data` with
+      `Data_Size`) and round-tripping it through spar's own parser +
+      instantiation pipeline (the parser is the test oracle). Exposed as
+      `spar dbc <file.dbc>`. The cheap CAN-only wedge, secondary to
+      ARXML ingest; license-clean, no XSD to bundle.
+    status: implemented
     tags: [ingest, dbc, can, tier1]
     fields:
       release: v0.17.0
+
+  - id: REQ-INGEST-DBC-FLOWS-001
+    type: requirement
+    title: "DBC message flows as AADL ports + bus connections"
+    description: >
+      Extend DBC ingest (REQ-INGEST-DBC-001) to model message
+      transmit/receive as AADL features and connections: each frame
+      becomes a data port on its transmitting device (out) and on each
+      receiver (in), connected across the CAN bus. This is the
+      broadcast-bus analogue of the port-connection modelling the
+      network-calculus track consumes, and is deliberately deferred from
+      the v0.17.0 first cut (which ships bus + devices + frame data
+      types only). KILL-GATE: drop if the flat instance model already
+      carries enough for the target CAN analysis without per-flow ports.
+    status: proposed
+    tags: [ingest, dbc, can, flows, tier1]
+    fields:
+      release: v0.18.0
 
   - id: REQ-INGEST-ARXML-001
     type: requirement

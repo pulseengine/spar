@@ -3206,3 +3206,30 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-NC-TFA-001
+
+  - id: TEST-INGEST-DBC
+    type: feature
+    title: DBC ingest emits instantiable AADL
+    description: >
+      spar-dbc's roundtrip tests exercise REQ-INGEST-DBC-001 end to end:
+      dbc_to_aadl parses a representative .dbc (three nodes — one named
+      `System`, an AADL reserved word, to force keyword escaping on a
+      device — two messages with signals, plus a Vector__XXX
+      no-transmitter frame) and emits AADL source. The emitted text is
+      then run back through spar's own pipeline — spar_syntax::parse,
+      file_item_tree, GlobalScope::from_trees, SystemInstance::instantiate
+      (root CAN_Network.impl) — asserting ZERO diagnostics at every stage
+      (the parser is the oracle), exactly one device per DBC node, and
+      Data_Size carried on each frame. Covers the empty (header-only)
+      network and rejection of malformed input. Unit tests additionally
+      pin the identifier sanitiser (digit-lead, keyword escape, run
+      collapse, uniquification).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-dbc
+    status: passing
+    tags: [ingest, dbc, can, tier1, v0170]
+    links:
+      - type: satisfies
+        target: REQ-INGEST-DBC-001
