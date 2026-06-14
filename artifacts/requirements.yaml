@@ -2683,21 +2683,81 @@ artifacts:
 
   - id: REQ-NC-PLP-001
     type: requirement
-    title: "PLP (polynomial-LP, generic-topology) network-calculus bounds"
+    title: "PLP (polynomial-LP) network-calculus bounds — feed-forward"
     description: >
       spar-network shall provide Polynomial-LP (PLP) network-calculus
-      bounds on the existing HiGHS/good_lp backend. PLP DOMINATES the
-      TFA spar already has — bounds always ≤ TFA, converging where TFA
-      does not at high utilization — and works on GENERIC topology
-      where the existing LUDB/PMOO are tandem-only. Validate output
-      against Panco/Saihu reference implementations. Highest
-      value-to-risk item in the analysis; pure analyzer win, zero
-      dependency on synthesis. [SOLID — Bouillard arXiv:2010.09263;
-      Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
-    status: proposed
+      bounds for FEED-FORWARD FIFO networks projected onto SINGLE-SUCCESSOR
+      sink-trees (per-flow sub-networks) on the existing HiGHS/good_lp
+      backend. Multi-successor forks — still feed-forward, but not
+      single-successor — are rejected (PlpError::NotFeedForward) and
+      deferred with the cyclic case to REQ-NC-PLP-002. This ports
+      panco's PURE polynomial PLP LP (no TFA/SFA strengthening):
+      bounds are always ≤ TFA and strictly inside the soundness sandwich
+      EXACT ≤ plp ≤ TFA, matching panco's polynomial-PLP reference to
+      solver precision — exact on 2 of 3 validation fixtures, within
+      5.6% of EXACT on the 3-hop line (72.22 vs 68.4 µs, still ≪ the
+      134.7 µs TFA). PLP works beyond the tandem-only LUDB/PMOO: 72.22
+      ≪ 134.7 on a 3-server LINE is the dominance the existing tools
+      cannot show. NOTE: this is PORT-FIDELITY against panco, not
+      independent method-soundness (the LP is transcribed from panco and
+      the floor is also panco's) — independent soundness is the deferred
+      simulation floor (REQ-NC-SIM-FLOOR-001). Driving PLP all the way
+      to the exact worst case via panco's TFA-strengthened LP (tfa=True)
+      is the orthogonal tightening REQ-NC-PLP-003. The GENERIC/CYCLIC case
+      and the "converges where TFA diverges at high utilization" claim
+      (a cyclic-dependency phenomenon — TFA terminates on feed-forward)
+      are split to REQ-NC-PLP-002. Highest value-to-risk analyzer item;
+      pure analyzer win, zero dependency on synthesis.
+      [SOLID — Bouillard arXiv:2010.09263]
+    status: implemented
     tags: [network-calculus, plp, substrate, tier1]
     fields:
       release: v0.18.0
+
+  - id: REQ-NC-PLP-002
+    type: requirement
+    title: "PLP network-calculus bounds — generic / cyclic topology"
+    description: >
+      spar-network shall extend PLP (REQ-NC-PLP-001) from feed-forward
+      sink-trees to GENERIC topology — including CYCLIC service
+      dependencies — via panco's forest decomposition (edges_forest) and
+      the LP fixpoint over the decomposed trees. This carries the
+      headline claim REQ-NC-PLP-001 cannot test: PLP CONVERGES where TFA
+      diverges at high utilization. That divergence is a cyclic-
+      dependency phenomenon (TFA's fixpoint terminates on any feed-
+      forward net), so it lives entirely here and CANNOT be exercised by
+      the current feed-forward-only oracle fixtures. GATE: this
+      requirement is blocked on new cyclic / high-utilization reference
+      fixtures from panco (extend REQ-NC-VALIDATION-001's pinned table)
+      — building generic+cyclic PLP before those fixtures exist would be
+      untested LP code with no soundness floor. [SOLID — Bouillard
+      arXiv:2010.09263; Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
+    status: proposed
+    tags: [network-calculus, plp, cyclic, substrate, tier1]
+    fields:
+      release: v0.19.0
+
+  - id: REQ-NC-PLP-003
+    type: requirement
+    title: "PLP tightening to exact worst case (TFA-strengthened LP)"
+    description: >
+      spar-network shall tighten its PLP bound (REQ-NC-PLP-001) toward the
+      exact worst-case FIFO delay by adding panco's TFA-strengthening
+      constraints to the polynomial LP (panco's FifoLP tfa=True path). On
+      the validation fixtures this drives PLP from pure-LP slack to EXACT:
+      three_server_line tagged 72.22 → 68.4 µs (= the Bouillard-Stea exact
+      ELP). This is ORTHOGONAL to the feed-forward → cyclic topology split
+      (REQ-NC-PLP-002): it strengthens the per-tree LP, it does not change
+      which topologies are handled. RISK: the strengthening embeds panco's
+      OWN per-server TFA delays inside the LP, so a faithful port can no
+      longer build a byte-identical LP from spar's INDEPENDENT TFA engine —
+      the oracle for this item is the pinned panco tfa=True PLP column under
+      the sandwich EXACT ≤ plp ≤ TFA, NOT solver-precision LP identity.
+      [SOLID — Bouillard arXiv:2010.09263]
+    status: proposed
+    tags: [network-calculus, plp, substrate, tier1]
+    fields:
+      release: v0.19.0
 
   - id: REQ-NC-VALIDATION-001
     type: requirement

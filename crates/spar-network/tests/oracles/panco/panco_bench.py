@@ -15,7 +15,11 @@ def us(x): return round(x*1e6,4)
 def bounds(net, label):
     tfa=TfaLP(net).all_delays
     sfa=SfaLP(net).all_delays
-    plp=FifoLP(net,polynomial=True,tfa=True).all_delays
+    # PURE polynomial PLP (no TFA strengthening): the only variant spar can
+    # build byte-identically to this LP from its own model (REQ-NC-PLP-001).
+    # tfa=True drives PLP to EXACT but embeds panco's per-server TFA delays
+    # in the LP — that tightening is REQ-NC-PLP-003.
+    plp=FifoLP(net,polynomial=True,tfa=False).all_delays
     exact=FifoLP(net,polynomial=False).all_delays
     print(f"--- {label}")
     print(f"  TFA  : {[us(x) for x in tfa]}")
