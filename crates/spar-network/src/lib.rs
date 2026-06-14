@@ -67,7 +67,7 @@ pub use curves::{
 };
 pub use extract::extract_network_graph;
 #[cfg(feature = "milp-solver")]
-pub use plp::{PlpBound, PlpError, PlpFlow, plp_bound};
+pub use plp::{PlpBound, PlpError, PlpFlow, plp_bound, plp_bound_tfa_strengthened};
 #[cfg(feature = "milp-solver")]
 pub use pmoo::{CompetingFlow, LpError, PmooBound, TaggedFlow, ludb_bound};
 pub use tfa::{
