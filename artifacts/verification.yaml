@@ -1860,6 +1860,40 @@ artifacts:
       - type: satisfies
         target: REQ-NC-VALIDATION-001
 
+  - id: TEST-NC-BRIDGE
+    type: feature
+    title: AADL instance → network-wide NC solver bridge
+    description: >
+      The network-wide TFA/PLP arm in crates/spar-analysis/src/wctt.rs
+      (network_wide_nc_bounds, gated behind --pmoo) turns an instantiated
+      AADL TSN model into solver input. wctt's collect_streams /
+      service_for_bus already assemble per-stream ArrivalCurves (routed by
+      Actual_Connection_Binding) and per-switch rate-latency ServiceCurves;
+      the bridge supplies the missing step — a single global dense server
+      index over every traversed switch, into which all streams' hops map,
+      yielding one TfaFlow/PlpFlow per stream fed to one network-wide
+      tfa_bound / plp_bound call. It surfaces WcttTfaBound and (under
+      milp-solver) WcttPlpBound Info diagnostics. Distinct from the
+      per-tandem pmoo_or_sfa bridge: here every stream is a flow in one
+      global network. Tests network_wide_tfa_fires_only_under_pmoo and
+      network_wide_plp_is_at_most_tfa_on_fifo_line assert the arm is off by
+      default (byte-identical contract — golden fixtures untouched), fires
+      one bound per stream over a shared 3-hop FIFO line, and that per-flow
+      PLP <= TFA (39 us vs 105.5 us here — the line-topology dominance that
+      LUDB/PMOO cannot show). Non-FIFO hops, unstable servers, and PLP
+      NotFeedForward skip the arm transparently, leaving the per-stream SFA
+      bounds authoritative. The production caller is the CLI --pmoo path
+      (run_all_analyses_with_pmoo, package spar).
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-analysis --lib wctt::tests::network_wide"
+    status: passing
+    tags: [v0.18.0, network, network-calculus, bridge, tsn, tfa, plp]
+    links:
+      - type: satisfies
+        target: REQ-NC-BRIDGE-001
+
   - id: TEST-WCTT
     type: feature
     title: Per-stream WCTT analysis pass tests

@@ -2813,7 +2813,7 @@ artifacts:
       milp-solver feature for the PLP half (the wasm build omits it).
       [SOLID — Bouillard arXiv:2010.09263; builds on REQ-NC-TFA-001,
       REQ-NC-PLP-001, extract_network_graph, wctt::collect_streams]
-    status: proposed
+    status: implemented
     tags: [network-calculus, bridge, tsn, substrate, tier1]
     fields:
       release: v0.18.0
