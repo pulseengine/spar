@@ -1911,6 +1911,46 @@ artifacts:
       - type: satisfies
         target: REQ-NC-PLP-CONVERGE-001
 
+  - id: TEST-NC-PLP-STR
+    type: feature
+    title: TFA-strengthened PLP — tightening to EXACT (panco tfa=True oracle)
+    description: >
+      Exercises plp_bound_tfa_strengthened (REQ-NC-PLP-003): the polynomial LP
+      with panco's per-server TFA-delay constraints added (Bouillard
+      fifo/plpConstraints.py, the FifoLP tfa=True path). Unlike TEST-NC-PLP
+      (a transcription of panco's PURE LP), this variant feeds the LP spar's
+      OWN independent FP-TFA per-server delays (tfa_bound), so reproducing
+      panco's tfa=True column is wiring-level agreement implied by
+      (LP port-fidelity from TEST-NC-PLP) ∧ (spar TFA ≈ panco TFA from
+      TEST-NC-VALIDATION), not a wholly independent recomputation. Two layers.
+      (1) plp.rs unit tests three_server_line_tfa_strengthened and
+      converge_bridge_tfa_strengthened pin [68.4,58.4,57.98] and
+      [1035.2,10030.7]. (2) the plp_str_xval module in nc_validation.rs
+      (feature milp-solver) pins the panco tfa=True column under three
+      guarantees: SOUNDNESS (strengthened ≥ panco EXACT — the strengthening
+      embeds sound per-server delays ≥ true, so the one-directional
+      t[h]−t[j] ≤ d[j] constraints keep the bound ≥ EXACT), AGREEMENT
+      (strengthened ≈ panco tfa=True within method tolerance), and MONOTONE
+      (strengthened ≤ pure PLP — adding constraints to a maximization can only
+      lower the optimum). converge_bridge additionally asserts the HEADLINE:
+      on the very net where PURE PLP exceeds TFA (dataA pure 1148.33 > TFA
+      1048.09 — TEST-NC-PLP's incomparability counterexample), strengthening
+      drives dataA to EXACT 1035.2, BACK BELOW TFA — restoring plp ≤ TFA where
+      pure PLP could not. Panco generator oracles/panco/panco_bench.py
+      (FifoLP(polynomial=True, tfa=True)).
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib plp::"
+        - run: "cargo test -p spar-network --test nc_validation plp_str_xval"
+    status: passing
+    tags: [v0.19.0, network, network-calculus, plp, validation, oracle]
+    links:
+      - type: satisfies
+        target: REQ-NC-PLP-003
+      - type: satisfies
+        target: REQ-NC-VALIDATION-001
+
   - id: TEST-NC-BRIDGE
     type: feature
     title: AADL instance → network-wide NC solver bridge

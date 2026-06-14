@@ -400,3 +400,172 @@ mod plp_xval {
         );
     }
 }
+
+// ─── TFA-strengthened PLP (REQ-NC-PLP-003) ──────────────────────────────────
+//
+// `plp_bound_tfa_strengthened` adds panco's `tfa=True` per-server TFA-delay
+// constraints to the polynomial LP (Bouillard `fifo/plpConstraints.py`),
+// tightening the bound toward EXACT. The LP is still spar's port of panco's
+// (as in the pure-PLP block), but here it is fed spar's OWN independent FP-TFA
+// per-server delays (`tfa_bound`) rather than panco's, so reproducing panco's
+// `tfa=True` column is a wiring-regression pin — agreement implied by
+// (LP port-fidelity, the `plp_xval` block) ∧ (spar TFA ≈ panco TFA, the TFA
+// block) — not a wholly independent recomputation. Soundness is preserved
+// because spar's per-server delays are themselves sound upper bounds (≥ true
+// delay), and the one-directional `t[h]−t[j] ≤ d[j]` constraints stay valid
+// under any looser `d[j]`.
+//
+// The oracle pins the panco `tfa=True` column (regenerated offline from the
+// venv, `FifoLP(polynomial=True, tfa=True)`), and asserts the three guarantees
+// that matter:
+//   (1) SOUNDNESS  — strengthened ≥ panco EXACT (independent ELP floor).
+//   (2) AGREEMENT  — strengthened ≈ panco `tfa=True` within method tolerance.
+//   (3) MONOTONE   — strengthened ≤ pure PLP (strengthening can only tighten).
+// `converge_bridge` additionally asserts the headline: strengthened dataA ≤
+// TFA, on the very net where *pure* PLP exceeds TFA (1148.33 > 1048.09). The
+// strengthening drives it to EXACT (1035.2), restoring `plp ≤ TFA` — the whole
+// point of REQ-NC-PLP-003.
+#[cfg(feature = "milp-solver")]
+mod plp_str_xval {
+    use super::*;
+    use spar_network::{PlpFlow, plp_bound, plp_bound_tfa_strengthened, tfa_bound};
+
+    /// Method-agreement tolerance for the strengthened LP. spar reproduces
+    /// panco's `tfa=True` column to the pinned 2 decimals; the slack absorbs
+    /// per-server ps-rounding in both spar's TFA delays and the LP (the same
+    /// ≤0.056 % regime as the TFA block), while still failing on any real
+    /// formulation drift (~200 ps at 68 µs).
+    const PLP_STR_TOL: f64 = 0.003;
+
+    fn plp_flow(burst: u64, rate: u64, path: &[usize]) -> PlpFlow {
+        PlpFlow {
+            alpha: ArrivalCurve::affine(burst, rate),
+            path: path.to_vec(),
+        }
+    }
+
+    /// For one fixture: the strengthened bound must (1) be `≥` panco EXACT,
+    /// (2) match the pinned panco `tfa=True` column within `PLP_STR_TOL`, and
+    /// (3) be `≤` spar's own pure PLP on the same fixture (strengthening never
+    /// loosens). Returns spar's strengthened per-flow delays (ps) so callers
+    /// can pin extra net-specific invariants.
+    fn check_plp_str(
+        name: &str,
+        flows: &[PlpFlow],
+        services: &[ServiceCurve],
+        panco_tfa_true_us: &[f64],
+        panco_exact_us: &[f64],
+    ) -> Vec<u64> {
+        let r = plp_bound_tfa_strengthened(flows, services)
+            .unwrap_or_else(|e| panic!("{name}: plp_bound_tfa_strengthened failed: {e}"));
+        let pure = plp_bound(flows, services)
+            .unwrap_or_else(|e| panic!("{name}: pure plp_bound failed: {e}"));
+
+        assert_eq!(
+            r.flow_delay_ps.len(),
+            panco_tfa_true_us.len(),
+            "{name}: flow count"
+        );
+        for (i, &str_ps) in r.flow_delay_ps.iter().enumerate() {
+            let exact_ps = (panco_exact_us[i] * US_PS as f64).round() as u64;
+            // (1) SOUNDNESS floor — strengthening must not undercut EXACT.
+            assert!(
+                str_ps >= exact_ps,
+                "{name} flow {i}: UNSOUND — strengthened {str_ps} ps < panco exact {exact_ps} ps",
+            );
+            // (2) AGREEMENT — track panco's tfa=True column (method-level).
+            let str_us = str_ps as f64 / US_PS as f64;
+            let rel = (str_us - panco_tfa_true_us[i]).abs() / panco_tfa_true_us[i];
+            assert!(
+                rel <= PLP_STR_TOL,
+                "{name} flow {i}: strengthened {str_us:.4} µs disagrees with panco tfa=True \
+                 {:.4} µs by {:.3}% (> {:.3}% tol)",
+                panco_tfa_true_us[i],
+                rel * 100.0,
+                PLP_STR_TOL * 100.0,
+            );
+            // (3) MONOTONE — strengthened ≤ pure PLP (only tightens).
+            assert!(
+                str_ps <= pure.flow_delay_ps[i],
+                "{name} flow {i}: strengthened {str_ps} ps EXCEEDS pure PLP {} ps \
+                 (strengthening must never loosen)",
+                pure.flow_delay_ps[i],
+            );
+        }
+        r.flow_delay_ps
+    }
+
+    /// `three_server_line` — strengthening drives the two crossing flows from
+    /// pure PLP `[72.22, 61.11, 57.98]` down to EXACT `[68.4, 58.4, 57.98]`
+    /// (= panco `tfa=True`).
+    #[test]
+    fn panco_three_server_line_plp_str() {
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+        ];
+        let flows = vec![
+            plp_flow(FRAME, HUNDRED_MBPS, &[0, 1, 2]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[0, 1]),
+            plp_flow(FRAME, HUNDRED_MBPS, &[1, 2]),
+        ];
+        check_plp_str(
+            "three_server_line",
+            &flows,
+            &services,
+            &[68.4, 58.4, 57.98],
+            &[68.4, 58.4, 57.98],
+        );
+    }
+
+    /// `converge_bridge` (wctt.rs::bridge_converge_aadl) — THE net that breaks
+    /// pure PLP. Two talkers merge at a shared sink: dataA `[0,2]` (fast→fast),
+    /// dataB `[1,2]` (slow→fast), sink = 2. Server latencies 5 µs / 10000 µs /
+    /// 5 µs. Pure PLP gives dataA 1148.33 µs > TFA 1048.09 µs (both sound, but
+    /// incomparable). Strengthening drives dataA to EXACT 1035.2 µs, *below*
+    /// TFA — the REQ-NC-PLP-003 fix. Pinned panco `tfa=True` = `[1035.2,
+    /// 10030.7]` = EXACT.
+    #[test]
+    fn panco_converge_bridge_plp_str() {
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS), // sw_a fast = 0
+            ServiceCurve::rate_latency(GBPS, 10_000 * US_PS), // sw_b slow = 1
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS), // sw_c fast sink = 2
+        ];
+        let flows = vec![
+            plp_flow(FRAME, HUNDRED_MBPS, &[0, 2]), // dataA
+            plp_flow(FRAME, HUNDRED_MBPS, &[1, 2]), // dataB
+        ];
+        let str_ps = check_plp_str(
+            "converge_bridge",
+            &flows,
+            &services,
+            &[1035.2, 10030.7],
+            &[1035.2, 10030.7],
+        );
+
+        // Headline: strengthened dataA ≤ TFA dataA, where *pure* PLP exceeds
+        // it. This is the incomparability that REQ-NC-PLP-003 repairs.
+        let tfa_flows: Vec<TfaFlow> = flows
+            .iter()
+            .map(|f| affine_flow(f.alpha.burst_bytes, f.alpha.sustained_rate_bps, &f.path))
+            .collect();
+        let tfa = tfa_bound(&tfa_flows, &services).expect("tfa ceiling");
+        let pure = plp_bound(&flows, &services).expect("pure plp");
+        assert!(
+            pure.flow_delay_ps[0] > tfa.flow_delay_ps[0],
+            "converge_bridge: precondition broke — pure PLP dataA {} ps should EXCEED \
+             TFA {} ps (the pure-PLP incomparability this fix targets)",
+            pure.flow_delay_ps[0],
+            tfa.flow_delay_ps[0],
+        );
+        assert!(
+            str_ps[0] <= tfa.flow_delay_ps[0],
+            "converge_bridge: strengthened dataA {} ps must be ≤ TFA {} ps \
+             (REQ-NC-PLP-003 restores plp ≤ TFA where pure PLP could not)",
+            str_ps[0],
+            tfa.flow_delay_ps[0],
+        );
+    }
+}

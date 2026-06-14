@@ -703,7 +703,7 @@ artifacts:
     status: planned
     tags: [solver, verification, v040]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-SOLVER-006
     type: requirement
@@ -741,7 +741,7 @@ artifacts:
     status: planned
     tags: [solver, safety, v040]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-SOLVER-009
     type: requirement
@@ -754,7 +754,7 @@ artifacts:
     status: planned
     tags: [solver, security, v040]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -2455,7 +2455,7 @@ artifacts:
     status: proposed
     tags: [ingest, sysml2, grammar]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-PLUGFEST-002
     type: requirement
@@ -2551,7 +2551,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.19.0
+      release: v0.20.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -2570,7 +2570,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.19.0
+      release: v0.20.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -2590,7 +2590,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler, attestation]
     fields:
-      release: v0.19.0
+      release: v0.20.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -2639,7 +2639,7 @@ artifacts:
     status: proposed
     tags: [ingest, dbc, can, flows, tier1]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-INGEST-ARXML-001
     type: requirement
@@ -2657,7 +2657,7 @@ artifacts:
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-NC-TFA-001
     type: requirement
@@ -2799,8 +2799,19 @@ artifacts:
       longer build a byte-identical LP from spar's INDEPENDENT TFA engine —
       the oracle for this item is the pinned panco tfa=True PLP column under
       the sandwich EXACT ≤ plp ≤ TFA, NOT solver-precision LP identity.
-      [SOLID — Bouillard arXiv:2010.09263]
-    status: proposed
+      DELIVERED: `plp_bound_tfa_strengthened` (spar-network/src/plp.rs) feeds
+      the LP spar's OWN sound FP-TFA per-server delays (`tfa_bound`); soundness
+      is preserved because those delays are upper bounds (≥ true), and the
+      one-directional t[h]−t[j] ≤ d[j] constraints stay valid under any looser
+      d[j], so the bound never drops below EXACT. On the converging-bridge net
+      that BREAKS pure PLP (REQ-NC-PLP-MIN-001's counterexample: pure PLP dataA
+      1148.33 > TFA 1048.09), strengthening drives dataA to EXACT 1035.2 — back
+      below TFA, restoring plp ≤ TFA where pure PLP could not. Oracle:
+      `nc_validation.rs::plp_str_xval` pins the panco tfa=True column
+      ([68.4,58.4,57.98] and [1035.2,10030.7]) under EXACT ≤ str ≤ pure-PLP,
+      plus the converge_bridge str-dataA ≤ TFA headline; panco generator
+      `oracles/panco/panco_bench.py`. [SOLID — Bouillard arXiv:2010.09263]
+    status: implemented
     tags: [network-calculus, plp, substrate, tier1]
     fields:
       release: v0.19.0
@@ -2936,7 +2947,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -2955,7 +2966,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, qbv, tier2]
     fields:
-      release: v0.19.0
+      release: v0.20.0
 
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement

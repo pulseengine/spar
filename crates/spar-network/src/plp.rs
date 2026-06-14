@@ -7,10 +7,23 @@
 //! whole aggregate (cheap, valid under cycles, but loose), and where
 //! [`crate::pmoo`] is a closed form restricted to tandems, PLP solves a
 //! *single linear program per flow* over a finite set of "interesting"
-//! time instants and recovers a delay bound that is provably
-//! `EXACT ≤ plp ≤ TFA` and, on feed-forward trees, materially tighter
-//! than TFA on the very topologies (lines with overlapping cross-traffic)
-//! where PMOO/LUDB do not apply.
+//! time instants. This module exposes two variants:
+//!
+//! * [`plp_bound`] — the **pure** polynomial LP (REQ-NC-PLP-001). Sound
+//!   (`≥ EXACT`) and, on most feed-forward trees, materially tighter than
+//!   TFA on the very topologies (lines with overlapping cross-traffic)
+//!   where PMOO/LUDB do not apply. It is **not** universally `≤ TFA`,
+//!   though: pure PLP and TFA are *incomparable* over-approximations —
+//!   on a converging tree with a slow branch the cross-burst at the shared
+//!   sink can inflate pure PLP *above* TFA (the `converge_bridge` fixture:
+//!   pure PLP 1148.33 µs > TFA 1048.09 µs ≥ EXACT 1035.2). The authoritative
+//!   feed-forward bound is therefore `min(PLP, TFA)` (REQ-NC-PLP-MIN-001).
+//! * [`plp_bound_tfa_strengthened`] — the **TFA-strengthened** LP
+//!   (REQ-NC-PLP-003): adds panco's `tfa=True` per-server TFA-delay
+//!   constraints, tightening the optimum toward the exact worst case. On
+//!   the validation fixtures it reaches EXACT (3-hop line 72.22 → 68.4 µs;
+//!   `converge_bridge` 1148.33 → 1035.2, back under TFA), restoring the
+//!   `EXACT ≤ plp ≤ TFA` sandwich that the *pure* LP can break.
 //!
 //! The formulation is Bouillard's polynomial-size LP (arXiv:2010.09263):
 //! a *time-expanded* model whose variables are the cumulative arrival
@@ -33,19 +46,19 @@
 //! solver precision), not an independent soundness proof of the PLP
 //! *method* — that is the deferred simulation floor REQ-NC-SIM-FLOOR-001.
 //!
-//! Two deliberate scope cuts, each its own requirement:
+//! [`plp_bound_tfa_strengthened`] adds the `tfa=True` strengthening on top of
+//! this pure port (REQ-NC-PLP-003); it embeds spar's *own* per-server TFA
+//! delays, so — unlike the pure LP — it is not byte-identical to panco and is
+//! pinned against panco's `tfa=True` column under the `EXACT ≤ plp ≤ TFA`
+//! sandwich rather than to solver-precision LP identity.
+//!
+//! One deliberate scope cut remains, its own requirement:
 //!
 //! * **Generic topology — forks and cycles** (panco's `edges_forest`
 //!   decomposition + LP fixpoint, and the "PLP converges where TFA diverges
 //!   at high utilization" claim) — REQ-NC-PLP-002. This build projects onto
 //!   single-successor sink-trees, so a cycle *or* a fork (the latter still
 //!   feed-forward) is rejected here with [`PlpError::NotFeedForward`].
-//! * **Tightening to the exact worst case** via panco's TFA-strengthened
-//!   LP (`tfa=True`, which embeds per-server TFA delays in the program) —
-//!   REQ-NC-PLP-003. The *pure* LP ported here is looser than EXACT on
-//!   some trees (e.g. 72.22 vs 68.4 µs on a 3-hop line) but is the only
-//!   variant spar can build *byte-identically* to panco from its own
-//!   model, which is what makes the solver-precision pin meaningful.
 //!
 //! # Units
 //!
@@ -72,6 +85,7 @@ use good_lp::{
 };
 
 use crate::curves::{ArrivalCurve, ServiceCurve};
+use crate::tfa::{TfaError, TfaFlow, tfa_bound};
 
 /// Per-link maximum-service ("shaping") rate, in bits/s. Matches the
 /// non-binding `TokenBucket(0, 1e12)` the cross-validation oracle pins for
@@ -181,6 +195,40 @@ impl core::error::Error for PlpError {}
 /// projection. Returns the per-flow delay bounds in picoseconds, or a
 /// [`PlpError`].
 pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBound, PlpError> {
+    plp_bound_impl(flows, services, false)
+}
+
+/// TFA-strengthened PLP delay bounds (REQ-NC-PLP-003).
+///
+/// Identical to [`plp_bound`] but adds panco's `tfa=True` *TFA-delay
+/// constraints* to each per-flow LP: for every server `j` the date-index
+/// spread is bounded by `j`'s per-server TFA delay `D_j`, which embeds the
+/// total-flow bound inside the polynomial program and tightens the optimum
+/// toward the exact worst case (on the validation fixtures it drives PLP from
+/// pure-LP slack to EXACT — e.g. `three_server_line` 72.22 → 68.4 µs, the
+/// Bouillard–Stea ELP).
+///
+/// The `D_j` are computed by spar's **own** [`crate::tfa::tfa_bound`] — an
+/// *independent* sound per-server upper delay — not panco's internal `TfaLP`.
+/// A sound (≥ true) `D_j` keeps the strengthened LP sound: the extra
+/// constraints only forbid date spreads no real arrival can produce, so the
+/// optimum stays `≥ EXACT`. Because the embedded delays come from a different
+/// TFA engine, the LP is **not** byte-identical to panco's `tfa=True` program
+/// (unlike [`plp_bound`] vs `tfa=False`); the oracle for this path is the
+/// pinned panco `tfa=True` column under the sandwich `EXACT ≤ plp ≤ TFA`, not
+/// solver-precision LP identity (see REQ-NC-PLP-003).
+pub fn plp_bound_tfa_strengthened(
+    flows: &[PlpFlow],
+    services: &[ServiceCurve],
+) -> Result<PlpBound, PlpError> {
+    plp_bound_impl(flows, services, true)
+}
+
+fn plp_bound_impl(
+    flows: &[PlpFlow],
+    services: &[ServiceCurve],
+    strengthen: bool,
+) -> Result<PlpBound, PlpError> {
     if flows.is_empty() || services.is_empty() {
         return Err(PlpError::EmptyNetwork);
     }
@@ -281,11 +329,58 @@ pub fn plp_bound(flows: &[PlpFlow], services: &[ServiceCurve]) -> Result<PlpBoun
         }
     }
 
+    // ── TFA-strengthening delays (REQ-NC-PLP-003) ────────────────────────
+    // When strengthening, compute spar's OWN per-server TFA delay on the
+    // (relabelled) network — a SOUND upper bound from the independent FP-TFA
+    // engine — and feed it into each per-flow LP as panco's `tfa=True`
+    // TFA-delay constraints. `server_tfa_us[g]` is the global server `g`'s
+    // delay in µs; `SubNetwork::project` sub-selects it into local order. A
+    // sound (≥ true) delay keeps the strengthened LP sound: the constraints
+    // only forbid date spreads no real arrival produces. The stability
+    // precheck above mirrors TFA's, so `tfa_bound` cannot return `Unstable`
+    // here; map any unexpected TFA error to `SolverFailed` rather than panic.
+    let server_tfa_us: Option<Vec<f64>> = if strengthen {
+        let tfa_flows: Vec<TfaFlow> = flows
+            .iter()
+            .map(|f| TfaFlow {
+                alpha: f.alpha,
+                path: f.path.clone(),
+            })
+            .collect();
+        let res = tfa_bound(&tfa_flows, services).map_err(|e| match e {
+            TfaError::Unstable {
+                server,
+                agg_rate_bps,
+                service_rate_bps,
+            } => PlpError::Unstable {
+                server,
+                agg_rate_bps,
+                service_rate_bps,
+            },
+            _ => PlpError::SolverFailed,
+        })?;
+        Some(
+            res.server_delay_ps
+                .iter()
+                .map(|&d| d as f64 / 1.0e6)
+                .collect(),
+        )
+    } else {
+        None
+    };
+
     // ── Per-flow LP on the sink-tree projection ──────────────────────────
     let paths: Vec<&[usize]> = flows.iter().map(|f| f.path.as_slice()).collect();
     let mut flow_delay_ps = Vec::with_capacity(flows.len());
     for foi in 0..flows.len() {
-        let sub = SubNetwork::project(foi, flows, services, &paths, &predecessors)?;
+        let sub = SubNetwork::project(
+            foi,
+            flows,
+            services,
+            &paths,
+            &predecessors,
+            server_tfa_us.as_deref(),
+        )?;
         let delay_us = sub.solve()?;
         // Ceiling-round to ps so the reported bound never dips below the
         // LP's continuous optimum (pessimism direction).
@@ -420,6 +515,10 @@ struct SubNetwork {
     t_max: Vec<usize>,
     /// Number of date variables `t_0 … t_{num_dates-1}`.
     num_dates: usize,
+    /// `tfa_delay_us[j]` — server `j`'s per-server TFA delay (µs) for the
+    /// TFA-strengthening constraints (REQ-NC-PLP-003); `None` for the pure
+    /// polynomial LP (REQ-NC-PLP-001).
+    tfa_delay_us: Option<Vec<f64>>,
 }
 
 impl SubNetwork {
@@ -431,6 +530,7 @@ impl SubNetwork {
         services: &[ServiceCurve],
         paths: &[&[usize]],
         predecessors: &[Vec<usize>],
+        server_tfa_us: Option<&[f64]>,
     ) -> Result<SubNetwork, PlpError> {
         // backward_search: all servers with a directed path to foi's sink.
         let sink = *paths[foi].last().expect("non-empty path checked");
@@ -521,6 +621,11 @@ impl SubNetwork {
         // times(num_servers, depth) → date windows and total date count.
         let (t_min, t_max, num_dates) = times(num_servers, &depth);
 
+        // Sub-select the global per-server TFA delays into local order
+        // (panco `sub_tfa_delays = [tfa_delays[j] for j in list_servers]`).
+        let tfa_delay_us =
+            server_tfa_us.map(|d| list_servers.iter().map(|&g| d[g]).collect::<Vec<f64>>());
+
         Ok(SubNetwork {
             num_servers,
             foi: local_foi,
@@ -536,6 +641,7 @@ impl SubNetwork {
             t_min,
             t_max,
             num_dates,
+            tfa_delay_us,
         })
     }
 
@@ -681,9 +787,32 @@ impl SubNetwork {
             }
         }
 
-        // (arrival_shaping, sfa_delay, tfa_delay constraints are all empty
-        //  for the pure feed-forward LP: no arrival_shaping groups, and the
-        //  sfa/tfa delay vectors are None — see module docs.)
+        // /* TFA delay constraints */  (REQ-NC-PLP-003; panco `tfa=True`)
+        // Bound each server's date-index spread by its per-server TFA delay
+        // d[j] (µs), embedding the total-flow bound in the polynomial LP and
+        // tightening the optimum toward exact. Mirrors panco's
+        // `plpConstraints.tfa_delay_constraints`:
+        //   sink j (== num_servers-1):  t[0]          − t[t_min[j]]   ≤ d[j]
+        //   non-sink j → h:             t[t_min[h]+k] − t[t_min[j]+k] ≤ d[j]
+        //     for k in 0..=depth[h]+1  (panco `range(depth[h]+2)`).
+        // Every index stays within its server's date window by construction
+        // (see `times`). For the pure LP (REQ-NC-PLP-001) `tfa_delay_us` is
+        // None and this block is skipped — the LP is then byte-identical to
+        // panco's `tfa=False` program.
+        if let Some(d) = &self.tfa_delay_us {
+            for j in 0..self.num_servers {
+                if j == self.num_servers - 1 {
+                    cons.push(constraint!(t[0] - t[self.t_min[j]] <= d[j]));
+                } else {
+                    let h = self.successor[j].expect("non-sink has a successor");
+                    for k in 0..=(self.depth[h] + 1) {
+                        cons.push(constraint!(
+                            t[self.t_min[h] + k] - t[self.t_min[j] + k] <= d[j]
+                        ));
+                    }
+                }
+            }
+        }
 
         // /* Objective */  max t_0 − t_{t_min[first server of foi]}.
         let src = self.t_min[self.path[self.foi][0]];
@@ -806,6 +935,129 @@ mod tests {
             &[27.0],
             &[27.0],
             1e-4,
+        );
+    }
+
+    /// Assert each TFA-strengthened bound matches the pinned panco `tfa=True`
+    /// column (µs, `FifoLP(polynomial=True, tfa=True)`) to solver precision,
+    /// and lies in the sandwich `EXACT ≤ strengthened ≤ pure-PLP` (REQ-NC-PLP-003).
+    fn check_strengthened(
+        name: &str,
+        flows: &[PlpFlow],
+        services: &[ServiceCurve],
+        tfa_true_us: &[f64],
+        exact_us: &[f64],
+        tol: f64,
+    ) {
+        let pure = plp_bound(flows, services).unwrap_or_else(|e| panic!("{name} pure: {e}"));
+        let strong =
+            plp_bound_tfa_strengthened(flows, services).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            strong.flow_delay_ps.len(),
+            tfa_true_us.len(),
+            "{name}: count"
+        );
+        for (i, &got_ps) in strong.flow_delay_ps.iter().enumerate() {
+            let got_us = got_ps as f64 / US_PS as f64;
+            let exact_ps = (exact_us[i] * US_PS as f64).round() as u64;
+            // Soundness floor: strengthened ≥ EXACT (never undercut the truth).
+            assert!(
+                got_ps >= exact_ps,
+                "{name} flow {i}: UNSOUND — strengthened {got_us:.4} µs < exact {:.4} µs",
+                exact_us[i]
+            );
+            // Tightening: strengthened ≤ pure-PLP (adding constraints to a
+            // maximising LP can only lower the optimum).
+            assert!(
+                got_ps <= pure.flow_delay_ps[i],
+                "{name} flow {i}: strengthened {got_us:.4} µs > pure-PLP {:.4} µs (must tighten)",
+                pure.flow_delay_ps[i] as f64 / US_PS as f64
+            );
+            // Port fidelity: match panco's tfa=True column to solver precision.
+            let rel = (got_us - tfa_true_us[i]).abs() / tfa_true_us[i];
+            assert!(
+                rel <= tol,
+                "{name} flow {i}: strengthened {got_us:.4} µs disagrees with panco tfa=True {:.4} µs by {:.3}% (> {:.3}%)",
+                tfa_true_us[i],
+                rel * 100.0,
+                tol * 100.0
+            );
+        }
+    }
+
+    /// REQ-NC-PLP-003 on `three_server_line`: TFA-strengthening drives pure
+    /// PLP `[72.22, 61.11, 57.98]` to panco's `tfa=True` column
+    /// `[68.4, 58.4, 57.98]` = the Bouillard–Stea EXACT bound. spar's own
+    /// independent per-server TFA delays are tight enough to reach exact here.
+    #[test]
+    fn three_server_line_tfa_strengthened() {
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10 * US_PS),
+        ];
+        let flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[0, 1, 2]),
+            flow(FRAME, HUNDRED_MBPS, &[0, 1]),
+            flow(FRAME, HUNDRED_MBPS, &[1, 2]),
+        ];
+        check_strengthened(
+            "three_server_line",
+            &flows,
+            &services,
+            &[68.4, 58.4, 57.98],
+            &[68.4, 58.4, 57.98],
+            1e-4,
+        );
+    }
+
+    /// REQ-NC-PLP-003 on the converging-bridge net — the pathological shape
+    /// where *pure* PLP overshoots TFA (dataA pure 1148.33 µs > TFA 1048.09).
+    /// TFA-strengthening drives it back to panco's `tfa=True` column
+    /// `[1035.2, 10030.7]` = EXACT, restoring the `≤ TFA` sandwich that pure
+    /// PLP violated (1035.2 ≤ 1048.09). This is the concrete payoff: the
+    /// strengthened bound is the tighter, sound choice on the net that broke
+    /// the universal pure-PLP-≤-TFA claim (see `wctt.rs::bridge_converge_aadl`).
+    #[test]
+    fn converge_bridge_tfa_strengthened() {
+        use crate::tfa::{TfaFlow, tfa_bound};
+        // topological order: sw_a fast [0], sw_b slow 10000µs [1], sw_c sink [2].
+        let services = vec![
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 10_000 * US_PS),
+            ServiceCurve::rate_latency(GBPS, 5 * US_PS),
+        ];
+        let flows = vec![
+            flow(FRAME, HUNDRED_MBPS, &[0, 2]),
+            flow(FRAME, HUNDRED_MBPS, &[1, 2]),
+        ];
+        check_strengthened(
+            "converge_bridge",
+            &flows,
+            &services,
+            &[1035.2, 10030.7],
+            &[1035.2, 10030.7],
+            1e-4,
+        );
+        // The payoff, asserted directly: strengthened dataA ≤ network-wide TFA
+        // dataA, even though pure PLP dataA exceeded it.
+        let strong = plp_bound_tfa_strengthened(&flows, &services).unwrap();
+        let tfa = tfa_bound(
+            &flows
+                .iter()
+                .map(|f| TfaFlow {
+                    alpha: f.alpha,
+                    path: f.path.clone(),
+                })
+                .collect::<Vec<_>>(),
+            &services,
+        )
+        .unwrap();
+        assert!(
+            strong.flow_delay_ps[0] <= tfa.flow_delay_ps[0],
+            "strengthened dataA {} must be ≤ TFA {} (the sandwich pure PLP broke)",
+            strong.flow_delay_ps[0],
+            tfa.flow_delay_ps[0]
         );
     }
 
