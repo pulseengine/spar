@@ -2301,6 +2301,43 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-QBV-BASE-001
 
+  - id: TEST-TSN-SYNTH-CQF-BASE
+    type: feature
+    title: CQF synthesis baseline — literature-pinned delay + decoupled admission oracle
+    description: >
+      Verifies synthesize_cqf, the standard two-buffer 802.1Qch CQF
+      configuration synthesizer (single global cycle time T). Unlike the
+      QBV oracle (self-consistent against its own checker), the CQF
+      checker's delay formula is PINNED TO EXTERNAL GROUND TRUTH: the
+      published worked example in IETF draft-eckert-detnet-tcqf-05
+      (24 hops, 10 us cycle => (24+1)*10 = 250 us; D_min = (24-1)*10 =
+      230 us; jitter exactly 2T) is asserted exactly by
+      delay_bound_matches_published_tcqf_example — so the duality oracle
+      anchors to the literature, not to the synthesizer's assumptions.
+      spar-network::cqf unit tests cover: (1) DELAY PIN — the published
+      TCQF numbers above; (2) MULTIFLOW ADMISSION — a flow set with
+      distinct hop counts/deadlines/paths yields the largest whole-ns
+      cycle meeting EVERY flow's structural deadline (H+1)·T, and every
+      link's aggregate per-cycle reservation fits csize = T·link_rate;
+      (3) MONOTONE — a tighter deadline on the binding flow shrinks the
+      synthesized cycle; (4) NEGATIVE PATHS — a deadline below the
+      irreducible (H+1)·1ns latency (DeadlineTooTight, naming the binding
+      flow), a single oversubscribed link, and two flows summing past one
+      link's budget (Oversubscribed), plus empty/degenerate/duplicate
+      input validation. Self-certifying: synthesize_cqf re-derives every
+      flow's delay and every link's budget through the independent
+      checker before returning, so a future change that breaks soundness
+      fails construction, not just the test. NO solver, NO new dependency.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- cqf"
+    status: passing
+    tags: [v0.20.0, network, tsn, synthesis, cqf, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SYNTH-CQF-BASE-001
+
   - id: TEST-TSN-CBS
     type: feature
     title: 802.1Qav CBS credit-pool service curve + wctt dispatch
