@@ -126,6 +126,60 @@ fn sample_dbc_emits_instantiable_aadl() {
 }
 
 #[test]
+fn sample_dbc_emits_message_flows() {
+    // REQ-INGEST-DBC-FLOWS-001: messages become typed event-data ports joined by
+    // bus-bound `port` connections. The instantiation assertions in `instantiate`
+    // are the oracle — if any port/connection/binding is malformed, it fails.
+    let aadl = dbc_to_aadl(SAMPLE_DBC, "CanDemo").expect("DBC should parse");
+
+    // EngineData is transmitted by EngineECU and received by Gateway + System:
+    // one `out` port, matching `in` ports on the receivers.
+    assert!(
+        aadl.contains("out event data port Msg_EngineData;"),
+        "missing transmitter port for EngineData:\n{aadl}"
+    );
+    assert!(
+        aadl.contains("in event data port Msg_EngineData;"),
+        "missing receiver port for EngineData:\n{aadl}"
+    );
+    // Status flows Gateway -> EngineECU.
+    assert!(
+        aadl.contains("out event data port Msg_Status;")
+            && aadl.contains("in event data port Msg_Status;"),
+        "missing Status flow ports:\n{aadl}"
+    );
+    // Every flow connection is bound to the CAN bus.
+    assert!(
+        aadl.contains("Actual_Connection_Binding => (reference (can_bus));"),
+        "flow connection not bound to the CAN bus:\n{aadl}"
+    );
+    // A `port` connection from the transmitter instance must exist.
+    assert!(
+        aadl.contains("port engineecu.") && aadl.contains("-> gateway."),
+        "missing EngineData broadcast connection:\n{aadl}"
+    );
+    // Broadcast has a Vector__XXX transmitter (no node) -> data type only, no
+    // ports/connections. Its `data` type still ships.
+    assert!(
+        aadl.contains("data Msg_Broadcast"),
+        "Broadcast data type should still be emitted:\n{aadl}"
+    );
+    assert!(
+        !aadl.contains("event data Msg_Broadcast"),
+        "Broadcast has no transmitter and must not produce flow ports:\n{aadl}"
+    );
+
+    // The whole thing must still instantiate with zero diagnostics.
+    let instance = instantiate(&aadl, "CanDemo");
+    let device_count = instance
+        .components
+        .iter()
+        .filter(|(_, c)| format!("{:?}", c.category).contains("Device"))
+        .count();
+    assert_eq!(device_count, 3, "expected one device per DBC node");
+}
+
+#[test]
 fn empty_network_still_instantiates() {
     // A header-only DBC (no nodes, no messages) must still yield a valid,
     // instantiable AADL package — just an empty network system + bus.

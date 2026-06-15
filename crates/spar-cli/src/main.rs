@@ -82,7 +82,9 @@ fn print_usage() {
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
-    eprintln!("  dbc        Ingest a CAN .dbc file and emit AADL (bus + devices + frames)");
+    eprintln!(
+        "  dbc        Ingest a CAN .dbc file and emit AADL (bus, devices, frames, message flows)"
+    );
     eprintln!(
         "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
     );
