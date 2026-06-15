@@ -3442,3 +3442,30 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-INGEST-DBC-001
+
+  - id: TEST-INGEST-DBC-FLOWS
+    type: feature
+    title: DBC message flows emit instantiable bus-bound port connections
+    description: >
+      spar-dbc's roundtrip test `sample_dbc_emits_message_flows` exercises
+      REQ-INGEST-DBC-FLOWS-001 on the representative .dbc: EngineData
+      (transmitted by EngineECU, received by Gateway + System) yields one
+      `out event data port` and matching `in` ports, and Status flows
+      Gateway -> EngineECU. It asserts the typed ports are emitted, every
+      flow connection carries
+      `Actual_Connection_Binding => (reference (can_bus))`, a `port`
+      connection runs from the transmitter instance, and the Vector__XXX
+      Broadcast frame (no node transmitter) produces its `data` type but
+      NO flow ports. The emitted AADL is then run back through spar's full
+      pipeline (parse, item-tree, scope, SystemInstance::instantiate)
+      asserting ZERO diagnostics — the parser/instantiator is the oracle,
+      so a malformed port, connection or binding fails the test.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-dbc --test roundtrip sample_dbc_emits_message_flows
+    status: passing
+    tags: [ingest, dbc, can, flows, tier1, v0200]
+    links:
+      - type: satisfies
+        target: REQ-INGEST-DBC-FLOWS-001

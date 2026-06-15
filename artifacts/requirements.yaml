@@ -2629,14 +2629,27 @@ artifacts:
     description: >
       Extend DBC ingest (REQ-INGEST-DBC-001) to model message
       transmit/receive as AADL features and connections: each frame
-      becomes a data port on its transmitting device (out) and on each
-      receiver (in), connected across the CAN bus. This is the
-      broadcast-bus analogue of the port-connection modelling the
-      network-calculus track consumes, and is deliberately deferred from
-      the v0.17.0 first cut (which ships bus + devices + frame data
-      types only). KILL-GATE: drop if the flat instance model already
-      carries enough for the target CAN analysis without per-flow ports.
-    status: proposed
+      becomes an `out event data port` on its transmitting node (the
+      `BO_` sender) and an `in event data port` on each receiving node
+      (the union of the frame's `SG_` signal receiver lists), joined by
+      `port` connections that carry
+      `Deployment_Properties::Actual_Connection_Binding => (reference
+      (can_bus))`. Event-data ports model the discrete data-carrying CAN
+      frame; the single broadcast `out` port fanning out to several `in`
+      ports mirrors CAN one-to-many. A frame is wired only when it has
+      both a known transmitter and >=1 known receiver (the `Vector__XXX`
+      placeholder and unknown names are dropped), so no port is left
+      dangling; frames lacking either end still emit their `data` type.
+      SCOPE: this is faithful CAN dataflow modelling for traceability,
+      diagrams and codegen — NOT a network-calculus feeder. spar's
+      TFA/PLP are FIFO; CAN is priority-arbitrated, so a FIFO bound over
+      it would be unsound. The CAN bus carries no `Spar_Network::
+      Switch_Type`, so `extract_network_graph` correctly ignores it (cf.
+      REQ-NC-BRIDGE-001, which excludes CAN); CAN response-time analysis
+      is a separate Tindell track behind its own soundness gate. Verified
+      by the spar-dbc round-trip oracle (emitted AADL must parse +
+      instantiate with zero diagnostics).
+    status: implemented
     tags: [ingest, dbc, can, flows, tier1]
     fields:
       release: v0.20.0

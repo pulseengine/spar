@@ -18,28 +18,50 @@
 //! test fails. A useful side effect is a human-inspectable
 //! "transpile DBC → AADL" artifact.
 //!
-//! # Mapping (v0.17.0 scope — `REQ-INGEST-DBC-001`)
+//! # Mapping (`REQ-INGEST-DBC-001` + `REQ-INGEST-DBC-FLOWS-001`)
 //!
-//! | DBC concept            | AADL construct                                  |
-//! |------------------------|-------------------------------------------------|
-//! | CAN bus (the network)  | a single `bus CAN_Bus`                           |
-//! | node / ECU             | `device <Node>` with `requires bus access`      |
-//! | message (frame)        | `data Msg_<Name>` with `Data_Size => <n> Bytes` |
-//! | the whole network      | `system CAN_Network` + its implementation        |
+//! | DBC concept                | AADL construct                                  |
+//! |----------------------------|-------------------------------------------------|
+//! | CAN bus (the network)      | a single `bus CAN_Bus`                           |
+//! | node / ECU                 | `device <Node>` with `requires bus access`      |
+//! | message (frame)            | `data Msg_<Name>` with `Data_Size => <n> Bytes` |
+//! | message tx (the `BO_` node)| an `out event data <Msg>` port on that device   |
+//! | message rx (a `SG_` receiver) | an `in event data <Msg>` port on that device |
+//! | a tx→rx pairing            | a `port` connection bound to the CAN bus        |
+//! | the whole network          | `system CAN_Network` + its implementation        |
 //!
-//! Message *flows* (which node transmits/receives which frame, modelled as
-//! ports and data connections across the bus) are deliberately **out of
-//! scope** for this first cut — that is the broadcast-bus equivalent of the
-//! port-connection modelling the network-calculus track will need, and is
-//! tracked separately as a follow-up requirement. What ships here is a
-//! structurally complete, instantiable model: bus + devices + message data
-//! types, with each device wired to the bus.
+//! # Message flows (`REQ-INGEST-DBC-FLOWS-001`)
+//!
+//! A CAN frame is a discrete, data-carrying event, so each modelled message
+//! becomes an `out event data Msg_<Name>` port on its transmitting node and an
+//! `in event data Msg_<Name>` port on every receiving node, joined by `port`
+//! connections. Each connection carries
+//! `Deployment_Properties::Actual_Connection_Binding => (reference (can_bus))`
+//! — the faithful AADL statement that this message is carried over the CAN
+//! bus. The single broadcast `out` port fanning out to several `in` ports
+//! mirrors CAN's one-to-many broadcast.
+//!
+//! Transmitter comes from the `BO_` line; receivers are the union of the
+//! frame's `SG_` signal receiver lists. A message is wired as a flow only when
+//! it has **both** a known transmitter node and at least one known receiver
+//! node (the `Vector__XXX` placeholder and unknown names are dropped), so every
+//! emitted port participates in a connection — no dangling features. Messages
+//! lacking either end still emit their `data` type, as before.
+//!
+//! **Scope note (not a network-calculus feeder).** These connections model the
+//! CAN broadcast for dataflow, traceability and codegen. They are *not* wired
+//! into spar's FIFO TFA/PLP network-calculus engine: CAN is priority-arbitrated,
+//! not FIFO, so a FIFO bound over it would be unsound. The CAN bus carries no
+//! `Spar_Network::Switch_Type`, so `spar_network::extract_network_graph`
+//! correctly ignores it (buses without that property are skipped). CAN
+//! response-time analysis is a separate (Tindell) track behind its own
+//! soundness gate.
 //!
 //! [Vector CAN database]: https://en.wikipedia.org/wiki/CAN_bus
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use can_dbc::{Dbc, Transmitter};
@@ -81,6 +103,17 @@ const BUS_NAME: &str = "CAN_Bus";
 /// The fixed root system classifier name.
 const SYSTEM_NAME: &str = "CAN_Network";
 
+/// A modelled message flow: the message's index, its transmitting device, and
+/// the port names on each end of the resulting `port` connections.
+struct MessageFlow {
+    /// Index into `messages` (and `dbc.messages`).
+    msg: usize,
+    /// Transmitting device index + its `out event data` port name.
+    tx: (usize, String),
+    /// Receiving device indices + their `in event data` port names.
+    rx: Vec<(usize, String)>,
+}
+
 fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
     // One global namespace for *classifier* names (bus, data types, devices,
     // system) so a node accidentally named like a message can never collide.
@@ -111,6 +144,76 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
         .map(|n| classifiers.alloc(&n.0, "Ecu"))
         .collect();
 
+    // Raw DBC node name -> device index, for resolving transmitters/receivers.
+    let node_index: HashMap<&str, usize> = dbc
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.0.as_str(), i))
+        .collect();
+
+    // -- flow model (REQ-INGEST-DBC-FLOWS-001) ---------------------------
+    // For each message with a known transmitter AND >=1 known receiver, allocate
+    // a typed `out`/`in event data` port on each participating device and record
+    // the flow for connection emission. Port names live in a per-device
+    // namespace seeded with the reserved `can` bus-access feature.
+    let mut dev_port_alloc: Vec<NameAllocator> = (0..devices.len())
+        .map(|_| {
+            let mut a = NameAllocator::new();
+            a.reserve("can");
+            a
+        })
+        .collect();
+    // Extra feature lines (typed ports) per device, in message order.
+    let mut dev_features: Vec<Vec<String>> = vec![Vec::new(); devices.len()];
+    let mut flows: Vec<MessageFlow> = Vec::new();
+
+    for (j, m) in dbc.messages.iter().enumerate() {
+        let tx_dev = match &m.transmitter {
+            Transmitter::NodeName(n) => node_index.get(n.as_str()).copied(),
+            Transmitter::VectorXXX => None,
+        };
+        // Receivers: union over the frame's signals, in first-seen order,
+        // dropping the placeholder, the transmitter itself, and unknown nodes.
+        let mut rx_devs: Vec<usize> = Vec::new();
+        for sig in &m.signals {
+            for r in &sig.receivers {
+                if !is_real_node(r) {
+                    continue;
+                }
+                if let Some(&ri) = node_index.get(r.as_str())
+                    && Some(ri) != tx_dev
+                    && !rx_devs.contains(&ri)
+                {
+                    rx_devs.push(ri);
+                }
+            }
+        }
+
+        let Some(txi) = tx_dev else { continue };
+        if rx_devs.is_empty() {
+            continue;
+        }
+
+        let msg_type = messages[j].0.clone();
+        let base = sanitize_ident(&m.name, "Frame");
+        let tx_port = dev_port_alloc[txi].alloc(&format!("{base}_tx"), "frame_tx");
+        dev_features[txi].push(format!("{tx_port}: out event data port {msg_type};"));
+        let rx: Vec<(usize, String)> = rx_devs
+            .iter()
+            .map(|&ri| {
+                let p = dev_port_alloc[ri].alloc(&format!("{base}_rx"), "frame_rx");
+                dev_features[ri].push(format!("{p}: in event data port {msg_type};"));
+                (ri, p)
+            })
+            .collect();
+        flows.push(MessageFlow {
+            msg: j,
+            tx: (txi, tx_port),
+            rx,
+        });
+    }
+
     let mut out = String::new();
     push_line(&mut out, 0, &format!("package {pkg}"));
     push_line(&mut out, 0, "public");
@@ -135,7 +238,7 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
     }
 
     // -- nodes as devices ------------------------------------------------
-    for dev in &devices {
+    for (i, dev) in devices.iter().enumerate() {
         push_line(&mut out, 1, &format!("device {dev}"));
         push_line(&mut out, 2, "features");
         push_line(
@@ -143,6 +246,10 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
             3,
             &format!("can: requires bus access {BUS_NAME};"),
         );
+        // Message-flow ports (transmitted out, received in).
+        for feature in &dev_features[i] {
+            push_line(&mut out, 3, feature);
+        }
         push_line(&mut out, 1, &format!("end {dev};"));
         out.push('\n');
     }
@@ -176,6 +283,7 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
     if !dev_insts.is_empty() {
         push_line(&mut out, 2, "connections");
         let mut conns = NameAllocator::new();
+        // Bus-access connections (every device shares the broadcast bus).
         for inst in &dev_insts {
             let c = conns.alloc(&format!("{inst}_access"), "access");
             push_line(
@@ -184,6 +292,25 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
                 &format!("{c}: bus access {inst}.can <-> {bus_inst};"),
             );
         }
+        // Message-flow port connections, each bound to the CAN bus. A single
+        // `out` port may source several connections (CAN broadcast fan-out).
+        for flow in &flows {
+            let (txi, tx_port) = &flow.tx;
+            let tx_inst = &dev_insts[*txi];
+            let base = sanitize_ident(&dbc.messages[flow.msg].name, "frame").to_lowercase();
+            for (ri, rx_port) in &flow.rx {
+                let rx_inst = &dev_insts[*ri];
+                let c = conns.alloc(&format!("{tx_inst}_{base}_to_{rx_inst}"), "flow");
+                push_line(
+                    &mut out,
+                    3,
+                    &format!(
+                        "{c}: port {tx_inst}.{tx_port} -> {rx_inst}.{rx_port} \
+                         {{Deployment_Properties::Actual_Connection_Binding => (reference ({bus_inst}));}};"
+                    ),
+                );
+            }
+        }
     }
 
     push_line(&mut out, 1, &format!("end {SYSTEM_NAME}.impl;"));
@@ -191,6 +318,12 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
 
     push_line(&mut out, 0, &format!("end {pkg};"));
     out
+}
+
+/// Whether `name` denotes a real DBC node, excluding the `Vector__XXX`
+/// "no node" placeholder (and its variants) and the empty string.
+fn is_real_node(name: &str) -> bool {
+    !matches!(name, "Vector__XXX" | "VectorXXX" | "")
 }
 
 fn push_line(out: &mut String, indent: usize, text: &str) {
