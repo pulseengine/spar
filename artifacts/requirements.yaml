@@ -2964,22 +2964,53 @@ artifacts:
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
-  - id: REQ-TSN-SYNTH-QBV-001
+  - id: REQ-TSN-SYNTH-QBV-BASE-001
     type: requirement
-    title: "802.1Qbv GCL synthesis — dependency-aware, mixed-criticality"
+    title: "802.1Qbv GCL synthesis baseline — per-class single-window, exact TAS round-trip"
     description: >
-      spar shall synthesize 802.1Qbv gate-control lists directly
-      (inverse of the existing TAS checking, REQ-TSN-002) via
-      dependency-aware priority adjustment (arXiv:2407.00987, 2024):
-      ~300 flows, mixed-criticality, +20.6% success over SOTA. The
-      first, smaller-scale, directly-Qbv synthesis step. KILL-GATE: kill
-      the AADL→TSN bridge if we cannot articulate why our integrated
-      architecture-to-timing story beats RTaW's already-cert-accepted
-      ARXML→TSN+NC. [SOLID]
-    status: proposed
+      spar shall synthesize a 802.1Qbv gate-control list for one
+      TAS-gated egress port from a per-class demand set (aggregate
+      arrival curve + per-hop deadline budget per class), a fixed cycle
+      period, and the link rate. Each class receives one contiguous open
+      window (mask = 1<<cos) sized by a monotone search so its
+      tas_residual_service curve (REQ-TSN-002) meets the class deadline
+      under the EXACT network-calculus delay bound; the leftover is a
+      closed guard window (mask=0). Latency-pessimistic by construction:
+      with one window per class the worst-case gate latency is
+      cycle − duration and window ORDER is provably a no-op on every
+      computed bound — closing the residual gap requires window SPLITTING
+      (REQ-TSN-SYNTH-QBV-001). Self-certifying: the synthesized GCL
+      round-trips through GateSchedule::parse and is re-checked per class
+      via delay_bound before return — the existing checker is a free
+      exact oracle for the synthesizer. NO new dependency (existing
+      tsn.rs + curves.rs). Precursor to REQ-TSN-SYNTH-QBV-001, mirroring
+      REQ-NC-PLP-CONVERGE-001 → REQ-NC-PLP-003. [SOLID]
+    status: implemented
     tags: [tsn, synthesis, qbv, tier2]
     fields:
       release: v0.20.0
+
+  - id: REQ-TSN-SYNTH-QBV-001
+    type: requirement
+    title: "802.1Qbv GCL synthesis — dependency-aware, window-splitting, mixed-criticality"
+    description: >
+      spar shall synthesize 802.1Qbv gate-control lists directly
+      (inverse of the existing TAS checking, REQ-TSN-002) via
+      dependency-aware priority adjustment with WINDOW SPLITTING
+      (arXiv:2407.00987, 2024): ~300 flows, mixed-criticality, +20.6%
+      success over SOTA. Builds on the single-window baseline
+      (REQ-TSN-SYNTH-QBV-BASE-001) by splitting a class's allocation into
+      multiple windows distributed around the cycle — the only lever that
+      lowers worst-case gate latency below cycle − duration for a fixed
+      bandwidth (with one window per class, window order alone is a
+      provable no-op; splitting/placement is the paper's actual
+      contribution). KILL-GATE: kill the AADL→TSN bridge if we cannot
+      articulate why our integrated architecture-to-timing story beats
+      RTaW's already-cert-accepted ARXML→TSN+NC. [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, qbv, tier2]
+    fields:
+      release: v0.21.0
 
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement

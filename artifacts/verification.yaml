@@ -2264,6 +2264,43 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-006
 
+  - id: TEST-TSN-SYNTH-QBV-BASE
+    type: feature
+    title: 802.1Qbv GCL synthesis baseline — exact TAS round-trip oracle
+    description: >
+      Verifies synthesize_gcl, the per-class single-window 802.1Qbv
+      gate-control-list synthesizer (the INVERSE of the TAS checker
+      tested by TEST-TSN-TAS). The oracle is the existing checker run
+      forward on the synthesizer's own output — no external reference
+      numbers needed. spar-network::tsn unit tests cover: (1) ROUND-TRIP
+      + DEADLINE — for a multi-class demand set (distinct CoS, affine
+      arrival curves, per-class deadlines) at a fixed cycle and link
+      rate, synthesize_gcl returns a GateSchedule whose blob re-parses
+      through GateSchedule::parse with zero error (windows tile
+      [0, cycle_ps) with no gaps/overlaps), and for EVERY class
+      delay_bound(arrival, tas_residual_service(schedule, cos, link)) ≤
+      that class's deadline — the same sound bound the analyzer uses;
+      (2) MINIMALITY/MONOTONE — a tighter deadline yields a wider window
+      (monotone-decreasing delay in window duration); (3) GUARD WINDOW —
+      leftover cycle time becomes a closed (mask=0) window that perturbs
+      no class's worst-case latency; (4) NEGATIVE PATHS — per-class
+      infeasibility (deadline below σ/link even at full cycle →
+      ClassInfeasible) and oversubscription (Σ minimal durations > cycle
+      → Oversubscribed) return structured errors distinguishing which
+      knob to turn; duplicate CoS and non-whole-nanosecond cycle are
+      rejected. Self-certifying: synthesize_gcl re-checks its own output
+      through parse + delay_bound before returning, so a future change
+      that breaks soundness fails construction, not just the test.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- synth"
+    status: passing
+    tags: [v0.20.0, network, tsn, synthesis, qbv, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SYNTH-QBV-BASE-001
+
   - id: TEST-TSN-CBS
     type: feature
     title: 802.1Qav CBS credit-pool service curve + wctt dispatch
