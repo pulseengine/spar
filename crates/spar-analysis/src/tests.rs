@@ -1642,8 +1642,8 @@ fn test_register_all_count() {
     runner.register_all();
     assert_eq!(
         runner.count(),
-        31,
-        "register_all should register all 31 instance-level analyses"
+        32,
+        "register_all should register all 32 instance-level analyses"
     );
 }
 
