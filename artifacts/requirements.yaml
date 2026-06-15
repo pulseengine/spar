@@ -3055,6 +3055,37 @@ artifacts:
     fields:
       release: v0.20.0
 
+  - id: REQ-TSN-SYNTH-CQF-BRIDGE-001
+    type: requirement
+    title: "AADL→CQF synthesis bridge — extract CqfFlow inputs from a SystemInstance and synthesize end-to-end"
+    description: >
+      spar shall extract the CQF synthesis inputs
+      (REQ-TSN-SYNTH-CQF-BASE-001) directly from an AADL SystemInstance and
+      surface the synthesized schedule (or a synthesis error) as analysis
+      diagnostics, so that a real AADL model — not a hand-built CqfFlow set —
+      drives standard 802.1Qch CQF configuration. For each end-to-end stream
+      (a non-bus-access connection whose endpoints are both end stations and
+      which carries Actual_Connection_Binding to switched buses) the bridge
+      derives: the per-cycle reservation in bits from Spar_TSN::Max_Frame_Size
+      on the source (one frame buffered per cycle), the end-to-end deadline
+      from Timing_Properties::Deadline, and the hop count H and link path from
+      the bound switch sequence — reusing the SAME routing resolution as the
+      WCTT walk (collect_streams), not a parallel reimplementation. The
+      homogeneous link rate fed to synthesize_cqf is the MINIMUM
+      Spar_Network::Output_Rate across the switches (conservative for the
+      single-csize baseline). This is table-stakes AADL→TSN-config glue — the
+      demonstrable end-to-end ship — and is explicitly NOT the PLP≪TFA wedge:
+      it composes NO network calculus. SOUNDNESS GUARD: the one-frame-per-cycle
+      reservation is sound only when the synthesized cycle time T does not
+      exceed each flow's period; the bridge verifies T≤period post-synthesis
+      and emits a diagnostic rather than silently under-reserve on the
+      AADL-legal-but-rare deadline>period edge case. NO new dependency (reuses
+      synthesize_cqf plus the existing spar-network property readers). [SOLID]
+    status: implemented
+    tags: [tsn, synthesis, cqf, bridge, aadl, tier2]
+    fields:
+      release: v0.20.0
+
   - id: REQ-TSN-SYNTH-CQF-001
     type: requirement
     title: "Multi-CQF / TCQF synthesis (heterogeneous cycles, injection planning, larger scale)"

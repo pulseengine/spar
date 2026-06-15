@@ -24,6 +24,7 @@ pub mod classifier_match;
 pub mod completeness;
 pub mod connection_rules;
 pub mod connectivity;
+pub mod cqf_synth;
 pub mod direction_rules;
 pub mod emv2_analysis;
 pub mod emv2_propagation;
@@ -199,6 +200,7 @@ impl AnalysisRunner {
         self.register(Box::new(BusBandwidthAnalysis));
         self.register(Box::new(FeatureGroupCheckAnalysis));
         self.register(Box::new(WcttAnalysis::default()));
+        self.register(Box::new(crate::cqf_synth::CqfSynthAnalysis));
     }
 
     /// Register all instance-level analyses **except** [`wctt::WcttAnalysis`].
@@ -269,6 +271,7 @@ impl AnalysisRunner {
         self.register(Box::new(WeightPowerAnalysis));
         self.register(Box::new(BusBandwidthAnalysis));
         self.register(Box::new(FeatureGroupCheckAnalysis));
+        self.register(Box::new(crate::cqf_synth::CqfSynthAnalysis));
         // WcttAnalysis intentionally omitted — caller registers a
         // PMOO-configured variant.
     }

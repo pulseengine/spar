@@ -2338,6 +2338,41 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-CQF-BASE-001
 
+  - id: TEST-TSN-SYNTH-CQF-BRIDGE
+    type: feature
+    title: AADL→CQF synthesis bridge — SystemInstance drives synthesize_cqf end-to-end
+    description: >
+      Verifies CqfSynthAnalysis, the pass that extracts CqfFlow inputs from a
+      real AADL SystemInstance and runs the literature-pinned CQF synthesizer
+      (REQ-TSN-SYNTH-CQF-BASE-001) over them. The oracle is a hand-computed
+      AADL fixture instantiated through the full HirDef pipeline (same
+      instantiate() harness as the WCTT tests): two source end stations each
+      bound via Actual_Connection_Binding to one switch (H=1), 1 Gbps
+      Output_Rate, 1500-byte Max_Frame_Size (12000 bits/cycle), 100 us
+      Deadline. The expected schedule is derived by hand from the pinned
+      delay model: T = deadline/(H+1) = 50 us, csize = T·link_rate =
+      50000 bits, per-switch aggregate reservation = 2·12000 = 24000 bits
+      <= csize (admitted), and D_max = (H+1)·T = 100 us = deadline. Tests
+      cover: (1) END-TO-END — the fixture yields exactly that CqfSchedule via
+      the analysis pass, surfaced as a diagnostic; (2) EXTRACTION FIDELITY —
+      hop count, per-cycle bits, and deadline are read from the model, not
+      hard-coded; (3) MIN-RATE — a heterogeneous-rate fixture feeds the
+      slowest switch rate to synthesize_cqf (conservative csize); (4)
+      SOUNDNESS GUARD — a deadline>period fixture (T would exceed the period)
+      emits the under-reservation diagnostic rather than silently admitting;
+      (5) EMPTY — a model with no bound streams emits no CQF diagnostics
+      (non-regression contract). Reuses collect_streams' routing resolution;
+      NO network-calculus composition; NO new dependency.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-analysis --lib -- cqf_synth"
+    status: passing
+    tags: [v0.20.0, analysis, tsn, synthesis, cqf, bridge, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SYNTH-CQF-BRIDGE-001
+
   - id: TEST-TSN-CBS
     type: feature
     title: 802.1Qav CBS credit-pool service curve + wctt dispatch

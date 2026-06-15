@@ -1506,17 +1506,24 @@ fn extract_time_ps(expr: &PropertyExpr) -> Option<u64> {
 }
 
 /// A single stream's logical description for the WCTT walk.
+///
+/// `pub(crate)` (with three of its fields exposed) so the AADL→CQF
+/// synthesis bridge (`cqf_synth`, REQ-TSN-SYNTH-CQF-BRIDGE-001) can reuse
+/// [`collect_streams`]' routing resolution instead of reimplementing the
+/// `Actual_Connection_Binding` walk. The bridge consumes only `name`,
+/// `src_idx`, and `hops` (the routing output); the NC-specific fields
+/// (`alpha`, `cos`, …) stay private to this module.
 #[derive(Debug, Clone)]
-struct Stream {
+pub(crate) struct Stream {
     /// Stable connection name from AADL, used in diagnostics.
-    name: String,
+    pub(crate) name: String,
     /// Source end-station component (device/processor) idx.
-    src_idx: ComponentInstanceIdx,
+    pub(crate) src_idx: ComponentInstanceIdx,
     /// Sink end-station component idx (kept for future PMOO/SFA use).
     #[allow(dead_code)]
     sink_idx: ComponentInstanceIdx,
     /// Ordered list of switched buses this stream traverses.
-    hops: Vec<ComponentInstanceIdx>,
+    pub(crate) hops: Vec<ComponentInstanceIdx>,
     /// Source-side arrival curve.
     alpha: ArrivalCurve,
     /// Stream's `Spar_TSN::Class_of_Service` (0..=7) when annotated on
@@ -1563,7 +1570,7 @@ impl Stream {
 ///    sides), and
 /// 2. carry `Actual_Connection_Binding` to one or more buses that
 ///    appear as switches in `graph`.
-fn collect_streams(
+pub(crate) fn collect_streams(
     instance: &SystemInstance,
     graph: &NetworkGraph,
     bus_by_name: &FxHashMap<String, ComponentInstanceIdx>,
