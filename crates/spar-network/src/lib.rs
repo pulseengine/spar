@@ -44,6 +44,10 @@
 
 #![forbid(unsafe_code)]
 
+/// Standard 802.1Qch CQF (Cyclic Queuing and Forwarding) configuration
+/// synthesis — single cycle-time, two-buffer baseline. Pure arithmetic, no
+/// solver. REQ-TSN-SYNTH-CQF-BASE-001.
+pub mod cqf;
 pub mod curves;
 pub mod extract;
 /// PMOO/LUDB delay bound via a HiGHS-backed MILP (good_lp). Gated behind the
@@ -61,6 +65,10 @@ pub mod tfa;
 pub mod tsn;
 pub mod types;
 
+pub use cqf::{
+    CqfFlow, CqfSchedule, CqfSynthError, cqf_cycle_budget_bits, cqf_delay_max_ps, cqf_delay_min_ps,
+    synthesize_cqf,
+};
 pub use curves::piecewise::{PiecewiseAffineArrivalCurve, PwaError};
 pub use curves::{
     ArrivalCurve, NcError, ServiceCurve, backlog_bound, delay_bound, output_bound, residual_service,

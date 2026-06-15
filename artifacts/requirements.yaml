@@ -3026,21 +3026,53 @@ artifacts:
     fields:
       release: v0.20.0
 
-  - id: REQ-TSN-SYNTH-CQF-001
+  - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
-    title: "CQF / Multi-CQF synthesis (simpler-config, larger scale)"
+    title: "CQF synthesis baseline — single cycle-time, 2-buffer, literature-pinned delay bound"
     description: >
-      spar shall synthesize CQF/Multi-CQF configurations — the
-      simpler-config, larger-scale direction with real 2026 momentum
-      (TCQF adopted as IETF DetNet WG item draft-ietf-detnet-tcqf-00,
-      14 Jan 2026; CENI 2,000 km / 100 Gbps). Candidate methods:
-      hyper-flow graph decomposition (arXiv:2309.06690 — 2,000 flows,
-      <100 ms @1,000) or GASA injection planning (arXiv:2506.22671 —
-      GA+SA, +15% flows). [SOLID]
-    status: proposed
+      spar shall synthesize a standard 802.1Qch CQF configuration (two
+      cyclic buffers, one global cycle time T) for a set of reserved
+      flows, each declaring a per-cycle reservation (csize contribution
+      in bits), a hop count H, an end-to-end deadline, and the links it
+      traverses. The synthesizer selects the largest whole-nanosecond
+      cycle time T meeting every flow's structural deadline
+      (D_max = (H+1)·T, per IETF draft-eckert-detnet-tcqf-05) and admits
+      the flows iff every link's aggregate per-cycle reservation fits the
+      cycle budget csize = T·link_rate. The two feasibility checks are
+      LOCAL and fully decoupled — CQF's bounded delay depends only on
+      (hops, T), not on per-link load — so NO network-calculus curve
+      composition is required (this is why CQF routes around the
+      NC-composition bridge that MILP needs). Self-certifying: the
+      independent CQF checker re-derives D_max per flow and the per-link
+      budget before return. The checker's delay formula is PINNED to the
+      published worked example (h=24, T=10us => (24+1)*10 = 250us) so the
+      duality oracle anchors to external ground truth, not to the
+      synthesizer's own assumptions. NO new dependency (pure arithmetic).
+      Precursor to REQ-TSN-SYNTH-CQF-001 (Multi-CQF/TCQF), mirroring
+      REQ-TSN-SYNTH-QBV-BASE-001 → REQ-TSN-SYNTH-QBV-001. [SOLID]
+    status: implemented
     tags: [tsn, synthesis, cqf, tier2]
     fields:
       release: v0.20.0
+
+  - id: REQ-TSN-SYNTH-CQF-001
+    type: requirement
+    title: "Multi-CQF / TCQF synthesis (heterogeneous cycles, injection planning, larger scale)"
+    description: >
+      spar shall synthesize Multi-CQF / TCQF configurations — three to
+      seven tagged cyclic buffers and heterogeneous cycle times, the
+      simpler-config, larger-scale direction with real 2026 momentum
+      (TCQF adopted as IETF DetNet WG item draft-ietf-detnet-tcqf-00,
+      14 Jan 2026; CENI 2,000 km / 100 Gbps). Extends the single-cycle
+      baseline (REQ-TSN-SYNTH-CQF-BASE-001) with per-flow injection-time
+      planning across a hyperperiod and multi-buffer ambiguity-window
+      handling. Candidate methods: hyper-flow graph decomposition
+      (arXiv:2309.06690 — 2,000 flows, <100 ms @1,000) or GASA injection
+      planning (arXiv:2506.22671 — GA+SA, +15% flows). [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, cqf, tier2]
+    fields:
+      release: v0.21.0
 
   - id: REQ-TSN-EXPORT-YANG-001
     type: requirement
