@@ -16,7 +16,7 @@
 use spar_hir_def::item_tree::PropertyExpr;
 use spar_hir_def::properties::PropertyMap;
 
-use crate::curves::ServiceCurve;
+use crate::curves::{ArrivalCurve, ServiceCurve, delay_bound};
 
 const SPAR_TSN: &str = "Spar_TSN";
 
@@ -1114,6 +1114,301 @@ pub fn tas_residual_service_with_sync_error(
     ServiceCurve::rate_latency(rate_bps, effective_latency_ps)
 }
 
+impl GateSchedule {
+    /// Serialize back to the `Gate_Control_List` blob format that
+    /// [`GateSchedule::parse`] accepts: `offset_ns:duration_ns:0xMASK`
+    /// entries joined by `;`. Window times are emitted in nanoseconds —
+    /// exact only when every `offset_ps`/`duration_ps` is a whole number
+    /// of nanoseconds, which holds for any schedule produced by `parse`
+    /// (whose inputs are ns) or by [`synthesize_gcl`].
+    pub fn to_gcl_blob(&self) -> String {
+        let mut out = String::new();
+        for (i, w) in self.windows.iter().enumerate() {
+            if i > 0 {
+                out.push(';');
+            }
+            out.push_str(&format!(
+                "{}:{}:0x{:02X}",
+                w.offset_ps / 1_000,
+                w.duration_ps / 1_000,
+                w.allowed_cos_mask
+            ));
+        }
+        out
+    }
+}
+
+// ── 802.1Qbv GCL synthesis (REQ-TSN-SYNTH-QBV-BASE-001) ──────────────
+//
+// The inverse of TAS checking ([`tas_residual_service`]): given per-class
+// demand at one egress port, produce a gate-control list whose residual
+// service curve meets every class's deadline. The baseline allocates one
+// contiguous open window per class plus a closed guard window; window
+// SPLITTING (the lower-latency lever) is the follow-up REQ-TSN-SYNTH-QBV-001.
+
+/// Per-class traffic demand at one TAS-gated egress port — the input unit
+/// to [`synthesize_gcl`].
+#[derive(Debug, Clone)]
+pub struct ClassDemand {
+    /// The 802.1Q class of service (priority) this demand occupies. Each
+    /// class gets exactly one open window in the synthesized GCL.
+    pub cos: ClassOfService,
+    /// Aggregate arrival curve for all flows of this class at the port.
+    pub arrival: ArrivalCurve,
+    /// Per-hop deadline budget for this class at this gate, picoseconds
+    /// (the share of the end-to-end deadline allotted to this hop).
+    pub deadline_ps: u64,
+}
+
+/// Errors returned by [`synthesize_gcl`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GclSynthError {
+    /// The demand set was empty.
+    NoDemands,
+    /// `cycle_ps` is zero or not a whole number of nanoseconds. The GCL
+    /// blob format quantizes window times to nanoseconds, so the cycle
+    /// must be a whole-nanosecond value.
+    CycleNotWholeNanos {
+        /// The rejected cycle period, picoseconds.
+        cycle_ps: u64,
+    },
+    /// Two demands name the same class of service. A class may appear at
+    /// most once (the single-window invariant the bound math relies on).
+    DuplicateClass {
+        /// The duplicated 802.1Q priority.
+        cos: u8,
+    },
+    /// Even a window spanning the entire cycle cannot meet this class's
+    /// deadline: the deadline is below the irreducible σ/link
+    /// transmission delay of the burst at full line rate (or the class's
+    /// sustained rate exceeds the whole link). Widen the deadline, raise
+    /// the link rate, or shrink the burst.
+    ClassInfeasible {
+        /// The class that cannot be served.
+        cos: u8,
+        /// The deadline that could not be met, picoseconds.
+        deadline_ps: u64,
+        /// The smallest delay achievable for this class (a full-cycle
+        /// window); `u64::MAX` if the class is unservable at any width.
+        achievable_ps: u64,
+    },
+    /// The sum of the minimal per-class window durations exceeds the
+    /// cycle — the port is oversubscribed. Lengthen the cycle, raise the
+    /// link rate, or relax deadlines.
+    Oversubscribed {
+        /// Total window time the demands require, picoseconds.
+        required_ps: u64,
+        /// The available cycle period, picoseconds.
+        cycle_ps: u64,
+    },
+    /// Self-certification failed: the synthesized GCL did not round-trip
+    /// through [`GateSchedule::parse`], or a class missed its deadline on
+    /// re-check with the real network-calculus bound. Indicates a
+    /// synthesizer bug — surfaced as an error rather than an unsound GCL.
+    SelfCheck(String),
+}
+
+impl core::fmt::Display for GclSynthError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoDemands => write!(f, "no class demands supplied"),
+            Self::CycleNotWholeNanos { cycle_ps } => {
+                write!(f, "cycle period {} ps is not a whole nanosecond", cycle_ps)
+            }
+            Self::DuplicateClass { cos } => {
+                write!(f, "class of service {} appears more than once", cos)
+            }
+            Self::ClassInfeasible {
+                cos,
+                deadline_ps,
+                achievable_ps,
+            } => write!(
+                f,
+                "class {} deadline {} ps is unachievable (best {} ps at full cycle)",
+                cos, deadline_ps, achievable_ps
+            ),
+            Self::Oversubscribed {
+                required_ps,
+                cycle_ps,
+            } => write!(
+                f,
+                "port oversubscribed: {} ps of window time required, {} ps cycle",
+                required_ps, cycle_ps
+            ),
+            Self::SelfCheck(msg) => write!(f, "synthesis self-check failed: {}", msg),
+        }
+    }
+}
+
+impl core::error::Error for GclSynthError {}
+
+/// Synthesize a 802.1Qbv gate-control list for one TAS-gated egress port.
+///
+/// Each [`ClassDemand`] receives one contiguous open window
+/// (`allowed_cos_mask = 1 << cos`); the leftover cycle time becomes a
+/// closed guard window (`mask = 0`). Window durations are sized by a
+/// monotone search so each class's [`tas_residual_service`] curve meets
+/// its deadline under the EXACT [`delay_bound`] — the same sound bound the
+/// analyzer uses, run forward on the synthesizer's own output. The result
+/// is self-certified through [`GateSchedule::parse`] + per-class
+/// [`delay_bound`] before return.
+///
+/// Latency-pessimistic by construction: with one window per class the
+/// worst-case gate latency is `cycle − duration`, independent of window
+/// placement — so window ORDER is a no-op on the bounds. Closing the
+/// residual gap needs window SPLITTING (REQ-TSN-SYNTH-QBV-001).
+///
+/// `cycle_ps` must be a whole number of nanoseconds (the GCL blob format
+/// is nanosecond-quantized). Returns a [`GclSynthError`] distinguishing
+/// per-class infeasibility from port oversubscription.
+pub fn synthesize_gcl(
+    demands: &[ClassDemand],
+    cycle_ps: u64,
+    link_rate_bps: u64,
+) -> Result<GateSchedule, GclSynthError> {
+    if demands.is_empty() {
+        return Err(GclSynthError::NoDemands);
+    }
+    if cycle_ps == 0 || !cycle_ps.is_multiple_of(1_000) {
+        return Err(GclSynthError::CycleNotWholeNanos { cycle_ps });
+    }
+    // A class may appear at most once — two windows for the same CoS
+    // would break the single-window `T_K = cycle − duration` invariant.
+    for (i, a) in demands.iter().enumerate() {
+        for b in &demands[i + 1..] {
+            if a.cos == b.cos {
+                return Err(GclSynthError::DuplicateClass { cos: a.cos.0 });
+            }
+        }
+    }
+
+    let cycle_ns = cycle_ps / 1_000;
+
+    // Per-class minimal window duration (ns). delay is strictly
+    // decreasing in window duration, so binary-search the smallest
+    // duration whose single-window schedule meets the deadline — using
+    // the REAL checker as the predicate (no parallel closed-form, so
+    // integer rounding cannot diverge from the oracle).
+    let mut durations_ns: Vec<u64> = Vec::with_capacity(demands.len());
+    for d in demands {
+        // Feasibility ceiling: a full-cycle window (latency 0, rate =
+        // link) is the best this class can ever get.
+        let full = class_delay_ps(d, cycle_ns, cycle_ns, link_rate_bps);
+        if !matches!(full, Some(delay) if delay <= d.deadline_ps) {
+            return Err(GclSynthError::ClassInfeasible {
+                cos: d.cos.0,
+                deadline_ps: d.deadline_ps,
+                achievable_ps: full.unwrap_or(u64::MAX),
+            });
+        }
+        // Binary-search the smallest feasible duration in 1..=cycle_ns.
+        let mut lo = 1u64;
+        let mut hi = cycle_ns;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let ok = matches!(
+                class_delay_ps(d, mid, cycle_ns, link_rate_bps),
+                Some(delay) if delay <= d.deadline_ps
+            );
+            if ok {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        durations_ns.push(lo);
+    }
+
+    let required_ns: u64 = durations_ns.iter().sum();
+    if required_ns > cycle_ns {
+        return Err(GclSynthError::Oversubscribed {
+            required_ps: required_ns.saturating_mul(1_000),
+            cycle_ps,
+        });
+    }
+
+    // Emit one open window per class (declaration order — a no-op on the
+    // bounds), then a closed guard window for any leftover.
+    let mut blob = String::new();
+    let mut offset_ns = 0u64;
+    for (d, &dur_ns) in demands.iter().zip(&durations_ns) {
+        if !blob.is_empty() {
+            blob.push(';');
+        }
+        let mask = 1u8 << d.cos.0;
+        blob.push_str(&format!("{}:{}:0x{:02X}", offset_ns, dur_ns, mask));
+        offset_ns += dur_ns;
+    }
+    if offset_ns < cycle_ns {
+        blob.push(';');
+        blob.push_str(&format!("{}:{}:0x00", offset_ns, cycle_ns - offset_ns));
+    }
+
+    // Self-certify against the real parser + checker. By construction
+    // this always passes; a failure here is a synthesizer bug, surfaced
+    // as an error rather than an unsound schedule reaching the caller.
+    let sched = GateSchedule::parse(&blob)
+        .map_err(|e| GclSynthError::SelfCheck(format!("re-parse failed for {:?}: {}", blob, e)))?;
+    for d in demands {
+        let beta = tas_residual_service(&sched, d.cos, link_rate_bps);
+        match delay_bound(&d.arrival, &beta) {
+            Ok(delay) if delay <= d.deadline_ps => {}
+            Ok(delay) => {
+                return Err(GclSynthError::SelfCheck(format!(
+                    "class {} delay {} ps exceeds deadline {} ps after synthesis",
+                    d.cos.0, delay, d.deadline_ps
+                )));
+            }
+            Err(e) => {
+                return Err(GclSynthError::SelfCheck(format!(
+                    "class {} unservable after synthesis: {:?}",
+                    d.cos.0, e
+                )));
+            }
+        }
+    }
+    Ok(sched)
+}
+
+/// Worst-case delay (ps) for `demand` if its class receives a single open
+/// window of `dur_ns` in a `cycle_ns` cycle on a `link_rate_bps` link,
+/// computed via the real TAS checker ([`tas_residual_service`] +
+/// [`delay_bound`]). `None` when the resulting server is unstable (the
+/// class's sustained rate exceeds the window's residual rate).
+fn class_delay_ps(
+    demand: &ClassDemand,
+    dur_ns: u64,
+    cycle_ns: u64,
+    link_rate_bps: u64,
+) -> Option<u64> {
+    let cycle_ps = cycle_ns.saturating_mul(1_000);
+    let dur_ps = dur_ns.saturating_mul(1_000);
+    let bit = 1u8 << demand.cos.0;
+    let windows = if dur_ns >= cycle_ns {
+        vec![GateWindow {
+            offset_ps: 0,
+            duration_ps: cycle_ps,
+            allowed_cos_mask: bit,
+        }]
+    } else {
+        vec![
+            GateWindow {
+                offset_ps: 0,
+                duration_ps: dur_ps,
+                allowed_cos_mask: bit,
+            },
+            GateWindow {
+                offset_ps: dur_ps,
+                duration_ps: cycle_ps - dur_ps,
+                allowed_cos_mask: 0,
+            },
+        ]
+    };
+    let sched = GateSchedule { windows, cycle_ps };
+    let beta = tas_residual_service(&sched, demand.cos, link_rate_bps);
+    delay_bound(&demand.arrival, &beta).ok()
+}
+
 /// Parse [`Spar_TSN::Gate_Control_List`] from a [`PropertyMap`] into a
 /// structured [`GateSchedule`].
 ///
@@ -1895,5 +2190,193 @@ mod tests {
         let svc = tas_residual_service_with_sync_error(&s, cos7, TAS_GBPS, 10_000_000);
         assert_eq!(svc.rate_bps, 0);
         assert_eq!(svc.latency_ps, 15_000_000);
+    }
+
+    // ── QBV GCL synthesis (REQ-TSN-SYNTH-QBV-BASE-001) ───────────────
+    //
+    // The oracle is the existing TAS checker run forward on the
+    // synthesizer's own output: synthesize_gcl → GateSchedule::parse
+    // round-trip (zero error) → tas_residual_service per class →
+    // delay_bound ≤ deadline. No external reference numbers — the
+    // checker (TEST-TSN-TAS) is the free, exact inverse.
+
+    fn cos(c: u8) -> ClassOfService {
+        ClassOfService::new(c).unwrap()
+    }
+
+    /// Assert that `sched` round-trips through the parser unchanged and
+    /// meets every demand's deadline under the exact NC delay bound.
+    fn assert_gcl_sound(sched: &GateSchedule, demands: &[ClassDemand], link_bps: u64) {
+        // (1) Round-trip: re-emit and re-parse with zero error.
+        let blob = sched.to_gcl_blob();
+        let reparsed = GateSchedule::parse(&blob)
+            .unwrap_or_else(|e| panic!("synthesized GCL {:?} failed to re-parse: {}", blob, e));
+        assert_eq!(&reparsed, sched, "round-trip changed the schedule");
+        // (2) Windows tile [0, cycle_ps): parse already enforces this, so
+        // a successful re-parse is the tiling proof.
+        // (3) Every class meets its deadline under the same sound bound
+        // the analyzer uses.
+        for d in demands {
+            let beta = tas_residual_service(sched, d.cos, link_bps);
+            let delay = delay_bound(&d.arrival, &beta).unwrap_or_else(|e| {
+                panic!("class {} unservable on synthesized GCL: {:?}", d.cos.0, e)
+            });
+            assert!(
+                delay <= d.deadline_ps,
+                "class {} delay {} ps exceeds deadline {} ps",
+                d.cos.0,
+                delay,
+                d.deadline_ps
+            );
+        }
+    }
+
+    #[test]
+    fn synth_multiclass_roundtrips_and_meets_all_deadlines() {
+        // Two classes sharing a 10 µs cycle on a 1 Gbps port. Distinct
+        // CoS, affine arrivals, slack deadlines — clearly feasible.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64; // 10 µs
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000), // 125 B burst, 100 Mbps
+                deadline_ps: 8_000_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(250, 200_000_000),
+                deadline_ps: 9_000_000,
+            },
+        ];
+        let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
+        assert_eq!(sched.cycle_ps, cycle_ps, "cycle preserved");
+        assert_gcl_sound(&sched, &demands, link);
+    }
+
+    #[test]
+    fn synth_tighter_deadline_widens_window() {
+        // Monotone lever: a tighter deadline forces a wider open window
+        // (delay is strictly decreasing in window duration).
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let mk = |deadline_ps| {
+            vec![ClassDemand {
+                cos: cos(5),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps,
+            }]
+        };
+        let loose = synthesize_gcl(&mk(8_000_000), cycle_ps, link).expect("feasible");
+        let tight = synthesize_gcl(&mk(4_000_000), cycle_ps, link).expect("feasible");
+        let open = |s: &GateSchedule| s.open_fraction(cos(5)).0;
+        assert!(
+            open(&tight) >= open(&loose),
+            "tighter deadline must not shrink the open window: tight {} < loose {}",
+            open(&tight),
+            open(&loose)
+        );
+        assert_gcl_sound(&tight, &mk(4_000_000), link);
+    }
+
+    #[test]
+    fn synth_leftover_becomes_closed_guard_window() {
+        // A single class that does not need the whole cycle leaves a
+        // closed (mask=0) guard window — which perturbs no class's
+        // worst-case latency.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![ClassDemand {
+            cos: cos(2),
+            arrival: ArrivalCurve::affine(125, 100_000_000),
+            deadline_ps: 9_500_000, // generous → small window, big leftover
+        }];
+        let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
+        let guard = sched.windows.last().expect("non-empty schedule");
+        assert_eq!(guard.allowed_cos_mask, 0, "leftover must be a closed guard");
+        assert_gcl_sound(&sched, &demands, link);
+    }
+
+    #[test]
+    fn synth_rejects_class_below_irreducible_transmission_delay() {
+        // σ = 1250 B = 10000 bits takes 10 µs to send at 1 Gbps even with
+        // the gate fully open (latency 0). A 5 µs deadline is physically
+        // impossible → ClassInfeasible, not Oversubscribed.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![ClassDemand {
+            cos: cos(6),
+            arrival: ArrivalCurve::affine(1250, 50_000_000),
+            deadline_ps: 5_000_000,
+        }];
+        let err = synthesize_gcl(&demands, cycle_ps, link).expect_err("infeasible");
+        assert!(
+            matches!(err, GclSynthError::ClassInfeasible { cos: 6, .. }),
+            "expected ClassInfeasible for cos 6, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn synth_rejects_oversubscribed_port() {
+        // Two classes each needing > half the cycle: individually
+        // feasible, jointly oversubscribed.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000, // forces a ~5.5 µs window
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+        ];
+        let err = synthesize_gcl(&demands, cycle_ps, link).expect_err("oversubscribed");
+        assert!(
+            matches!(err, GclSynthError::Oversubscribed { .. }),
+            "expected Oversubscribed, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn synth_input_validation() {
+        let link = 1_000_000_000u64;
+        // No demands.
+        assert_eq!(
+            synthesize_gcl(&[], 10_000_000, link),
+            Err(GclSynthError::NoDemands)
+        );
+        // Cycle not a whole number of nanoseconds.
+        let d = vec![ClassDemand {
+            cos: cos(7),
+            arrival: ArrivalCurve::affine(125, 100_000_000),
+            deadline_ps: 8_000_000,
+        }];
+        assert!(matches!(
+            synthesize_gcl(&d, 10_000_001, link),
+            Err(GclSynthError::CycleNotWholeNanos { .. })
+        ));
+        // Duplicate class of service.
+        let dup = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+        ];
+        assert!(matches!(
+            synthesize_gcl(&dup, 10_000_000, link),
+            Err(GclSynthError::DuplicateClass { cos: 7 })
+        ));
     }
 }
