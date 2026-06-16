@@ -29,9 +29,9 @@
 //!   source × 8 (one frame buffered per cycle), defaulting to one
 //!   Ethernet MTU ([`DEFAULT_FRAME_BYTES`]).
 //! - **`deadline_ps`** — `Timing_Properties::Deadline` on the source
-//!   (the accessor falls back to `Period`). A stream with no timing
-//!   budget cannot constrain the cycle time and is skipped with an Info
-//!   diagnostic rather than given an invented deadline.
+//!   (no fallback to `Period`). A stream with no `Deadline` cannot
+//!   constrain the cycle time and is skipped with an Info diagnostic
+//!   rather than given an invented deadline.
 //! - **`path`** — the bound switch sequence, each switch's arena index
 //!   reused as the link id, so streams sharing a switch sum their
 //!   per-cycle reservations there; `path.len()` is the hop count H.
@@ -135,9 +135,9 @@ pub(crate) fn collect_cqf_inputs(instance: &SystemInstance) -> CqfInputs {
     for s in &streams {
         let src_props = instance.properties_for(s.src_idx);
 
-        // End-to-end deadline (Deadline, falling back to Period inside
-        // the accessor). No timing budget ⇒ the flow can't constrain the
-        // cycle time; record it as skipped rather than invent one.
+        // End-to-end deadline from Timing_Properties::Deadline (no Period
+        // fallback). No Deadline ⇒ the flow can't constrain the cycle
+        // time; record it as skipped rather than invent one.
         let Some(deadline_ps) = get_timing_property(src_props, "Deadline") else {
             out.skipped.push(s.name.clone());
             continue;
