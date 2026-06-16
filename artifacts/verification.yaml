@@ -2301,6 +2301,39 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-QBV-BASE-001
 
+  - id: TEST-TSN-EXPORT-YANG
+    type: feature
+    title: 802.1Qcw YANG/NETCONF export of a synthesized gate schedule
+    description: >
+      Verifies to_qcw_yang, the serializer turning a GateSchedule (the
+      output of synthesize_gcl, REQ-TSN-SYNTH-QBV-BASE-001) into an
+      ieee802-dot1q-sched (802.1Qcw) instance document in NETCONF XML.
+      No external reference tool: the oracle is structural invariants the
+      emitted document MUST satisfy, checked in spar-network::tsn unit
+      tests. (1) GOLDEN — a fixed two-window schedule serializes to a
+      pinned exact XML string (snapshot), so any formatting drift fails;
+      (2) ONE-ENTRY-PER-WINDOW — the emitted document contains exactly
+      one <gate-control-entry> per GateWindow, in declaration order;
+      (3) CYCLE CONSERVATION — Σ time-interval-value over the entries
+      equals the schedule cycle in ns, and admin-cycle-time encodes
+      cycle_ps/1e12 s; (4) MASK FIDELITY — each entry's gate-states-value
+      equals its window's allowed_cos_mask (including the closed mask=0
+      guard window); (5) ROUND-TRIP FROM SYNTH — feeding a synthesize_gcl
+      output straight into to_qcw_yang produces a document whose entry
+      count and interval sum match the source GateSchedule. Pure string
+      serialization, NO new dependency (the to_gcl_blob precedent). Full
+      ieee802-dot1q-sched schema validation (pyang/yanglint) is a noted
+      follow-up, not asserted here.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- yang"
+    status: passing
+    tags: [v0.20.0, network, tsn, export, yang, netconf, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-EXPORT-YANG-001
+
   - id: TEST-TSN-SYNTH-CQF-BASE
     type: feature
     title: CQF synthesis baseline — literature-pinned delay + decoupled admission oracle
