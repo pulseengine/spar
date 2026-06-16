@@ -610,7 +610,7 @@ artifacts:
     status: planned
     tags: [diff, merge, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -639,7 +639,7 @@ artifacts:
     status: planned
     tags: [query, instance, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -703,7 +703,7 @@ artifacts:
     status: planned
     tags: [solver, verification, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-SOLVER-006
     type: requirement
@@ -741,7 +741,7 @@ artifacts:
     status: planned
     tags: [solver, safety, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-SOLVER-009
     type: requirement
@@ -754,7 +754,7 @@ artifacts:
     status: planned
     tags: [solver, security, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -990,7 +990,7 @@ artifacts:
     status: planned
     tags: [verification, competitive-gap, v040]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
@@ -2430,7 +2430,7 @@ artifacts:
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
     fields:
-      release: v0.20.0
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -2455,7 +2455,7 @@ artifacts:
     status: proposed
     tags: [ingest, sysml2, grammar]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-PLUGFEST-002
     type: requirement
@@ -2551,7 +2551,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.20.0
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -2570,7 +2570,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.20.0
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -2590,7 +2590,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler, attestation]
     fields:
-      release: v0.20.0
+      release: v0.21.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -2670,7 +2670,7 @@ artifacts:
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-NC-TFA-001
     type: requirement
@@ -2757,7 +2757,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-NC-PLP-CONVERGE-001
     type: requirement
@@ -2960,7 +2960,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -3024,7 +3024,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
@@ -3169,7 +3169,7 @@ artifacts:
     status: proposed
     tags: [proof, lean, network-calculus, soundness, tier3]
     fields:
-      release: v0.20.0
+      release: v0.21.0
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
