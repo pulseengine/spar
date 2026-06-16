@@ -2264,6 +2264,40 @@ artifacts:
       - type: satisfies
         target: REQ-NETWORK-006
 
+  - id: TEST-TSN-SVC-MULTIWIN
+    type: feature
+    title: Sound TAS service-curve latency for multi-window gate schedules
+    description: >
+      Verifies the exact sound latency T_sound that replaces the
+      optimistic longest-single-gap latency in tas_residual_service for
+      multi-window GCLs (REQ-TSN-SVC-MULTIWIN-001). The oracle is an
+      INDEPENDENT per-class minimum-service staircase
+      S(t) = R·min over phases φ of (open-time in [φ,φ+t]), computed
+      separately from the production T_sound. spar-network::tsn unit
+      tests assert: (1) SOUNDNESS — the production rate-latency curve
+      β_sound(t) = R·ρ·(t−T_sound)₊ satisfies β_sound(t) ≤ S(t) for all t
+      across a battery of single-window, even k-split, uneven-split, and
+      multi-class shared-cycle schedules; (2) REGRESSION — the two pinned
+      counterexamples where the OLD longest-gap β exceeded S now hold
+      β_sound ≤ S (GCL `0:4000:0x00;4000:500:0x01;4500:4000:0x00;8500:1000:0x01`
+      at t=8500ns; `0:200:0x01;200:5000:0x00;5200:1800:0x01;7000:5000:0x00`
+      at t=10200ns); (3) EXACTNESS/NON-REGRESSION — T_sound equals the
+      legacy value for a single window per class (cycle−open) and for even
+      k-way splits ((cycle−open)/k), so shipped single-window synthesizer
+      output is byte-unchanged; (4) MONOTONE — a more even split yields a
+      smaller (or equal) T_sound. Exact picosecond integer arithmetic at
+      window-boundary breakpoints. Self-certifying: production curve
+      checked against the independent staircase, not a hand-pinned number.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- tas_sound"
+    status: planned
+    tags: [network, tsn, wctt, tas, soundness, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SVC-MULTIWIN-001
+
   - id: TEST-TSN-SYNTH-QBV-BASE
     type: feature
     title: 802.1Qbv GCL synthesis baseline — exact TAS round-trip oracle
