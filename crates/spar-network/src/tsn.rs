@@ -1136,6 +1136,82 @@ impl GateSchedule {
         }
         out
     }
+
+    /// Serialize this gate schedule as an IEEE 802.1Qcw `ieee802-dot1q-sched`
+    /// YANG instance document (NETCONF XML) for the egress port
+    /// `port_name` — the deployable artifact a TSN switch consumes via
+    /// `edit-config` (REQ-TSN-EXPORT-YANG-001), not a network-calculus bound.
+    ///
+    /// Each [`GateWindow`] becomes one `<gate-control-entry>` with
+    /// `operation-name=set-gate-states`, `time-interval-value` the window
+    /// duration in whole nanoseconds (`duration_ps / 1000`, exact for any
+    /// schedule produced by [`GateSchedule::parse`] or [`synthesize_gcl`]),
+    /// and `gate-states-value` the window's `allowed_cos_mask` (the closed
+    /// guard window emits mask 0). The cycle period is the rational
+    /// `admin-cycle-time` = `cycle_ps / 1e12` seconds. `admin-gate-states`
+    /// initializes all eight queues open (255). NO new dependency —
+    /// hand-emitted XML, mirroring [`GateSchedule::to_gcl_blob`].
+    pub fn to_qcw_yang(&self, port_name: &str) -> String {
+        // Picoseconds per second — the denominator of the `admin-cycle-time`
+        // rational, since every interval in this crate is stored in ps.
+        const PS_PER_SECOND: u64 = 1_000_000_000_000;
+        let mut out = String::new();
+        out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        out.push_str("<interfaces xmlns=\"urn:ietf:params:xml:ns:yang:ietf-interfaces\">\n");
+        out.push_str("  <interface>\n");
+        out.push_str(&format!("    <name>{}</name>\n", xml_escape(port_name)));
+        out.push_str(
+            "    <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">\n",
+        );
+        out.push_str("      <gate-enabled>true</gate-enabled>\n");
+        out.push_str("      <admin-gate-states>255</admin-gate-states>\n");
+        out.push_str("      <admin-control-list>\n");
+        for (i, w) in self.windows.iter().enumerate() {
+            // gate-states-value and time-interval-value are DIRECT siblings
+            // of operation-name in the entry (ieee802-dot1q-sched augments
+            // the dot1q-types base-gate-control-entries grouping — there is
+            // no `sgs-params` wrapper, and no `admin-control-list-length`
+            // leaf: length is enforced by a `must` count constraint).
+            out.push_str("        <gate-control-entry>\n");
+            out.push_str(&format!("          <index>{}</index>\n", i));
+            out.push_str("          <operation-name>set-gate-states</operation-name>\n");
+            out.push_str(&format!(
+                "          <time-interval-value>{}</time-interval-value>\n",
+                w.duration_ps / 1_000
+            ));
+            out.push_str(&format!(
+                "          <gate-states-value>{}</gate-states-value>\n",
+                w.allowed_cos_mask
+            ));
+            out.push_str("        </gate-control-entry>\n");
+        }
+        out.push_str("      </admin-control-list>\n");
+        out.push_str("      <admin-cycle-time>\n");
+        out.push_str(&format!(
+            "        <numerator>{}</numerator>\n",
+            self.cycle_ps
+        ));
+        out.push_str(&format!(
+            "        <denominator>{}</denominator>\n",
+            PS_PER_SECOND
+        ));
+        out.push_str("      </admin-cycle-time>\n");
+        out.push_str("    </gate-parameter-table>\n");
+        out.push_str("  </interface>\n");
+        out.push_str("</interfaces>\n");
+        out
+    }
+}
+
+/// Minimal XML text escaping for values embedded in the
+/// `ieee802-dot1q-sched` instance document emitted by
+/// [`GateSchedule::to_qcw_yang`]. Ampersand is replaced first so the
+/// entities introduced by the later replacements are not double-escaped.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 // ── 802.1Qbv GCL synthesis (REQ-TSN-SYNTH-QBV-BASE-001) ──────────────
@@ -2378,5 +2454,172 @@ mod tests {
             synthesize_gcl(&dup, 10_000_000, link),
             Err(GclSynthError::DuplicateClass { cos: 7 })
         ));
+    }
+
+    // ── 802.1Qcw YANG export (REQ-TSN-EXPORT-YANG-001) ───────────────
+
+    /// A two-window schedule on a 100 ns toy cycle: one 30 ns open window
+    /// for CoS 2 (mask 0x04) then a 70 ns closed guard window (mask 0).
+    fn two_window_schedule() -> GateSchedule {
+        GateSchedule {
+            windows: vec![
+                GateWindow {
+                    offset_ps: 0,
+                    duration_ps: 30_000,
+                    allowed_cos_mask: 0x04,
+                },
+                GateWindow {
+                    offset_ps: 30_000,
+                    duration_ps: 70_000,
+                    allowed_cos_mask: 0x00,
+                },
+            ],
+            cycle_ps: 100_000,
+        }
+    }
+
+    #[test]
+    fn qcw_yang_golden_snapshot() {
+        // Pin the EXACT emitted document. Any formatting/structural drift
+        // (a renamed node, a reordered field, a changed namespace) fails
+        // here — the snapshot is the strictest oracle for a serializer.
+        let expected = "\
+<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<interfaces xmlns=\"urn:ietf:params:xml:ns:yang:ietf-interfaces\">
+  <interface>
+    <name>eth0</name>
+    <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">
+      <gate-enabled>true</gate-enabled>
+      <admin-gate-states>255</admin-gate-states>
+      <admin-control-list>
+        <gate-control-entry>
+          <index>0</index>
+          <operation-name>set-gate-states</operation-name>
+          <time-interval-value>30</time-interval-value>
+          <gate-states-value>4</gate-states-value>
+        </gate-control-entry>
+        <gate-control-entry>
+          <index>1</index>
+          <operation-name>set-gate-states</operation-name>
+          <time-interval-value>70</time-interval-value>
+          <gate-states-value>0</gate-states-value>
+        </gate-control-entry>
+      </admin-control-list>
+      <admin-cycle-time>
+        <numerator>100000</numerator>
+        <denominator>1000000000000</denominator>
+      </admin-cycle-time>
+    </gate-parameter-table>
+  </interface>
+</interfaces>
+";
+        assert_eq!(two_window_schedule().to_qcw_yang("eth0"), expected);
+    }
+
+    /// Parse out every `<time-interval-value>N</time-interval-value>`.
+    fn interval_values(doc: &str) -> Vec<u64> {
+        doc.lines()
+            .filter_map(|l| {
+                l.trim()
+                    .strip_prefix("<time-interval-value>")
+                    .and_then(|r| r.strip_suffix("</time-interval-value>"))
+                    .map(|n| n.parse::<u64>().unwrap())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn qcw_yang_one_entry_per_window_and_cycle_conserved() {
+        let sched = GateSchedule {
+            windows: vec![
+                GateWindow {
+                    offset_ps: 0,
+                    duration_ps: 20_000,
+                    allowed_cos_mask: 0x02,
+                },
+                GateWindow {
+                    offset_ps: 20_000,
+                    duration_ps: 25_000,
+                    allowed_cos_mask: 0x08,
+                },
+                GateWindow {
+                    offset_ps: 45_000,
+                    duration_ps: 55_000,
+                    allowed_cos_mask: 0x00,
+                },
+            ],
+            cycle_ps: 100_000,
+        };
+        let doc = sched.to_qcw_yang("sw1-p3");
+        // exactly one gate-control-entry (and one index) per window
+        assert_eq!(doc.matches("<gate-control-entry>").count(), 3);
+        assert_eq!(doc.matches("<index>").count(), 3);
+        // Σ time-interval-value (ns) == cycle (ns)
+        let sum_ns: u64 = interval_values(&doc).iter().sum();
+        assert_eq!(sum_ns, sched.cycle_ps / 1_000);
+        // cycle rational: cycle_ps / 1e12 s
+        assert!(doc.contains("<numerator>100000</numerator>"));
+        assert!(doc.contains("<denominator>1000000000000</denominator>"));
+    }
+
+    #[test]
+    fn qcw_yang_mask_fidelity_including_guard() {
+        let sched = GateSchedule {
+            windows: vec![
+                GateWindow {
+                    offset_ps: 0,
+                    duration_ps: 40_000,
+                    allowed_cos_mask: 0x80, // CoS 7 only
+                },
+                GateWindow {
+                    offset_ps: 40_000,
+                    duration_ps: 60_000,
+                    allowed_cos_mask: 0x00, // closed guard
+                },
+            ],
+            cycle_ps: 100_000,
+        };
+        let doc = sched.to_qcw_yang("p");
+        assert!(doc.contains("<gate-states-value>128</gate-states-value>"));
+        // the closed guard window must still appear, as mask 0
+        assert!(doc.contains("<gate-states-value>0</gate-states-value>"));
+    }
+
+    #[test]
+    fn qcw_yang_roundtrips_synthesizer_output() {
+        // Export a REAL synthesize_gcl output: the document's entry count
+        // and interval sum must match the source GateSchedule, closing the
+        // synthesize→export loop end to end.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64; // 10 µs
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(250, 200_000_000),
+                deadline_ps: 9_000_000,
+            },
+        ];
+        let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
+        let doc = sched.to_qcw_yang("eth1");
+        assert_eq!(
+            doc.matches("<gate-control-entry>").count(),
+            sched.windows.len()
+        );
+        let sum_ns: u64 = interval_values(&doc).iter().sum();
+        assert_eq!(sum_ns, sched.cycle_ps / 1_000);
+    }
+
+    #[test]
+    fn qcw_yang_escapes_port_name() {
+        // Port names flow into XML text; a `&`/`<` must be entity-escaped
+        // so the document stays well-formed.
+        let doc = two_window_schedule().to_qcw_yang("p&<a>\"");
+        assert!(doc.contains("<name>p&amp;&lt;a&gt;&quot;</name>"));
+        assert!(!doc.contains("<name>p&<a>"));
     }
 }

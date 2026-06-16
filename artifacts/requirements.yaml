@@ -3109,15 +3109,37 @@ artifacts:
     type: requirement
     title: "TSN config export (802.1Qcw YANG / NETCONF)"
     description: >
-      spar shall export synthesized TSN configuration as 802.1Qcw YANG
-      / NETCONF. ONLY meaningful as the output stage of a working
-      synthesizer (REQ-TSN-SYNTH-*) — the weakest standalone case in the
-      analysis. KILL-GATE: premature if no synthesis target consumes the
-      export.
-    status: proposed
+      spar shall export a synthesized 802.1Qbv gate schedule
+      (GateSchedule, the output of REQ-TSN-SYNTH-QBV-BASE-001) as an
+      ieee802-dot1q-sched (802.1Qcw) YANG instance document in NETCONF
+      XML encoding — the deployable artifact a TSN switch consumes via
+      edit-config, not a network-calculus bound. Each GateWindow maps to
+      one gate-control-entry (operation-name=set-gate-states,
+      time-interval-value = duration in ns, gate-states-value = the
+      allowed-CoS bitmask); the cycle period maps to admin-cycle-time as
+      the rational cycle_ps / 1e12 s. KILL-GATE (premature if no
+      synthesis target consumes the export) is now CLEARED:
+      REQ-TSN-SYNTH-QBV-BASE-001 shipped a GateSchedule producer in
+      v0.20.0, so export is the genuine output stage of a working
+      synthesizer. This completes the ingest→synthesize→EXPORT story a
+      real TSN tool sells (tsnkit/Slate/RTaW/PEGASE emit deployable
+      configs, not just bounds). Self-certifying oracle: structural
+      invariants on the emitted document — exactly one gate-control-entry
+      per window, Σ time-interval-value == cycle, gate-states-value ==
+      window mask, plus a pinned golden snapshot. NO new dependency
+      (hand-serialized XML String, the to_gcl_blob precedent). The
+      document is deliberately SIMPLIFIED and not yet schema-valid: the
+      gate-parameter-table sits directly under interfaces/interface
+      rather than the 802.1Qcw bridge-port mount, and operation-name
+      carries a bare `set-gate-states` identityref with no
+      module-prefixed value. Concrete follow-ups: the bridge-port mount +
+      prefixed identityref to pass pyang/yanglint, and a CQF/Qch export
+      path — neither claimed here.
+      [SOLID — IEEE 802.1Qcw-2023 ieee802-dot1q-sched YANG]
+    status: implemented
     tags: [tsn, export, yang, netconf, tier2]
     fields:
-      release: v0.21.0
+      release: v0.20.0
 
   - id: REQ-TSN-SYNTH-ONLINE-001
     type: requirement
