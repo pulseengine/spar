@@ -1144,17 +1144,34 @@ impl GateSchedule {
     ///
     /// Each [`GateWindow`] becomes one `<gate-control-entry>` with
     /// `operation-name=set-gate-states`, `time-interval-value` the window
-    /// duration in whole nanoseconds (`duration_ps / 1000`, exact for any
-    /// schedule produced by [`GateSchedule::parse`] or [`synthesize_gcl`]),
-    /// and `gate-states-value` the window's `allowed_cos_mask` (the closed
+    /// duration in whole nanoseconds (`duration_ps / 1000`), and
+    /// `gate-states-value` the window's `allowed_cos_mask` (the closed
     /// guard window emits mask 0). The cycle period is the rational
     /// `admin-cycle-time` = `cycle_ps / 1e12` seconds. `admin-gate-states`
     /// initializes all eight queues open (255). NO new dependency —
     /// hand-emitted XML, mirroring [`GateSchedule::to_gcl_blob`].
+    ///
+    /// **Precondition:** every `duration_ps` and `cycle_ps` is a whole
+    /// number of nanoseconds. `time-interval-value` is integer ns, so a
+    /// sub-nanosecond duration would truncate and the emitted intervals
+    /// would no longer sum to `admin-cycle-time` (which is emitted from
+    /// `cycle_ps` directly). Both producers — [`GateSchedule::parse`] and
+    /// [`synthesize_gcl`] — guarantee whole-ns windows, so for any
+    /// schedule they build `Σ time-interval-value == admin-cycle-time`;
+    /// the `debug_assert` upholds that contract at this boundary.
     pub fn to_qcw_yang(&self, port_name: &str) -> String {
         // Picoseconds per second — the denominator of the `admin-cycle-time`
         // rational, since every interval in this crate is stored in ps.
         const PS_PER_SECOND: u64 = 1_000_000_000_000;
+        debug_assert!(
+            self.cycle_ps.is_multiple_of(1_000)
+                && self
+                    .windows
+                    .iter()
+                    .all(|w| w.duration_ps.is_multiple_of(1_000)),
+            "to_qcw_yang requires whole-nanosecond windows and cycle \
+             (guaranteed by GateSchedule::parse and synthesize_gcl)"
+        );
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.push_str("<interfaces xmlns=\"urn:ietf:params:xml:ns:yang:ietf-interfaces\">\n");
@@ -2560,6 +2577,35 @@ mod tests {
         // cycle rational: cycle_ps / 1e12 s
         assert!(doc.contains("<numerator>100000</numerator>"));
         assert!(doc.contains("<denominator>1000000000000</denominator>"));
+    }
+
+    #[test]
+    fn qcw_yang_intervals_sum_to_admin_cycle_time() {
+        // Internal consistency on a REAL whole-ns synthesizer output (the
+        // producer contract): Σ time-interval-value (ns) == admin-cycle-time
+        // numerator / 1000. Closes the gap where the cycle is emitted
+        // independently of the per-window intervals (a truncating
+        // sub-nanosecond duration would break this — guarded by the
+        // function's debug_assert and impossible from synthesize_gcl).
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![
+            ClassDemand {
+                cos: cos(6),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+            ClassDemand {
+                cos: cos(2),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+        ];
+        let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
+        let doc = sched.to_qcw_yang("eth2");
+        let sum_ns: u64 = interval_values(&doc).iter().sum();
+        assert!(doc.contains(&format!("<numerator>{}</numerator>", sched.cycle_ps)));
+        assert_eq!(sum_ns, sched.cycle_ps / 1_000);
     }
 
     #[test]
