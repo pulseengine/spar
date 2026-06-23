@@ -971,18 +971,19 @@ impl GateSchedule {
         (open_ps, self.cycle_ps)
     }
 
-    /// Worst-case gate latency for class `cos`, picoseconds.
+    /// Longest contiguous closed (gate-shut-for-`cos`) run in the cycle,
+    /// picoseconds, taken with wrap-around — a RAW gate-schedule metric.
     ///
-    /// Defined as the maximum contiguous closed (gate-shut-for-`cos`)
-    /// duration in the cycle, taken with wrap-around. Equivalently, the
-    /// longest stretch of time during which a frame waiting at the
-    /// queue cannot egress because no window in the GCL has bit
-    /// `cos.0` set.
+    /// NOTE: this is **not** the sound rate-latency service-curve latency
+    /// for multi-window schedules — it is OPTIMISTIC there (it charges only
+    /// the single longest gap, ignoring the gap → sliver → gap composite).
+    /// The service curves use [`GateSchedule::min_service_latency_ps`]
+    /// instead (REQ-TSN-SVC-MULTIWIN-001); the two coincide only for a
+    /// single open window per class and for even k-way splits. This
+    /// accessor is retained for the raw "longest closed run" quantity.
     ///
     /// Returns `cycle_ps` if no window opens for `cos` (the gate is
-    /// permanently closed; all of `cycle_ps` is the closed gap, which
-    /// drives `tas_residual_service` to the unservable `(rate=0,
-    /// latency=cycle_ps)` form).
+    /// permanently closed; all of `cycle_ps` is the closed gap).
     pub fn worst_case_latency(&self, cos: ClassOfService) -> u64 {
         let bit = 1u8 << cos.0;
         // Walk windows once and accumulate the longest run of closed
@@ -1014,6 +1015,67 @@ impl GateSchedule {
             max_closed = current_closed;
         }
         max_closed.min(self.cycle_ps)
+    }
+
+    /// Exact SOUND rate-latency latency `T_sound` for class `cos`
+    /// (REQ-TSN-SVC-MULTIWIN-001) — the maximum horizontal deviation of the
+    /// per-class minimum-service staircase below the long-term-rate line.
+    ///
+    /// Unlike [`GateSchedule::worst_case_latency`] (the longest single
+    /// closed gap, which is OPTIMISTIC for uneven multi-window schedules),
+    /// this is SOUND: the rate-latency curve `β(t) = R·ρ·(t − T_sound)₊`
+    /// lower-bounds the true minimum service
+    /// `S(t) = R · min over φ of (open-time for cos in [φ, φ+t])` for ALL t.
+    /// For a single open window per class — or even k-way splits — it
+    /// equals `worst_case_latency` (`cycle − open` and `(cycle − open)/k`);
+    /// only uneven multi-window schedules are corrected upward.
+    ///
+    /// Method: `T_sound = maxₜ[t − S(t)/(R·ρ)] = maxᵩ maxₜ[t − open(φ,φ+t)/ρ]`.
+    /// For a fixed phase φ taken at an open-window END (a gap start), the
+    /// inner term rises during closed gaps and falls during open windows,
+    /// so its maximum lies at an open-window START. Enumerating φ over every
+    /// open-window end and t over every subsequent open-window start yields
+    /// the exact maximum in O(W²) over the W open windows, entirely in
+    /// integer arithmetic: maximise the candidate `t·open − o·cycle`
+    /// (= `(t − o/ρ)·open`), then divide by `open` rounding UP — the
+    /// pessimistic (sound) direction.
+    pub fn min_service_latency_ps(&self, cos: ClassOfService) -> u64 {
+        let bit = 1u8 << cos.0;
+        let opens: Vec<(u64, u64)> = self
+            .windows
+            .iter()
+            .filter(|w| w.allowed_cos_mask & bit != 0)
+            .map(|w| (w.offset_ps, w.duration_ps))
+            .collect();
+        let open_total: u64 = opens.iter().map(|(_, d)| *d).sum();
+        // Permanently closed: unservable — full-cycle latency, matching the
+        // `worst_case_latency` contract `tas_residual_service` relies on.
+        if open_total == 0 {
+            return self.cycle_ps;
+        }
+        // Permanently open: zero latency.
+        if open_total >= self.cycle_ps {
+            return 0;
+        }
+        let cycle = self.cycle_ps as i128;
+        let open = open_total as i128;
+        let w = opens.len();
+        let mut best: i128 = 0; // T_sound is ≥ 0
+        for i in 0..w {
+            // φ = end of open window i = start of a closed gap.
+            let phi_end = opens[i].0 as i128 + opens[i].1 as i128;
+            let mut o_accum: i128 = 0; // open time strictly before window j
+            for k in 1..=w {
+                let j = (i + k) % w;
+                // Forward cyclic distance φ → start of window j, in [0, cycle).
+                let t = (opens[j].0 as i128 - phi_end).rem_euclid(cycle);
+                let cand = t * open - o_accum * cycle;
+                best = best.max(cand);
+                o_accum += opens[j].1 as i128;
+            }
+        }
+        // ceil(best / open) — round the latency UP to stay sound.
+        ((best + open - 1) / open) as u64
     }
 }
 
@@ -1047,7 +1109,9 @@ pub fn tas_residual_service(
     link_rate_bps: u64,
 ) -> ServiceCurve {
     let (open_ps, cycle_ps) = schedule.open_fraction(cos);
-    let latency_ps = schedule.worst_case_latency(cos);
+    // Sound rate-latency latency (REQ-TSN-SVC-MULTIWIN-001) — exact for
+    // multi-window schedules, equal to the longest gap for single windows.
+    let latency_ps = schedule.min_service_latency_ps(cos);
 
     // R_link · ρ_K = link_rate_bps · open_ps / cycle_ps, in u128 to
     // avoid overflow on realistic inputs.
@@ -1091,7 +1155,10 @@ pub fn tas_residual_service_with_sync_error(
     sync_error_ps: u64,
 ) -> ServiceCurve {
     let (open_ps, cycle_ps) = schedule.open_fraction(cos);
-    let latency_ps = schedule.worst_case_latency(cos);
+    // Sound rate-latency latency (REQ-TSN-SVC-MULTIWIN-001); ε is added on
+    // top below. Equals the longest gap for single-window schedules, so the
+    // `sync_error_ps == 0` single-window non-regression contract holds.
+    let latency_ps = schedule.min_service_latency_ps(cos);
 
     // Effective open time shrinks by ε (clamped at 0). Once ε ≥ open
     // time, the gate is effectively closed: rate = 0 with the worst-
@@ -1961,6 +2028,121 @@ mod tests {
         let svc = tas_residual_service(&s, cos0, TAS_GBPS);
         assert_eq!(svc.rate_bps, 0);
         assert_eq!(svc.latency_ps, 10_000_000);
+    }
+
+    // ── REQ-TSN-SVC-MULTIWIN-001: sound TAS service-curve latency ────────
+
+    /// INDEPENDENT min-service oracle: min over every integer-ns phase φ of
+    /// the open-ps for `cos` in [φ, φ+t]. Brute force (small test cycles
+    /// only) — deliberately a different algorithm from the production
+    /// breakpoint method in `min_service_latency_ps`.
+    fn min_open_ps(sched: &GateSchedule, cos: ClassOfService, t_ps: u64) -> u64 {
+        let bit = 1u8 << cos.0;
+        let cyc_ns = (sched.cycle_ps / 1000) as usize;
+        let mut open = vec![false; cyc_ns];
+        for w in &sched.windows {
+            if w.allowed_cos_mask & bit != 0 {
+                let s = (w.offset_ps / 1000) as usize;
+                let e = ((w.offset_ps + w.duration_ps) / 1000) as usize;
+                for slot in open.iter_mut().take(e).skip(s) {
+                    *slot = true;
+                }
+            }
+        }
+        let t_ns = (t_ps / 1000) as usize;
+        let mut min_o = u64::MAX;
+        for phi in 0..cyc_ns {
+            let mut o = 0u64;
+            for k in 0..t_ns {
+                if open[(phi + k) % cyc_ns] {
+                    o += 1000;
+                }
+            }
+            min_o = min_o.min(o);
+        }
+        min_o
+    }
+
+    /// Exact, R-free soundness predicate: β_sound(t) ≤ S(t)
+    /// ⟺ open_total·(t − T_sound)₊ ≤ min_open(t)·cycle (all in ps).
+    fn beta_sound_le_s(sched: &GateSchedule, cos: ClassOfService, t_ps: u64) -> bool {
+        let (open_total, cycle) = sched.open_fraction(cos);
+        let tsound = sched.min_service_latency_ps(cos);
+        let lhs = (open_total as u128) * (t_ps.saturating_sub(tsound) as u128);
+        let rhs = (min_open_ps(sched, cos, t_ps) as u128) * (cycle as u128);
+        lhs <= rhs
+    }
+
+    #[test]
+    fn tas_sound_holds_across_split_battery() {
+        // β_sound(t) ≤ true min-service S(t) for ALL t, swept at 1ns over
+        // [0, 2·cycle], across single / even / uneven / multi-class shapes.
+        let cos0 = cos(0);
+        let cases = [
+            "0:40:0x01;40:60:0x00",                       // single 40/100
+            "0:20:0x01;20:30:0x00;50:20:0x01;70:30:0x00", // even 2-split
+            "0:30:0x01;30:30:0x00;60:10:0x01;70:30:0x00", // uneven 30+10
+            "0:35:0x01;35:30:0x00;65:5:0x01;70:30:0x00",  // uneven 35+5
+            "0:20:0x03;20:20:0x00;40:20:0x01;60:40:0x00", // multi-class: cos0 uneven
+        ];
+        for blob in cases {
+            let s = GateSchedule::parse(blob).unwrap();
+            let mut t = 0u64;
+            while t <= 2 * s.cycle_ps {
+                assert!(
+                    beta_sound_le_s(&s, cos0, t),
+                    "UNSOUND β>S at t={}ps for `{}` (T_sound={})",
+                    t,
+                    blob,
+                    s.min_service_latency_ps(cos0)
+                );
+                t += 1_000;
+            }
+        }
+    }
+
+    #[test]
+    fn tas_sound_single_window_matches_longest_gap() {
+        // Non-regression: for one window per class, the sound latency equals
+        // the legacy longest-gap value (cycle − open), so shipped
+        // single-window synthesizer output is byte-unchanged.
+        let s = GateSchedule::parse("0:40:0x01;40:60:0x00").unwrap();
+        assert_eq!(
+            s.min_service_latency_ps(cos(0)),
+            s.worst_case_latency(cos(0))
+        );
+        assert_eq!(s.min_service_latency_ps(cos(0)), 60_000);
+    }
+
+    #[test]
+    fn tas_sound_even_split_is_cycle_minus_open_over_k() {
+        // Even k-split → (cycle − open)/k, exactly (the tight, sound lever).
+        let s2 = GateSchedule::parse("0:20:0x01;20:30:0x00;50:20:0x01;70:30:0x00").unwrap();
+        assert_eq!(s2.min_service_latency_ps(cos(0)), 30_000); // (100−40)/2
+        let s4 = GateSchedule::parse(
+            "0:10:0x01;10:15:0x00;25:10:0x01;35:15:0x00;\
+             50:10:0x01;60:15:0x00;75:10:0x01;85:15:0x00",
+        )
+        .unwrap();
+        assert_eq!(s4.min_service_latency_ps(cos(0)), 15_000); // (100−40)/4
+    }
+
+    #[test]
+    fn tas_sound_fixes_pinned_counterexamples() {
+        // The two schedules where the OLD longest-gap β exceeded S. The
+        // sound latency is strictly larger (the optimism removed) and
+        // β_sound ≤ S now holds at the previously-failing t.
+        let cos0 = cos(0);
+        let c1 =
+            GateSchedule::parse("0:4000:0x00;4000:500:0x01;4500:4000:0x00;8500:1000:0x01").unwrap();
+        assert!(c1.min_service_latency_ps(cos0) > c1.worst_case_latency(cos0));
+        assert_eq!(c1.min_service_latency_ps(cos0), 5_333_334); // ceil(8e12/1.5e6) ps
+        assert!(beta_sound_le_s(&c1, cos0, 8_500_000));
+
+        let c2 =
+            GateSchedule::parse("0:200:0x01;200:5000:0x00;5200:1800:0x01;7000:5000:0x00").unwrap();
+        assert!(c2.min_service_latency_ps(cos0) > c2.worst_case_latency(cos0));
+        assert!(beta_sound_le_s(&c2, cos0, 10_200_000));
     }
 
     #[test]

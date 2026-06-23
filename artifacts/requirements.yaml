@@ -1544,6 +1544,53 @@ artifacts:
     status: implemented
     tags: [network, tsn, wctt, v081]
 
+  - id: REQ-TSN-SVC-MULTIWIN-001
+    type: requirement
+    title: "Sound TAS service-curve latency for multi-window gate schedules"
+    description: >
+      spar's TAS gate-window service curve (REQ-TSN-002) derives its
+      latency T_K as the longest single contiguous closed run. That is
+      OPTIMISTIC (unsound) for gate schedules where a class opens in
+      MULTIPLE windows of unequal duration/spacing: past the single
+      longest gap the rate-latency curve β_K(t)=R·ρ_K·(t−T_K)₊ assumes
+      sustained service the gate does not deliver (a big-gap → sliver →
+      big-gap timeline). spar shall instead compute the EXACT sound
+      latency T_sound from the per-class minimum-service staircase
+      S(t) = R · min over phases φ∈[0,cycle) of (open-time for K in
+      [φ, φ+t]): T_sound = max over t of [t − S(t)/(R·ρ_K)], the maximum
+      horizontal deviation of S below the long-term-rate line (the worst
+      case lies within t∈[0,cycle] since S is periodic with per-cycle
+      gain R·open). T_sound ≥ longest-gap always, with EQUALITY for a
+      single window per class and for EVEN k-way splits ((cycle−open)/k)
+      — so REQ-TSN-002's shipped single-window outputs are unchanged;
+      only uneven multi-window schedules are corrected upward.
+      tas_residual_service, tas_residual_service_with_sync_error, and the
+      wctt.rs WcttTasGated diagnostic shall consume T_sound. REACHABILITY:
+      the gap is reachable, not latent — wctt.rs runs the curve on the
+      user's Spar_TSN::Gate_Control_List, which may be an arbitrary
+      uneven multi-window GCL; no shipped synthesizer emits such schedules
+      (synthesize_gcl is one window per class). Computed in EXACT
+      picosecond integer arithmetic at window-boundary breakpoints (NOT a
+      1ns-discretized scan). SELF-CERTIFYING ORACLE: an independent
+      min-service staircase asserts β_sound(t) ≤ S(t) for all t across a
+      battery of single/even/uneven/multi-class schedules, plus two
+      pinned regression counterexamples where the OLD longest-gap β
+      exceeded S: GCL `0:4000:0x00;4000:500:0x01;4500:4000:0x00;8500:1000:0x01`
+      (cycle 9500ns, t=8500ns: old β=88B > S=62B) and
+      `0:200:0x01;200:5000:0x00;5200:1800:0x01;7000:5000:0x00`
+      (cycle 12000ns, t=10200ns: old β=108B > S=25B). SINGLE-GATE scope —
+      distinct from the cross-hop TAS composition question (a separate
+      panco-gated track); this is validated deterministically by the
+      staircase, NOT panco (which models FIFO rate-latency, the wrong tool
+      for TAS gate staircases). Prerequisite for window-splitting
+      synthesis (REQ-TSN-SYNTH-QBV-001), which must self-certify against
+      the sound (and correctly-RANKING) bound. [SOLID — Zhao/Network
+      Calculus for TSN; verified 2026-06-16 by independent falsification.]
+    status: approved
+    tags: [network, tsn, wctt, network-calculus, soundness, tier1]
+    fields:
+      release: v0.21.0
+
   - id: REQ-TSN-003
     type: requirement
     title: 802.1Qav CBS credit-pool service curve

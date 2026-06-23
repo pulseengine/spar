@@ -373,7 +373,11 @@ impl WcttAnalysis {
                         } else {
                             ((open_ps as u128) * 100 / (cycle_ps as u128)) as u64
                         };
-                        let gate_latency_ps = schedule.worst_case_latency(cos);
+                        // Sound exact latency (REQ-TSN-SVC-MULTIWIN-001):
+                        // matches the longest gap for single-window GCLs,
+                        // but is correct for uneven multi-window user GCLs
+                        // where the longest-gap value is optimistic.
+                        let gate_latency_ps = schedule.min_service_latency_ps(cos);
                         diags.push(AnalysisDiagnostic {
                             severity: Severity::Info,
                             message: format!(
