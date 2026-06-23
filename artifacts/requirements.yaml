@@ -3246,6 +3246,72 @@ artifacts:
     fields:
       release: v0.22.0
 
+  - id: REQ-NC-TAS-COMPOSE-001
+    type: requirement
+    title: "Sound network-wide composition of per-port TAS residual service curves (the PLP≪TFA wedge loop)"
+    description: >
+      spar wants to compose synthesized per-egress-port 802.1Qbv TAS
+      residual service curves (REQ-TSN-SVC-MULTIWIN-001) network-wide via
+      the existing TFA/PLP engine (wctt.rs::network_wide_nc_bounds) to get
+      sound end-to-end per-flow bounds and demonstrate PLP ≪ TFA tightness
+      on gated tandems/lines — the strategic differentiator and the
+      network-wide oracle REQ-TSN-SYNTH-MILP-001 needs.
+      GO/NO-GO VERDICT = NO-GO (2026-06-24, fresh-context refute-framed
+      experiment, panco oracle; code claims verified against current main):
+      (1) UNSOUND AS NAIVELY SPECIFIED. The proposed "relabel a TSN hop as
+      FIFO to bypass the network_wide_nc_bounds guard (wctt.rs:978-995)"
+      does NOT change which curve the composition reads.
+      network_wide_nc_bounds reads service_for_bus[hop] (wctt.rs:1007),
+      which is populated UNCONDITIONALLY at wctt.rs:183 with the FULL
+      LINE-RATE curve ServiceCurve::rate_latency(Output_Rate, wcet); the
+      TAS residual is rebuilt separately in the per-hop SFA walk
+      (wctt.rs:346-361) and never written back (confirmed by the
+      wctt.rs:169-172 comment). Counterexample: one gated port, GCL
+      `0:20000:0x04;20000:80000:0x00` (20µs open / 80µs closed), two
+      same-class flows α=(1500B,50Mbps): the relabel feeds β=(1Gbps,0) →
+      panco FIFO-exact = 24.0µs, but a frame arriving as the gate closes
+      cannot be served for ≥80µs (physics floor) → 24 < 80 → UNSOUND. The
+      correct residual β=(200Mbps,80µs) (tsn.rs:1042/1106) → panco = 200µs
+      (sound). So the current guard is RIGHT to bail; bypassing it is the
+      bug.
+      (2) THE OPEN QUESTION (C) IS NOT ESTABLISHABLE WITH AVAILABLE
+      ORACLES even if the plumbing is fixed. panco validates composition of
+      given rate-latency curves (step B, REQ-NC-VALIDATION-001) but CANNOT
+      inject a TAS gate (panco/README:29-31); whether composing
+      phase-worst-case residuals across MULTIPLE gated hops under
+      multi-flow shared-class FIFO with gate phase CORRELATED across hops
+      stays a sound upper bound needs a TAS-matched simulator floor
+      (REQ-NC-SIM-FLOOR-001). FALSE-GO TRAP: a shallow fix of (1) that
+      plumbs the residual and re-runs the single-hop scenario yields
+      200µs ≥ truth and could be mistaken for a GO — it is NOT, because it
+      never exercises (C). [BLOCKED — research-grade]
+    status: proposed
+    tags: [network-calculus, tsn, tas, composition, wedge, research-grade, blocked]
+    fields:
+      release: v0.22.0
+
+  - id: REQ-NC-SIM-FLOOR-001
+    type: requirement
+    title: "TAS-matched discrete-event simulation floor (oracle-kind-(a)) for gated-hop NC validation"
+    description: >
+      spar shall validate 802.1Qbv TAS / gated-hop network-calculus bounds
+      against a TAS-matched discrete-event simulator (OMNeT++/INET or
+      equivalent) — the stronger oracle-kind-(a) simulation floor noted as
+      deferred in tests/oracles/panco/README.md (lines 28-31). This is the
+      ONLY oracle that can settle the open soundness question (C) in
+      REQ-NC-TAS-COMPOSE-001: NC-tool agreement (panco/xTFA/DNC) is
+      structurally incapable of it because those tools validate
+      FIFO/CBS/ATS rate-latency-server networks, not gate schedules. Until
+      this exists, sound network-wide composition of TAS residuals across
+      multiple gated hops cannot be certified, and any such bound must
+      either keep the network_wide_nc_bounds TSN-hop guard (bail) or be
+      labelled research-grade. Gates REQ-NC-TAS-COMPOSE-001 and, through
+      it, the network-wide arm of REQ-TSN-SYNTH-MILP-001.
+    status: proposed
+    tags: [network-calculus, tsn, tas, simulation, oracle, substrate]
+    fields:
+      release: v0.22.0
+
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement
     title: "TSN schedule synthesis — MIP→VNS-GA scale handoff"
@@ -3254,7 +3320,16 @@ artifacts:
       MILP backend via the MIP→VNS-GA handoff (Wang et al., Sensors
       2025): exact MIP ≤ ~1,000 flows, then VNS-GA (genetic +
       2-opt/or-opt/exchange) up to ~3,000 flows. The cleanest concrete
-      scale recipe sitting directly on the current solver. [SOLID]
+      scale recipe sitting directly on the current solver.
+      GATING (updated 2026-06-24): the NETWORK-WIDE arm — where windows
+      couple across hops and a sound end-to-end NC oracle is needed —
+      depends on REQ-NC-TAS-COMPOSE-001, which is NO-GO/blocked pending the
+      simulator floor REQ-NC-SIM-FLOOR-001. A single-port window-sizing
+      MILP (the per-port problem already solved structurally by
+      REQ-TSN-SYNTH-QBV-SPLIT-BASE-001) does not need that oracle, but it
+      also does not earn MILP's keep over the existing greedy synthesizer.
+      So MILP stays gated on the composition oracle, not buildable as a
+      clean baseline yet. [gated]
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
     fields:
