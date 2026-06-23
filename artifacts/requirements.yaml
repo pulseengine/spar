@@ -2237,24 +2237,36 @@ artifacts:
 
   - id: REQ-EMV2-PROPAGATION-002
     type: requirement
-    title: Ingest parsed .emv2 annex into the error-propagation overlay
+    title: Integrate parsed EMV2 annex into SystemInstance for error-propagation
     description: >
       The error-propagation pass (REQ-EMV2-PROPAGATION-001) consumes an
-      `Emv2Overlay` that, on the `spar analyze` path, is never populated
-      from the parsed `.emv2` annex subclause (root cause documented at
-      crates/spar-analysis/src/emv2_propagation.rs:128) — so it reports
-      "0 chain(s), 0 local flow(s)" for EVERY real model, while the fault
-      tree and the EMV2→STPA bridge (which DO read the annex) work. spar
-      shall populate the `Emv2Overlay` from the parsed annex (error
-      source/sink/path + in/out propagation declarations) when building
-      analysis inputs, so `compute_error_propagation` yields real chains
-      on production input. Oracle: the two repro models (relay_transport,
-      and the bundled OSATE network_protocol_pkg) each produce > 0 chains;
-      a model with no EMV2 annex still yields 0. Tracks GitHub #294.
-    status: approved
-    tags: [emv2, analysis, bug, safety]
+      `Emv2Overlay` that, on the `spar analyze` path, is always EMPTY
+      (emv2_propagation.rs:383 `Emv2Overlay::new()`), so it reports
+      "0 chain(s), 0 local flow(s)" for EVERY real model. GitHub #294.
+      SCOPE CORRECTION (investigated 2026-06-23): #294's premise that the
+      fault tree and EMV2→STPA bridge already read the annex is WRONG —
+      those passes work off EMV2 *properties* and component structure, NOT
+      the annex subclause. The EMV2 annex body IS fully parsed
+      (`spar-annex/emv2` → `Emv2Parse`, bundled in `ParseResult.annexes`)
+      but is PARSED-BUT-DISCARDED: HIR lowering drops it
+      (item_tree/lower.rs:169 `ANNEX_SUBCLAUSE => {}`), `SystemInstance`
+      has no EMV2 fields, and `Analysis::analyze(&self, &SystemInstance)`
+      cannot see the parse result. So this is NOT a small overlay-wiring
+      fix — it requires INTEGRATING the parsed annex into the instance
+      model: (1) lower the EMV2 annex subclause during instance
+      construction (hir-def, salsa), storing per-component error
+      source/sink/path + in/out propagation declarations on
+      `SystemInstance` with an accessor; (2) resolve annex component/port
+      names to `ComponentInstanceIdx`/feature; (3) a bridge building the
+      `Emv2Overlay` from that instance data; (4) wire it into the analyze
+      path. A genuine cross-layer feature (the gap 3 files call "future
+      work"), re-scoped from v0.21.0 → v0.22.0 and from `bug` to a feature.
+      Oracle: the two repro models (relay_transport, bundled OSATE
+      network_protocol_pkg) each produce > 0 chains; no-annex model yields 0.
+    status: proposed
+    tags: [emv2, analysis, safety, hir-def, capability]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-WRPC-BINDING-002
     type: requirement
