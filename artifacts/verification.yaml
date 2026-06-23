@@ -2335,6 +2335,35 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-QBV-BASE-001
 
+  - id: TEST-TSN-SYNTH-QBV-SPLIT
+    type: feature
+    title: 802.1Qbv window-splitting synthesis baseline — splits an oversubscribed port
+    description: >
+      Verifies synthesize_gcl_split (REQ-TSN-SYNTH-QBV-SPLIT-BASE-001), the
+      smallest-feasible-K even-split synthesizer. spar-network::tsn unit
+      tests cover: (1) THE LEVER — the exact two-class latency-bound demand
+      set that synth_rejects_oversubscribed_port REJECTS with single
+      windows is made FEASIBLE by splitting; the result self-certifies
+      (each class's delay_bound over the SOUND min_service_latency curve ≤
+      its deadline) and genuinely splits (≥ 2 windows per class);
+      (2) NO-NEEDLESS-SPLIT — a comfortably feasible demand returns K=1,
+      byte-identical to synthesize_gcl; (3) K-CAP — max_windows_per_class=1
+      disables splitting, so the oversubscribed set is rejected;
+      (4) INPUT VALIDATION — a non-whole-nanosecond cycle (and cycle 0) are
+      rejected up front as CycleNotWholeNanos, not silently mis-reported.
+      Self-certifying: the full multi-window schedule is re-checked through
+      the sound checker before return, so an unsound split fails
+      construction, not just the test.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- split_"
+    status: passing
+    tags: [v0.21.0, network, tsn, synthesis, qbv, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SYNTH-QBV-SPLIT-BASE-001
+
   - id: TEST-TSN-EXPORT-YANG
     type: feature
     title: 802.1Qcw YANG/NETCONF export of a synthesized gate schedule

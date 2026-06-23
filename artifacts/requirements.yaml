@@ -3169,6 +3169,62 @@ artifacts:
     fields:
       release: v0.20.0
 
+  - id: REQ-TSN-SYNTH-QBV-SPLIT-BASE-001
+    type: requirement
+    title: "802.1Qbv window-splitting synthesis baseline — even K-split, smallest feasible K"
+    description: >
+      spar shall synthesize a window-SPLITTING 802.1Qbv gate-control list
+      that pulls the worst-case-latency lever the single-window baseline
+      (REQ-TSN-SYNTH-QBV-BASE-001) cannot: splitting a class's allocation
+      into K evenly-spaced windows cuts its worst-case gate latency to
+      (cycle − open)/K at the SAME bandwidth, so a port that single
+      windows leave Oversubscribed (each latency-bound class needing a
+      wide window to reach a low latency) becomes feasible.
+      `synthesize_gcl_split` uses the network-calculus identity that a
+      K-way even split on cycle c is identical to a single window on cycle
+      c/K (same rate, same latency = c/K − w): it synthesizes one round on
+      c/K with the existing single-window search and replicates it K
+      times, returning the SMALLEST feasible K (fewest windows). K=1
+      reproduces synthesize_gcl exactly; the result SELF-CERTIFIES on the
+      full multi-window schedule against the SOUND latency
+      (REQ-TSN-SVC-MULTIWIN-001 / min_service_latency_ps) — the
+      counterexample regime that makes this non-trivial. NC-level baseline:
+      the model is guard-band-free, so `max_windows_per_class` caps the
+      search off the rate-loss cliff a guard-band-aware model imposes
+      (deployable claim = REQ-TSN-SYNTH-QBV-GUARDBAND-001). Precursor to
+      the full dependency-aware REQ-TSN-SYNTH-QBV-001, mirroring
+      REQ-TSN-SYNTH-QBV-BASE-001 → REQ-TSN-SYNTH-QBV-001. Incremental
+      synthesis (table-stakes vs RTaW), NOT the PLP≪TFA wedge. [SOLID]
+    status: implemented
+    tags: [tsn, synthesis, qbv, tier2]
+    fields:
+      release: v0.21.0
+
+  - id: REQ-TSN-SYNTH-QBV-GUARDBAND-001
+    type: requirement
+    title: "802.1Qbv guard-band-aware window-splitting (deployable GCL claim)"
+    description: >
+      Follow-up to REQ-TSN-SYNTH-QBV-SPLIT-BASE-001, which synthesizes
+      split GCLs over a guard-band-FREE model (sound at the NC
+      service-curve level, but NOT a deployable-hardware claim — real
+      802.1Qbv loses ~K guard bands of transmit time to frame-straddle
+      protection, which the model does not see, so the baseline can
+      over-state available rate by (K−1)·g/cycle). spar should subtract
+      the per-window guard band g (≈ Max_Frame_Size / link_rate; readers
+      exist) from effective open time and add g to latency — using the
+      already-present structural hook in
+      `tas_residual_service_with_sync_error` (the ε-subtraction pattern) —
+      so the synthesizer's "meets deadline" claim becomes
+      deployment-sound and the breakeven K (self-starvation at
+      K = 1 + cycle·ρ/g) is enforced automatically by the oracle rejecting
+      rate-starving splits. Verified-economics: latency gain ~1/K vs rate
+      loss linear in K; rich to K≈10, catastrophic past ~50 for typical
+      automotive cycles/frames. [SOLID]
+    status: proposed
+    tags: [tsn, synthesis, qbv, guard-band, tier2]
+    fields:
+      release: v0.22.0
+
   - id: REQ-TSN-SYNTH-QBV-001
     type: requirement
     title: "802.1Qbv GCL synthesis — dependency-aware, window-splitting, mixed-criticality"
@@ -3177,19 +3233,18 @@ artifacts:
       (inverse of the existing TAS checking, REQ-TSN-002) via
       dependency-aware priority adjustment with WINDOW SPLITTING
       (arXiv:2407.00987, 2024): ~300 flows, mixed-criticality, +20.6%
-      success over SOTA. Builds on the single-window baseline
-      (REQ-TSN-SYNTH-QBV-BASE-001) by splitting a class's allocation into
-      multiple windows distributed around the cycle — the only lever that
-      lowers worst-case gate latency below cycle − duration for a fixed
-      bandwidth (with one window per class, window order alone is a
-      provable no-op; splitting/placement is the paper's actual
-      contribution). KILL-GATE: kill the AADL→TSN bridge if we cannot
-      articulate why our integrated architecture-to-timing story beats
-      RTaW's already-cert-accepted ARXML→TSN+NC. [SOLID]
+      success over SOTA. The even-split LEVER shipped as the precursor
+      REQ-TSN-SYNTH-QBV-SPLIT-BASE-001 (smallest feasible K, NC-level,
+      self-certified against the sound bound); this requirement is the
+      FULL contribution that remains — dependency-aware priority/placement
+      (not just even splits) and mixed-criticality across ~300 flows.
+      KILL-GATE: kill the AADL→TSN bridge if we cannot articulate why our
+      integrated architecture-to-timing story beats RTaW's already-cert-
+      accepted ARXML→TSN+NC. [SOLID]
     status: proposed
     tags: [tsn, synthesis, qbv, tier2]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement
