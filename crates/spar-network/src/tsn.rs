@@ -2079,11 +2079,11 @@ mod tests {
         // [0, 2·cycle], across single / even / uneven / multi-class shapes.
         let cos0 = cos(0);
         let cases = [
-            "0:40:0x01;40:60:0x00",                        // single 40/100
-            "0:20:0x01;20:30:0x00;50:20:0x01;70:30:0x00",  // even 2-split
-            "0:30:0x01;30:30:0x00;60:10:0x01;70:30:0x00",  // uneven 30+10
-            "0:35:0x01;35:30:0x00;65:5:0x01;70:30:0x00",   // uneven 35+5
-            "0:20:0x03;20:20:0x00;40:20:0x01;60:40:0x00",  // multi-class: cos0 uneven
+            "0:40:0x01;40:60:0x00",                       // single 40/100
+            "0:20:0x01;20:30:0x00;50:20:0x01;70:30:0x00", // even 2-split
+            "0:30:0x01;30:30:0x00;60:10:0x01;70:30:0x00", // uneven 30+10
+            "0:35:0x01;35:30:0x00;65:5:0x01;70:30:0x00",  // uneven 35+5
+            "0:20:0x03;20:20:0x00;40:20:0x01;60:40:0x00", // multi-class: cos0 uneven
         ];
         for blob in cases {
             let s = GateSchedule::parse(blob).unwrap();
@@ -2107,7 +2107,10 @@ mod tests {
         // the legacy longest-gap value (cycle − open), so shipped
         // single-window synthesizer output is byte-unchanged.
         let s = GateSchedule::parse("0:40:0x01;40:60:0x00").unwrap();
-        assert_eq!(s.min_service_latency_ps(cos(0)), s.worst_case_latency(cos(0)));
+        assert_eq!(
+            s.min_service_latency_ps(cos(0)),
+            s.worst_case_latency(cos(0))
+        );
         assert_eq!(s.min_service_latency_ps(cos(0)), 60_000);
     }
 
