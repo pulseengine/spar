@@ -49,7 +49,7 @@ impl Analysis for WrpcBindingAnalysis {
         }
 
         // Walk all connection instances.
-        for (_conn_idx, conn) in instance.connections.iter() {
+        for (conn_idx, conn) in instance.connections.iter() {
             let owner = conn.owner;
             let owner_comp = instance.component(owner);
 
@@ -87,13 +87,24 @@ impl Analysis for WrpcBindingAnalysis {
                 continue;
             }
 
-            // Check if the connection has an Actual_Connection_Binding.
-            // Connection bindings are typically set on the owning component
-            // via `applies to` or directly on the component's property map.
+            // Check for an Actual_Connection_Binding either on the CONNECTION
+            // instance itself — the standard `Actual_Connection_Binding =>
+            // (reference (bus)) applies to <conn>` idiom, which lowers to the
+            // per-connection property map (AS5506D §11.3, instance.rs #237) —
+            // or on the owning component's flat map (the legacy form). The
+            // per-connection lookup is the #281 fix: without it, a correctly
+            // bus-bound cross-processor connection is a guaranteed
+            // false-positive. (Verifying the reference resolves to an actual
+            // `bus` — not mere presence — is a tracked follow-up.)
+            let conn_props = instance.properties_for_connection(conn_idx);
             let owner_props = instance.properties_for(owner);
-            let has_conn_binding = owner_props
+            let has_conn_binding = conn_props
                 .get("Deployment_Properties", "Actual_Connection_Binding")
                 .is_some()
+                || conn_props.get("", "Actual_Connection_Binding").is_some()
+                || owner_props
+                    .get("Deployment_Properties", "Actual_Connection_Binding")
+                    .is_some()
                 || owner_props.get("", "Actual_Connection_Binding").is_some();
 
             if !has_conn_binding {
@@ -170,6 +181,7 @@ mod tests {
         features: Arena<FeatureInstance>,
         connections: Arena<ConnectionInstance>,
         property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+        connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     }
 
     impl TestBuilder {
@@ -179,7 +191,33 @@ mod tests {
                 features: Arena::default(),
                 connections: Arena::default(),
                 property_maps: FxHashMap::default(),
+                connection_property_maps: FxHashMap::default(),
             }
+        }
+
+        /// Set a property on a CONNECTION instance — the lowered form of an
+        /// `applies to <conn>` clause (AS5506D §11.3, instance.rs #237).
+        fn set_connection_property(
+            &mut self,
+            conn: ConnectionInstanceIdx,
+            set: &str,
+            name: &str,
+            value: &str,
+        ) {
+            let map = self.connection_property_maps.entry(conn).or_default();
+            map.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
+            });
         }
 
         fn add_component(
@@ -272,7 +310,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
                 feature_property_maps: Default::default(),
-                connection_property_maps: Default::default(),
+                connection_property_maps: self.connection_property_maps,
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
             }
@@ -356,6 +394,57 @@ mod tests {
         assert!(
             diags.is_empty(),
             "should not warn when bus binding exists: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn cross_processor_connection_with_per_connection_binding_no_warning() {
+        // REQ-WRPC-BINDING-002 / GitHub #281: the standard idiom
+        // `Actual_Connection_Binding => (reference (bus)) applies to <conn>`
+        // lands on the CONNECTION instance's property map, not the owner's
+        // flat map. The check must honor it — otherwise a correctly
+        // bus-bound cross-processor connection is a guaranteed false-positive.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("top", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
+        let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, sender, receiver]);
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+        let conn = b.add_connection(
+            "est_to_falcon",
+            root,
+            "sender",
+            "out_port",
+            "receiver",
+            "in_port",
+        );
+        // Binding on the CONNECTION (the `applies to <conn>` form), not the owner.
+        b.set_connection_property(
+            conn,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (shmem)",
+        );
+
+        let inst = b.build(root);
+        let diags = WrpcBindingAnalysis.analyze(&inst);
+        assert!(
+            diags.is_empty(),
+            "per-connection `applies to <conn>` binding must satisfy the check: {:?}",
             diags
         );
     }
@@ -515,6 +604,48 @@ mod tests {
         assert!(
             diags.is_empty(),
             "no bindings = can't determine boundary: {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn analysis_name_is_wrpc_binding() {
+        assert_eq!(WrpcBindingAnalysis.name(), "wrpc-binding");
+    }
+
+    #[test]
+    fn three_processor_model_still_analyzed() {
+        // Guards the `processor_count < 2` early-return: a model with THREE
+        // processors must still be analyzed (an unbound cross-processor
+        // connection warns), so the guard is a floor, not an equality.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("top", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let cpu3 = b.add_component("cpu3", ComponentCategory::Processor, Some(root));
+        let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
+        let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, cpu3, sender, receiver]);
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu3)",
+        );
+        b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
+
+        let inst = b.build(root);
+        let diags = WrpcBindingAnalysis.analyze(&inst);
+        assert_eq!(
+            diags.len(),
+            1,
+            "3-processor model must still warn: {:?}",
             diags
         );
     }

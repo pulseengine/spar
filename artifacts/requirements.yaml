@@ -2268,15 +2268,39 @@ artifacts:
       cross-processor connection — the analysis cannot be satisfied by a
       correct deployment, so it cannot gate. spar shall resolve the binding
       on the CONNECTION instance (honor the `applies to <conn>`
-      association) and verify it targets an actual `bus` (the doc intent),
-      not mere presence. Oracle: a cross-processor connection bound via
-      `applies to <conn>` no longer warns; a genuinely unbound one still
-      warns; one bound to a non-bus warns. Repro: jess
-      hardware/pixhawk6x-rt.aadl. Tracks GitHub #281.
-    status: approved
+      association, which lowers to the per-connection property map) in
+      addition to the owner's flat map, so a correctly bus-bound
+      cross-processor connection no longer warns. Oracle: a cross-processor
+      connection bound via `applies to <conn>` no longer warns; a genuinely
+      unbound one still warns; the legacy owner-map form still works. Repro:
+      jess hardware/pixhawk6x-rt.aadl. Verifying the binding's reference
+      RESOLVES to an actual `bus` component (vs. mere presence) is carved
+      out to REQ-WRPC-BINDING-003 to avoid reintroducing false-positives on
+      reference forms the resolver can't yet follow. Tracks GitHub #281.
+    status: implemented
     tags: [wrpc, binding, analysis, bug]
     fields:
       release: v0.21.0
+
+  - id: REQ-WRPC-BINDING-003
+    type: requirement
+    title: Verify wrpc-binding Actual_Connection_Binding resolves to an actual bus
+    description: >
+      Follow-up to REQ-WRPC-BINDING-002 (which honors a per-connection
+      `Actual_Connection_Binding` by PRESENCE). spar should additionally
+      resolve the binding's `reference (...)` value to a component instance
+      and warn when it does NOT resolve to a `bus` / `virtual bus` (the
+      documented intent) — catching a connection bound to the wrong target.
+      Deferred from -002 because naive reference resolution risks new
+      false-positives on dotted/multi-level reference paths the resolver
+      cannot yet follow; the sound rule is "warn only when the reference
+      resolves UNAMBIGUOUSLY to a non-bus component, accept otherwise".
+      Oracle: a connection bound to a non-bus component warns; one bound to
+      a bus, or whose reference cannot be resolved, does not.
+    status: proposed
+    tags: [wrpc, binding, analysis]
+    fields:
+      release: v0.22.0
 
   - id: REQ-CODEGEN-WIT-CONN-001
     type: requirement
