@@ -2292,7 +2292,7 @@ artifacts:
       method: automated-test
       steps:
         - run: "cargo test -p spar-network --lib -- tas_sound"
-    status: planned
+    status: passing
     tags: [network, tsn, wctt, tas, soundness, oracle]
     links:
       - type: satisfies

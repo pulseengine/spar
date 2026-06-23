@@ -610,7 +610,7 @@ artifacts:
     status: planned
     tags: [diff, merge, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -639,7 +639,7 @@ artifacts:
     status: planned
     tags: [query, instance, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -703,7 +703,7 @@ artifacts:
     status: planned
     tags: [solver, verification, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-SOLVER-006
     type: requirement
@@ -741,7 +741,7 @@ artifacts:
     status: planned
     tags: [solver, safety, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-SOLVER-009
     type: requirement
@@ -754,7 +754,7 @@ artifacts:
     status: planned
     tags: [solver, security, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -990,7 +990,7 @@ artifacts:
     status: planned
     tags: [verification, competitive-gap, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
@@ -1043,7 +1043,7 @@ artifacts:
     status: planned
     tags: [interop, requirements, v040]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-INTEROP-003
     type: requirement
@@ -1586,7 +1586,7 @@ artifacts:
       synthesis (REQ-TSN-SYNTH-QBV-001), which must self-certify against
       the sound (and correctly-RANKING) bound. [SOLID — Zhao/Network
       Calculus for TSN; verified 2026-06-16 by independent falsification.]
-    status: approved
+    status: implemented
     tags: [network, tsn, wctt, network-calculus, soundness, tier1]
     fields:
       release: v0.21.0
@@ -2609,7 +2609,7 @@ artifacts:
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -2634,7 +2634,7 @@ artifacts:
     status: proposed
     tags: [ingest, sysml2, grammar]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-PLUGFEST-002
     type: requirement
@@ -2649,7 +2649,7 @@ artifacts:
     status: proposed
     tags: [interop, plugfest, osate]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2693,7 +2693,7 @@ artifacts:
     status: proposed
     tags: [parser, plugfest, emv2]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2709,7 +2709,7 @@ artifacts:
     status: proposed
     tags: [interop, plugfest, ocarina]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2730,7 +2730,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -2749,7 +2749,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -2769,7 +2769,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler, attestation]
     fields:
-      release: v0.21.0
+      release: v0.22.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -2849,7 +2849,7 @@ artifacts:
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-NC-TFA-001
     type: requirement
@@ -2936,7 +2936,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-NC-PLP-CONVERGE-001
     type: requirement
@@ -3139,7 +3139,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -3258,7 +3258,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
@@ -3333,11 +3333,58 @@ artifacts:
       planning across a hyperperiod and multi-buffer ambiguity-window
       handling. Candidate methods: hyper-flow graph decomposition
       (arXiv:2309.06690 — 2,000 flows, <100 ms @1,000) or GASA injection
-      planning (arXiv:2506.22671 — GA+SA, +15% flows). [SOLID]
+      planning (arXiv:2506.22671 — GA+SA, +15% flows).
+      MODEL-PINNING VERDICT (2026-06-23, primary sources): the
+      HETEROGENEOUS-cycle case has NO sound closed-form per-flow delay
+      bound to self-certify against the way (h±1)·T_c works for
+      CQF-BASE. draft-ietf-detnet-tcqf-00 App.B only ASSERTS strict-
+      priority per-hop latency (C, 2C, 3C, 4C) with no end-to-end
+      composition rule and only a 25%-avg-utilization admission heuristic
+      (which is unsound as a per-cycle buffer-budget test). The two
+      candidate papers are HEURISTIC-with-simulation: arXiv:2506.22671's
+      WCD Eq.(3) is parameterized by a GA/SA-produced injection offset
+      and validated by simulation, not a standalone checkable bound. By
+      contrast, MULTI-BUFFER SINGLE-cycle (B∈[3,7]) keeps the existing
+      (h±1)·T_c bound unchanged — B only absorbs dead time / accommodates
+      long links (tcqf-00 §2.5.1/§2.6), so it is the honest, soundly
+      self-certifiable extension (carved to REQ-TSN-SYNTH-CQF-LONGLINK-001).
+      This requirement (heterogeneous synthesis) is therefore RESEARCH-
+      GRADE until an original, separately-proven interference/feasibility
+      bound exists; deferred to v0.22.0, not a clean self-certifying
+      baseline. [RESEARCH-GRADE]
     status: proposed
-    tags: [tsn, synthesis, cqf, tier2]
+    tags: [tsn, synthesis, cqf, tier2, research-grade]
     fields:
-      release: v0.21.0
+      release: v0.22.0
+
+  - id: REQ-TSN-SYNTH-CQF-LONGLINK-001
+    type: requirement
+    title: "Multi-buffer single-cycle CQF for long links (B-buffer dead-time accommodation)"
+    description: >
+      spar shall extend the single-cycle CQF synthesizer
+      (REQ-TSN-SYNTH-CQF-BASE-001) to use B ∈ [3,7] cyclic buffers so a
+      flow's link delay / dead time DT can exceed one cycle without
+      forcing a larger global cycle T or reducing utilization. This is
+      the SOUND, self-certifiable half of the Multi-CQF space identified
+      by the 2026-06-23 model-pinning study: per draft-ietf-detnet-tcqf-00
+      §2.5.1/§2.6, additional buffers absorb dead time and accommodate
+      "arbitrary latency links at arbitrary speeds without reduction of
+      utilization" — they do NOT change the end-to-end delay STRUCTURE,
+      which remains (h−1)·T_c + DT ≤ D ≤ (h+1)·T_c (§2.1). The feasibility
+      test stays the per-cycle csize buffer-budget non-overflow rule
+      (§5.1) that CQF-BASE already self-certifies against — so this is a
+      genuine capability add (long-link / WAN DetNet) that stays inside
+      the existing closed-form self-certification pattern, unlike the
+      research-grade heterogeneous-cycle case (REQ-TSN-SYNTH-CQF-001).
+      Scope: add a per-flow link-delay / DT input + buffer-count B to the
+      synthesizer, compute B = ceil(DT / T_c) bounded to [2,7], reject if
+      B exceeds the hardware buffer cap, and keep the delay/csize oracle.
+      Honest non-goal: this is table-stakes long-link support, not the
+      heterogeneous-cycle ambition and not the PLP≪TFA NC-tightness wedge.
+    status: proposed
+    tags: [tsn, synthesis, cqf, longlink, detnet]
+    fields:
+      release: v0.22.0
 
   - id: REQ-TSN-EXPORT-YANG-001
     type: requirement
@@ -3403,7 +3450,7 @@ artifacts:
     status: proposed
     tags: [proof, lean, network-calculus, soundness, tier3]
     fields:
-      release: v0.21.0
+      release: v0.22.0
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
@@ -3421,4 +3468,4 @@ artifacts:
     status: proposed
     tags: [proof, certificate, network-calculus, soundness, tier3]
     fields:
-      release: v0.21.0
+      release: v0.22.0
