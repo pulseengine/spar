@@ -1530,6 +1530,116 @@ pub fn synthesize_gcl(
     Ok(sched)
 }
 
+/// Synthesize a window-SPLITTING 802.1Qbv GCL (REQ-TSN-SYNTH-QBV-001) —
+/// the worst-case-latency lever that [`synthesize_gcl`]'s single window
+/// per class cannot pull. Splitting a class's allocation into K evenly
+/// spaced windows cuts its worst-case gate latency to `(cycle − open)/K`
+/// at the SAME bandwidth, so a port that single windows leave
+/// `Oversubscribed` (each latency-bound class needing a wide window to
+/// reach a low latency) can become feasible.
+///
+/// Key identity: a K-way even split on cycle `c` with per-round window `w`
+/// is network-calculus-identical to a SINGLE window `w` on a cycle `c/K`
+/// (same rate `R·w/(c/K)`, same latency `c/K − w`). So this tries
+/// `K = 1, 2, …, max_windows_per_class`, synthesizes ONE round on `c/K`
+/// with the existing single-window search, and replicates it K times. It
+/// returns the SMALLEST feasible K (fewest windows — closest to a
+/// deployable GCL); `K = 1` reproduces [`synthesize_gcl`] exactly. The
+/// result self-certifies on the full multi-window schedule against the
+/// SOUND latency [`GateSchedule::min_service_latency_ps`].
+///
+/// SCOPE: this is an NC-level service-curve baseline. The model does not
+/// account for 802.1Qbv guard bands, so each extra window is "free" here;
+/// `max_windows_per_class` is the cap that keeps the search off the
+/// rate-loss cliff a guard-band-aware model would impose (the deployable
+/// claim is the follow-up REQ-TSN-SYNTH-QBV-GUARDBAND-001). Not the
+/// PLP≪TFA wedge — incremental synthesis, table-stakes against RTaW.
+pub fn synthesize_gcl_split(
+    demands: &[ClassDemand],
+    cycle_ps: u64,
+    link_rate_bps: u64,
+    max_windows_per_class: u64,
+) -> Result<GateSchedule, GclSynthError> {
+    if demands.is_empty() {
+        return Err(GclSynthError::NoDemands);
+    }
+    if cycle_ps == 0 || !cycle_ps.is_multiple_of(1_000) {
+        return Err(GclSynthError::CycleNotWholeNanos { cycle_ps });
+    }
+    let kcap = max_windows_per_class.max(1);
+    let mut last_oversub = GclSynthError::Oversubscribed {
+        required_ps: 0,
+        cycle_ps,
+    };
+    for k in 1..=kcap {
+        // The round cycle `cycle_ps / k` must be a whole number of
+        // nanoseconds, i.e. K must divide the cycle in ns — skip K otherwise.
+        if !cycle_ps.is_multiple_of(k.saturating_mul(1_000)) {
+            continue;
+        }
+        let round_cycle_ps = cycle_ps / k;
+        match synthesize_gcl(demands, round_cycle_ps, link_rate_bps) {
+            Ok(round) => {
+                // K == 1 is exactly the single-window baseline.
+                if k == 1 {
+                    return Ok(round);
+                }
+                // Replicate the round K times across the full cycle.
+                let mut blob = String::new();
+                for r in 0..k {
+                    let base = r * round_cycle_ps;
+                    for w in &round.windows {
+                        if !blob.is_empty() {
+                            blob.push(';');
+                        }
+                        blob.push_str(&format!(
+                            "{}:{}:0x{:02X}",
+                            (base + w.offset_ps) / 1_000,
+                            w.duration_ps / 1_000,
+                            w.allowed_cos_mask
+                        ));
+                    }
+                }
+                let sched = GateSchedule::parse(&blob).map_err(|e| {
+                    GclSynthError::SelfCheck(format!("split re-parse failed for {:?}: {}", blob, e))
+                })?;
+                // Self-certify the FULL multi-window schedule against the
+                // SOUND latency — a failure here is a synthesizer bug, not
+                // an unsound schedule reaching the caller.
+                for d in demands {
+                    let beta = tas_residual_service(&sched, d.cos, link_rate_bps);
+                    match delay_bound(&d.arrival, &beta) {
+                        Ok(delay) if delay <= d.deadline_ps => {}
+                        Ok(delay) => {
+                            return Err(GclSynthError::SelfCheck(format!(
+                                "class {} delay {} ps exceeds deadline {} ps after {}-split",
+                                d.cos.0, delay, d.deadline_ps, k
+                            )));
+                        }
+                        Err(e) => {
+                            return Err(GclSynthError::SelfCheck(format!(
+                                "class {} unservable after {}-split: {:?}",
+                                d.cos.0, k, e
+                            )));
+                        }
+                    }
+                }
+                return Ok(sched);
+            }
+            // Oversubscribed shrinks as K grows for latency-bound classes —
+            // a finer split may fit. Keep the error and try the next K.
+            Err(e @ GclSynthError::Oversubscribed { .. }) => {
+                last_oversub = e;
+                continue;
+            }
+            // ClassInfeasible (can't be served even at rate=link, latency=0)
+            // and structural errors are K-independent — fail fast.
+            Err(other) => return Err(other),
+        }
+    }
+    Err(last_oversub)
+}
+
 /// Worst-case delay (ps) for `demand` if its class receives a single open
 /// window of `dur_ns` in a `cycle_ns` cycle on a `link_rate_bps` link,
 /// computed via the real TAS checker ([`tas_residual_service`] +
@@ -2616,6 +2726,130 @@ mod tests {
             "expected Oversubscribed, got {:?}",
             err
         );
+    }
+
+    // ── REQ-TSN-SYNTH-QBV-001: window-splitting synthesis ────────────────
+
+    #[test]
+    fn split_fits_an_oversubscribed_latency_bound_port() {
+        // The exact demand set synth_rejects_oversubscribed_port rejects:
+        // two latency-bound classes that one window per class oversubscribes.
+        // Splitting cuts each class's worst-case latency at the SAME
+        // bandwidth, so a finer split fits where single windows did not.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+        ];
+        // One window per class oversubscribes (the QBV-BASE limit).
+        assert!(matches!(
+            synthesize_gcl(&demands, cycle_ps, link),
+            Err(GclSynthError::Oversubscribed { .. })
+        ));
+        // Window-splitting finds a feasible schedule.
+        let sched = synthesize_gcl_split(&demands, cycle_ps, link, 8).expect("split feasible");
+        // SOUND self-check: each class meets its deadline under the exact
+        // min-service latency on the resulting multi-window schedule.
+        for d in &demands {
+            let beta = tas_residual_service(&sched, d.cos, link);
+            let delay = delay_bound(&d.arrival, &beta).expect("servable");
+            assert!(
+                delay <= d.deadline_ps,
+                "class {} delay {} > deadline {}",
+                d.cos.0,
+                delay,
+                d.deadline_ps
+            );
+        }
+        // It genuinely SPLIT — at least two windows for each class.
+        for d in &demands {
+            let n = sched
+                .windows
+                .iter()
+                .filter(|w| w.allowed_cos_mask & (1 << d.cos.0) != 0)
+                .count();
+            assert!(n >= 2, "class {} not split: {} window(s)", d.cos.0, n);
+        }
+    }
+
+    #[test]
+    fn split_uses_single_window_when_feasible() {
+        // A comfortably feasible demand needs no splitting: K=1, and the
+        // result is byte-identical to synthesize_gcl (no needless windows).
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 8_000_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 9_000_000,
+            },
+        ];
+        let base = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
+        let split = synthesize_gcl_split(&demands, cycle_ps, link, 8).expect("feasible");
+        assert_eq!(
+            base.to_gcl_blob(),
+            split.to_gcl_blob(),
+            "K=1 must reproduce synthesize_gcl byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn split_caps_at_max_windows() {
+        // With max_windows_per_class = 1, splitting is disabled, so the
+        // oversubscribed set is rejected (same as the single-window path).
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+        ];
+        assert!(matches!(
+            synthesize_gcl_split(&demands, cycle_ps, link, 1),
+            Err(GclSynthError::Oversubscribed { .. })
+        ));
+    }
+
+    #[test]
+    fn split_rejects_non_whole_nanosecond_cycle() {
+        // A non-whole-ns cycle is rejected up front (not silently skipped
+        // into a misleading Oversubscribed) — and cycle 0 likewise.
+        let link = 1_000_000_000u64;
+        let demands = vec![ClassDemand {
+            cos: cos(7),
+            arrival: ArrivalCurve::affine(125, 100_000_000),
+            deadline_ps: 5_000_000,
+        }];
+        assert!(matches!(
+            synthesize_gcl_split(&demands, 1_500, link, 8),
+            Err(GclSynthError::CycleNotWholeNanos { cycle_ps: 1_500 })
+        ));
+        assert!(matches!(
+            synthesize_gcl_split(&demands, 0, link, 8),
+            Err(GclSynthError::CycleNotWholeNanos { .. })
+        ));
     }
 
     #[test]
