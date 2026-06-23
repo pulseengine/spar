@@ -2186,6 +2186,102 @@ artifacts:
     status: implemented
     tags: [emv2, analysis, v0100, safety]
 
+  # ── Issue-mapped backlog (GitHub triage → rivet, 2026-06-23) ─────────────
+
+  - id: REQ-EMV2-PROPAGATION-002
+    type: requirement
+    title: Ingest parsed .emv2 annex into the error-propagation overlay
+    description: >
+      The error-propagation pass (REQ-EMV2-PROPAGATION-001) consumes an
+      `Emv2Overlay` that, on the `spar analyze` path, is never populated
+      from the parsed `.emv2` annex subclause (root cause documented at
+      crates/spar-analysis/src/emv2_propagation.rs:128) — so it reports
+      "0 chain(s), 0 local flow(s)" for EVERY real model, while the fault
+      tree and the EMV2→STPA bridge (which DO read the annex) work. spar
+      shall populate the `Emv2Overlay` from the parsed annex (error
+      source/sink/path + in/out propagation declarations) when building
+      analysis inputs, so `compute_error_propagation` yields real chains
+      on production input. Oracle: the two repro models (relay_transport,
+      and the bundled OSATE network_protocol_pkg) each produce > 0 chains;
+      a model with no EMV2 annex still yields 0. Tracks GitHub #294.
+    status: approved
+    tags: [emv2, analysis, bug, safety]
+    fields:
+      release: v0.21.0
+
+  - id: REQ-WRPC-BINDING-002
+    type: requirement
+    title: Honor per-connection Actual_Connection_Binding (applies to <conn>) in wrpc-binding
+    description: >
+      The `wrpc-binding` check (crates/spar-analysis/src/wrpc_binding.rs)
+      reads the OWNING component's flat property map for
+      `Actual_Connection_Binding`, so it misses the standard per-connection
+      `Actual_Connection_Binding => (reference (bus)) applies to <conn>`
+      idiom and emits a false-positive on EVERY correctly bus-bound
+      cross-processor connection — the analysis cannot be satisfied by a
+      correct deployment, so it cannot gate. spar shall resolve the binding
+      on the CONNECTION instance (honor the `applies to <conn>`
+      association) and verify it targets an actual `bus` (the doc intent),
+      not mere presence. Oracle: a cross-processor connection bound via
+      `applies to <conn>` no longer warns; a genuinely unbound one still
+      warns; one bound to a non-bus warns. Repro: jess
+      hardware/pixhawk6x-rt.aadl. Tracks GitHub #281.
+    status: approved
+    tags: [wrpc, binding, analysis, bug]
+    fields:
+      release: v0.21.0
+
+  - id: REQ-CODEGEN-WIT-CONN-001
+    type: requirement
+    title: Connection-aware WIT codegen — shared cross-component contracts
+    description: >
+      `generate_wit` (crates/spar-codegen/src/wit_gen.rs) emits a
+      per-process ports interface from each process's OWN features and
+      never walks `ConnectionInstance`s, so a cross-component connection
+      produces no shared interface, no package cross-reference, and no
+      guarantee that the producer's exported type equals the consumer's
+      imported type. spar shall walk cross-component connections and emit a
+      SHARED interface in a common WIT package that the producer process
+      `export`s and the consumer `import`s, with matching types; group
+      connected request/response port-tuples into a single `func(req) ->
+      resp` (the rpc.aadl idiom); and when the connection is bound
+      (`Actual_Connection_Binding`) to a wRPC/transport bus, emit the
+      transport wiring/metadata alongside the WIT so same-core-fuse vs
+      cross-core-RPC is a deployment choice over one contract. The
+      type-level machinery in transform/wit.rs + wac.rs exists but is not
+      wired to the instance connection graph. Highest-value change for
+      using spar as the wRPC architecture source. Depends on
+      REQ-WRPC-BINDING-002 (binding resolution). Oracle: for
+      estimator.state_out -> falcon.state_in both processes reference one
+      shared interface with aligned types; a type mismatch fails codegen.
+      Tracks GitHub #282 (jess DD-009).
+    status: proposed
+    tags: [codegen, wit, wrpc, capability]
+    fields:
+      release: v0.22.0
+
+  - id: REQ-RELEASE-WASM-GATES-001
+    type: requirement
+    title: wasm verification gates + crates.io/npm distribution in the release standard
+    description: >
+      spar ships a jco-transpiled wasm component with NO wasm verification
+      (not even a wasmtime load-check) while the native binary gets the
+      full cosign + SLSA + SBOM treatment. Per the org-wide
+      release-artifact-pipeline five-track standard, spar shall add —
+      Track C (wasm gates): a witness MC/DC gate and a scry
+      abstract-interpretation gate on the wasm component (sigil-signing is
+      blocked on pulseengine/sigil#164, use cosign in the interim); and
+      Track B (distribution): publish to crates.io from signed OIDC CI and
+      add an npm CLI wrapper (spar is user-facing). Coordination hub
+      pulseengine/pulseengine.eu#98 — any deviation/sequencing is decided
+      there in the open, not diverged silently. Oracle: the release
+      workflow runs the witness + scry gates on the wasm artifact and
+      publishes to crates.io + npm. Tracks GitHub #297.
+    status: proposed
+    tags: [release, wasm, witness, scry, supply-chain, npm]
+    fields:
+      release: v0.22.0
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: REQ-VERIFY-GATE-001
