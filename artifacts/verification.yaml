@@ -3285,6 +3285,29 @@ artifacts:
       - type: satisfies
         target: REQ-EMV2-PROPAGATION-001
 
+  - id: TEST-WRPC-BINDING
+    type: feature
+    title: wrpc-binding honors per-connection Actual_Connection_Binding
+    description: >
+      Unit tests in crates/spar-analysis/src/wrpc_binding.rs verify the
+      REQ-WRPC-BINDING-002 fix: (a) a cross-processor connection whose
+      `Actual_Connection_Binding => (reference (bus)) applies to <conn>`
+      lands on the per-connection property map produces NO warning (the
+      #281 false-positive, previously emitted); (b) a genuinely unbound
+      cross-processor connection still warns; (c) the legacy owner-flat-map
+      binding form still satisfies the check; (d) same-processor / single-
+      processor / 3-processor models behave correctly (the processor-count
+      guard is a floor); (e) the analysis name is stable.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-analysis --lib -- wrpc_binding"
+    status: passing
+    tags: [wrpc, binding, analysis, bug]
+    links:
+      - type: satisfies
+        target: REQ-WRPC-BINDING-002
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: TEST-VERIFY-GATE-RUNNER
