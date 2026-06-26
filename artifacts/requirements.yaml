@@ -610,7 +610,7 @@ artifacts:
     status: planned
     tags: [diff, merge, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -639,7 +639,7 @@ artifacts:
     status: planned
     tags: [query, instance, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -690,7 +690,7 @@ artifacts:
     status: planned
     tags: [solver, optimization, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-SOLVER-005
     type: requirement
@@ -703,7 +703,7 @@ artifacts:
     status: planned
     tags: [solver, verification, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-SOLVER-006
     type: requirement
@@ -716,7 +716,7 @@ artifacts:
     status: planned
     tags: [solver, optimization, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-SOLVER-007
     type: requirement
@@ -741,7 +741,7 @@ artifacts:
     status: planned
     tags: [solver, safety, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-SOLVER-009
     type: requirement
@@ -754,7 +754,7 @@ artifacts:
     status: planned
     tags: [solver, security, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -962,7 +962,7 @@ artifacts:
     status: planned
     tags: [visualization, scheduling, competitive-gap, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-SECURITY-001
     type: requirement
@@ -990,7 +990,7 @@ artifacts:
     status: planned
     tags: [verification, competitive-gap, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
@@ -1043,7 +1043,7 @@ artifacts:
     status: planned
     tags: [interop, requirements, v040]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-INTEROP-003
     type: requirement
@@ -2266,7 +2266,7 @@ artifacts:
     status: proposed
     tags: [emv2, analysis, safety, hir-def, capability]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-WRPC-BINDING-002
     type: requirement
@@ -2341,7 +2341,7 @@ artifacts:
     status: proposed
     tags: [codegen, wit, wrpc, capability]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-RELEASE-WASM-GATES-001
     type: requirement
@@ -2363,7 +2363,7 @@ artifacts:
     status: proposed
     tags: [release, wasm, witness, scry, supply-chain, npm]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # ── CI / Verification gate ──────────────────────────────────────────────
 
@@ -2609,7 +2609,7 @@ artifacts:
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -2634,7 +2634,7 @@ artifacts:
     status: proposed
     tags: [ingest, sysml2, grammar]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-PLUGFEST-002
     type: requirement
@@ -2649,7 +2649,7 @@ artifacts:
     status: proposed
     tags: [interop, plugfest, osate]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2693,7 +2693,7 @@ artifacts:
     status: proposed
     tags: [parser, plugfest, emv2]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2709,7 +2709,7 @@ artifacts:
     status: proposed
     tags: [interop, plugfest, ocarina]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -2730,7 +2730,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -2749,7 +2749,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -2769,7 +2769,7 @@ artifacts:
     status: proposed
     tags: [trace-topology, reconciler, attestation]
     fields:
-      release: v0.22.0
+      release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -2849,7 +2849,7 @@ artifacts:
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-NC-TFA-001
     type: requirement
@@ -2936,7 +2936,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-NC-PLP-CONVERGE-001
     type: requirement
@@ -3032,6 +3032,8 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263]
     status: proposed
     tags: [network-calculus, plp, bridge, substrate, tier1]
+    fields:
+      release: v0.22.0
 
   - id: REQ-NC-BRIDGE-001
     type: requirement
@@ -3139,7 +3141,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -3244,7 +3246,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, qbv, tier2]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-NC-TAS-COMPOSE-001
     type: requirement
@@ -3288,7 +3290,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, tsn, tas, composition, wedge, research-grade, blocked]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-NC-SIM-FLOOR-001
     type: requirement
@@ -3310,7 +3312,7 @@ artifacts:
     status: proposed
     tags: [network-calculus, tsn, tas, simulation, oracle, substrate]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement
@@ -3333,7 +3335,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
@@ -3430,7 +3432,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, cqf, tier2, research-grade]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-TSN-SYNTH-CQF-LONGLINK-001
     type: requirement
@@ -3508,7 +3510,7 @@ artifacts:
     status: proposed
     tags: [tsn, synthesis, online, reconfiguration, tier2]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   # --- Tier 3: internal soundness ratchet (parallel, never marketed) ---
 
@@ -3525,7 +3527,7 @@ artifacts:
     status: proposed
     tags: [proof, lean, network-calculus, soundness, tier3]
     fields:
-      release: v0.22.0
+      release: v0.23.0
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
@@ -3543,4 +3545,4 @@ artifacts:
     status: proposed
     tags: [proof, certificate, network-calculus, soundness, tier3]
     fields:
-      release: v0.22.0
+      release: v0.23.0
