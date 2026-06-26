@@ -98,16 +98,18 @@ impl Analysis for WrpcBindingAnalysis {
             // `bus` — not mere presence — is a tracked follow-up.)
             let conn_props = instance.properties_for_connection(conn_idx);
             let owner_props = instance.properties_for(owner);
-            let has_conn_binding = conn_props
+            // Capture the binding VALUE (not just presence) — prefer the
+            // per-connection property map (the #281 `applies to <conn>` idiom),
+            // then the owning component's flat map.
+            let binding_value = conn_props
                 .get("Deployment_Properties", "Actual_Connection_Binding")
-                .is_some()
-                || conn_props.get("", "Actual_Connection_Binding").is_some()
-                || owner_props
-                    .get("Deployment_Properties", "Actual_Connection_Binding")
-                    .is_some()
-                || owner_props.get("", "Actual_Connection_Binding").is_some();
+                .or_else(|| conn_props.get("", "Actual_Connection_Binding"))
+                .or_else(|| owner_props.get("Deployment_Properties", "Actual_Connection_Binding"))
+                .or_else(|| owner_props.get("", "Actual_Connection_Binding"));
 
-            if !has_conn_binding {
+            let Some(binding_value) = binding_value else {
+                // REQ-WRPC-BINDING-002: no binding at all on a cross-processor
+                // connection → warn (missing transport).
                 let path = component_path(instance, owner);
                 diagnostics.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
@@ -119,6 +121,29 @@ impl Analysis for WrpcBindingAnalysis {
                         owner_comp.name,
                         src_binding.as_deref().unwrap_or("?"),
                         dst_binding.as_deref().unwrap_or("?"),
+                    ),
+                    path,
+                    analysis: "wrpc-binding".to_string(),
+                });
+                continue;
+            };
+
+            // REQ-WRPC-BINDING-003: the binding is present — verify its
+            // `reference (...)` target is a bus / virtual bus. Warn ONLY when
+            // the reference resolves UNAMBIGUOUSLY to a non-bus component;
+            // accept a bus, an unresolvable name, a dotted/multi-level path, or
+            // a multi-reference list (the sound rule that avoids new
+            // false-positives, per the requirement).
+            if let Some(target) = extract_simple_reference_name(binding_value)
+                && let Some(category) = unambiguous_non_bus_category(instance, &target)
+            {
+                let path = component_path(instance, owner);
+                diagnostics.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "connection '{}' in '{}' is bound via Actual_Connection_Binding \
+                         to '{}', which is a {} — not a bus or virtual bus",
+                        conn.name, owner_comp.name, target, category,
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
@@ -163,6 +188,51 @@ fn get_processor_binding(instance: &SystemInstance, idx: ComponentInstanceIdx) -
         current = instance.component(ci).parent;
     }
     None
+}
+
+/// Extract the simple referenced component name from an
+/// `Actual_Connection_Binding` value of the form `reference (name)` or
+/// `(reference (name))`. Returns `None` for empty, dotted/multi-level, or
+/// multi-reference values — the sound rule (REQ-WRPC-BINDING-003) accepts
+/// those rather than risk a false positive on a path the resolver cannot
+/// unambiguously follow.
+fn extract_simple_reference_name(value: &str) -> Option<String> {
+    // Split on the `reference` keyword (no manual index arithmetic). The text
+    // before the first `reference` is discarded (handles the outer-paren
+    // `(reference (x))` form); the text after holds the parenthesised target.
+    let mut parts = value.split("reference");
+    let _before = parts.next()?;
+    let after = parts.next()?;
+    // A second `reference` means a binding LIST (`reference (a), reference (b)`)
+    // — ambiguous, accept (do not warn).
+    if parts.next().is_some() {
+        return None;
+    }
+    let inner = after.split_once('(')?.1;
+    let name = inner.split_once(')')?.0.trim();
+    if name.is_empty() || name.contains('.') || name.contains(',') {
+        return None;
+    }
+    Some(name.to_string())
+}
+
+/// If `name` resolves to EXACTLY ONE component and that component is not a
+/// `bus` / `virtual bus`, return its category (for the diagnostic). A bus,
+/// zero matches, or multiple matches all return `None` — accept, no warning.
+fn unambiguous_non_bus_category(
+    instance: &SystemInstance,
+    name: &str,
+) -> Option<ComponentCategory> {
+    let mut matches = instance
+        .all_components()
+        .filter(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name));
+    match (matches.next(), matches.next()) {
+        (Some((_, comp)), None) => match comp.category {
+            ComponentCategory::Bus | ComponentCategory::VirtualBus => None,
+            other => Some(other),
+        },
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -648,5 +718,117 @@ mod tests {
             "3-processor model must still warn: {:?}",
             diags
         );
+    }
+
+    // ---- REQ-WRPC-BINDING-003: bus-target verification ----
+
+    /// Build a 2-processor model with `sender`→`receiver` crossing the
+    /// boundary, plus any extra children, returning the builder ready for a
+    /// connection + `Actual_Connection_Binding`.
+    fn two_proc_base() -> (TestBuilder, ComponentInstanceIdx) {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("top", ComponentCategory::System, None);
+        let cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let can_bus = b.add_component("can_bus", ComponentCategory::Bus, Some(root));
+        let vbus = b.add_component("ip_vbus", ComponentCategory::VirtualBus, Some(root));
+        let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
+        let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![cpu1, cpu2, can_bus, vbus, sender, receiver]);
+        b.set_property(
+            sender,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu1)",
+        );
+        b.set_property(
+            receiver,
+            "Deployment_Properties",
+            "Actual_Processor_Binding",
+            "reference (cpu2)",
+        );
+        b.add_connection("c1", root, "sender", "out_port", "receiver", "in_port");
+        (b, root)
+    }
+
+    fn analyze_with_binding(value: &str) -> Vec<AnalysisDiagnostic> {
+        let (mut b, root) = two_proc_base();
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            value,
+        );
+        let inst = b.build(root);
+        WrpcBindingAnalysis.analyze(&inst)
+    }
+
+    #[test]
+    fn binding_to_non_bus_component_warns() {
+        // Bound, but the reference resolves to a PROCESSOR — not a bus.
+        let diags = analyze_with_binding("reference (cpu1)");
+        assert_eq!(diags.len(), 1, "non-bus target must warn: {diags:?}");
+        assert!(
+            diags[0].message.contains("not a bus") && diags[0].message.contains("cpu1"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn binding_to_real_bus_does_not_warn() {
+        assert!(
+            analyze_with_binding("reference (can_bus)").is_empty(),
+            "a real bus target must not warn",
+        );
+    }
+
+    #[test]
+    fn binding_to_virtual_bus_does_not_warn() {
+        assert!(
+            analyze_with_binding("reference (ip_vbus)").is_empty(),
+            "a virtual-bus target must not warn",
+        );
+    }
+
+    #[test]
+    fn binding_to_unresolvable_reference_does_not_warn() {
+        // The sound rule: an unresolvable name is accepted, not warned.
+        assert!(
+            analyze_with_binding("reference (ghost_bus)").is_empty(),
+            "an unresolvable reference must not warn",
+        );
+    }
+
+    #[test]
+    fn binding_with_dotted_or_multi_reference_does_not_warn() {
+        // Dotted/multi-level path the resolver cannot follow → accept.
+        assert!(
+            analyze_with_binding("reference (top.cpu1)").is_empty(),
+            "a dotted reference must not warn",
+        );
+        // A binding LIST is ambiguous → accept (even though cpu1 is non-bus).
+        assert!(
+            analyze_with_binding("reference (cpu1), reference (can_bus)").is_empty(),
+            "a multi-reference binding list must not warn",
+        );
+    }
+
+    #[test]
+    fn reference_name_extraction_is_conservative() {
+        assert_eq!(
+            extract_simple_reference_name("reference (bus1)").as_deref(),
+            Some("bus1"),
+        );
+        assert_eq!(
+            extract_simple_reference_name("(reference (bus1))").as_deref(),
+            Some("bus1"),
+        );
+        assert_eq!(extract_simple_reference_name("reference (sys.bus1)"), None);
+        assert_eq!(
+            extract_simple_reference_name("reference (a), reference (b)"),
+            None,
+        );
+        assert_eq!(extract_simple_reference_name("bus1"), None);
     }
 }

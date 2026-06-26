@@ -2309,7 +2309,7 @@ artifacts:
       resolves UNAMBIGUOUSLY to a non-bus component, accept otherwise".
       Oracle: a connection bound to a non-bus component warns; one bound to
       a bus, or whose reference cannot be resolved, does not.
-    status: proposed
+    status: implemented
     tags: [wrpc, binding, analysis]
     fields:
       release: v0.22.0
