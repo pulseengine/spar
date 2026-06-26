@@ -3030,7 +3030,7 @@ artifacts:
       GATE: on the converging-bridge fixture the bridge's authoritative bound
       equals TFA (1048 µs) for the cross-burst flow, not the looser PLP.
       [SOLID — Bouillard arXiv:2010.09263]
-    status: proposed
+    status: implemented
     tags: [network-calculus, plp, bridge, substrate, tier1]
     fields:
       release: v0.22.0
