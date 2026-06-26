@@ -24,3 +24,6 @@ verification.yaml
 # cargo-mutants output — regenerable mutation-testing scratch.
 /mutants.out/
 /mutants.out.old/
+
+# Agent-maintained durable session scratch — never commit.
+.pulseengine-session-notes.md

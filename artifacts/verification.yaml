@@ -3369,6 +3369,33 @@ artifacts:
       - type: satisfies
         target: REQ-WRPC-BINDING-002
 
+  - id: TEST-WRPC-BINDING-BUS-TARGET
+    type: feature
+    title: wrpc-binding verifies Actual_Connection_Binding resolves to a bus
+    description: >
+      Unit tests in crates/spar-analysis/src/wrpc_binding.rs verify
+      REQ-WRPC-BINDING-003: when a cross-processor connection HAS an
+      Actual_Connection_Binding, the analysis resolves the binding's
+      `reference (...)` target and warns ONLY when it resolves
+      UNAMBIGUOUSLY to a non-bus component. (a) binding to a processor
+      (non-bus) warns "not a bus"; (b) binding to a real bus does NOT warn;
+      (c) binding to a virtual bus does NOT warn; (d) an unresolvable
+      reference does NOT warn (the sound rule — no new false-positive); (e)
+      a dotted / multi-level path or a multi-reference binding list does NOT
+      warn (ambiguous → accept); (f) extract_simple_reference_name parses
+      `reference (x)` and `(reference (x))`, rejecting empty, dotted, and
+      multi-reference values. The presence-only REQ-WRPC-BINDING-002 path
+      (TEST-WRPC-BINDING) is unchanged and still green.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-analysis --lib -- wrpc_binding"
+    status: passing
+    tags: [wrpc, binding, analysis]
+    links:
+      - type: satisfies
+        target: REQ-WRPC-BINDING-003
+
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: TEST-VERIFY-GATE-RUNNER
