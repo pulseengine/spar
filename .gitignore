@@ -20,3 +20,7 @@ verification.yaml
 # LP solver problem dumps written into the repo root by HiGHS/good_lp
 # during network-calculus (PLP/TFA) test runs — regenerable scratch.
 *.lp
+
+# cargo-mutants output — regenerable mutation-testing scratch.
+/mutants.out/
+/mutants.out.old/
