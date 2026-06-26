@@ -1049,16 +1049,27 @@ fn network_wide_nc_bounds(
         });
     }
 
+    // The authoritative per-flow NC bound is min(PLP, TFA) (REQ-NC-PLP-MIN-001):
+    // PLP and TFA are incomparable sound over-approximations (both ≥ exact,
+    // neither dominates), so the tightest *sound* per-flow bound is their
+    // pointwise minimum. Seed with TFA (always present); the PLP arm below
+    // tightens it where PLP is smaller. When PLP is absent (feature off, or a
+    // non-feed-forward topology) the authoritative bound is TFA alone — never
+    // worse than TFA, with the PLP win wherever it holds. `min` over two sound
+    // bounds is itself sound, so this adds no new soundness surface.
+    #[cfg_attr(not(feature = "milp-solver"), allow(unused_mut))]
+    let mut authoritative_ps: Vec<u64> = tfa.flow_delay_ps.clone();
+
     // PLP: the polynomial-LP feed-forward bound (Bouillard arXiv:2010.09263).
     // Usually tighter than TFA, but PLP and TFA are *incomparable*
     // over-approximations — both sound (≥ exact), neither dominates: under
     // extreme cross-burst pure PLP can exceed TFA (see the
     // `network_wide_tfa_index_aligns_on_converging_tree` counterexample). We
-    // emit both; the authoritative per-flow bound is min(PLP, TFA).
-    // HiGHS/good_lp-backed, so gated behind `milp-solver` (off for wasm,
+    // emit the PLP line, tighten the authoritative bound, and (above) the TFA
+    // line. HiGHS/good_lp-backed, so gated behind `milp-solver` (off for wasm,
     // #259). A multi-successor / cyclic topology returns
     // `PlpError::NotFeedForward`; we then omit the PLP lines and the TFA
-    // numbers above remain the network-wide result.
+    // numbers stand as the authoritative result.
     #[cfg(feature = "milp-solver")]
     {
         use spar_network::plp::{PlpFlow, plp_bound};
@@ -1085,7 +1096,30 @@ fn network_wide_nc_bounds(
                     analysis: analysis.to_string(),
                 });
             }
+            // Tighten the authoritative bound to min(PLP, TFA) per flow.
+            for (auth, &plp_ps) in authoritative_ps.iter_mut().zip(&plp.flow_delay_ps) {
+                *auth = (*auth).min(plp_ps);
+            }
         }
+    }
+
+    // Emit the authoritative per-flow bound = min(PLP, TFA) (REQ-NC-PLP-MIN-001).
+    // This is the number downstream consumers should trust: never worse than
+    // TFA, and the PLP win wherever PLP is tighter.
+    for (s, &delay_ps) in streams.iter().zip(&authoritative_ps) {
+        diags.push(AnalysisDiagnostic {
+            severity: Severity::Info,
+            message: format!(
+                "WcttAuthoritativeBound: stream '{}' network-wide authoritative \
+                 end-to-end delay {} ps ({} hop{})",
+                s.display_name(instance),
+                delay_ps,
+                s.hops.len(),
+                if s.hops.len() == 1 { "" } else { "s" },
+            ),
+            path: component_path(instance, s.src_idx),
+            analysis: analysis.to_string(),
+        });
     }
 }
 
@@ -4007,6 +4041,78 @@ end NetConv;
                 plp_fast > 0 && plp_slow > plp_fast.saturating_mul(5),
                 "the PLP bound through the slow switch must dominate; a local \
                  index would alias its slow hop onto the fast curve. plp={plp:#?}",
+            );
+        }
+    }
+
+    #[test]
+    fn network_wide_authoritative_bound_is_min_of_plp_and_tfa() {
+        // REQ-NC-PLP-MIN-001. On the converging tree the fast stream's PLP
+        // (~1148µs) EXCEEDS its TFA (~1048µs) — the documented incomparability
+        // counterexample. The authoritative bound must pick TFA for that
+        // stream (the min), never the looser PLP, while keeping the PLP win
+        // wherever PLP is tighter. min() over two sound bounds is itself sound.
+        let inst = instantiate(bridge_converge_aadl(), "NetConv", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        let tfa = collect_delays(&diags, "WcttTfaBound");
+        let auth = collect_delays(&diags, "WcttAuthoritativeBound");
+
+        // The authoritative bound is emitted regardless of the milp-solver
+        // feature (TFA-only when PLP is unavailable): one per stream.
+        assert_eq!(
+            auth.len(),
+            tfa.len(),
+            "one authoritative bound per stream: auth={auth:#?} tfa={tfa:#?}",
+        );
+
+        // Without PLP the authoritative bound is exactly TFA.
+        #[cfg(not(feature = "milp-solver"))]
+        for (name, &tfa_ps) in &tfa {
+            assert_eq!(
+                auth.get(name),
+                Some(&tfa_ps),
+                "no-PLP authoritative bound must equal TFA for '{name}'",
+            );
+        }
+
+        #[cfg(feature = "milp-solver")]
+        {
+            let plp = collect_delays(&diags, "WcttPlpBound");
+            assert_eq!(plp.len(), tfa.len(), "one PLP bound per stream: {plp:#?}");
+
+            // Authoritative == min(PLP, TFA) for every stream.
+            for (name, &auth_ps) in &auth {
+                assert_eq!(
+                    auth_ps,
+                    tfa[name].min(plp[name]),
+                    "authoritative for '{name}' must be min(PLP {}, TFA {})",
+                    plp[name],
+                    tfa[name],
+                );
+            }
+
+            // The counterexample stream: PLP > TFA, so the authoritative bound
+            // must equal TFA and sit strictly below PLP. A regression that
+            // blindly reported PLP would fail here.
+            let mut crossburst = None;
+            for name in auth.keys() {
+                if plp[name] > tfa[name] {
+                    crossburst = Some(name.clone());
+                    break;
+                }
+            }
+            let crossburst =
+                crossburst.expect("converging tree must exhibit a PLP>TFA cross-burst stream");
+            assert_eq!(
+                auth[&crossburst], tfa[&crossburst],
+                "for the PLP>TFA stream '{crossburst}' the authoritative bound must be TFA \
+                 ({}), not the looser PLP ({})",
+                tfa[&crossburst], plp[&crossburst],
+            );
+            assert!(
+                auth[&crossburst] < plp[&crossburst],
+                "authoritative must be strictly below PLP on the cross-burst stream",
             );
         }
     }
