@@ -1911,6 +1911,38 @@ artifacts:
       - type: satisfies
         target: REQ-NC-PLP-CONVERGE-001
 
+  - id: TEST-NC-PLP-MIN
+    type: feature
+    title: Authoritative network-wide NC bound is min(PLP, TFA)
+    description: >
+      Verifies REQ-NC-PLP-MIN-001: the bridge emits a per-stream
+      WcttAuthoritativeBound equal to the pointwise minimum of the
+      network-wide TFA and PLP end-to-end delays. The spar-analysis unit
+      test network_wide_authoritative_bound_is_min_of_plp_and_tfa runs the
+      converging-tree fixture (bridge_converge_aadl) — the documented
+      incomparability counterexample where the fast stream's pure PLP
+      (~1148µs) EXCEEDS its TFA (~1048µs) — and asserts: (1) one
+      authoritative bound per stream is emitted regardless of the
+      milp-solver feature; (2) with milp-solver, authoritative == min(PLP,
+      TFA) for every stream; (3) on the PLP>TFA cross-burst stream the
+      authoritative bound equals TFA and sits strictly below PLP, so a
+      regression that blindly reported the looser PLP would fail; (4)
+      without the milp-solver feature (PLP absent) the authoritative bound
+      equals TFA. Pure selection over two already-computed sound bounds —
+      min of two sound over-approximations is itself sound, adding no new
+      soundness surface; the reported bound is therefore never worse than
+      TFA while keeping the PLP win wherever PLP is tighter.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-analysis --lib --features milp-solver network_wide_authoritative_bound"
+        - run: "cargo test -p spar-analysis --lib --no-default-features network_wide_authoritative_bound"
+    status: passing
+    tags: [v0.22.0, network, network-calculus, plp, tfa, bridge, oracle]
+    links:
+      - type: satisfies
+        target: REQ-NC-PLP-MIN-001
+
   - id: TEST-NC-PLP-STR
     type: feature
     title: TFA-strengthened PLP — tightening to EXACT (panco tfa=True oracle)
