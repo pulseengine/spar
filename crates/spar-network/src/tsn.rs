@@ -1361,6 +1361,21 @@ pub enum GclSynthError {
         /// The available cycle period, picoseconds.
         cycle_ps: u64,
     },
+    /// The per-class usable windows fit, but the 802.1Qbv guard bands
+    /// (one `guard_ps` band trails every emitted window) push the total
+    /// past the cycle at EVERY tried split — the guard-band rate-loss
+    /// cliff that the guard-free [`synthesize_gcl_split`] ignores. Widen
+    /// the cycle, raise the link rate, shrink the guard (smaller
+    /// `queueMaxSDU`), or relax deadlines. `required_ps` is the closest
+    /// fit found (Σ usable windows + Σ guards at the least-overflowing K).
+    GuardOversubscribed {
+        /// Usable window time plus guard-band time required, picoseconds.
+        required_ps: u64,
+        /// The available cycle period, picoseconds.
+        cycle_ps: u64,
+        /// Per-window guard-band duration charged, picoseconds.
+        guard_ps: u64,
+    },
     /// Self-certification failed: the synthesized GCL did not round-trip
     /// through [`GateSchedule::parse`], or a class missed its deadline on
     /// re-check with the real network-calculus bound. Indicates a
@@ -1394,6 +1409,15 @@ impl core::fmt::Display for GclSynthError {
                 f,
                 "port oversubscribed: {} ps of window time required, {} ps cycle",
                 required_ps, cycle_ps
+            ),
+            Self::GuardOversubscribed {
+                required_ps,
+                cycle_ps,
+                guard_ps,
+            } => write!(
+                f,
+                "guard-band oversubscribed: {} ps of windows + {} ps guards required, {} ps cycle",
+                required_ps, guard_ps, cycle_ps
             ),
             Self::SelfCheck(msg) => write!(f, "synthesis self-check failed: {}", msg),
         }
@@ -1638,6 +1662,195 @@ pub fn synthesize_gcl_split(
         }
     }
     Err(last_oversub)
+}
+
+/// Synthesize a guard-band-aware window-splitting 802.1Qbv GCL
+/// (REQ-TSN-SYNTH-QBV-GUARDBAND-001) — the DEPLOYMENT-SOUND splitter that
+/// [`synthesize_gcl_split`] is not, because it charges the IEEE 802.1Qbv
+/// §8.6.8.4 transmission-overrun guard band that protects every window
+/// boundary.
+///
+/// In a real switch a frame may not BEGIN transmission within the last
+/// `g = queueMaxSDU·8 / R` of an open window — it could overrun the gate
+/// close and steal the next window's slot (§8.6.8.4). The deployable
+/// effect is that each emitted open window of allocated width `W` yields
+/// only `W − g` of usable transmission, and every window boundary must
+/// reserve `g` of closed guard. [`synthesize_gcl_split`] ignores this, so
+/// each extra split is "free" there; here every one of the `N` class
+/// windows per round costs an additional `g`, so the guard overhead grows
+/// as `N·K·g` while the latency benefit `(cycle − open)/K` shrinks — the
+/// rate-loss cliff. This returns the SMALLEST feasible `K`, or
+/// [`GclSynthError::GuardOversubscribed`] if the guards never fit.
+///
+/// Model anchor (TEST-TSN-GUARDBAND, `guard_band_k1_equals_sync_error…`):
+/// for a single window the construction "emit `w` usable open, reserve a
+/// trailing `g` closed guard" is algebraically identical to the shipped,
+/// independently-derived [`tas_residual_service_with_sync_error`] at
+/// `ε = g` — a non-circular cross-check that the guard is modelled
+/// correctly. Each class's SERVICE is unchanged by the guard (open `w`,
+/// latency `cycle/K − w`); the guard tightens only the PACKING budget
+/// `Σ wᵢ + N·g ≤ cycle/K`, so the validated per-round
+/// [`synthesize_gcl`] search is reused unchanged to size every `wᵢ`.
+///
+/// `guard_band_ps` is rounded UP to a whole nanosecond (the sound /
+/// pessimistic direction — a wider guard never under-charges) so a guard
+/// derived from `MTU·8/R` (rarely a whole ns) still round-trips through
+/// the ns-granular GCL blob. `guard_band_ps == 0` reproduces
+/// [`synthesize_gcl_split`] exactly.
+pub fn synthesize_gcl_split_guarded(
+    demands: &[ClassDemand],
+    cycle_ps: u64,
+    link_rate_bps: u64,
+    max_windows_per_class: u64,
+    guard_band_ps: u64,
+) -> Result<GateSchedule, GclSynthError> {
+    if demands.is_empty() {
+        return Err(GclSynthError::NoDemands);
+    }
+    if cycle_ps == 0 || !cycle_ps.is_multiple_of(1_000) {
+        return Err(GclSynthError::CycleNotWholeNanos { cycle_ps });
+    }
+    // Round the guard UP to a whole nanosecond — wider guard is the sound
+    // (pessimistic) direction and keeps every emitted duration ns-exact.
+    let guard_ps = guard_band_ps.div_ceil(1_000).saturating_mul(1_000);
+    let n = demands.len() as u64;
+    let kcap = max_windows_per_class.max(1);
+    let mut best_required: u64 = u64::MAX;
+    let mut had_window_oversub = false;
+    let mut window_oversub = GclSynthError::Oversubscribed {
+        required_ps: 0,
+        cycle_ps,
+    };
+    for k in 1..=kcap {
+        // Round cycle must be a whole number of ns (K divides cycle-ns).
+        if !cycle_ps.is_multiple_of(k.saturating_mul(1_000)) {
+            continue;
+        }
+        let round_cycle_ps = cycle_ps / k;
+        // The guards alone must leave room for at least a sliver of each
+        // window; if N·g already meets/exceeds the round, this K cannot fit.
+        let guard_total = n.saturating_mul(guard_ps);
+        // Size every class's usable window with the VALIDATED single-window
+        // search on the real round cycle — the guard does not change the
+        // service each class needs (open w, latency round_cycle − w).
+        let round = match synthesize_gcl(demands, round_cycle_ps, link_rate_bps) {
+            Ok(round) => round,
+            // For latency-bound classes the required window shrinks as K
+            // grows, so a finer split may fit — record and try the next K.
+            Err(e @ GclSynthError::Oversubscribed { .. }) => {
+                had_window_oversub = true;
+                window_oversub = e;
+                continue;
+            }
+            // ClassInfeasible / structural errors are K-independent.
+            Err(other) => return Err(other),
+        };
+        // Usable window time = the open windows the round search emitted.
+        let usable_ps: u64 = round
+            .windows
+            .iter()
+            .filter(|w| w.allowed_cos_mask != 0)
+            .map(|w| w.duration_ps)
+            .sum();
+        let required_round = usable_ps.saturating_add(guard_total);
+        if required_round > round_cycle_ps {
+            // Windows fit but guards push over — the cliff. Record the
+            // closest fit (scaled to the full cycle) and try the next K.
+            best_required = best_required.min(required_round.saturating_mul(k));
+            continue;
+        }
+
+        // Feasible. Re-emit each round with an explicit `guard_ps` closed
+        // window trailing every class window; the last class's guard also
+        // absorbs the round's leftover (so the schedule tiles [0, cycle)
+        // exactly, as `parse` requires). Replicate across the full cycle.
+        let opens: Vec<&GateWindow> = round
+            .windows
+            .iter()
+            .filter(|w| w.allowed_cos_mask != 0)
+            .collect();
+        let leftover_ps = round_cycle_ps - required_round; // ≥ 0 by the check
+        let mut blob = String::new();
+        for r in 0..k {
+            let mut offset_ns = (r * round_cycle_ps) / 1_000;
+            for (i, w) in opens.iter().enumerate() {
+                if !blob.is_empty() {
+                    blob.push(';');
+                }
+                blob.push_str(&format!(
+                    "{}:{}:0x{:02X}",
+                    offset_ns,
+                    w.duration_ps / 1_000,
+                    w.allowed_cos_mask
+                ));
+                offset_ns += w.duration_ps / 1_000;
+                // Trailing guard (closed). The final class in the round
+                // also soaks up the leftover so the round tiles exactly.
+                // Skip a zero-width closed window — `parse` rejects
+                // ZeroDuration, and skipping it leaves no gap (so a
+                // guard of 0 reduces this to `synthesize_gcl_split`).
+                let guard_here_ps = if i + 1 == opens.len() {
+                    guard_ps + leftover_ps
+                } else {
+                    guard_ps
+                };
+                if guard_here_ps > 0 {
+                    blob.push(';');
+                    blob.push_str(&format!("{}:{}:0x00", offset_ns, guard_here_ps / 1_000));
+                    offset_ns += guard_here_ps / 1_000;
+                }
+            }
+        }
+
+        let sched = GateSchedule::parse(&blob).map_err(|e| {
+            GclSynthError::SelfCheck(format!(
+                "guarded split re-parse failed for {:?}: {}",
+                blob, e
+            ))
+        })?;
+        // Self-certify the FULL multi-window schedule against the SOUND
+        // latency — the real gate. If the guard emission is wrong, a class
+        // misses its deadline here rather than an unsound GCL reaching the
+        // caller. The budget check above guarantees feasibility for any
+        // input, so this deadline arm is a DEFENSIVE invariant that valid
+        // construction never trips (the same unreachable-defensive-arm
+        // pattern `synthesize_gcl` and `synthesize_gcl_split` carry — a
+        // surviving "always-true" mutant here is equivalent, not a gap).
+        for d in demands {
+            let beta = tas_residual_service(&sched, d.cos, link_rate_bps);
+            match delay_bound(&d.arrival, &beta) {
+                Ok(delay) if delay <= d.deadline_ps => {}
+                Ok(delay) => {
+                    return Err(GclSynthError::SelfCheck(format!(
+                        "class {} delay {} ps exceeds deadline {} ps after guarded {}-split",
+                        d.cos.0, delay, d.deadline_ps, k
+                    )));
+                }
+                Err(e) => {
+                    return Err(GclSynthError::SelfCheck(format!(
+                        "class {} unservable after guarded {}-split: {:?}",
+                        d.cos.0, k, e
+                    )));
+                }
+            }
+        }
+        return Ok(sched);
+    }
+
+    // No K fit. If some K's windows themselves oversubscribed (before
+    // guards), surface that; otherwise the guards were the blocker.
+    if best_required == u64::MAX && had_window_oversub {
+        return Err(window_oversub);
+    }
+    Err(GclSynthError::GuardOversubscribed {
+        required_ps: if best_required == u64::MAX {
+            cycle_ps
+        } else {
+            best_required
+        },
+        cycle_ps,
+        guard_ps,
+    })
 }
 
 /// Worst-case delay (ps) for `demand` if its class receives a single open
@@ -2577,6 +2790,52 @@ mod tests {
         assert_eq!(svc.latency_ps, 15_000_000);
     }
 
+    // ── QBV guard-band model anchor (REQ-TSN-SYNTH-QBV-GUARDBAND-001) ─
+    //
+    // GO/NO-GO for the guard-band-aware synthesizer. An 802.1Qbv guard
+    // band of duration `g` at the END of an open window means the class
+    // cannot transmit in that final `g` (a frame starting there would
+    // overrun the closed period; §8.6.8.4 TransmissionOverrun). So a
+    // class nominally allocated a window of duration `D` actually gets a
+    // usable open window of `D − g`.
+    //
+    // This must be ALGEBRAICALLY IDENTICAL — for a single window (K=1) —
+    // to the already-shipped, independently-derived
+    // `tas_residual_service_with_sync_error` at ε = g, which shrinks the
+    // open time by ε and grows the latency by ε for the unrelated reason
+    // of gPTP clock skew. The two paths derive `(open = D−g,
+    // latency = C−D+g, rate = R·(D−g)/C)` from different premises; their
+    // agreement is the non-circular cross-check that "emit a (D−g)-open
+    // window" is the correct guard construction. If this DROPS OUT CLEAN,
+    // the synthesizer is anchored on validated arithmetic; if it FIGHTS,
+    // the guard model is wrong and must not be built on.
+    #[test]
+    fn guard_band_k1_equals_sync_error_at_eps_g() {
+        let cos7 = ClassOfService::new(7).unwrap();
+        // Cycle C = 10 us, nominal window D = 5 us, guard g = 1 us.
+        // Plain schedule: the full nominal D = 5 us open.
+        let plain = GateSchedule::parse("0:5000:0x80;5000:5000:0x7F").unwrap();
+        // Sync-error path: shrink open by ε = g = 1 us = 1_000_000 ps.
+        let via_sync_error =
+            tas_residual_service_with_sync_error(&plain, cos7, TAS_GBPS, 1_000_000);
+
+        // Guard construction: EMIT the usable window D − g = 4 us open,
+        // and reserve the trailing g = 1 us as part of the closed period.
+        // The class sees open = 4 us, closed = 6 us, cycle = 10 us.
+        let guarded = GateSchedule::parse("0:4000:0x80;4000:6000:0x7F").unwrap();
+        let via_guard = tas_residual_service(&guarded, cos7, TAS_GBPS);
+
+        // Byte-identical service curve from two independent derivations.
+        assert_eq!(
+            via_guard, via_sync_error,
+            "K=1 guard (emit D−g open) must equal sync-error at ε=g"
+        );
+        // Pin the absolute values so a refactor of EITHER path is caught:
+        // rate = 1 Gbps · 4us/10us = 400 Mbps; latency = C−D+g = 6 us.
+        assert_eq!(via_guard.rate_bps, 400_000_000);
+        assert_eq!(via_guard.latency_ps, 6_000_000);
+    }
+
     // ── QBV GCL synthesis (REQ-TSN-SYNTH-QBV-BASE-001) ───────────────
     //
     // The oracle is the existing TAS checker run forward on the
@@ -2848,6 +3107,214 @@ mod tests {
         ));
         assert!(matches!(
             synthesize_gcl_split(&demands, 0, link, 8),
+            Err(GclSynthError::CycleNotWholeNanos { .. })
+        ));
+    }
+
+    // ── REQ-TSN-SYNTH-QBV-GUARDBAND-001: guard-band-aware splitting ───
+    //
+    // The deployment-sound splitter. Oracle is the same forward TAS
+    // checker (TEST-TSN-TAS), plus the K=1 model anchor above
+    // (guard_band_k1_equals_sync_error_at_eps_g) that pins the guard
+    // construction to the independently-derived sync-error path.
+
+    /// The two-class latency-bound set that one window per class
+    /// oversubscribes (shared with the un-guarded split tests).
+    fn guardband_demands() -> Vec<ClassDemand> {
+        vec![
+            ClassDemand {
+                cos: cos(7),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+            ClassDemand {
+                cos: cos(3),
+                arrival: ArrivalCurve::affine(125, 100_000_000),
+                deadline_ps: 5_500_000,
+            },
+        ]
+    }
+
+    #[test]
+    fn guarded_zero_guard_reproduces_split_byte_for_byte() {
+        // guard_band_ps = 0 must degenerate to synthesize_gcl_split
+        // EXACTLY — no spurious zero-width closed windows, identical blob.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = guardband_demands();
+        let split = synthesize_gcl_split(&demands, cycle_ps, link, 8).expect("split feasible");
+        let guarded = synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, 0)
+            .expect("guarded feasible at g=0");
+        assert_eq!(
+            split.to_gcl_blob(),
+            guarded.to_gcl_blob(),
+            "g=0 must reproduce synthesize_gcl_split byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn guarded_split_inserts_guards_and_meets_deadlines() {
+        // A modest guard the port can still absorb: the result splits,
+        // carries explicit closed guard windows of exactly `guard_ps`
+        // between class windows, tiles [0,cycle), and meets every deadline
+        // under the SOUND bound.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = guardband_demands();
+        let guard_ps = 100_000u64; // 100 ns
+        let sched = synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, guard_ps)
+            .expect("guarded split feasible");
+        // Round-trips and meets all deadlines under the exact NC bound.
+        assert_gcl_sound(&sched, &demands, link);
+        // Genuinely split — each class has ≥ 2 windows.
+        for d in &demands {
+            let n = sched
+                .windows
+                .iter()
+                .filter(|w| w.allowed_cos_mask & (1 << d.cos.0) != 0)
+                .count();
+            assert!(n >= 2, "class {} not split: {} window(s)", d.cos.0, n);
+        }
+        // An inter-class guard of EXACTLY guard_ps exists (the non-final
+        // class window's trailing closed band; the final one absorbs the
+        // round leftover and is wider).
+        assert!(
+            sched
+                .windows
+                .iter()
+                .any(|w| w.allowed_cos_mask == 0 && w.duration_ps == guard_ps),
+            "expected a closed guard window of exactly {} ps; got {:?}",
+            guard_ps,
+            sched.windows
+        );
+    }
+
+    #[test]
+    fn guarded_rounds_subnanosecond_guard_up() {
+        // A guard of 99_001 ps (not a whole ns) rounds UP to 100_000 ps —
+        // the sound direction — so the emitted GCL stays ns-exact and the
+        // charged guard is never smaller than requested.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = guardband_demands();
+        let sched = synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, 99_001)
+            .expect("guarded split feasible");
+        assert!(
+            sched
+                .windows
+                .iter()
+                .any(|w| w.allowed_cos_mask == 0 && w.duration_ps == 100_000),
+            "sub-ns guard must round UP to 100_000 ps; got {:?}",
+            sched.windows
+        );
+    }
+
+    #[test]
+    fn guarded_large_guard_hits_the_cliff() {
+        // The guard-band rate-loss cliff: a 3 µs guard per window. The
+        // windows themselves still fit at K=2 (round 5 µs), but two 3 µs
+        // guards alone (6 µs) exceed the 5 µs round at every split, so no
+        // K is feasible → GuardOversubscribed, NOT a silently-unsound GCL.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = guardband_demands();
+        let err = synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, 3_000_000)
+            .expect_err("guards must oversubscribe");
+        match err {
+            GclSynthError::GuardOversubscribed {
+                required_ps,
+                cycle_ps: reported_cycle,
+                guard_ps,
+            } => {
+                assert_eq!(guard_ps, 3_000_000, "charged guard must be reported");
+                assert_eq!(reported_cycle, cycle_ps, "cycle must be reported");
+                // The reported requirement is the closest real fit, which
+                // by definition overflows the cycle — NOT the unreached
+                // `== u64::MAX` placeholder fallback.
+                assert!(
+                    required_ps > cycle_ps,
+                    "required_ps {} must exceed cycle {} (the genuine overflow)",
+                    required_ps,
+                    cycle_ps
+                );
+            }
+            other => panic!(
+                "expected GuardOversubscribed at guard 3 µs, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn guarded_exact_fit_round_is_feasible() {
+        // Boundary: when the usable windows plus guards EXACTLY fill the
+        // round (leftover = 0), the schedule is FEASIBLE — the budget test
+        // is `>` not `>=`. A single class whose tight deadline forces a
+        // full-cycle window, with g = 0, makes required_round ==
+        // round_cycle_ps exactly.
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        // σ = 1250 B = 10000 bits → 10 µs to send at 1 Gbps even fully
+        // open; a 10 µs deadline is met ONLY by the whole-cycle window.
+        let demands = vec![ClassDemand {
+            cos: cos(7),
+            arrival: ArrivalCurve::affine(1250, 50_000_000),
+            deadline_ps: 10_000_000,
+        }];
+        let sched = synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, 0)
+            .expect("exact-fit round (leftover 0) must be feasible");
+        assert_gcl_sound(&sched, &demands, link);
+        // The class fills the whole cycle: one open window, no closed time.
+        assert_eq!(
+            sched.open_fraction(cos(7)).0,
+            cycle_ps,
+            "window must fill the cycle"
+        );
+    }
+
+    #[test]
+    fn guarded_split_is_never_coarser_than_unguarded() {
+        // A guard the un-guarded path ignores can only push the chosen K
+        // up, never down: once each window costs a guard, the same demands
+        // need at least as fine a split to fit. Here both still fit, and
+        // the guarded schedule never has FEWER windows than the guard-free
+        // one (the provable monotone direction).
+        let link = 1_000_000_000u64;
+        let cycle_ps = 10_000_000u64;
+        let demands = guardband_demands();
+        let bare = synthesize_gcl_split(&demands, cycle_ps, link, 8).expect("feasible");
+        let guarded =
+            synthesize_gcl_split_guarded(&demands, cycle_ps, link, 8, 200_000).expect("feasible");
+        let class_windows = |s: &GateSchedule, c: u8| {
+            s.windows
+                .iter()
+                .filter(|w| w.allowed_cos_mask & (1 << c) != 0)
+                .count()
+        };
+        for d in &demands {
+            assert!(
+                class_windows(&guarded, d.cos.0) >= class_windows(&bare, d.cos.0),
+                "guarded split must not be coarser than guard-free for class {}",
+                d.cos.0
+            );
+        }
+        assert_gcl_sound(&guarded, &demands, link);
+    }
+
+    #[test]
+    fn guarded_input_validation() {
+        let link = 1_000_000_000u64;
+        assert_eq!(
+            synthesize_gcl_split_guarded(&[], 10_000_000, link, 8, 100_000),
+            Err(GclSynthError::NoDemands)
+        );
+        let d = guardband_demands();
+        assert!(matches!(
+            synthesize_gcl_split_guarded(&d, 10_000_001, link, 8, 100_000),
+            Err(GclSynthError::CycleNotWholeNanos { .. })
+        ));
+        assert!(matches!(
+            synthesize_gcl_split_guarded(&d, 0, link, 8, 100_000),
             Err(GclSynthError::CycleNotWholeNanos { .. })
         ));
     }

@@ -3210,19 +3210,36 @@ artifacts:
       split GCLs over a guard-band-FREE model (sound at the NC
       service-curve level, but NOT a deployable-hardware claim — real
       802.1Qbv loses ~K guard bands of transmit time to frame-straddle
-      protection, which the model does not see, so the baseline can
-      over-state available rate by (K−1)·g/cycle). spar should subtract
-      the per-window guard band g (≈ Max_Frame_Size / link_rate; readers
-      exist) from effective open time and add g to latency — using the
-      already-present structural hook in
-      `tas_residual_service_with_sync_error` (the ε-subtraction pattern) —
-      so the synthesizer's "meets deadline" claim becomes
-      deployment-sound and the breakeven K (self-starvation at
-      K = 1 + cycle·ρ/g) is enforced automatically by the oracle rejecting
-      rate-starving splits. Verified-economics: latency gain ~1/K vs rate
-      loss linear in K; rich to K≈10, catastrophic past ~50 for typical
-      automotive cycles/frames. [SOLID]
-    status: proposed
+      protection per IEEE 802.1Q §8.6.8.4 TransmissionOverrun, which the
+      baseline model does not see, so it can over-state available rate by
+      ~N·K·g/cycle). spar shall charge the per-window guard band
+      g (≈ queueMaxSDU·8 / link_rate) so the synthesizer's
+      "meets deadline" claim becomes deployment-sound.
+      Implementation (synthesize_gcl_split_guarded): each class's USABLE
+      open window is sized by the same validated single-window search the
+      guard-free path uses (the guard does not change the service a class
+      receives — open w, latency cycle/K − w — only the PACKING budget),
+      then the emitter reserves an explicit trailing closed guard window
+      of g after every class window so the budget becomes Σwᵢ + N·g ≤
+      cycle/K and the DEPLOYED GCL physically contains the guards a switch
+      enforces. The breakeven/self-starvation cliff (guards growing as
+      N·K·g while latency benefit shrinks as 1/K) is enforced
+      automatically: when no split fits, the oracle returns
+      GuardOversubscribed rather than an unsound GCL. Model soundness is
+      pinned non-circularly by TEST-TSN-GUARDBAND's K=1 anchor — "emit a
+      (D−g)-open window" is proven algebraically identical to the shipped
+      tas_residual_service_with_sync_error at ε = g (open D−g, latency
+      C−D+g, rate R·(D−g)/C from two independent derivations). g rounds UP
+      to a whole ns (sound direction); g = 0 reproduces
+      REQ-TSN-SYNTH-QBV-SPLIT-BASE-001 byte-for-byte. NO new dependency
+      (existing tsn.rs + curves.rs). Precursor to the full
+      dependency-aware REQ-TSN-SYNTH-QBV-001. SCOPE: this is the
+      deployment-sound GCL PRODUCER — the GateSchedule it returns
+      physically carries the guard bands a switch enforces. Like the whole
+      synthesize_gcl* family it is library API; no synthesizer is yet wired
+      into a CLI / AADL→Qbv consumer, so this REQ makes no end-to-end
+      pipeline claim — consumer wiring is separate future work. [SOLID]
+    status: implemented
     tags: [tsn, synthesis, qbv, guard-band, tier2]
     fields:
       release: v0.22.0
