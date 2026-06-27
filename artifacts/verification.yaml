@@ -2396,6 +2396,47 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-QBV-SPLIT-BASE-001
 
+  - id: TEST-TSN-GUARDBAND
+    type: feature
+    title: 802.1Qbv guard-band-aware splitting — deployment-sound GCL synthesis
+    description: >
+      Verifies synthesize_gcl_split_guarded (REQ-TSN-SYNTH-QBV-GUARDBAND-001),
+      the deployment-sound splitter that charges the IEEE 802.1Q §8.6.8.4
+      transmission-overrun guard band the guard-free
+      REQ-TSN-SYNTH-QBV-SPLIT-BASE-001 ignores. spar-network::tsn unit
+      tests cover: (1) THE MODEL ANCHOR (go/no-go) —
+      guard_band_k1_equals_sync_error_at_eps_g pins the guard construction
+      NON-CIRCULARLY: for a single window, "emit a (D−g)-open window plus a
+      trailing closed g guard" yields a service curve BYTE-IDENTICAL to the
+      independently-derived tas_residual_service_with_sync_error at ε = g
+      (open D−g, latency C−D+g, rate R·(D−g)/C) — two derivations from
+      different premises agreeing is the evidence the guard is modelled
+      right; (2) DEGENERACY — guard_band_ps = 0 reproduces
+      synthesize_gcl_split byte-for-byte (no spurious zero-width windows);
+      (3) FEASIBLE SPLIT — a modest guard still splits, inserts explicit
+      closed guard windows of exactly g between class windows, tiles
+      [0,cycle), and meets every deadline under the SOUND
+      min_service_latency bound; (4) SOUND ROUNDING — a sub-nanosecond
+      guard rounds UP (never under-charges) and stays ns-exact in the
+      emitted blob; (5) THE RATE-LOSS CLIFF — a guard so wide that N·g
+      exceeds every round returns the structured GuardOversubscribed
+      (with the charged guard_ps), NOT a silently rate-starved/unsound GCL;
+      (6) MONOTONE — the guarded schedule is never COARSER (fewer windows)
+      than the guard-free one for the same demands; (7) INPUT VALIDATION —
+      empty demands and non-whole-ns/zero cycles rejected up front.
+      Self-certifying: the full guarded multi-window schedule is re-checked
+      through tas_residual_service + delay_bound before return, so an
+      unsound guard emission fails construction, not just the test.
+    fields:
+      method: automated-test
+      steps:
+        - run: "cargo test -p spar-network --lib -- guard"
+    status: passing
+    tags: [v0.22.0, network, tsn, synthesis, qbv, guard-band, oracle]
+    links:
+      - type: satisfies
+        target: REQ-TSN-SYNTH-QBV-GUARDBAND-001
+
   - id: TEST-TSN-EXPORT-YANG
     type: feature
     title: 802.1Qcw YANG/NETCONF export of a synthesized gate schedule
