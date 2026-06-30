@@ -1943,6 +1943,8 @@ artifacts:
       - type: satisfies
         target: REQ-NC-PLP-MIN-001
 
+      - type: verifies
+        target: REQ-NC-PLP-MIN-001
   - id: TEST-NC-PLP-STR
     type: feature
     title: TFA-strengthened PLP — tightening to EXACT (panco tfa=True oracle)
@@ -2437,6 +2439,8 @@ artifacts:
       - type: satisfies
         target: REQ-TSN-SYNTH-QBV-GUARDBAND-001
 
+      - type: verifies
+        target: REQ-TSN-SYNTH-QBV-GUARDBAND-001
   - id: TEST-TSN-EXPORT-YANG
     type: feature
     title: 802.1Qcw YANG/NETCONF export of a synthesized gate schedule
@@ -3437,6 +3441,8 @@ artifacts:
       - type: satisfies
         target: REQ-WRPC-BINDING-003
 
+      - type: verifies
+        target: REQ-WRPC-BINDING-003
   # ── CI / Verification gate ──────────────────────────────────────────────
 
   - id: TEST-VERIFY-GATE-RUNNER
