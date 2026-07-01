@@ -199,6 +199,92 @@ end P;
         assert_eq!(fgt.features.len(), 2);
     }
 
+    // ── EMV2 subclause retention (REQ-EMV2-PROPAGATION-002, layer 2) ──────
+    //
+    // Verbatim `error propagations` body from the bundled OSATE corpus
+    // (test-data/interop/osate-examples/LargeExamplesforEMV2TR/
+    //  network_protocol_pkg.aadl) — the same block L1's spar-annex tests pin.
+    const EMV2_SNIPPET: &str = r#"error propagations
+  bindings: out propagation {LateDelivery, ValueCorruption};
+  connection: in propagation {LostMessage, ValueCorruption};
+flows
+  RetryTiming: error source bindings {LateDelivery};
+  MaskLoss: error sink connection {LostMessage};
+  PassCorruption: error path connection {ValueCorruption} -> bindings;
+end propagations;"#;
+
+    /// Independent oracle: L1 parsing the bare snippet directly. If L2's
+    /// lowering drops/mangles the subclause, the item-tree model diverges.
+    fn emv2_oracle_model() -> spar_annex::emv2::Emv2Model {
+        let parsed = spar_annex::emv2::parse(EMV2_SNIPPET);
+        spar_annex::emv2::Emv2Model::from_syntax(&parsed.syntax_node())
+    }
+
+    #[test]
+    fn item_tree_retains_component_emv2_subclause() {
+        let db = make_db();
+        let src = format!(
+            "package P\npublic\n  system S\n    annex EMV2 {{**\n{EMV2_SNIPPET}\n    **}};\n  end S;\nend P;\n"
+        );
+        let file = spar_base_db::SourceFile::new(&db, "emv2.aadl".to_string(), src);
+        let tree = file_item_tree(&db, file);
+
+        assert_eq!(tree.component_types.len(), 1);
+        let ct = &tree.component_types[tree.component_types.iter().next().unwrap().0];
+        assert_eq!(
+            ct.emv2.len(),
+            1,
+            "the component's EMV2 subclause must be retained"
+        );
+        let sub = &tree.emv2_subclauses[ct.emv2[0]];
+        assert!(sub.name.as_str().eq_ignore_ascii_case("EMV2"));
+        // The lowered model must EQUAL the independently-parsed L1 oracle.
+        assert_eq!(sub.model, emv2_oracle_model());
+        // Spot-check it is non-empty (2 propagations, 3 flows) so an empty
+        // model can't vacuously pass.
+        assert_eq!(sub.model.propagations.len(), 2);
+        assert_eq!(sub.model.flows.len(), 3);
+    }
+
+    #[test]
+    fn item_tree_retains_impl_emv2_subclause() {
+        let db = make_db();
+        let src = format!(
+            "package P\npublic\n  system S\n  end S;\n  system implementation S.i\n    annex EMV2 {{**\n{EMV2_SNIPPET}\n    **}};\n  end S.i;\nend P;\n"
+        );
+        let file = spar_base_db::SourceFile::new(&db, "emv2impl.aadl".to_string(), src);
+        let tree = file_item_tree(&db, file);
+
+        assert_eq!(tree.component_impls.len(), 1);
+        let ci = &tree.component_impls[tree.component_impls.iter().next().unwrap().0];
+        assert_eq!(
+            ci.emv2.len(),
+            1,
+            "the implementation's EMV2 subclause must be retained"
+        );
+        assert_eq!(tree.emv2_subclauses[ci.emv2[0]].model, emv2_oracle_model());
+    }
+
+    #[test]
+    fn item_tree_emv2_filter_drops_non_emv2_annex() {
+        // A component with an EMV2 annex AND a non-EMV2 annex retains exactly
+        // the EMV2 one (guards the case-insensitive name filter).
+        let db = make_db();
+        let src = format!(
+            "package P\npublic\n  system S\n    annex EMV2 {{**\n{EMV2_SNIPPET}\n    **}};\n    annex behavior_specification {{** **}};\n  end S;\nend P;\n"
+        );
+        let file = spar_base_db::SourceFile::new(&db, "mixed.aadl".to_string(), src);
+        let tree = file_item_tree(&db, file);
+
+        let ct = &tree.component_types[tree.component_types.iter().next().unwrap().0];
+        assert_eq!(
+            ct.emv2.len(),
+            1,
+            "only the EMV2 annex is retained, not behavior_specification"
+        );
+        assert_eq!(tree.emv2_subclauses.len(), 1);
+    }
+
     #[test]
     fn item_tree_connections() {
         let db = make_db();

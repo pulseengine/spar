@@ -1483,6 +1483,7 @@ dependencies = [
  "salsa",
  "serde",
  "smol_str",
+ "spar-annex",
  "spar-base-db",
  "spar-syntax",
 ]

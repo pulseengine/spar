@@ -2266,10 +2266,12 @@ artifacts:
       LAYER STATUS (4-PR foundation, user-directed v0.23.0 headline
       2026-07-01): L1 (semantic EMV2 model in spar-annex — Emv2Model lifting
       the CST into typed propagations/flows) LANDED, verified by
-      TEST-EMV2-SEMANTIC-MODEL; L2 (item-tree attach), L3 (instance
-      projection), L4 (overlay populate + analyze-path wiring + end-to-end
-      > 0-chains oracle) remain. Requirement flips proposed → implemented when
-      L4 closes the end-to-end oracle.
+      TEST-EMV2-SEMANTIC-MODEL; L2 (item-tree attach — the component's EMV2
+      subclause is retained in an emv2_subclauses arena, referenced from
+      ComponentType/ImplItem.emv2) LANDED, verified by
+      TEST-EMV2-ITEMTREE-ATTACH; L3 (instance projection), L4 (overlay populate
+      + analyze-path wiring + end-to-end > 0-chains oracle) remain. Requirement
+      flips proposed → implemented when L4 closes the end-to-end oracle.
     status: proposed
     tags: [emv2, analysis, safety, hir-def, capability]
     fields:

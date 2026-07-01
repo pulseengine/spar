@@ -86,6 +86,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree
     }
@@ -120,6 +121,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree
     }

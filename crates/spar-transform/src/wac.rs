@@ -145,6 +145,7 @@ fn lower_wac(doc: &WacDocument) -> ItemTree {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
     public_items.push(ItemRef::ComponentType(sys_type_idx));
 
@@ -230,6 +231,7 @@ fn lower_wac(doc: &WacDocument) -> ItemTree {
         call_sequences: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
     public_items.push(ItemRef::ComponentImpl(impl_idx));
 

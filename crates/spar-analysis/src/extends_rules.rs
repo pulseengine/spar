@@ -302,6 +302,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ext_ct = tree.component_types.alloc(ComponentTypeItem {
@@ -316,6 +317,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -433,6 +435,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ext_ct = tree.component_types.alloc(ComponentTypeItem {
@@ -447,6 +450,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -510,6 +514,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ext_ct = tree.component_types.alloc(ComponentTypeItem {
@@ -524,6 +529,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -588,6 +594,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ext_ct = tree.component_types.alloc(ComponentTypeItem {
@@ -602,6 +609,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -645,6 +653,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -692,6 +701,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -734,6 +744,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -774,6 +785,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ci_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -792,6 +804,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -833,6 +846,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ci_idx = tree.component_impls.alloc(ComponentImplItem {
@@ -851,6 +865,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -893,6 +908,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -933,6 +949,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -977,6 +994,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -1039,6 +1057,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         let ext_ct = tree.component_types.alloc(ComponentTypeItem {
@@ -1053,6 +1072,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {
@@ -1096,6 +1116,7 @@ mod tests {
             property_associations: Vec::new(),
             is_public: true,
             requires_modes: false,
+            emv2: Vec::new(),
         });
 
         tree.packages.alloc(Package {

@@ -196,6 +196,7 @@ pub fn protocol_library() -> ItemTree {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         public_items.push(ItemRef::ComponentType(ct_idx));
     }

@@ -12,6 +12,7 @@ pub mod lower;
 
 use la_arena::{Arena, Idx};
 use serde::{Deserialize, Serialize};
+use spar_annex::emv2::Emv2Model;
 
 use crate::name::{ClassifierRef, Name, PropertyRef};
 
@@ -36,6 +37,7 @@ pub type FlowImplIdx = Idx<FlowImplItem>;
 pub type CallSequenceIdx = Idx<CallSequenceItem>;
 pub type SubprogramCallIdx = Idx<SubprogramCallItem>;
 pub type RenamesIdx = Idx<RenamesItem>;
+pub type Emv2SubclauseIdx = Idx<Emv2Subclause>;
 
 // ── Lowering diagnostics ──────────────────────────────────────────
 
@@ -80,8 +82,19 @@ pub struct ItemTree {
     pub call_sequences: Arena<CallSequenceItem>,
     pub subprogram_calls: Arena<SubprogramCallItem>,
     pub renames: Arena<RenamesItem>,
+    pub emv2_subclauses: Arena<Emv2Subclause>,
     /// Diagnostics produced during lowering (STPA-REQ-002, STPA-REQ-004).
     pub diagnostics: Vec<LoweringDiagnostic>,
+}
+
+/// An `annex EMV2 {** … **}` subclause attached to a component type or
+/// implementation (REQ-EMV2-PROPAGATION-002, layer 2, GitHub #294).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Emv2Subclause {
+    /// Annex name as written (provenance).
+    pub name: Name,
+    /// The L1 semantic model lifted from the subclause body.
+    pub model: Emv2Model,
 }
 
 // ── Top-level items ────────────────────────────────────────────────
@@ -175,6 +188,8 @@ pub struct ComponentTypeItem {
     /// Whether the modes section uses `requires modes` (derived modes)
     /// rather than declaring its own modes.
     pub requires_modes: bool,
+    /// EMV2 annex subclauses attached to this component type.
+    pub emv2: Vec<Emv2SubclauseIdx>,
 }
 
 /// A component implementation declaration.
@@ -207,6 +222,8 @@ pub struct ComponentImplItem {
     /// Whether the modes section uses `requires modes` (derived modes)
     /// rather than declaring its own modes.
     pub requires_modes: bool,
+    /// EMV2 annex subclauses attached to this component implementation.
+    pub emv2: Vec<Emv2SubclauseIdx>,
 }
 
 /// A feature group type declaration.

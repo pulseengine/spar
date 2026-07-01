@@ -368,6 +368,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: property_associations.clone(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 
     if !subcomponents.is_empty() || !connections.is_empty() {
@@ -387,6 +388,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
     }
 
@@ -446,6 +448,7 @@ fn lower_port_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -468,6 +471,7 @@ fn lower_connection_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -493,6 +497,7 @@ fn lower_action_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -519,6 +524,7 @@ fn lower_state_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -544,6 +550,7 @@ fn lower_attribute_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -569,6 +576,7 @@ fn lower_item_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -633,6 +641,7 @@ fn lower_enum_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations,
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -739,6 +748,7 @@ fn lower_requirement_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations,
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -777,6 +787,7 @@ fn lower_constraint_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations,
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -802,6 +813,7 @@ fn lower_calc_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
@@ -827,6 +839,7 @@ fn lower_allocation_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         prototypes: Vec::new(),
         property_associations: Vec::new(),
         requires_modes: false,
+        emv2: Vec::new(),
     });
 }
 
