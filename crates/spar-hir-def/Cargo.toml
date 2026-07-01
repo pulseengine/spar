@@ -9,6 +9,7 @@ description = "HIR definitions and name resolution for AADL analysis"
 [dependencies]
 spar-syntax.workspace = true
 spar-base-db.workspace = true
+spar-annex.workspace = true
 salsa.workspace = true
 rowan.workspace = true
 la-arena = "0.3"

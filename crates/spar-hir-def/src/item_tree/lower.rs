@@ -6,8 +6,39 @@
 use spar_syntax::ast::{self, AstNode};
 use spar_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
+use spar_annex::emv2::Emv2Model;
+
 use crate::item_tree::*;
 use crate::name::{ClassifierRef, Name, PropertyRef};
+
+/// Lift EMV2 annex subclauses that are direct children of a component
+/// type/impl node into the item tree, returning their arena indices.
+///
+/// Non-EMV2 annex languages remain dropped (only their diagnostics apply
+/// elsewhere). REQ-EMV2-PROPAGATION-002, layer 2, GitHub #294.
+fn lower_emv2_subclauses(node: &SyntaxNode, tree: &mut ItemTree) -> Vec<Emv2SubclauseIdx> {
+    let mut out = Vec::new();
+    for sub in node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::ANNEX_SUBCLAUSE)
+    {
+        let Some((name, text)) = spar_annex::extract_annex_content(&sub) else {
+            continue;
+        };
+        // Other annex languages stay dropped.
+        if !name.eq_ignore_ascii_case("EMV2") {
+            continue;
+        }
+        let parsed = spar_annex::emv2::parse(&text);
+        let model = Emv2Model::from_syntax(&parsed.syntax_node());
+        let idx = tree.emv2_subclauses.alloc(Emv2Subclause {
+            name: Name::new(&name),
+            model,
+        });
+        out.push(idx);
+    }
+    out
+}
 
 /// Lower a parsed source file into an item tree.
 pub fn lower_file(root: &SyntaxNode) -> ItemTree {
@@ -237,6 +268,8 @@ fn lower_component_type_with_visibility(
         .find(|c| c.kind() == SyntaxKind::MODE_SECTION)
         .is_some_and(|ms| has_requires_modes_prefix(&ms));
 
+    let emv2 = lower_emv2_subclauses(node, tree);
+
     let idx = tree.component_types.alloc(ComponentTypeItem {
         name,
         category,
@@ -249,6 +282,7 @@ fn lower_component_type_with_visibility(
         prototypes,
         property_associations,
         requires_modes,
+        emv2,
     });
     Some(ItemRef::ComponentType(idx))
 }
@@ -337,6 +371,8 @@ fn lower_component_impl_with_visibility(
         .find(|c| c.kind() == SyntaxKind::MODE_SECTION)
         .is_some_and(|ms| has_requires_modes_prefix(&ms));
 
+    let emv2 = lower_emv2_subclauses(node, tree);
+
     let idx = tree.component_impls.alloc(ComponentImplItem {
         type_name,
         impl_name,
@@ -353,6 +389,7 @@ fn lower_component_impl_with_visibility(
         call_sequences,
         property_associations,
         requires_modes,
+        emv2,
     });
     Some(ItemRef::ComponentImpl(idx))
 }

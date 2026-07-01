@@ -3468,6 +3468,36 @@ artifacts:
       - type: verifies
         target: REQ-EMV2-PROPAGATION-002
 
+  - id: TEST-EMV2-ITEMTREE-ATTACH
+    type: feature
+    title: EMV2 subclause retained in the item-tree, attached to its component
+    description: >
+      Layer 2 of REQ-EMV2-PROPAGATION-002 (GitHub #294): a component's
+      `annex EMV2 {** … **}` subclause is no longer dropped at item-tree
+      lowering (previously the empty ANNEX_SUBCLAUSE arm) — it is lifted via the
+      L1 Emv2Model and stored in a new `emv2_subclauses` arena, referenced from
+      `ComponentTypeItem.emv2` / `ComponentImplItem.emv2`
+      (crates/spar-hir-def/src/item_tree). Oracle tests in spar-hir-def
+      (parse real AADL → item-tree → assert, NON-CIRCULAR by comparing the
+      lowered model against L1 parsing the same snippet directly): (a) a system
+      TYPE with an EMV2 annex retains exactly one subclause whose model EQUALS
+      the L1 oracle (2 propagations, 3 flows — non-vacuous); (b) a system
+      IMPLEMENTATION with an EMV2 annex retains it on its own `emv2` list;
+      (c) a component with an EMV2 annex AND a non-EMV2 annex
+      (behavior_specification) retains EXACTLY the EMV2 one (guards the
+      case-insensitive name filter; annex subclauses repeat, so lowering
+      filters rather than finds). Stops at the item-tree/type level — does NOT
+      touch instantiation (that is layer 3).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib emv2
+    status: passing
+    tags: [emv2, analysis, safety, v0.23.0, hir-def]
+    links:
+      - type: verifies
+        target: REQ-EMV2-PROPAGATION-002
+
   - id: TEST-WRPC-BINDING
     type: feature
     title: wrpc-binding honors per-connection Actual_Connection_Binding

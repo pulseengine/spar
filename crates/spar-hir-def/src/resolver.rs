@@ -692,6 +692,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -713,6 +714,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("B"),
@@ -762,6 +764,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -783,6 +786,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("B"),
@@ -830,6 +834,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("C"),
@@ -851,6 +856,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -893,6 +899,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree1.packages.alloc(Package {
             name: Name::new("Foo"),
@@ -915,6 +922,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree2.packages.alloc(Package {
             name: Name::new("Foo"),
@@ -986,6 +994,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         // Public type in the same package to verify selective visibility
         let ct_public = tree.component_types.alloc(ComponentTypeItem {
@@ -1000,6 +1009,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -1066,6 +1076,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("Pkg1"),
@@ -1125,6 +1136,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -1185,6 +1197,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         let ci = tree.component_impls.alloc(ComponentImplItem {
             type_name: Name::new("OriginalSensor"),
@@ -1202,6 +1215,7 @@ mod tests {
             call_sequences: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("A"),
@@ -1311,6 +1325,7 @@ mod tests {
             prototypes: Vec::new(),
             property_associations: Vec::new(),
             requires_modes: false,
+            emv2: Vec::new(),
         });
         tree.packages.alloc(Package {
             name: Name::new("Lib"),
