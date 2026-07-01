@@ -3456,26 +3456,39 @@ artifacts:
       one-way latency is significant relative to the cycle (long / WAN
       DetNet links), where the shipped hop-count bound (h±1)·T_c is
       optimistic. Model (draft-ietf-detnet-tcqf / draft-eckert-detnet-tcqf-05,
-      fresh-context-pinned + advisor-confirmed 2026-07-01; SUPERSEDES the
-      earlier unsound spec whose interval inverted on long links):
+      fresh-context-pinned 2026-07-01, D_max soundness validated by an
+      INDEPENDENT discrete-event cycle-timeline simulation oracle — not just
+      algebraic self-consistency; SUPERSEDES the earlier unsound spec whose
+      interval inverted on long links):
       per-hop CYCLE-QUANTIZATION with a network dead time DT (0 ≤ DT < T_c,
       at the cycle END, ≥ max link latency). The per-hop cycle advance is
       kᵢ = 2 + ⌊(dᵢ − DT)/T_c⌋ (Euclidean division; DT SUBTRACTS — dead time
       eases same-cycle delivery); dᵢ < DT ⇒ kᵢ = 1. Bounds:
       D_max = T_c + T_c·Σᵢ kᵢ(dᵢᵐᵃˣ); D_min = T_c·Σ_{i<H} kᵢ(dᵢᵐⁱⁿ) (H−1
       intermediate hops + last-hop floor 0) — the asymmetry makes (H±1)·T_c
-      emerge AND guarantees D_min ≤ D_max always (no inversion). Buffers
-      key off jitter: Bᵢ = (kᵢᵐᵃˣ − kᵢᵐⁱⁿ) + 2, B = max(3, maxᵢ Bᵢ), ERROR
-      if B > cap (never a silent down-clamp). Admission budget shrinks by
-      the dead time: csize = (T_c − DT)·rate (only the transmittable window;
-      collapses to the shipped T_c·rate at DT=0). Degeneracy: every dᵢᵐᵃˣ <
+      emerge AND guarantees D_min ≤ D_max always (no inversion). D_min is the
+      draft's nominal (H−1)·T_c figure, NOT a universal lower bound — a frame
+      released just before a cycle boundary can be delivered a fraction of T_c
+      sooner (sim reaches 49µs where D_min=50µs) — and it is safe precisely
+      because D_min has NO buffer-sizing or minimum-latency consumer (only the
+      library re-export for jitter reporting); buffers key off per-hop k.
+      The bound LIBRARY (cqf_buffer_count) is multi-buffer-capable: buffers key
+      off jitter Bᵢ = (kᵢᵐᵃˣ − kᵢᵐⁱⁿ) + 2, B = max(3, maxᵢ Bᵢ), ERROR if
+      B > cap (never a silent down-clamp). In the synthesizer's supported
+      cycle-dominates regime jitter is ≤ 1 cycle, so it emits the 3-cycle
+      floor; the >3 arms are exercised by the standalone bound oracles.
+      Admission budget shrinks by the dead time: csize = (T_c − DT)·rate (only
+      the transmittable window; collapses to the shipped T_c·rate at DT=0). Degeneracy: every dᵢᵐᵃˣ <
       DT (with DT > 0) ⇒ all kᵢ = 1 ⇒ D_max = (H+1)·T_c, D_min = (H−1)·T_c —
       reproduces the shipped 24-hop/10µs → 250µs pin. IMPLEMENTATION
       (crates/spar-network/src/cqf.rs): standalone bound functions
       (cqf_hop_advance_cycles, cqf_delay_{max,min}_longlink_ps,
       cqf_cycle_budget_bits_with_dead_time, cqf_buffer_count) + LinkDelay,
       and synthesize_cqf_longlink returning CqfLongLinkSchedule. CqfFlow
-      gains per-hop link_delays (empty ⇒ all-short, backward compatible).
+      gains per-hop link_delays (empty ⇒ all-short; delay+cycle degenerate to
+      the shipped hop-count result, though at DT>0 the csize budget is the
+      reduced (T_c−DT)·rate, so admission is not byte-identical to
+      synthesize_cqf).
       SCOPE (sound baseline): synthesis serves the "cycle dominates links"
       regime (T_c > every link, kᵢ ∈ {1,2}, monotonic → closed-form cycle
       selection); a deadline that would need a cycle SHORTER than a link

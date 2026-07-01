@@ -235,8 +235,10 @@ pub fn cqf_cycle_budget_bits(cycle_ps: u64, link_rate_bps: u64) -> u128 {
 // received in time to be forwarded in cycle c+1). On a LONG link that no
 // longer holds — the frame can miss the next cycle boundary and be delayed by
 // extra whole cycles. The sound generalization (draft-ietf-detnet-tcqf,
-// draft-eckert-detnet-tcqf-05, advisor-confirmed) quantizes each hop's link
-// latency into an integer CYCLE ADVANCE kᵢ and sums them.
+// draft-eckert-detnet-tcqf-05; D_max soundness validated by an independent
+// discrete-event cycle-timeline simulation, see the `longlink_dmax_upper_
+// bounds_discrete_event_sim` oracle) quantizes each hop's link latency into an
+// integer CYCLE ADVANCE kᵢ and sums them.
 //
 // Dead time `DT` (0 ≤ DT < T_c) is the tcqf guard interval at the END of each
 // cycle: no scheduled frame is sent in the last DT of a cycle so it is sure to
@@ -299,6 +301,17 @@ pub fn cqf_delay_max_longlink_ps(
 /// `(H−1)·T_c` emerge together AND guarantees `D_min ≤ D_max` always (the prior
 /// spec inverted precisely because it lacked the last-hop compensation).
 /// Degenerates to `(H−1)·T_c` when every hop is short.
+///
+/// # Not a universal lower bound
+///
+/// `D_min` is the draft's *nominal* best case (the `(H−1)·T_c` figure), not a
+/// guaranteed floor over every source phase: a frame presented just before a
+/// cycle boundary is delivered a fraction of `T_c` sooner relative to its own
+/// release instant than this returns (the discrete-event sim reaches 49 µs
+/// where `D_min` = 50 µs on `[1,25,8]` µs at `DT`=2/`T_c`=10). This is safe
+/// because `D_min` has NO buffer-sizing or minimum-latency-guarantee consumer —
+/// cyclic buffers key off per-hop `k` ([`cqf_buffer_count`]), and `D_max` is
+/// the safety-critical bound. `D_min` is exported for jitter reporting only.
 #[must_use]
 pub fn cqf_delay_min_longlink_ps(
     link_delays_min_ps: &[u64],
@@ -349,9 +362,10 @@ pub fn cqf_buffer_count(
     for ld in link_delays {
         let k_max = cqf_hop_advance_cycles(ld.max_ps, dead_time_ps, cycle_ps);
         let k_min = cqf_hop_advance_cycles(ld.min_ps, dead_time_ps, cycle_ps);
-        // k_max ≥ k_min (advance is monotone in latency), so the difference is
-        // non-negative; +2 for double buffering.
-        let b_i = (k_max - k_min) as u32 + 2;
+        // Advance is monotone in latency, so k_max ≥ k_min for a well-formed
+        // LinkDelay; saturating_sub keeps a caller-swapped (min > max) struct
+        // from wrapping into a bogus huge buffer count. +2 for double buffering.
+        let b_i = (k_max.saturating_sub(k_min)) as u32 + 2;
         needed = needed.max(b_i);
     }
     if needed > cap {
@@ -828,6 +842,112 @@ mod tests {
         );
     }
 
+    /// Admission is inclusive at the budget: a reservation EXACTLY equal to
+    /// csize is admitted (`required > csize`, strict). This also exercises the
+    /// `self_check` admission arm on the returned schedule at the boundary —
+    /// killing the `>` ⇒ `>=` / `==` mutants in both the admission loop and the
+    /// self-check (surfaced by full-file mutation of the co-located v0.20 CQF
+    /// baseline, hardened here since the file is under change).
+    #[test]
+    fn synth_admission_boundary_reserves_exactly_csize() {
+        // 1 Gbps, 1 hop, deadline 200 µs ⇒ T = 100 µs ⇒ csize = 100_000 bits.
+        let rate = 1_000_000_000u64;
+        let exact = [flow(1, 100_000, 200_000_000, &[0])];
+        let sched = synthesize_cqf(&exact, rate).expect("reservation == csize is admissible");
+        assert_eq!(sched.csize_bits, 100_000);
+        assert_eq!(sched.per_link_bits[&0], 100_000);
+        // One bit over the budget is rejected (the strict side of the boundary).
+        let over = [flow(1, 100_001, 200_000_000, &[0])];
+        assert_eq!(
+            synthesize_cqf(&over, rate),
+            Err(CqfSynthError::Oversubscribed {
+                link: 0,
+                required_bits: 100_001,
+                csize_bits: 100_000,
+            })
+        );
+    }
+
+    /// Every `CqfSynthError` variant renders a non-empty, distinguishing
+    /// `Display` string (kills the `fmt -> Ok(default)` mutant that would make
+    /// every error print as the empty string).
+    #[test]
+    fn cqf_synth_error_display_is_populated() {
+        let cases: &[(CqfSynthError, &str)] = &[
+            (CqfSynthError::NoFlows, "no CQF flows"),
+            (CqfSynthError::EmptyPath { id: 3 }, "flow 3"),
+            (CqfSynthError::DegenerateFlow { id: 4 }, "zero"),
+            (
+                CqfSynthError::DuplicateFlowId { id: 5 },
+                "duplicate flow id 5",
+            ),
+            (CqfSynthError::ZeroLinkRate, "non-zero"),
+            (
+                CqfSynthError::DeadlineTooTight {
+                    id: 6,
+                    hops: 3,
+                    deadline_ps: 9,
+                },
+                "irreducible",
+            ),
+            (
+                CqfSynthError::Oversubscribed {
+                    link: 7,
+                    required_bits: 10,
+                    csize_bits: 5,
+                },
+                "oversubscribed",
+            ),
+            (CqfSynthError::SelfCheck("boom"), "boom"),
+            (
+                CqfSynthError::DeadTimeTooLarge {
+                    dead_time_ps: 9,
+                    cycle_ps: 8,
+                },
+                "dead time",
+            ),
+            (
+                CqfSynthError::LinkDelayLenMismatch {
+                    id: 8,
+                    path_len: 2,
+                    delays_len: 1,
+                },
+                "link delays",
+            ),
+            (
+                CqfSynthError::BufferBudgetExceeded { needed: 9, cap: 7 },
+                "cyclic buffers",
+            ),
+            (
+                CqfSynthError::LongLinkDeadlineTooTight { id: 9 },
+                "every link",
+            ),
+        ];
+        for (err, needle) in cases {
+            let shown = err.to_string();
+            assert!(!shown.is_empty(), "{err:?} rendered empty");
+            assert!(
+                shown.contains(needle),
+                "{err:?} Display {shown:?} missing {needle:?}"
+            );
+        }
+    }
+
+    // NOTE — accepted mutation survivors in the v0.20 hop-count baseline
+    // (`synthesize_cqf` / `self_check`), surfaced by full-file mutation:
+    //   • line 417 (×4): the `deadline/(hops+1)` key inside `min_by_key` only
+    //     selects WHICH flow id is NAMED in a DeadlineTooTight message when
+    //     several flows are simultaneously infeasible — a diagnostic nicety,
+    //     not a soundness property; the `/(H+1)` vs `/H` variant is argmin-
+    //     equivalent for realistic inputs and the others need contrived
+    //     picosecond-scale multi-flow inputs to distinguish.
+    //   • `self_check` replaced whole-body with `Ok(())`: `self_check` is a
+    //     defensive regression guard that, by construction, never returns Err
+    //     on a reachable (already deadline- and admission-filtered) schedule,
+    //     so the whole-body replacement is an equivalent mutant.
+    // These belong to REQ-TSN-SYNTH-CQF-BASE-001 (shipped v0.20.0); the
+    // long-link functions under REQ-TSN-SYNTH-CQF-LONGLINK-001 are 0-missed.
+
     // ── Long-link CQF oracles (REQ-TSN-SYNTH-CQF-LONGLINK-001) ────────────
     //
     // Three NON-CIRCULAR oracles for the cycle-quantized bound. Constants:
@@ -1079,5 +1199,234 @@ mod tests {
                 delays_len: 1
             })
         );
+    }
+
+    /// Play one frame through an EXPLICIT CQF cycle timeline and return its
+    /// end-to-end delay in picoseconds. This is the independent ground truth
+    /// for the cycle-quantized bound: it derives every per-hop cycle advance
+    /// from `floor(arrival / T_c)` on real timestamps — it NEVER calls
+    /// [`cqf_hop_advance_cycles`] — so an off-by-one / floor-direction /
+    /// dead-time-sign error in the closed form shows up as a mismatch here.
+    ///
+    /// Model: cycles tile the timeline `[c·T_c, (c+1)·T_c)`; the transmittable
+    /// window is `[c·T_c, (c+1)·T_c − DT)` (dead time `DT` at the cycle END). A
+    /// frame that ARRIVES during cycle `a` is buffered and FORWARDED during
+    /// cycle `a+1`. `latest` sends at the very end of that window (worst case);
+    /// `!latest` sends at the window start (best case). `ready` is the source
+    /// presentation instant; the frame is treated as arrived in cycle
+    /// `⌊ready/T_c⌋`.
+    fn sim_longlink_delay_ps(
+        delays_ps: &[u64],
+        dt_ps: u64,
+        tc_ps: u64,
+        ready_ps: u64,
+        latest: bool,
+    ) -> u128 {
+        let tc = u128::from(tc_ps);
+        let dt = u128::from(dt_ps);
+        let mut arrived_cycle = u128::from(ready_ps) / tc;
+        let mut arrival = u128::from(ready_ps);
+        for &d in delays_ps {
+            let fwd = arrived_cycle + 1; // forwarded in the cycle after arrival
+            let send = if latest {
+                (fwd + 1) * tc - dt // last transmittable instant of the window
+            } else {
+                fwd * tc // first instant of the window
+            };
+            arrival = send + u128::from(d);
+            arrived_cycle = arrival / tc;
+        }
+        arrival - u128::from(ready_ps)
+    }
+
+    #[test]
+    fn longlink_dmax_upper_bounds_discrete_event_sim() {
+        // (D) INDEPENDENT ANTI-OPTIMISM ORACLE — the advisor's blocking gate.
+        // Oracles (A)/(B)/(C) all re-apply the k_i closed form (by hand or by
+        // degeneracy to the shipped hop-count bound), so a subtle optimistic
+        // error in k_i = 2 + ⌊(d−DT)/T_c⌋ (wrong sign, floor direction,
+        // off-by-one) would pass every one of them AND survive mutation. This
+        // oracle plays frames through a discrete-event cycle timeline that
+        // derives cycle advance from floor(arrival/T_c) — fully independent of
+        // the closed form — and asserts the analytical D_max upper-bounds EVERY
+        // observed delay across a full-cycle sweep of source phases. Profiles
+        // are chosen to drive k_i ≥ 2 (the regime (A) never exercises).
+        let tc = TEN_US_PS;
+        let dt = DT_2US_PS;
+        let profiles: &[&[u64]] = &[
+            &[1_000_000, 25_000_000, 8_000_000],           // k = [1, 4, 2]
+            &[15_000_000, 15_000_000],                     // k = [3, 3]
+            &[12_000_000, 3_000_000, 30_000_000],          // k = [3, 2, 4]
+            &[1_000_000, 1_000_000, 1_000_000, 1_000_000], // k = 1 (degenerate)
+        ];
+        let mut saw_multi_cycle = false;
+        for prof in profiles {
+            let dmax = cqf_delay_max_longlink_ps(prof, dt, tc);
+            let dmin = cqf_delay_min_longlink_ps(prof, dt, tc);
+            saw_multi_cycle |= prof.iter().any(|&d| cqf_hop_advance_cycles(d, dt, tc) >= 2);
+            // Sweep the source presentation phase across a full cycle.
+            for step in 0..(tc / 1_000_000) {
+                let ready = step * 1_000_000;
+                let observed = sim_longlink_delay_ps(prof, dt, tc, ready, true);
+                assert!(
+                    dmax >= observed,
+                    "OPTIMISTIC D_max: {dmax} < observed {observed} \
+                     (prof={prof:?}, ready={ready})"
+                );
+            }
+            // Nominal best case: a boundary-aligned frame (ready = 0). D_min
+            // drops the last hop's cycle-quantization (ℓ_H,min = 0), so it is
+            // the ALIGNED reference, not an absolute floor over all sub-cycle
+            // source phases — a frame arriving just before a boundary can be
+            // delivered up to ~T_c sooner relative to its own `ready`. That
+            // asymmetry is safe: buffer sizing uses per-hop k (k_max−k_min),
+            // never D_min. So we only require D_min ≤ the aligned sim here.
+            let aligned_min = sim_longlink_delay_ps(prof, dt, tc, 0, false);
+            assert!(
+                dmin <= aligned_min,
+                "D_min {dmin} > aligned best-case sim {aligned_min} (prof={prof:?})"
+            );
+        }
+        assert!(
+            saw_multi_cycle,
+            "sim oracle must exercise the k_i ≥ 2 multi-cycle regime"
+        );
+    }
+
+    #[test]
+    fn longlink_synth_boundary_delay_equals_dead_time() {
+        // A hop whose latency is EXACTLY the dead time (d == DT) must be charged
+        // k = 2 (Euclidean div: 2 + ⌊0/T_c⌋ = 2), NOT k = 1. If the regime's
+        // inline shortcut used `d <= DT ⇒ k = 1` it would pick a cycle that the
+        // exact self-cert then rejects. Real path: Σk = 2 ⇒ T_c = 60/3 = 20 µs,
+        // D_max = 20·3 = 60 µs == deadline ⇒ Ok. A `d <= DT` shortcut picks
+        // 30 µs, whose real D_max = 90 µs > 60 ⇒ SelfCheck error.
+        let rate = 1_000_000_000u64;
+        let f = [ll_flow(
+            1,
+            1_000,
+            60_000_000,
+            &[0],
+            &[(DT_2US_PS, DT_2US_PS)],
+        )];
+        let sched = synthesize_cqf_longlink(&f, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP)
+            .expect("d == DT is feasible at k = 2");
+        assert_eq!(
+            sched.cycle_time_ps, 20_000_000,
+            "d == DT must be charged k=2"
+        );
+    }
+
+    #[test]
+    fn longlink_synth_tie_reports_first_binding_flow() {
+        // Two flows with an IDENTICAL cycle limit, both needing a sub-link
+        // cycle (infeasible). The tightest-flow tracker keeps the FIRST binding
+        // flow on a tie (`limit < cycle`, strict) — a `<=` would drift the id to
+        // the later flow. Both: deadline 60 µs, one 30 µs hop ⇒ Σk=2 ⇒ limit
+        // 20 µs ≤ 30 µs link ⇒ LongLinkDeadlineTooTight, and the id must be 7.
+        let rate = 1_000_000_000u64;
+        let flows = [
+            ll_flow(7, 1_000, 60_000_000, &[0], &[(30_000_000, 30_000_000)]),
+            ll_flow(9, 1_000, 60_000_000, &[1], &[(30_000_000, 30_000_000)]),
+        ];
+        assert_eq!(
+            synthesize_cqf_longlink(&flows, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::LongLinkDeadlineTooTight { id: 7 })
+        );
+    }
+
+    #[test]
+    fn longlink_synth_admission_oversubscribe_and_boundary() {
+        // Admission against csize = (T_c − DT)·rate. 1 short hop, deadline
+        // 40 µs ⇒ T_c = 20 µs ⇒ csize = (20−2)µs·1Gbps = 18_000 bits.
+        //  • reserve == csize (18_000)  ⇒ Ok  (kills the `>=` boundary mutant).
+        //  • reserve  > csize (18_001)  ⇒ Oversubscribed (kills `==`, and the
+        //    `*=`-instead-of-`+=` per-link accumulation mutant that zeroes the
+        //    load so nothing ever oversubscribes).
+        let rate = 1_000_000_000u64;
+        let at = [ll_flow(
+            1,
+            18_000,
+            40_000_000,
+            &[0],
+            &[(1_000_000, 1_000_000)],
+        )];
+        let sched = synthesize_cqf_longlink(&at, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP)
+            .expect("reservation exactly equal to csize is admissible");
+        assert_eq!(sched.csize_bits, 18_000);
+        assert_eq!(sched.cycle_time_ps, 20_000_000);
+
+        let over = [ll_flow(
+            1,
+            18_001,
+            40_000_000,
+            &[0],
+            &[(1_000_000, 1_000_000)],
+        )];
+        assert_eq!(
+            synthesize_cqf_longlink(&over, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::Oversubscribed {
+                link: 0,
+                required_bits: 18_001,
+                csize_bits: 18_000,
+            })
+        );
+    }
+
+    #[test]
+    fn longlink_synth_rejects_per_field_degeneracy() {
+        // The degenerate-flow guard is a disjunction: EITHER a zero reservation
+        // OR a zero deadline is rejected on its own (a `&&` mutant would demand
+        // both). Each field tested independently.
+        let rate = 1_000_000_000u64;
+        let zero_bits = [ll_flow(1, 0, 40_000_000, &[0], &[(1_000_000, 1_000_000)])];
+        assert_eq!(
+            synthesize_cqf_longlink(&zero_bits, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::DegenerateFlow { id: 1 })
+        );
+        let zero_deadline = [ll_flow(2, 1_000, 0, &[0], &[(1_000_000, 1_000_000)])];
+        assert_eq!(
+            synthesize_cqf_longlink(&zero_deadline, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::DegenerateFlow { id: 2 })
+        );
+    }
+
+    #[test]
+    fn longlink_synth_selfcert_admits_slack_below_deadline() {
+        // The exact-bound self-cert is `D_max > deadline ⇒ reject`. When cycle
+        // flooring leaves D_max STRICTLY below the deadline the config is still
+        // feasible and must be admitted — a `D_max < deadline` mutant would
+        // reject it. 2 short hops, deadline 100 µs: 100/3 = 33_333_333 ps
+        // floored to 33_333_000 ps (ns granularity) ⇒ D_max = 99_999_000 ps
+        // < 100 µs, so Ok with a non-degenerate 1000 ps of slack.
+        let rate = 1_000_000_000u64;
+        let f = [ll_flow(
+            1,
+            1_000,
+            100_000_000,
+            &[0, 1],
+            &[(1_000_000, 1_000_000); 2],
+        )];
+        let sched = synthesize_cqf_longlink(&f, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP)
+            .expect("D_max strictly below deadline is feasible");
+        assert_eq!(sched.cycle_time_ps, 33_333_000);
+        let dmax = cqf_delay_max_longlink_ps(&[1_000_000, 1_000_000], DT_2US_PS, 33_333_000);
+        assert!(dmax < 100_000_000, "flooring must leave real slack");
+    }
+
+    #[test]
+    fn longlink_buffer_count_cap_is_inclusive() {
+        // needed == cap is Ok (the cap is inclusive); only needed > cap fails.
+        // Kills the `needed > cap` ⇒ `needed >= cap` mutant.
+        let short = [LinkDelay {
+            min_ps: 0,
+            max_ps: 500_000,
+        }; 4];
+        assert_eq!(cqf_buffer_count(&short, DT_2US_PS, TEN_US_PS, 3), Ok(3));
+        let jittery = [LinkDelay {
+            min_ps: 1_000_000,
+            max_ps: 25_000_000,
+        }];
+        assert_eq!(cqf_buffer_count(&jittery, DT_2US_PS, TEN_US_PS, 5), Ok(5));
     }
 }

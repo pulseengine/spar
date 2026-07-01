@@ -2513,7 +2513,7 @@ artifacts:
 
   - id: TEST-TSN-SYNTH-CQF-LONGLINK
     type: feature
-    title: Long-link CQF — cycle-quantized bound + dead-time synthesis, 3 non-circular oracles
+    title: Long-link CQF — cycle-quantized bound + dead-time synthesis, 4 non-circular oracles
     description: >
       Verifies the sound long-link CQF bound and synthesizer
       (REQ-TSN-SYNTH-CQF-LONGLINK-001), where the shipped hop-count (H±1)·T_c
@@ -2529,7 +2529,14 @@ artifacts:
       strictly different, sounder computation; (C) OPTIMISM/INVERSION GUARD —
       an H=2 both-15µs case gives 70µs > naive 30µs (the exact deadline-miss
       the feature closes) plus a grid property asserting D_min ≤ D_max never
-      inverts. Also: csize = (T_c − DT)·rate shrinks by the dead time and
+      inverts. (D) INDEPENDENT DISCRETE-EVENT SIMULATION — (A)/(B)/(C) all
+      re-apply the kᵢ closed form, so a subtle optimistic error (sign, floor
+      direction, off-by-one) would pass them; oracle (D) plays frames through
+      an explicit CQF cycle timeline that derives cycle advance from
+      floor(arrival/T_c) — never calling the kᵢ formula — and asserts D_max
+      upper-bounds every observed delay across a full-cycle source-phase sweep
+      over profiles driving kᵢ ∈ {1..4}. This is the anti-optimism gate.
+      Also: csize = (T_c − DT)·rate shrinks by the dead time and
       degenerates to T_c·rate at DT=0; buffer count from link jitter with a
       hard cap (Err, never a silent down-clamp). The synthesizer
       synthesize_cqf_longlink is covered for the cycle-dominates regime
