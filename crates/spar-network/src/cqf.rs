@@ -179,6 +179,135 @@ pub fn cqf_cycle_budget_bits(cycle_ps: u64, link_rate_bps: u64) -> u128 {
     u128::from(link_rate_bps) * u128::from(cycle_ps) / 1_000_000_000_000u128
 }
 
+// ── Long-link CQF (REQ-TSN-SYNTH-CQF-LONGLINK-001) ────────────────────────
+//
+// The bounds above are hop-count-only: they assume every link's one-way
+// latency is negligible relative to the cycle (a frame sent in cycle c is
+// received in time to be forwarded in cycle c+1). On a LONG link that no
+// longer holds — the frame can miss the next cycle boundary and be delayed by
+// extra whole cycles. The sound generalization (draft-ietf-detnet-tcqf,
+// draft-eckert-detnet-tcqf-05, advisor-confirmed) quantizes each hop's link
+// latency into an integer CYCLE ADVANCE kᵢ and sums them.
+//
+// Dead time `DT` (0 ≤ DT < T_c) is the tcqf guard interval at the END of each
+// cycle: no scheduled frame is sent in the last DT of a cycle so it is sure to
+// arrive before the receiver's next boundary. Because DT sits at the cycle
+// end, it makes same-cycle delivery EASIER — it enters kᵢ with a MINUS sign.
+
+/// One link's one-way latency window (picoseconds): propagation + PHY /
+/// processing + sync-error margin. Frame serialization is charged on the send
+/// side (the `csize` budget), not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkDelay {
+    /// Minimum one-way latency (best case), picoseconds.
+    pub min_ps: u64,
+    /// Maximum one-way latency (worst case), picoseconds.
+    pub max_ps: u64,
+}
+
+/// Per-hop CQF cycle advance `kᵢ = 2 + ⌊(dᵢ − DT) / T_c⌋`, the number of whole
+/// cycles a frame advances crossing a hop of one-way latency `link_delay_ps`,
+/// with dead time `dead_time_ps` (`0 ≤ DT < T_c`) and cycle `cycle_ps`.
+///
+/// Uses floored (Euclidean) division so a `dᵢ < DT` short link yields exactly
+/// `kᵢ = 1` (the classic single-cycle CQF hop) and a boundary `dᵢ = DT` is
+/// charged pessimistically to `kᵢ = 2`. `kᵢ ≥ 1` is guaranteed by `DT < T_c`.
+#[must_use]
+pub fn cqf_hop_advance_cycles(link_delay_ps: u64, dead_time_ps: u64, cycle_ps: u64) -> u64 {
+    debug_assert!(dead_time_ps < cycle_ps, "dead time must be < cycle");
+    let numerator = i128::from(link_delay_ps) - i128::from(dead_time_ps);
+    // div_euclid = floor for a positive divisor; numerator may be negative.
+    (2 + numerator.div_euclid(i128::from(cycle_ps))) as u64
+}
+
+/// Worst-case long-link end-to-end delay `D_max = T_c + T_c·Σᵢ kᵢ(dᵢᵐᵃˣ)`,
+/// picoseconds. `link_delays_max_ps` is the per-hop MAX latency in path order
+/// (its length is the hop count `H`). The leading `T_c` is the worst-case
+/// source-ingress alignment wait.
+///
+/// Degenerates to the shipped `(H+1)·T_c` when every hop is short
+/// (`dᵢᵐᵃˣ < DT` ⇒ `kᵢ = 1`).
+#[must_use]
+pub fn cqf_delay_max_longlink_ps(
+    link_delays_max_ps: &[u64],
+    dead_time_ps: u64,
+    cycle_ps: u64,
+) -> u128 {
+    let sum_k: u128 = link_delays_max_ps
+        .iter()
+        .map(|&d| u128::from(cqf_hop_advance_cycles(d, dead_time_ps, cycle_ps)))
+        .sum();
+    u128::from(cycle_ps) + u128::from(cycle_ps) * sum_k
+}
+
+/// Best-case long-link end-to-end delay
+/// `D_min = ℓ_H,min + T_c·Σ_{i<H} kᵢ(dᵢᵐⁱⁿ)`, picoseconds, with the last-hop
+/// physical floor `ℓ_H,min = 0` (the last hop is delivered to the end host, not
+/// re-buffered, so it is not cycle-quantized).
+///
+/// Only the FIRST `H−1` (intermediate) hops are summed. This deliberate
+/// asymmetry with [`cqf_delay_max_longlink_ps`] is what makes `(H+1)·T_c` and
+/// `(H−1)·T_c` emerge together AND guarantees `D_min ≤ D_max` always (the prior
+/// spec inverted precisely because it lacked the last-hop compensation).
+/// Degenerates to `(H−1)·T_c` when every hop is short.
+#[must_use]
+pub fn cqf_delay_min_longlink_ps(
+    link_delays_min_ps: &[u64],
+    dead_time_ps: u64,
+    cycle_ps: u64,
+) -> u128 {
+    let h = link_delays_min_ps.len();
+    if h == 0 {
+        return 0;
+    }
+    let sum_k: u128 = link_delays_min_ps[..h - 1]
+        .iter()
+        .map(|&d| u128::from(cqf_hop_advance_cycles(d, dead_time_ps, cycle_ps)))
+        .sum();
+    u128::from(cycle_ps) * sum_k // ℓ_H,min = 0
+}
+
+/// Cycle admission budget with dead time: `csize = (T_c − DT)·rate`, bits.
+///
+/// Only the `T_c − DT` transmittable window of each cycle may be filled — a
+/// frame admitted into the dead-time tail could fail to drain before the cycle
+/// boundary and spill into a later cycle, breaking `D_max`. Collapses to the
+/// shipped [`cqf_cycle_budget_bits`] (`T_c·rate`) when `DT = 0`.
+#[must_use]
+pub fn cqf_cycle_budget_bits_with_dead_time(
+    cycle_ps: u64,
+    dead_time_ps: u64,
+    link_rate_bps: u64,
+) -> u128 {
+    let window_ps = cycle_ps.saturating_sub(dead_time_ps);
+    u128::from(link_rate_bps) * u128::from(window_ps) / 1_000_000_000_000u128
+}
+
+/// Per-path cyclic buffer count `B = max(3, maxᵢ((kᵢᵐᵃˣ − kᵢᵐⁱⁿ) + 2))` —
+/// the tcqf 3-cycle floor plus one extra cycle per cycle of link-latency
+/// jitter. `Ok(B)` when `B ≤ cap`; `Err(B)` when the needed count exceeds the
+/// hardware cap (never silently clamped DOWN — undersized buffers drop frames).
+///
+/// The draft mandates support for 3 and 4 cycles and a 7-cycle ceiling, so
+/// `cap` is normally 7.
+pub fn cqf_buffer_count(
+    link_delays: &[LinkDelay],
+    dead_time_ps: u64,
+    cycle_ps: u64,
+    cap: u32,
+) -> Result<u32, u32> {
+    let mut needed = 3u32;
+    for ld in link_delays {
+        let k_max = cqf_hop_advance_cycles(ld.max_ps, dead_time_ps, cycle_ps);
+        let k_min = cqf_hop_advance_cycles(ld.min_ps, dead_time_ps, cycle_ps);
+        // k_max ≥ k_min (advance is monotone in latency), so the difference is
+        // non-negative; +2 for double buffering.
+        let b_i = (k_max - k_min) as u32 + 2;
+        needed = needed.max(b_i);
+    }
+    if needed > cap { Err(needed) } else { Ok(needed) }
+}
+
 /// Synthesize a standard two-buffer CQF configuration for `flows` on links of
 /// uniform `link_rate_bps`.
 ///
@@ -479,5 +608,107 @@ mod tests {
             ),
             Err(CqfSynthError::DuplicateFlowId { id: 1 })
         );
+    }
+
+    // ── Long-link CQF oracles (REQ-TSN-SYNTH-CQF-LONGLINK-001) ────────────
+    //
+    // Three NON-CIRCULAR oracles for the cycle-quantized bound. Constants:
+    // T_c = 10 us, DT = 2 us. Hand-computed k_i = 2 + floor((d_i - DT)/T_c).
+
+    const DT_2US_PS: u64 = 2_000_000;
+
+    #[test]
+    fn longlink_degeneracy_reproduces_shipped_hop_count_bound() {
+        // (A) DEGENERACY: every hop short (d_i^max < DT) ⇒ k_i = 1 ⇒ the
+        // long-link bound must EQUAL the independently-shipped hop-count bound
+        // cqf_delay_max_ps / cqf_delay_min_ps — which is externally pinned to
+        // the draft's 24-hop/250us example. Ties the new code to ground truth
+        // WITHOUT re-deriving the new formula.
+        let hops = 24usize;
+        let d_max = vec![1_000_000u64; hops]; // 1 us < DT ⇒ k=1
+        let d_min = vec![1_000_000u64; hops];
+        let dmax = cqf_delay_max_longlink_ps(&d_max, DT_2US_PS, TEN_US_PS);
+        let dmin = cqf_delay_min_longlink_ps(&d_min, DT_2US_PS, TEN_US_PS);
+        assert_eq!(dmax, cqf_delay_max_ps(hops as u32, TEN_US_PS), "D_max ≠ (H+1)·T_c");
+        assert_eq!(dmin, cqf_delay_min_ps(hops as u32, TEN_US_PS), "D_min ≠ (H−1)·T_c");
+        // Absolute pin: 250 us / 230 us.
+        assert_eq!(dmax, 250_000_000);
+        assert_eq!(dmin, 230_000_000);
+        // Every hop advances exactly one cycle.
+        assert_eq!(cqf_hop_advance_cycles(1_000_000, DT_2US_PS, TEN_US_PS), 1);
+    }
+
+    #[test]
+    fn longlink_discrimination_beats_naive_hop_count() {
+        // (B) DISCRIMINATION: 3-hop path d = [1, 25, 8] us ⇒ k = [1, 4, 2].
+        // D_max = T_c + T_c·(1+4+2) = 10 + 70 = 80 us. The naive hop-count
+        // bound (H+1)·T_c = 40 us UNDER-bounds the true worst case by 2× —
+        // proving the long-link bound is a strictly different, sounder
+        // computation, not a rename of the old one.
+        let d = [1_000_000u64, 25_000_000, 8_000_000];
+        assert_eq!(cqf_hop_advance_cycles(d[0], DT_2US_PS, TEN_US_PS), 1);
+        assert_eq!(cqf_hop_advance_cycles(d[1], DT_2US_PS, TEN_US_PS), 4);
+        assert_eq!(cqf_hop_advance_cycles(d[2], DT_2US_PS, TEN_US_PS), 2);
+        let dmax = cqf_delay_max_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
+        assert_eq!(dmax, 80_000_000, "D_max must be 80 us");
+        let naive = cqf_delay_max_ps(d.len() as u32, TEN_US_PS); // 40 us
+        assert!(naive < dmax, "naive (H+1)T_c {naive} must UNDER-bound long-link {dmax}");
+        // D_min sums the H−1 intermediate hops: (1+4)·10 = 50 us.
+        let dmin = cqf_delay_min_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
+        assert_eq!(dmin, 50_000_000);
+    }
+
+    #[test]
+    fn longlink_never_inverts_and_flags_naive_optimism() {
+        // (C) OPTIMISM/INVERSION GUARD. Edge case H=2, both links d=15 us
+        // (> T_c) ⇒ k = [3, 3] ⇒ D_max = 10 + 60 = 70 us, while the naive
+        // (H+1)·T_c = 30 us. A 40 us-deadline flow PASSES the naive test but
+        // its true worst case is 70 us — the exact unsoundness this feature
+        // closes. Also: D_min ≤ D_max must hold for ALL inputs (the prior
+        // spec inverted; this construction cannot).
+        let d = [15_000_000u64, 15_000_000];
+        assert_eq!(cqf_hop_advance_cycles(15_000_000, DT_2US_PS, TEN_US_PS), 3);
+        let dmax = cqf_delay_max_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
+        assert_eq!(dmax, 70_000_000);
+        assert!(cqf_delay_max_ps(2, TEN_US_PS) < dmax, "naive 30us must under-bound 70us");
+        // Never-inverts property across a grid of hop counts, delays, DT.
+        for dt in [0u64, 1_000_000, 5_000_000, 9_000_000] {
+            for &per_hop in &[0u64, 500_000, 2_000_000, 12_000_000, 33_000_000] {
+                for h in 1..=6usize {
+                    let dv = vec![per_hop; h];
+                    let mx = cqf_delay_max_longlink_ps(&dv, dt, TEN_US_PS);
+                    let mn = cqf_delay_min_longlink_ps(&dv, dt, TEN_US_PS);
+                    assert!(mn <= mx, "inverted: D_min {mn} > D_max {mx} (h={h}, d={per_hop}, dt={dt})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn longlink_csize_shrinks_by_dead_time_and_degenerates() {
+        // csize = (T_c − DT)·rate. At DT=0 it equals the shipped T_c·rate;
+        // with DT>0 it is strictly smaller (the dead-time tail is unusable).
+        let rate = 1_000_000_000u64; // 1 Gbps
+        let full = cqf_cycle_budget_bits(TEN_US_PS, rate);
+        assert_eq!(cqf_cycle_budget_bits_with_dead_time(TEN_US_PS, 0, rate), full);
+        let with_dt = cqf_cycle_budget_bits_with_dead_time(TEN_US_PS, DT_2US_PS, rate);
+        // (10us−2us)·1Gbps = 8us·1e9 = 8000 bits.
+        assert_eq!(with_dt, 8_000);
+        assert!(with_dt < full);
+    }
+
+    #[test]
+    fn longlink_buffer_count_from_jitter_and_cap() {
+        // B = max(3, max_i((k_i^max − k_i^min)+2)); Err(needed) past the cap.
+        // Hop with min=1us (k=1), max=25us (k=4): jitter 3 cycles ⇒ B_i=5.
+        let jittery = [LinkDelay { min_ps: 1_000_000, max_ps: 25_000_000 }];
+        assert_eq!(cqf_buffer_count(&jittery, DT_2US_PS, TEN_US_PS, 7), Ok(5));
+        // All-short deterministic links ⇒ floor of 3.
+        let short = [LinkDelay { min_ps: 0, max_ps: 500_000 }; 4];
+        assert_eq!(cqf_buffer_count(&short, DT_2US_PS, TEN_US_PS, 7), Ok(3));
+        // Exceeds the 7-cycle cap ⇒ Err(needed), never a silent down-clamp.
+        // max=90us ⇒ k_max=2+⌊(90−2)/10⌋=10; min=0 ⇒ k_min=1; B=(10−1)+2=11.
+        let huge = [LinkDelay { min_ps: 0, max_ps: 90_000_000 }];
+        assert_eq!(cqf_buffer_count(&huge, DT_2US_PS, TEN_US_PS, 7), Err(11));
     }
 }
