@@ -64,6 +64,11 @@ pub struct SystemInstance {
     /// Property maps for connection instances — values attached via
     /// `applies to <path>.<connection>` (issue #237).
     pub connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
+    /// EMV2 error-propagation models projected from each component's classifier
+    /// (type ∪ impl, DIRECT only — extends-chain EMV2 inheritance is deferred)
+    /// at instantiation time (REQ-EMV2-PROPAGATION-002 L3). Keyed by component
+    /// instance so L4 can build the Emv2Overlay without re-reading the item-tree.
+    pub emv2_models: FxHashMap<ComponentInstanceIdx, Vec<spar_annex::emv2::Emv2Model>>,
     /// Semantic (end-to-end) connection instances traced through the hierarchy.
     pub semantic_connections: Vec<SemanticConnection>,
     /// System Operation Modes — the cartesian product of modes across all modal components.
@@ -222,6 +227,7 @@ impl SystemInstance {
             property_maps: FxHashMap::default(),
             feature_property_maps: FxHashMap::default(),
             connection_property_maps: FxHashMap::default(),
+            emv2_models: FxHashMap::default(),
             pending_applies_to: Vec::new(),
             depth: 0,
             max_depth: 100,
@@ -265,6 +271,7 @@ impl SystemInstance {
             property_maps: builder.property_maps,
             feature_property_maps: builder.feature_property_maps,
             connection_property_maps: builder.connection_property_maps,
+            emv2_models: builder.emv2_models,
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         };
@@ -317,6 +324,11 @@ impl SystemInstance {
     pub fn properties_for(&self, idx: ComponentInstanceIdx) -> &PropertyMap {
         static EMPTY: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
+    }
+
+    /// Projected EMV2 models for a component instance (empty slice if none).
+    pub fn emv2_for(&self, idx: ComponentInstanceIdx) -> &[spar_annex::emv2::Emv2Model] {
+        self.emv2_models.get(&idx).map(Vec::as_slice).unwrap_or(&[])
     }
 
     /// Resolved properties attached to a feature instance via
@@ -1415,6 +1427,7 @@ struct Builder<'a> {
     property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
     feature_property_maps: FxHashMap<FeatureInstanceIdx, PropertyMap>,
     connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
+    emv2_models: FxHashMap<ComponentInstanceIdx, Vec<spar_annex::emv2::Emv2Model>>,
     /// Property associations with a non-empty `applies to <path>` clause.
     ///
     /// These are collected during instantiation and eagerly attached to
@@ -1503,6 +1516,9 @@ impl<'a> Builder<'a> {
 
         // Instantiate features, flows, modes, and mode transitions from the type.
         self.populate_from_type(idx, type_loc, &resolved_package);
+
+        // Project retained EMV2 subclause models (type ∪ impl) onto this instance.
+        self.project_emv2(idx, type_loc, impl_loc);
 
         // Instantiate subcomponents (recursive)
         #[allow(clippy::collapsible_if)]
@@ -1604,6 +1620,9 @@ impl<'a> Builder<'a> {
                                 // from the resolved type.
                                 self.populate_from_type(child_idx, leaf_type_loc, &leaf_pkg);
 
+                                // Project the leaf type's EMV2 models (type only).
+                                self.project_emv2(child_idx, leaf_type_loc, None);
+
                                 // Build property map for leaf subcomponent (type only)
                                 self.build_leaf_property_map(
                                     child_idx,
@@ -1616,6 +1635,7 @@ impl<'a> Builder<'a> {
                             }
                         } else {
                             // No classifier — anonymous subcomponent
+                            // no classifier → no EMV2 to project
                             let child_idx = self.components.alloc(ComponentInstance {
                                 name: instance_name,
                                 category: _sub_cat,
@@ -2020,6 +2040,40 @@ impl<'a> Builder<'a> {
             }
         }
         None
+    }
+
+    /// Project the classifier's EMV2 subclause models (type ∪ impl, direct only)
+    /// onto a component instance. No-op when neither loc has EMV2.
+    fn project_emv2(
+        &mut self,
+        idx: ComponentInstanceIdx,
+        type_loc: Option<crate::resolver::ItemLoc>,
+        impl_loc: Option<crate::resolver::ItemLoc>,
+    ) {
+        let mut models = Vec::new();
+        if let Some(loc) = type_loc
+            && let (Some(ct), Some(tree)) = (
+                self.scope.get_component_type(loc),
+                self.scope.tree(loc.tree),
+            )
+        {
+            for &sub in &ct.emv2 {
+                models.push(tree.emv2_subclauses[sub].model.clone());
+            }
+        }
+        if let Some(loc) = impl_loc
+            && let (Some(ci), Some(tree)) = (
+                self.scope.get_component_impl(loc),
+                self.scope.tree(loc.tree),
+            )
+        {
+            for &sub in &ci.emv2 {
+                models.push(tree.emv2_subclauses[sub].model.clone());
+            }
+        }
+        if !models.is_empty() {
+            self.emv2_models.insert(idx, models);
+        }
     }
 
     fn populate_from_type(
@@ -2605,6 +2659,7 @@ mod tests {
             property_maps: FxHashMap::default(),
             feature_property_maps: FxHashMap::default(),
             connection_property_maps: FxHashMap::default(),
+            emv2_models: Default::default(),
             semantic_connections: Vec::new(),
             system_operation_modes: Vec::new(),
         }
@@ -4464,5 +4519,114 @@ end p;
             Some("\"port-shape\""),
             "feature property must be stored per-feature, not on the component (#237)"
         );
+    }
+
+    // ── EMV2 instance projection (REQ-EMV2-PROPAGATION-002, layer 3) ──────
+    //
+    // Full pipeline: hand-authored AADL (with an EMV2 annex) → item-tree
+    // (L2 retains the subclause) → instantiate → assert the ComponentInstance
+    // carries the projected model. NON-VACUOUS: exact propagation/flow counts
+    // from the fixture (a bare `== item-tree model` would only prove the copy
+    // ran; a wrong/empty/double-counted projection must fail loudly).
+
+    fn instantiate_aadl(src: &str, pkg: &str, ty: &str, imp: &str) -> SystemInstance {
+        let db = crate::HirDefDatabase::default();
+        let file = spar_base_db::SourceFile::new(&db, "emv2_l3.aadl".to_string(), src.to_string());
+        let tree = crate::file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(ty), &Name::new(imp))
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn emv2_projected_onto_impl_root_from_type() {
+        // EMV2 on the TYPE; root instance is the IMPLEMENTATION (main alloc
+        // path unions type ∪ impl). Fixture: 2 propagations + 1 source flow.
+        let src = r#"package P
+public
+  system S
+    annex EMV2 {**
+error propagations
+  p1: out propagation {ServiceError};
+  p2: in propagation {LateDelivery};
+flows
+  f1: error source p1 {ServiceError};
+end propagations;
+    **};
+  end S;
+  system implementation S.i
+  end S.i;
+end P;
+"#;
+        let inst = instantiate_aadl(src, "P", "S", "i");
+        let models = inst.emv2_for(inst.root);
+        assert_eq!(
+            models.len(),
+            1,
+            "root instance must carry the type's EMV2 subclause"
+        );
+        assert_eq!(models[0].propagations.len(), 2);
+        assert_eq!(models[0].flows.len(), 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn emv2_projected_onto_type_only_leaf_subcomponent() {
+        // A type-only leaf subcomponent (`sub : device Sensor;`) hits a
+        // DIFFERENT alloc site than the root; a main-path-only projection would
+        // silently miss it. Sensor's EMV2: 1 propagation + 1 source flow.
+        let src = r#"package P
+public
+  device Sensor
+    annex EMV2 {**
+error propagations
+  s1: out propagation {BadValue};
+flows
+  fs: error source s1 {BadValue};
+end propagations;
+    **};
+  end Sensor;
+  system S
+  end S;
+  system implementation S.i
+    subcomponents
+      sub : device Sensor;
+  end S.i;
+end P;
+"#;
+        let inst = instantiate_aadl(src, "P", "S", "i");
+        // Root (S.i) has no EMV2.
+        assert!(
+            inst.emv2_for(inst.root).is_empty(),
+            "S itself declares no EMV2"
+        );
+        // Its leaf subcomponent carries Sensor's projected model.
+        let sub = inst.component(inst.root).children[0];
+        let models = inst.emv2_for(sub);
+        assert_eq!(
+            models.len(),
+            1,
+            "type-only leaf must carry its device type's EMV2"
+        );
+        assert_eq!(models[0].propagations.len(), 1);
+        assert_eq!(models[0].flows.len(), 1);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn emv2_absent_yields_empty_projection() {
+        // No EMV2 annex anywhere ⇒ empty projection (guards against a bug that
+        // attaches empty/duplicate models to every instance).
+        let src = r#"package P
+public
+  system S
+  end S;
+  system implementation S.i
+  end S.i;
+end P;
+"#;
+        let inst = instantiate_aadl(src, "P", "S", "i");
+        assert!(inst.emv2_for(inst.root).is_empty());
+        assert!(inst.emv2_models.is_empty());
     }
 }

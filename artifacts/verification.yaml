@@ -3498,6 +3498,40 @@ artifacts:
       - type: verifies
         target: REQ-EMV2-PROPAGATION-002
 
+  - id: TEST-EMV2-INSTANCE-PROJECT
+    type: feature
+    title: EMV2 model projected onto ComponentInstances during instantiation
+    description: >
+      Layer 3 of REQ-EMV2-PROPAGATION-002 (GitHub #294): during
+      instantiation the retained EMV2 model (L2) is projected from each
+      component's classifier (type ∪ impl, direct only) onto the
+      ComponentInstance, stored as a SystemInstance side-table
+      `emv2_models: FxHashMap<ComponentInstanceIdx, Vec<Emv2Model>>` (keyed by
+      instance so L4 can build the Emv2Overlay without re-reading the item-tree,
+      which is unreachable post-instantiation) with an `emv2_for(idx)`
+      accessor. Deliberate side-table (not a ComponentInstance field) to avoid
+      breaking ~103 constructors; extends-chain EMV2 inheritance deferred.
+      Oracle tests in spar-hir-def (full pipeline: hand-authored AADL →
+      item-tree → instantiate → assert, NON-VACUOUS exact counts, since a bare
+      `== item-tree model` would only prove the copy ran): (a) EMV2 on the TYPE,
+      root instance is the IMPLEMENTATION — root carries it (2 propagations +
+      1 flow), exercising the main alloc path's type∪impl union; (b) a type-only
+      leaf subcomponent (`sub : device Sensor` with an EMV2 annex) carries the
+      device type's model (1 propagation + 1 flow) while the EMV2-less root is
+      empty — exercising the distinct leaf alloc site a main-path-only
+      projection would miss; (c) no annex ⇒ empty projection. Stops at
+      instance projection — does NOT build the Emv2Overlay or wire analysis
+      passes (that is layer 4).
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-hir-def --lib emv2_
+    status: passing
+    tags: [emv2, analysis, safety, v0.23.0, hir-def]
+    links:
+      - type: verifies
+        target: REQ-EMV2-PROPAGATION-002
+
   - id: TEST-WRPC-BINDING
     type: feature
     title: wrpc-binding honors per-connection Actual_Connection_Binding
