@@ -68,6 +68,12 @@ pub struct CqfFlow {
     pub deadline_ps: u64,
     /// Links the flow traverses, by link id. `len()` is the hop count `H`.
     pub path: Vec<u32>,
+    /// Per-hop one-way link latency, parallel to `path` (same length). EMPTY
+    /// means "every hop is short" — the flow is handled by the hop-count
+    /// [`synthesize_cqf`] exactly as before. Populated (length must equal
+    /// `path.len()`) it drives the long-link cycle-quantized bound in
+    /// [`synthesize_cqf_longlink`] (REQ-TSN-SYNTH-CQF-LONGLINK-001).
+    pub link_delays: Vec<LinkDelay>,
 }
 
 /// A synthesized standard-CQF configuration.
@@ -113,6 +119,25 @@ pub enum CqfSynthError {
     /// The synthesized configuration failed its own re-check (a synthesis bug;
     /// should be unreachable).
     SelfCheck(&'static str),
+    /// Long-link only: dead time `DT` is not strictly below the cycle time
+    /// (`DT ≥ T_c`), so the per-hop cycle-advance formula is undefined.
+    DeadTimeTooLarge { dead_time_ps: u64, cycle_ps: u64 },
+    /// Long-link only: a flow's `link_delays` length does not match its `path`
+    /// (hop count) length.
+    LinkDelayLenMismatch {
+        id: u32,
+        path_len: usize,
+        delays_len: usize,
+    },
+    /// Long-link only: the worst hop needs more cyclic buffers than the
+    /// hardware cap (the draft's 7-cycle ceiling). Never silently clamped —
+    /// undersized buffers would drop frames.
+    BufferBudgetExceeded { needed: u32, cap: u32 },
+    /// Long-link only: no cycle time in the "cycle dominates links"
+    /// (`T_c > max link delay`) regime meets this flow's deadline — the
+    /// deadline would require sub-link-delay cycles (the multi-cycle-per-hop
+    /// regime), which this sound baseline does not yet synthesize.
+    LongLinkDeadlineTooTight { id: u32 },
 }
 
 impl fmt::Display for CqfSynthError {
@@ -146,6 +171,30 @@ impl fmt::Display for CqfSynthError {
                  but cycle budget is {csize_bits} bits"
             ),
             Self::SelfCheck(why) => write!(f, "CQF self-check failed: {why}"),
+            Self::DeadTimeTooLarge {
+                dead_time_ps,
+                cycle_ps,
+            } => write!(
+                f,
+                "dead time {dead_time_ps} ps must be strictly below cycle {cycle_ps} ps"
+            ),
+            Self::LinkDelayLenMismatch {
+                id,
+                path_len,
+                delays_len,
+            } => write!(
+                f,
+                "flow {id}: {delays_len} link delays for a {path_len}-hop path"
+            ),
+            Self::BufferBudgetExceeded { needed, cap } => write!(
+                f,
+                "long-link CQF needs {needed} cyclic buffers but the cap is {cap}"
+            ),
+            Self::LongLinkDeadlineTooTight { id } => write!(
+                f,
+                "flow {id}: deadline unmeetable with a cycle longer than every link \
+                 (sub-link-delay cycles are not yet synthesized)"
+            ),
         }
     }
 }
@@ -305,7 +354,11 @@ pub fn cqf_buffer_count(
         let b_i = (k_max - k_min) as u32 + 2;
         needed = needed.max(b_i);
     }
-    if needed > cap { Err(needed) } else { Ok(needed) }
+    if needed > cap {
+        Err(needed)
+    } else {
+        Ok(needed)
+    }
 }
 
 /// Synthesize a standard two-buffer CQF configuration for `flows` on links of
@@ -417,6 +470,170 @@ fn self_check(schedule: &CqfSchedule, flows: &[CqfFlow]) -> Result<(), CqfSynthE
     Ok(())
 }
 
+/// The draft's cyclic-buffer ceiling: "7 or fewer cycles MUST be used".
+pub const CQF_DEFAULT_BUFFER_CAP: u32 = 7;
+
+/// A synthesized long-link CQF configuration (REQ-TSN-SYNTH-CQF-LONGLINK-001).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CqfLongLinkSchedule {
+    /// Chosen global cycle time `T_c`, picoseconds (whole ns, `> DT` and
+    /// `>` every link delay).
+    pub cycle_time_ps: u64,
+    /// Dead time `DT` (`0 ≤ DT < T_c`), picoseconds.
+    pub dead_time_ps: u64,
+    /// Cycle budget `csize = (T_c − DT)·rate`, bits.
+    pub csize_bits: u128,
+    /// Per-link aggregate reservation, bits/cycle (`≤ csize_bits`).
+    pub per_link_bits: BTreeMap<u32, u128>,
+    /// Cyclic buffers required (`3..=cap`) — from the worst hop's latency
+    /// jitter.
+    pub buffers: u32,
+}
+
+/// Synthesize a long-link-sound CQF configuration, accounting for each hop's
+/// one-way link latency via the cycle-quantized bound
+/// ([`cqf_delay_max_longlink_ps`]) and the dead-time budget
+/// ([`cqf_cycle_budget_bits_with_dead_time`]).
+///
+/// Baseline scope — the **"cycle dominates links"** regime: it selects the
+/// largest whole-nanosecond `T_c` that is longer than every link delay (so each
+/// hop advances one cycle if `dᵢ < DT`, else two) and meets every flow's
+/// deadline `D_max ≤ deadline`, then admits flows against
+/// `csize = (T_c − DT)·rate` and sizes the cyclic buffers. When a deadline can
+/// only be met with a cycle *shorter* than some link (the multi-cycle-per-hop
+/// regime), it returns [`CqfSynthError::LongLinkDeadlineTooTight`] rather than
+/// an unsound configuration; optimal sub-link-cycle selection is a follow-up.
+///
+/// A flow with empty `link_delays` is treated as all-short (every `dᵢ = 0`);
+/// with `DT > 0` that reproduces the hop-count [`synthesize_cqf`] result. The
+/// returned schedule self-certifies against the exact long-link bound before
+/// return.
+pub fn synthesize_cqf_longlink(
+    flows: &[CqfFlow],
+    link_rate_bps: u64,
+    dead_time_ps: u64,
+    buffer_cap: u32,
+) -> Result<CqfLongLinkSchedule, CqfSynthError> {
+    if flows.is_empty() {
+        return Err(CqfSynthError::NoFlows);
+    }
+    if link_rate_bps == 0 {
+        return Err(CqfSynthError::ZeroLinkRate);
+    }
+
+    let mut seen_ids = BTreeMap::new();
+    for flow in flows {
+        if seen_ids.insert(flow.id, ()).is_some() {
+            return Err(CqfSynthError::DuplicateFlowId { id: flow.id });
+        }
+        if flow.path.is_empty() {
+            return Err(CqfSynthError::EmptyPath { id: flow.id });
+        }
+        if flow.reserved_bits_per_cycle == 0 || flow.deadline_ps == 0 {
+            return Err(CqfSynthError::DegenerateFlow { id: flow.id });
+        }
+        if !flow.link_delays.is_empty() && flow.link_delays.len() != flow.path.len() {
+            return Err(CqfSynthError::LinkDelayLenMismatch {
+                id: flow.id,
+                path_len: flow.path.len(),
+                delays_len: flow.link_delays.len(),
+            });
+        }
+    }
+
+    // Max one-way latency of hop `i` (0 when a flow omits its delays).
+    let hop_max =
+        |flow: &CqfFlow, i: usize| -> u64 { flow.link_delays.get(i).map_or(0, |ld| ld.max_ps) };
+
+    // Cycle-dominates regime: with T_c > every dᵢ, kᵢ = 1 if dᵢ < DT else 2.
+    // The per-flow cycle limit is deadline / (1 + Σkᵢ); the global T_c is the
+    // tightest, floored to a whole ns. Track the largest link delay so we can
+    // enforce the regime assumption afterward.
+    let mut cycle_ps = u64::MAX;
+    let mut tightest_id = flows[0].id;
+    let mut max_link_delay_ps = 0u64;
+    for flow in flows {
+        let mut sum_k = 0u64;
+        for i in 0..flow.path.len() {
+            let d = hop_max(flow, i);
+            max_link_delay_ps = max_link_delay_ps.max(d);
+            sum_k += if d < dead_time_ps { 1 } else { 2 };
+        }
+        let limit_ps = flow.deadline_ps / (1 + sum_k);
+        if limit_ps < cycle_ps {
+            cycle_ps = limit_ps;
+            tightest_id = flow.id;
+        }
+    }
+    cycle_ps = (cycle_ps / 1_000) * 1_000; // whole nanoseconds
+
+    // Regime validity: the cycle must be longer than every link (so kᵢ ≤ 2).
+    if cycle_ps == 0 || cycle_ps <= max_link_delay_ps {
+        return Err(CqfSynthError::LongLinkDeadlineTooTight { id: tightest_id });
+    }
+    if dead_time_ps >= cycle_ps {
+        return Err(CqfSynthError::DeadTimeTooLarge {
+            dead_time_ps,
+            cycle_ps,
+        });
+    }
+
+    // Admission against the dead-time-reduced budget.
+    let csize_bits = cqf_cycle_budget_bits_with_dead_time(cycle_ps, dead_time_ps, link_rate_bps);
+    let mut per_link_bits: BTreeMap<u32, u128> = BTreeMap::new();
+    for flow in flows {
+        for &link in &flow.path {
+            *per_link_bits.entry(link).or_insert(0) += u128::from(flow.reserved_bits_per_cycle);
+        }
+    }
+    for (&link, &required) in &per_link_bits {
+        if required > csize_bits {
+            return Err(CqfSynthError::Oversubscribed {
+                link,
+                required_bits: required,
+                csize_bits,
+            });
+        }
+    }
+
+    // Buffer sizing over every hop of every flow (empty delays ⇒ zero jitter).
+    let mut hops: Vec<LinkDelay> = Vec::new();
+    for flow in flows {
+        for i in 0..flow.path.len() {
+            hops.push(flow.link_delays.get(i).copied().unwrap_or(LinkDelay {
+                min_ps: 0,
+                max_ps: 0,
+            }));
+        }
+    }
+    let buffers =
+        cqf_buffer_count(&hops, dead_time_ps, cycle_ps, buffer_cap).map_err(|needed| {
+            CqfSynthError::BufferBudgetExceeded {
+                needed,
+                cap: buffer_cap,
+            }
+        })?;
+
+    // Self-certify against the EXACT long-link bound (regression guard).
+    for flow in flows {
+        let d_max: Vec<u64> = (0..flow.path.len()).map(|i| hop_max(flow, i)).collect();
+        if cqf_delay_max_longlink_ps(&d_max, dead_time_ps, cycle_ps) > u128::from(flow.deadline_ps)
+        {
+            return Err(CqfSynthError::SelfCheck(
+                "long-link flow delay exceeds deadline",
+            ));
+        }
+    }
+
+    Ok(CqfLongLinkSchedule {
+        cycle_time_ps: cycle_ps,
+        dead_time_ps,
+        csize_bits,
+        per_link_bits,
+        buffers,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,6 +647,7 @@ mod tests {
             reserved_bits_per_cycle: bits,
             deadline_ps,
             path: path.to_vec(),
+            link_delays: Vec::new(),
         }
     }
 
@@ -629,8 +847,16 @@ mod tests {
         let d_min = vec![1_000_000u64; hops];
         let dmax = cqf_delay_max_longlink_ps(&d_max, DT_2US_PS, TEN_US_PS);
         let dmin = cqf_delay_min_longlink_ps(&d_min, DT_2US_PS, TEN_US_PS);
-        assert_eq!(dmax, cqf_delay_max_ps(hops as u32, TEN_US_PS), "D_max ≠ (H+1)·T_c");
-        assert_eq!(dmin, cqf_delay_min_ps(hops as u32, TEN_US_PS), "D_min ≠ (H−1)·T_c");
+        assert_eq!(
+            dmax,
+            cqf_delay_max_ps(hops as u32, TEN_US_PS),
+            "D_max ≠ (H+1)·T_c"
+        );
+        assert_eq!(
+            dmin,
+            cqf_delay_min_ps(hops as u32, TEN_US_PS),
+            "D_min ≠ (H−1)·T_c"
+        );
         // Absolute pin: 250 us / 230 us.
         assert_eq!(dmax, 250_000_000);
         assert_eq!(dmin, 230_000_000);
@@ -652,7 +878,10 @@ mod tests {
         let dmax = cqf_delay_max_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
         assert_eq!(dmax, 80_000_000, "D_max must be 80 us");
         let naive = cqf_delay_max_ps(d.len() as u32, TEN_US_PS); // 40 us
-        assert!(naive < dmax, "naive (H+1)T_c {naive} must UNDER-bound long-link {dmax}");
+        assert!(
+            naive < dmax,
+            "naive (H+1)T_c {naive} must UNDER-bound long-link {dmax}"
+        );
         // D_min sums the H−1 intermediate hops: (1+4)·10 = 50 us.
         let dmin = cqf_delay_min_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
         assert_eq!(dmin, 50_000_000);
@@ -670,7 +899,10 @@ mod tests {
         assert_eq!(cqf_hop_advance_cycles(15_000_000, DT_2US_PS, TEN_US_PS), 3);
         let dmax = cqf_delay_max_longlink_ps(&d, DT_2US_PS, TEN_US_PS);
         assert_eq!(dmax, 70_000_000);
-        assert!(cqf_delay_max_ps(2, TEN_US_PS) < dmax, "naive 30us must under-bound 70us");
+        assert!(
+            cqf_delay_max_ps(2, TEN_US_PS) < dmax,
+            "naive 30us must under-bound 70us"
+        );
         // Never-inverts property across a grid of hop counts, delays, DT.
         for dt in [0u64, 1_000_000, 5_000_000, 9_000_000] {
             for &per_hop in &[0u64, 500_000, 2_000_000, 12_000_000, 33_000_000] {
@@ -678,7 +910,10 @@ mod tests {
                     let dv = vec![per_hop; h];
                     let mx = cqf_delay_max_longlink_ps(&dv, dt, TEN_US_PS);
                     let mn = cqf_delay_min_longlink_ps(&dv, dt, TEN_US_PS);
-                    assert!(mn <= mx, "inverted: D_min {mn} > D_max {mx} (h={h}, d={per_hop}, dt={dt})");
+                    assert!(
+                        mn <= mx,
+                        "inverted: D_min {mn} > D_max {mx} (h={h}, d={per_hop}, dt={dt})"
+                    );
                 }
             }
         }
@@ -690,7 +925,10 @@ mod tests {
         // with DT>0 it is strictly smaller (the dead-time tail is unusable).
         let rate = 1_000_000_000u64; // 1 Gbps
         let full = cqf_cycle_budget_bits(TEN_US_PS, rate);
-        assert_eq!(cqf_cycle_budget_bits_with_dead_time(TEN_US_PS, 0, rate), full);
+        assert_eq!(
+            cqf_cycle_budget_bits_with_dead_time(TEN_US_PS, 0, rate),
+            full
+        );
         let with_dt = cqf_cycle_budget_bits_with_dead_time(TEN_US_PS, DT_2US_PS, rate);
         // (10us−2us)·1Gbps = 8us·1e9 = 8000 bits.
         assert_eq!(with_dt, 8_000);
@@ -701,14 +939,145 @@ mod tests {
     fn longlink_buffer_count_from_jitter_and_cap() {
         // B = max(3, max_i((k_i^max − k_i^min)+2)); Err(needed) past the cap.
         // Hop with min=1us (k=1), max=25us (k=4): jitter 3 cycles ⇒ B_i=5.
-        let jittery = [LinkDelay { min_ps: 1_000_000, max_ps: 25_000_000 }];
+        let jittery = [LinkDelay {
+            min_ps: 1_000_000,
+            max_ps: 25_000_000,
+        }];
         assert_eq!(cqf_buffer_count(&jittery, DT_2US_PS, TEN_US_PS, 7), Ok(5));
         // All-short deterministic links ⇒ floor of 3.
-        let short = [LinkDelay { min_ps: 0, max_ps: 500_000 }; 4];
+        let short = [LinkDelay {
+            min_ps: 0,
+            max_ps: 500_000,
+        }; 4];
         assert_eq!(cqf_buffer_count(&short, DT_2US_PS, TEN_US_PS, 7), Ok(3));
         // Exceeds the 7-cycle cap ⇒ Err(needed), never a silent down-clamp.
         // max=90us ⇒ k_max=2+⌊(90−2)/10⌋=10; min=0 ⇒ k_min=1; B=(10−1)+2=11.
-        let huge = [LinkDelay { min_ps: 0, max_ps: 90_000_000 }];
+        let huge = [LinkDelay {
+            min_ps: 0,
+            max_ps: 90_000_000,
+        }];
         assert_eq!(cqf_buffer_count(&huge, DT_2US_PS, TEN_US_PS, 7), Err(11));
+    }
+
+    fn ll_flow(
+        id: u32,
+        bits: u64,
+        deadline_ps: u64,
+        path: &[u32],
+        delays: &[(u64, u64)],
+    ) -> CqfFlow {
+        CqfFlow {
+            id,
+            reserved_bits_per_cycle: bits,
+            deadline_ps,
+            path: path.to_vec(),
+            link_delays: delays
+                .iter()
+                .map(|&(min_ps, max_ps)| LinkDelay { min_ps, max_ps })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn longlink_synth_feasible_in_cycle_dominates_regime() {
+        // 2-hop path, both links 5 us (> DT=2us ⇒ k=2 each), deadline 150 us.
+        // Σk=4 ⇒ T_c limit = 150/(1+4) = 30 us > max link 5 us ✓. D_max =
+        // 30·(1+4) = 150 us ≤ deadline. csize = (30−2)us·1Gbps = 28_000 bits.
+        let rate = 1_000_000_000u64;
+        let flows = [ll_flow(
+            1,
+            1_000,
+            150_000_000,
+            &[0, 1],
+            &[(5_000_000, 5_000_000); 2],
+        )];
+        let sched = synthesize_cqf_longlink(&flows, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP)
+            .expect("feasible in cycle-dominates regime");
+        assert_eq!(sched.cycle_time_ps, 30_000_000);
+        assert_eq!(sched.dead_time_ps, DT_2US_PS);
+        assert_eq!(sched.csize_bits, 28_000);
+        assert_eq!(sched.buffers, 3, "deterministic links ⇒ 3-buffer floor");
+        // The true long-link D_max at the chosen cycle meets the deadline.
+        let dmax =
+            cqf_delay_max_longlink_ps(&[5_000_000, 5_000_000], DT_2US_PS, sched.cycle_time_ps);
+        assert!(dmax <= 150_000_000);
+    }
+
+    #[test]
+    fn longlink_synth_rejects_deadline_needing_sublink_cycle() {
+        // A 30 us link with a 60 us deadline: Σk=2 ⇒ T_c limit = 60/3 = 20 us,
+        // which is SHORTER than the 30 us link — the cycle-dominates regime
+        // cannot serve it, so we get a structured error, never an unsound
+        // config that silently assumes a single-cycle hop.
+        let rate = 1_000_000_000u64;
+        let flows = [ll_flow(
+            7,
+            1_000,
+            60_000_000,
+            &[0],
+            &[(30_000_000, 30_000_000)],
+        )];
+        assert_eq!(
+            synthesize_cqf_longlink(&flows, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::LongLinkDeadlineTooTight { id: 7 })
+        );
+    }
+
+    #[test]
+    fn longlink_synth_all_short_matches_hop_count_synthesis() {
+        // Every hop short (dᵢ=1us < DT) ⇒ the long-link synthesizer picks the
+        // SAME cycle as the hop-count synthesize_cqf and its D_max is (H+1)·T_c.
+        let rate = 1_000_000_000u64;
+        let short = &[(1_000_000u64, 1_000_000u64); 3];
+        let ll = [ll_flow(1, 1_000, 80_000_000, &[0, 1, 2], short)];
+        let hop = [flow(1, 1_000, 80_000_000, &[0, 1, 2])];
+        let a = synthesize_cqf_longlink(&ll, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP)
+            .expect("feasible");
+        let b = synthesize_cqf(&hop, rate).expect("feasible");
+        assert_eq!(
+            a.cycle_time_ps, b.cycle_time_ps,
+            "same cycle as hop-count synth"
+        );
+        // D_max degenerates to (H+1)·T_c.
+        assert_eq!(
+            cqf_delay_max_longlink_ps(&[1_000_000; 3], DT_2US_PS, a.cycle_time_ps),
+            cqf_delay_max_ps(3, a.cycle_time_ps)
+        );
+    }
+
+    #[test]
+    fn longlink_synth_flags_buffer_budget_and_len_mismatch() {
+        let rate = 1_000_000_000u64;
+        // In the cycle-dominates regime buffers are always the 3-cycle floor
+        // (T_c > every link ⇒ jitter ≤ 1 cycle), so the only way to trip the
+        // budget is a cap BELOW the draft's mandated 3 — a misconfiguration
+        // the synthesizer must reject, not silently under-buffer.
+        let f = [ll_flow(
+            1,
+            1_000,
+            100_000_000,
+            &[0],
+            &[(1_000_000, 1_000_000)],
+        )];
+        assert_eq!(
+            synthesize_cqf_longlink(&f, rate, DT_2US_PS, 2),
+            Err(CqfSynthError::BufferBudgetExceeded { needed: 3, cap: 2 })
+        );
+        // link_delays length must match the path.
+        let bad = [ll_flow(
+            2,
+            1_000,
+            100_000_000,
+            &[0, 1],
+            &[(1_000_000, 1_000_000)],
+        )];
+        assert_eq!(
+            synthesize_cqf_longlink(&bad, rate, DT_2US_PS, CQF_DEFAULT_BUFFER_CAP),
+            Err(CqfSynthError::LinkDelayLenMismatch {
+                id: 2,
+                path_len: 2,
+                delays_len: 1
+            })
+        );
     }
 }

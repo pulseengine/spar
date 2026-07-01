@@ -66,8 +66,10 @@ pub mod tsn;
 pub mod types;
 
 pub use cqf::{
-    CqfFlow, CqfSchedule, CqfSynthError, cqf_cycle_budget_bits, cqf_delay_max_ps, cqf_delay_min_ps,
-    synthesize_cqf,
+    CQF_DEFAULT_BUFFER_CAP, CqfFlow, CqfLongLinkSchedule, CqfSchedule, CqfSynthError, LinkDelay,
+    cqf_buffer_count, cqf_cycle_budget_bits, cqf_cycle_budget_bits_with_dead_time,
+    cqf_delay_max_longlink_ps, cqf_delay_max_ps, cqf_delay_min_longlink_ps, cqf_delay_min_ps,
+    cqf_hop_advance_cycles, synthesize_cqf, synthesize_cqf_longlink,
 };
 pub use curves::piecewise::{PiecewiseAffineArrivalCurve, PwaError};
 pub use curves::{
