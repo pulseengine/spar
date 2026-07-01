@@ -155,6 +155,11 @@ pub(crate) fn collect_cqf_inputs(instance: &SystemInstance) -> CqfInputs {
             reserved_bits_per_cycle,
             deadline_ps,
             path,
+            // Per-hop link latency is not yet read from the AADL bus
+            // properties, so every hop is treated as short (hop-count CQF).
+            // Populating this from Spar_Network::Latency is the follow-up that
+            // activates the long-link bound end-to-end.
+            link_delays: Vec::new(),
         });
         out.labels.push((s.name.clone(), period_ps));
     }

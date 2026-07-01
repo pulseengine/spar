@@ -3452,41 +3452,53 @@ artifacts:
     type: requirement
     title: "Multi-buffer single-cycle CQF for long links (B-buffer dead-time accommodation)"
     description: >
-      ⚠ SPEC UNDER REVISION — DEFERRED to v0.23.0 (2026-06-27 fresh-context
-      model-pinning). The delay clause below is UNSOUND as written: it
-      conflates the within-cycle dead-time guard band DT (< T_c) with
-      multi-cycle link delay, so when the buffer clause B=ceil(DT/T_c)
-      activates (DT ≥ 3·T_c) the interval INVERTS (e.g. h=1, DT=3·T_c gives
-      D_min=3·T_c > D_max=2·T_c) and goes optimistic exactly in the
-      long-link regime. The SOUND model is per-hop CYCLE-QUANTIZATION:
-      kᵢ=ceil((dᵢ+DT)/T_c); D_max=T_c+Σkᵢ·T_c; D_min=Σ(kᵢ−1)·T_c+DT;
-      buffers key off JITTER Bᵢ=ceil((dᵢᵐᵃˣ−dᵢᵐⁱⁿ)/T_c)+2, B=clamp(maxᵢBᵢ,
-      3,B_cap); csize=T_c·rate unchanged. Degeneracy (all dᵢ<T_c ⇒ kᵢ=1)
-      reproduces the shipped (h+1)·T_c. Build to the corrected model in the
-      v0.23 feature loop (oracle design: degeneracy + 3-hop discrimination
-      + inversion-guard). Original (unsound) text retained below for the
-      rewrite diff:
-      spar shall extend the single-cycle CQF synthesizer
-      (REQ-TSN-SYNTH-CQF-BASE-001) to use B ∈ [3,7] cyclic buffers so a
-      flow's link delay / dead time DT can exceed one cycle without
-      forcing a larger global cycle T or reducing utilization. This is
-      the SOUND, self-certifiable half of the Multi-CQF space identified
-      by the 2026-06-23 model-pinning study: per draft-ietf-detnet-tcqf-00
-      §2.5.1/§2.6, additional buffers absorb dead time and accommodate
-      "arbitrary latency links at arbitrary speeds without reduction of
-      utilization" — they do NOT change the end-to-end delay STRUCTURE,
-      which remains (h−1)·T_c + DT ≤ D ≤ (h+1)·T_c (§2.1). The feasibility
-      test stays the per-cycle csize buffer-budget non-overflow rule
-      (§5.1) that CQF-BASE already self-certifies against — so this is a
-      genuine capability add (long-link / WAN DetNet) that stays inside
-      the existing closed-form self-certification pattern, unlike the
-      research-grade heterogeneous-cycle case (REQ-TSN-SYNTH-CQF-001).
-      Scope: add a per-flow link-delay / DT input + buffer-count B to the
-      synthesizer, compute B = ceil(DT / T_c) bounded to [2,7], reject if
-      B exceeds the hardware buffer cap, and keep the delay/csize oracle.
-      Honest non-goal: this is table-stakes long-link support, not the
-      heterogeneous-cycle ambition and not the PLP≪TFA NC-tightness wedge.
-    status: proposed
+      spar shall bound and synthesize CQF configurations SOUNDLY when link
+      one-way latency is significant relative to the cycle (long / WAN
+      DetNet links), where the shipped hop-count bound (h±1)·T_c is
+      optimistic. Model (draft-ietf-detnet-tcqf / draft-eckert-detnet-tcqf-05,
+      fresh-context-pinned 2026-07-01, D_max soundness validated by an
+      INDEPENDENT discrete-event cycle-timeline simulation oracle — not just
+      algebraic self-consistency; SUPERSEDES the earlier unsound spec whose
+      interval inverted on long links):
+      per-hop CYCLE-QUANTIZATION with a network dead time DT (0 ≤ DT < T_c,
+      at the cycle END, ≥ max link latency). The per-hop cycle advance is
+      kᵢ = 2 + ⌊(dᵢ − DT)/T_c⌋ (Euclidean division; DT SUBTRACTS — dead time
+      eases same-cycle delivery); dᵢ < DT ⇒ kᵢ = 1. Bounds:
+      D_max = T_c + T_c·Σᵢ kᵢ(dᵢᵐᵃˣ); D_min = T_c·Σ_{i<H} kᵢ(dᵢᵐⁱⁿ) (H−1
+      intermediate hops + last-hop floor 0) — the asymmetry makes (H±1)·T_c
+      emerge AND guarantees D_min ≤ D_max always (no inversion). D_min is the
+      draft's nominal (H−1)·T_c figure, NOT a universal lower bound — a frame
+      released just before a cycle boundary can be delivered a fraction of T_c
+      sooner (sim reaches 49µs where D_min=50µs) — and it is safe precisely
+      because D_min has NO buffer-sizing or minimum-latency consumer (only the
+      library re-export for jitter reporting); buffers key off per-hop k.
+      The bound LIBRARY (cqf_buffer_count) is multi-buffer-capable: buffers key
+      off jitter Bᵢ = (kᵢᵐᵃˣ − kᵢᵐⁱⁿ) + 2, B = max(3, maxᵢ Bᵢ), ERROR if
+      B > cap (never a silent down-clamp). In the synthesizer's supported
+      cycle-dominates regime jitter is ≤ 1 cycle, so it emits the 3-cycle
+      floor; the >3 arms are exercised by the standalone bound oracles.
+      Admission budget shrinks by the dead time: csize = (T_c − DT)·rate (only
+      the transmittable window; collapses to the shipped T_c·rate at DT=0). Degeneracy: every dᵢᵐᵃˣ <
+      DT (with DT > 0) ⇒ all kᵢ = 1 ⇒ D_max = (H+1)·T_c, D_min = (H−1)·T_c —
+      reproduces the shipped 24-hop/10µs → 250µs pin. IMPLEMENTATION
+      (crates/spar-network/src/cqf.rs): standalone bound functions
+      (cqf_hop_advance_cycles, cqf_delay_{max,min}_longlink_ps,
+      cqf_cycle_budget_bits_with_dead_time, cqf_buffer_count) + LinkDelay,
+      and synthesize_cqf_longlink returning CqfLongLinkSchedule. CqfFlow
+      gains per-hop link_delays (empty ⇒ all-short; delay+cycle degenerate to
+      the shipped hop-count result, though at DT>0 the csize budget is the
+      reduced (T_c−DT)·rate, so admission is not byte-identical to
+      synthesize_cqf).
+      SCOPE (sound baseline): synthesis serves the "cycle dominates links"
+      regime (T_c > every link, kᵢ ∈ {1,2}, monotonic → closed-form cycle
+      selection); a deadline that would need a cycle SHORTER than a link
+      returns LongLinkDeadlineTooTight rather than an unsound config — the
+      sub-link multi-cycle-per-hop regime is a documented follow-up. Wiring
+      the AADL bridge (cqf_synth.rs) to read per-hop Spar_Network::Latency is
+      a separate follow-up (the bound + synthesizer are library-complete).
+      Non-goal: not the heterogeneous-cycle ambition (REQ-TSN-SYNTH-CQF-001)
+      nor the PLP≪TFA NC-tightness wedge.
+    status: implemented
     release: v0.23.0
     tags: [tsn, synthesis, cqf, longlink, detnet]
 
