@@ -15,11 +15,13 @@
 
 mod grammar;
 mod lexer;
+pub mod model;
 mod parser;
 pub mod syntax_kind;
 
 use std::mem;
 
+pub use model::{Emv2Model, ErrorFlow, ErrorFlowKind, ErrorPropagation, PropagationDirection};
 pub use syntax_kind::{Emv2Kind, Emv2Language, Emv2SyntaxNode, Emv2SyntaxToken};
 
 use crate::{AnnexDiagnostic, AnnexNode, AnnexParseResult, AnnexParser, Severity, Span};
