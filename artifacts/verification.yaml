@@ -3437,6 +3437,37 @@ artifacts:
       - type: satisfies
         target: REQ-EMV2-PROPAGATION-001
 
+  - id: TEST-EMV2-SEMANTIC-MODEL
+    type: feature
+    title: EMV2 semantic model — typed projection of the error-propagations subclause
+    description: >
+      Layer 1 of REQ-EMV2-PROPAGATION-002 (GitHub #294): the semantic model
+      that lifts an EMV2 subclause's flat Rowan CST into typed structs
+      (crates/spar-annex/src/emv2/model.rs — Emv2Model::from_syntax).
+      Oracle tests (parse a real annex body → assert the typed model, NEVER a
+      hand-built struct): (a) in/out propagations carry direction + the
+      declared {TypeSet}; (b) an error SOURCE flow captures its origin point +
+      types; (c) an error SINK flow captures its point; (d) an error PATH
+      captures BOTH the incoming and outgoing points via the landmark walk
+      (points are un-wrapped bare tokens in the grammar); (e) a dotted feature
+      path `bus.access` is recovered whitespace-free; (f) `not` negation is
+      captured; (g) a multi-element {A, B, C} type set yields all three;
+      (h) a VERBATIM block from the bundled OSATE corpus
+      (network_protocol_pkg.aadl) with propagation-KIND points (`bindings`,
+      `connection`) plus a source + sink + path together; (i) a subclause with
+      only error types yields an empty model. This is the parse-driven
+      building block the later layers (item-tree attach, instance projection,
+      overlay population) consume; it does NOT yet reach SystemInstance.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-annex --lib model
+    status: passing
+    tags: [emv2, analysis, safety, v0.23.0, annex]
+    links:
+      - type: verifies
+        target: REQ-EMV2-PROPAGATION-002
+
   - id: TEST-WRPC-BINDING
     type: feature
     title: wrpc-binding honors per-connection Actual_Connection_Binding
