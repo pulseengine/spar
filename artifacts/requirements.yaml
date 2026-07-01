@@ -2263,6 +2263,13 @@ artifacts:
       work"), re-scoped from v0.21.0 → v0.22.0 and from `bug` to a feature.
       Oracle: the two repro models (relay_transport, bundled OSATE
       network_protocol_pkg) each produce > 0 chains; no-annex model yields 0.
+      LAYER STATUS (4-PR foundation, user-directed v0.23.0 headline
+      2026-07-01): L1 (semantic EMV2 model in spar-annex — Emv2Model lifting
+      the CST into typed propagations/flows) LANDED, verified by
+      TEST-EMV2-SEMANTIC-MODEL; L2 (item-tree attach), L3 (instance
+      projection), L4 (overlay populate + analyze-path wiring + end-to-end
+      > 0-chains oracle) remain. Requirement flips proposed → implemented when
+      L4 closes the end-to-end oracle.
     status: proposed
     tags: [emv2, analysis, safety, hir-def, capability]
     fields:
