@@ -3534,7 +3534,7 @@ artifacts:
 
   - id: TEST-EMV2-OVERLAY-WIRING
     type: feature
-    title: EMV2 overlay built from instances — spar analyze reports real chains (closes #294)
+    title: EMV2 overlay built from instances — port-connected traversal mechanism (synthetic fixture)
     description: >
       Layer 4 (final) of REQ-EMV2-PROPAGATION-002 (GitHub #294): the
       error-propagation pass builds its Emv2Overlay from the EMV2 models
@@ -3553,8 +3553,14 @@ artifacts:
       L4 closes, proving (a) is not vacuous; (c) a negated `not out propagation`
       is skipped and yields no chain. cmd_analyze needed no change (it already
       instantiates via SystemInstance::instantiate, which runs the L3
-      projection). Verified workspace-wide (compile + clippy). Closes #294 and
-      flips REQ-EMV2-PROPAGATION-002 to implemented.
+      projection). Verified workspace-wide (compile + clippy).
+      SCOPE (2026-07-02): this verifies the port-connected traversal MECHANISM
+      on a SYNTHETIC Sender→Receiver fixture — NOT real-model closure. The
+      bundled OSATE repro model (network_protocol_pkg) still reports 0 chains
+      (it propagates along the Actual_Connection_Binding stack, not ports); that
+      real-model >0-chains oracle is REQ-EMV2-PROPAGATION-003 (#294 reopened).
+      This test rightly stays green — it proves the overlay-population + port
+      traversal it covers; it never covered the binding-path case.
     fields:
       method: automated-test
       steps:

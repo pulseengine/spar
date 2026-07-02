@@ -2261,8 +2261,13 @@ artifacts:
       `Emv2Overlay` from that instance data; (4) wire it into the analyze
       path. A genuine cross-layer feature (the gap 3 files call "future
       work"), re-scoped from v0.21.0 → v0.22.0 and from `bug` to a feature.
-      Oracle: the two repro models (relay_transport, bundled OSATE
-      network_protocol_pkg) each produce > 0 chains; no-annex model yields 0.
+      Oracle (as ACTUALLY verified — see SCOPE CORRECTION 2026-07-02 below):
+      the annex is ingested end-to-end and per-component LOCAL FLOWS are
+      analysed on the real repro model (bundled OSATE network_protocol_pkg:
+      6 flows, was 0 pre-L4); a synthetic source→sink error path across a PORT
+      connection yields ≥1 chain; empty-overlay/negated cases yield 0. NOTE:
+      cross-component CHAINS on the real repro models remain 0 — carved to the
+      successor REQ-EMV2-PROPAGATION-003 (binding-path traversal); see below.
       LAYER STATUS (4-PR foundation, user-directed v0.23.0 headline
       2026-07-01): L1 (semantic EMV2 model in spar-annex — Emv2Model lifting
       the CST into typed propagations/flows) LANDED, verified by
@@ -2276,18 +2281,79 @@ artifacts:
       populate + analyze-path wiring + end-to-end > 0-chains oracle) LANDED,
       verified by TEST-EMV2-OVERLAY-WIRING — Emv2Overlay::from_instance builds
       the overlay from the projected instance EMV2 (replacing the empty
-      Emv2Overlay::new() at emv2_propagation.rs analyze), so `spar analyze` now
-      reports real propagation chains (a source→sink error path across a port
-      connection yields ≥1 chain; empty-overlay/negated cases yield 0). ALL 4
-      LAYERS LANDED — GitHub #294 CLOSED. (cmd_analyze needed no change: it
-      already instantiates via SystemInstance::instantiate, which runs the L3
-      projection.) Separate follow-up (out of scope): the fault tree +
-      EMV2→STPA bridge still hardcode error_type "ServiceFailure" and would
-      carry real error types once wired to this same foundation.
+      Emv2Overlay::new() at emv2_propagation.rs analyze). (cmd_analyze needed no
+      change: it already instantiates via SystemInstance::instantiate, which
+      runs the L3 projection.)
+      SCOPE CORRECTION (2026-07-02, empirically verified): the closing claim
+      that `spar analyze` "reports real propagation chains" and that #294 is
+      CLOSED was an OVER-CLAIM. Running `spar analyze --root
+      network_protocol_pkg::MySystem.basic` on the bundled OSATE repro model
+      reports `EMV2 propagation: 0 chain(s), 6 local flow(s)` — the FLOWS are
+      now analysed (real progress: was 0 pre-L4) but CHAINS are still 0. The
+      L4 end-to-end oracle (emv2_chain.rs) that yields ≥1 chain uses a SYNTHETIC
+      Sender→Receiver PORT-connection fixture; the real repro models instead
+      propagate along the `Actual_Connection_Binding` stack (dataxfer→CRC→DP→
+      Network) via `bindings`/`connection` pseudo-features, and
+      `compute_error_propagation` builds its traversal graph ONLY from port
+      `semantic_connections` (+ its docstring: does not follow `path` flows or
+      type transformation). So L1-L4 deliver the annex-ingestion foundation +
+      local-flow analysis + the port-connected traversal mechanism — a real,
+      shippable win — but real-model cross-component chains are the UNFINISHED
+      half, carved to successor REQ-EMV2-PROPAGATION-003 (binding-path traversal
+      + path-flow type transformation). #294 REOPENED (its headline symptom
+      "0 chains for all real models" still reproduces). Separate follow-up (out
+      of scope): the fault tree + EMV2→STPA bridge still hardcode error_type
+      "ServiceFailure" and would carry real error types once wired to this same
+      foundation.
     status: implemented
     tags: [emv2, analysis, safety, hir-def, capability]
     fields:
       release: v0.23.0
+
+  - id: REQ-EMV2-PROPAGATION-003
+    type: requirement
+    title: EMV2 error propagation along the Actual_Connection_Binding stack
+    description: >
+      Successor to REQ-EMV2-PROPAGATION-002 (GitHub #294 reopened). The L1-L4
+      foundation ingests the EMV2 annex and analyses per-component local flows,
+      but `spar analyze` still reports 0 cross-component CHAINS on the real
+      repro models, because `compute_error_propagation` builds its traversal
+      graph ONLY from port `semantic_connections`. Real AADL error models
+      propagate along the `Actual_Connection_Binding` resource stack, not (only)
+      data-port connections. Empirical ground truth (2026-07-02): the bundled
+      OSATE `network_protocol_pkg::MySystem.basic` is a layered protocol stack
+      `dataxfer` → CRC → DP → Network (each bound to the next via
+      Actual_Connection_Binding). Its EMV2 propagations live on the
+      `bindings`/`connection` pseudo-features of the virtual buses; the only
+      port connection (Sender.output → Receiver.input) carries NO EMV2. So the
+      port-only traversal finds zero edges among the propagation-bearing
+      components and reports `0 chain(s), 6 local flow(s)`.
+      TWO mechanism gaps must both be closed (verify each against the code
+      before implementing — do not assume binding edges alone suffice):
+      (1) BINDING-EDGE TRAVERSAL — extend the `outgoing` graph so a component's
+      `bindings` out-propagation reaches the component(s) bound to it (resolve
+      Actual_Connection_Binding references to ComponentInstanceIdx), in addition
+      to port semantic_connections;
+      (2) PATH-FLOW TYPE TRANSFORMATION — `traverse` currently matches on
+      type-equality and (per its docstring) does not follow `path` flows. The
+      real model REQUIRES this: CRC's `DetectCorruption` is
+      `error path connection{ValueCorruption} -> bindings {LostMessage}` — it
+      transforms ValueCorruption→LostMessage (a CRC check turning corruption
+      into a dropped frame). A chain from Network's HWFault{ValueCorruption}
+      through CRC must switch error type mid-path, which type-equality matching
+      cannot express.
+      ORACLE (RED-BEFORE-GREEN, the missing test that let 002 over-claim): a
+      test that runs the propagation pass on the ACTUAL bundled
+      `network_protocol_pkg.aadl` (not a synthetic fixture) and asserts a
+      SPECIFIC, hand-traced chain count > 0 (currently 0 — that IS the red).
+      Derive the exact expected chains + their error types by manual trace of
+      the binding stack at implementation time so the oracle is non-vacuous
+      (the discipline REQ-002's synthetic fixture had but its real-model oracle
+      lacked). A no-EMV2 / port-only model must still yield 0.
+    status: proposed
+    tags: [emv2, analysis, safety, binding, capability]
+    fields:
+      release: v0.24.0
 
   - id: REQ-WRPC-BINDING-002
     type: requirement
