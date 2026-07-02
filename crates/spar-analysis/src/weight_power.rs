@@ -544,6 +544,7 @@ mod tests {
                 property_maps: self.property_maps,
                 feature_property_maps: Default::default(),
                 connection_property_maps: Default::default(),
+                emv2_models: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
             }
@@ -1244,6 +1245,7 @@ mod tests {
                 property_maps: b.property_maps,
                 feature_property_maps: Default::default(),
                 connection_property_maps: Default::default(),
+                emv2_models: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: vec![som],
             }
@@ -1323,6 +1325,7 @@ mod tests {
                 property_maps: b.property_maps,
                 feature_property_maps: Default::default(),
                 connection_property_maps: Default::default(),
+                emv2_models: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: vec![som],
             }

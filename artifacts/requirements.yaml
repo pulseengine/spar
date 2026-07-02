@@ -2269,9 +2269,13 @@ artifacts:
       TEST-EMV2-SEMANTIC-MODEL; L2 (item-tree attach — the component's EMV2
       subclause is retained in an emv2_subclauses arena, referenced from
       ComponentType/ImplItem.emv2) LANDED, verified by
-      TEST-EMV2-ITEMTREE-ATTACH; L3 (instance projection), L4 (overlay populate
-      + analyze-path wiring + end-to-end > 0-chains oracle) remain. Requirement
-      flips proposed → implemented when L4 closes the end-to-end oracle.
+      TEST-EMV2-ITEMTREE-ATTACH; L3 (instance projection — the classifier's
+      EMV2 model is projected onto each ComponentInstance at instantiation,
+      stored as a SystemInstance emv2_models side-table with an emv2_for
+      accessor) LANDED, verified by TEST-EMV2-INSTANCE-PROJECT; L4 (overlay
+      populate + analyze-path wiring + end-to-end > 0-chains oracle) remains.
+      Requirement flips proposed → implemented when L4 closes the end-to-end
+      oracle.
     status: proposed
     tags: [emv2, analysis, safety, hir-def, capability]
     fields:
