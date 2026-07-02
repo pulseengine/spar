@@ -404,4 +404,109 @@ end TestPkg;
         assert_eq!(wit_ident("___"), "unnamed");
         assert_eq!(wit_ident(""), "unnamed");
     }
+
+    /// Fixture for REQ-CODEGEN-WIT-RECORDS-001 (#319): a `data implementation`
+    /// with scalar subcomponents (the real-world `EepromSnapshot.Impl` =
+    /// u32 + u32 + u8 pattern), referenced by a process port.
+    fn build_record_test_instance() -> SystemInstance {
+        let aadl = r#"
+package RecPkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Byte8
+        properties
+            Data_Size => 1 Bytes;
+    end Byte8;
+
+    data EepromSnapshot
+    end EepromSnapshot;
+
+    data implementation EepromSnapshot.Impl
+        subcomponents
+            addr: data Word32;
+            value: data Word32;
+            flags: data Byte8;
+    end EepromSnapshot.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port EepromSnapshot.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end RecPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "rec.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        SystemInstance::instantiate(
+            &scope,
+            &Name::new("RecPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        )
+    }
+
+    /// RED-before-green oracle for REQ-CODEGEN-WIT-RECORDS-001 (#319 items 1,3,6):
+    /// an AADL `data implementation` with scalar subcomponents must generate a
+    /// WIT `record` with one typed field per subcomponent — NOT an opaque
+    /// `list<u8>` blob (which would need `cabi_realloc` at the ABI boundary,
+    /// defeating no_alloc). Currently RED: wit_gen emits `type ... = list<u8>`.
+    #[test]
+    fn data_implementation_becomes_wit_record() {
+        let inst = build_record_test_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, idx);
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Must NOT degrade the structured type to an opaque byte blob.
+        assert!(
+            !body.contains("= list<u8>"),
+            "data implementation must NOT degrade to list<u8>:\n{body}"
+        );
+        // Must emit a typed record (name kebab-cased with PascalCase boundaries
+        // preserved: EepromSnapshot.Impl -> eeprom-snapshot-impl).
+        assert!(
+            body.contains("record eeprom-snapshot-impl {"),
+            "expected a WIT record for EepromSnapshot.Impl:\n{body}"
+        );
+        // One typed field per scalar subcomponent (4B->u32, 4B->u32, 1B->u8).
+        for field in ["addr: u32", "value: u32", "flags: u8"] {
+            assert!(
+                body.contains(field),
+                "expected record field `{field}`:\n{body}"
+            );
+        }
+    }
 }
