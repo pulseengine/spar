@@ -197,6 +197,49 @@ impl Emv2Overlay {
         });
     }
 
+    /// Build the overlay from the EMV2 models projected onto each component
+    /// instance at instantiation time (REQ-EMV2-PROPAGATION-002 L4, GitHub
+    /// #294). This is what makes `spar analyze` report real propagation chains:
+    /// previously the analyze path used an EMPTY overlay ([`Self::new`]), so
+    /// every model reported "0 chain(s)". Layers 1-3 parse the `annex EMV2`
+    /// subclause into a typed model, retain it on the item-tree, and project it
+    /// onto `SystemInstance::emv2_models`; here we translate that into the
+    /// per-component out/in propagations + flows the traversal consumes.
+    ///
+    /// A `not` (negated) propagation asserts the component does NOT emit/receive
+    /// the type, so it is SKIPPED — projecting it would fabricate a chain that
+    /// the model explicitly denies.
+    #[must_use]
+    pub fn from_instance(instance: &spar_hir_def::instance::SystemInstance) -> Self {
+        use spar_annex::emv2::{ErrorFlowKind, PropagationDirection as AnnexDir};
+
+        let mut overlay = Self::new();
+        for (&component, models) in &instance.emv2_models {
+            for model in models {
+                for p in &model.propagations {
+                    if p.negated {
+                        continue;
+                    }
+                    let types: Vec<&str> = p.error_types.iter().map(String::as_str).collect();
+                    match p.direction {
+                        AnnexDir::Out => overlay.add_out_propagation(component, &p.feature, &types),
+                        AnnexDir::In => overlay.add_in_propagation(component, &p.feature, &types),
+                    }
+                }
+                for f in &model.flows {
+                    let kind = match f.kind {
+                        ErrorFlowKind::Source => "source",
+                        ErrorFlowKind::Sink => "sink",
+                        ErrorFlowKind::Path => "path",
+                    };
+                    let types: Vec<&str> = f.error_types.iter().map(String::as_str).collect();
+                    overlay.add_flow(component, &f.name, kind, &types);
+                }
+            }
+        }
+        overlay
+    }
+
     /// Check whether a component has any `in propagation` that matches
     /// `error_type` (case-insensitive, per AADL EMV2 v2 §4.3).
     pub fn has_in_propagation_for(
@@ -394,7 +437,10 @@ impl Analysis for Emv2PropagationAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
-        let overlay = Emv2Overlay::new();
+        // Build the overlay from the EMV2 models projected onto instances
+        // (L1-L3); previously this was an EMPTY overlay, so every real model
+        // reported "0 chain(s)". REQ-EMV2-PROPAGATION-002 L4, GitHub #294.
+        let overlay = Emv2Overlay::from_instance(instance);
         let report = compute_error_propagation(instance, &overlay);
         let root_path = component_path(instance, instance.root);
 
