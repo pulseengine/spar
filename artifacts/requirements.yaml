@@ -2305,10 +2305,9 @@ artifacts:
       of scope): the fault tree + EMV2→STPA bridge still hardcode error_type
       "ServiceFailure" and would carry real error types once wired to this same
       foundation.
-    status: implemented
+    status: verified
+    release: v0.23.0
     tags: [emv2, analysis, safety, hir-def, capability]
-    fields:
-      release: v0.23.0
 
   - id: REQ-EMV2-PROPAGATION-003
     type: requirement
@@ -3585,7 +3584,7 @@ artifacts:
       a separate follow-up (the bound + synthesizer are library-complete).
       Non-goal: not the heterogeneous-cycle ambition (REQ-TSN-SYNTH-CQF-001)
       nor the PLP≪TFA NC-tightness wedge.
-    status: implemented
+    status: verified
     release: v0.23.0
     tags: [tsn, synthesis, cqf, longlink, detnet]
 
