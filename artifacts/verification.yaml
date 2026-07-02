@@ -3532,6 +3532,39 @@ artifacts:
       - type: verifies
         target: REQ-EMV2-PROPAGATION-002
 
+  - id: TEST-EMV2-OVERLAY-WIRING
+    type: feature
+    title: EMV2 overlay built from instances — spar analyze reports real chains (closes #294)
+    description: >
+      Layer 4 (final) of REQ-EMV2-PROPAGATION-002 (GitHub #294): the
+      error-propagation pass builds its Emv2Overlay from the EMV2 models
+      projected onto instances (L1-L3) via new
+      Emv2Overlay::from_instance(&SystemInstance), replacing the empty
+      Emv2Overlay::new() the analyze path used before — which is why every real
+      model reported "0 chain(s)". END-TO-END, RED-BEFORE-GREEN oracle
+      (crates/spar-analysis/tests/emv2_chain.rs), parsing real AADL through the
+      whole pipeline (parse → item-tree → instantiate → overlay → traversal),
+      NON-VACUOUS: (a) two leaf systems Sender→Receiver connected by a
+      `dataxfer` port connection, Sender `out propagation {ServiceError}` +
+      Receiver `in propagation {ServiceError}` ⇒ the pass reports ≥1 chain
+      (origin snd, type ServiceError, one downstream rcv) AND analyze emits the
+      "error propagation chain:" diagnostic; (b) the SAME instance with an EMPTY
+      overlay (Emv2Overlay::new(), the pre-L4 state) yields 0 chains — the delta
+      L4 closes, proving (a) is not vacuous; (c) a negated `not out propagation`
+      is skipped and yields no chain. cmd_analyze needed no change (it already
+      instantiates via SystemInstance::instantiate, which runs the L3
+      projection). Verified workspace-wide (compile + clippy). Closes #294 and
+      flips REQ-EMV2-PROPAGATION-002 to implemented.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --test emv2_chain
+    status: passing
+    tags: [emv2, analysis, safety, v0.23.0, capability]
+    links:
+      - type: verifies
+        target: REQ-EMV2-PROPAGATION-002
+
   - id: TEST-WRPC-BINDING
     type: feature
     title: wrpc-binding honors per-connection Actual_Connection_Binding

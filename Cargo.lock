@@ -1411,6 +1411,7 @@ dependencies = [
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
+ "spar-annex",
  "spar-base-db",
  "spar-hir-def",
  "spar-network",

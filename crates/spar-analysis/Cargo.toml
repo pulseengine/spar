@@ -8,6 +8,9 @@ description = "Pluggable analysis framework for AADL models"
 
 [dependencies]
 spar-hir-def.workspace = true
+# For the EMV2 semantic model (Emv2Model) projected onto instances by
+# spar-hir-def L3; the propagation overlay is built from it (REQ-EMV2-PROPAGATION-002 L4).
+spar-annex.workspace = true
 # Explicit path dep (not workspace inheritance) so we can set
 # default-features = false — inherited deps can't override it. Keeps the MILP
 # solver (good_lp/HiGHS) opt-in; the `milp-solver` feature re-enables it for
