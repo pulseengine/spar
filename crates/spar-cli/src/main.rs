@@ -2074,7 +2074,7 @@ fn cmd_codegen(args: &[String]) {
         dry_run,
     };
 
-    let result = spar_codegen::generate(&inst, &config);
+    let result = spar_codegen::generate(&inst, &scope, &config);
 
     if dry_run {
         eprintln!(

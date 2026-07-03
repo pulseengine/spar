@@ -11,16 +11,18 @@ use spar_hir_def::name::Name;
 use spar_hir_def::resolver::GlobalScope;
 
 /// Build a SystemInstance from inline AADL text.
-fn build_instance(aadl: &str, pkg: &str, typ: &str, imp: &str) -> SystemInstance {
+fn build_instance(aadl: &str, pkg: &str, typ: &str, imp: &str) -> (GlobalScope, SystemInstance) {
     let db = spar_hir_def::HirDefDatabase::default();
     let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
     let tree = spar_hir_def::file_item_tree(&db, sf);
     let scope = GlobalScope::from_trees(vec![tree]);
-    SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(typ), &Name::new(imp))
+    let inst =
+        SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(typ), &Name::new(imp));
+    (scope, inst)
 }
 
 /// Load the golden AADL model from test-data.
-fn golden_instance() -> SystemInstance {
+fn golden_instance() -> (GlobalScope, SystemInstance) {
     let aadl = include_str!("../../../test-data/codegen/building_control.aadl");
     build_instance(aadl, "BuildingControl", "BuildingSystem", "impl")
 }
@@ -29,7 +31,7 @@ fn golden_instance() -> SystemInstance {
 
 #[test]
 fn golden_instance_has_expected_hierarchy() {
-    let inst = golden_instance();
+    let (_scope, inst) = golden_instance();
 
     // Root is a system
     let root = inst.component(inst.root);
@@ -60,7 +62,7 @@ fn golden_instance_has_expected_hierarchy() {
 // ── Full generation: all modules produce output ────────────────────
 
 fn generate_all() -> CodegenOutput {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -69,7 +71,7 @@ fn generate_all() -> CodegenOutput {
         rivet: true,
         dry_run: true,
     };
-    generate(&inst, &config)
+    generate(&inst, &scope, &config)
 }
 
 #[test]
@@ -115,7 +117,7 @@ fn golden_model_generates_wit() {
 /// output as a predictably-shaped tree artifact.
 #[test]
 fn wit_format_emits_only_wit_files() {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -124,7 +126,7 @@ fn wit_format_emits_only_wit_files() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &config);
+    let output = generate(&inst, &scope, &config);
 
     assert!(
         !output.files.is_empty(),
@@ -147,7 +149,7 @@ fn wit_format_emits_only_wit_files() {
 /// rust/both paths.
 #[test]
 fn rust_format_still_emits_workspace() {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -156,7 +158,7 @@ fn rust_format_still_emits_workspace() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &config);
+    let output = generate(&inst, &scope, &config);
 
     assert!(
         output.files.iter().any(|f| f.path == "Cargo.toml"),

@@ -28,6 +28,29 @@ pub enum ResolvedClassifier {
     Unresolved,
 }
 
+/// The WIT-relevant shape of a `data` classifier, resolved from the item-tree
+/// for code generation (REQ-CODEGEN-WIT-RECORDS-001, GitHub #319). Lets
+/// spar-codegen decide between a scalar type alias, a WIT record, or a hard
+/// error without re-implementing classifier / `Data_Size` resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataShape {
+    /// A scalar `data` type with a resolved `Data_Size`, in bytes.
+    Scalar { bytes: u64 },
+    /// A `data implementation` decomposed into named fields (→ WIT record).
+    /// Fields are in declaration order; each shape is resolved recursively.
+    Record { fields: Vec<DataField> },
+    /// A `data` classifier with neither a `Data_Size` nor subcomponents, or one
+    /// that does not resolve — opaque (codegen keeps its legacy handling).
+    Opaque,
+}
+
+/// One field of a [`DataShape::Record`] — a subcomponent of a data impl.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataField {
+    pub name: Name,
+    pub shape: DataShape,
+}
+
 /// Result of resolving a property reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedProperty {
@@ -323,6 +346,68 @@ impl GlobalScope {
     pub fn get_feature(&self, tree_idx: usize, feat_idx: FeatureIdx) -> Option<&Feature> {
         let tree = self.tree(tree_idx)?;
         Some(&tree.features[feat_idx])
+    }
+
+    /// Resolve a `data` classifier to its WIT-relevant [`DataShape`]: a
+    /// `data implementation` with subcomponents becomes a `Record` (fields
+    /// resolved recursively), a `data` type carrying `Data_Size` becomes a
+    /// `Scalar`, and anything else is `Opaque`. REQ-CODEGEN-WIT-RECORDS-001
+    /// (GitHub #319) — codegen consumes this to emit typed records instead of
+    /// opaque `list<u8>` blobs.
+    pub fn resolve_data_shape(&self, from_package: &Name, classifier: &ClassifierRef) -> DataShape {
+        let resolved = self.resolve_classifier(from_package, classifier);
+        // An implementation with subcomponents = a record of fields.
+        if let ResolvedClassifier::ComponentImpl { loc, package } = &resolved
+            && let Some(ci) = self.get_component_impl(*loc)
+            && ci.category == crate::item_tree::ComponentCategory::Data
+            && !ci.subcomponents.is_empty()
+            && let Some(tree) = self.tree(loc.tree)
+        {
+            let mut fields = Vec::new();
+            for &sub_idx in &ci.subcomponents {
+                let sub = &tree.subcomponents[sub_idx];
+                let shape = match &sub.classifier {
+                    Some(cref) => self.resolve_data_shape(package, cref),
+                    None => DataShape::Opaque,
+                };
+                fields.push(DataField {
+                    name: sub.name.clone(),
+                    shape,
+                });
+            }
+            return DataShape::Record { fields };
+        }
+        // A data type carrying Data_Size = a scalar.
+        if let Some(bytes) = self.data_size_bytes(from_package, classifier) {
+            return DataShape::Scalar { bytes };
+        }
+        DataShape::Opaque
+    }
+
+    /// Resolve a `data` classifier's declared `Data_Size`, in bytes. Mirrors the
+    /// instance builder's private resolver so codegen can size record fields
+    /// without instantiating them. REQ-CODEGEN-WIT-RECORDS-001.
+    pub fn data_size_bytes(&self, from_package: &Name, classifier: &ClassifierRef) -> Option<u64> {
+        let resolved = self.resolve_classifier(from_package, classifier);
+        let loc = match &resolved {
+            ResolvedClassifier::ComponentType { loc, .. } => *loc,
+            _ => return None,
+        };
+        let ct = self.get_component_type(loc)?;
+        if ct.category != crate::item_tree::ComponentCategory::Data {
+            return None;
+        }
+        let tree = self.tree(loc.tree)?;
+        for &pa_idx in &ct.property_associations {
+            let pa = &tree.property_associations[pa_idx];
+            let pn = pa.name.property_name.as_str();
+            if pn.eq_ignore_ascii_case("Data_Size") || pn.eq_ignore_ascii_case("Source_Data_Size") {
+                // parse_size_value returns BITS ("8 Bytes" -> 64).
+                let bits = crate::property_value::parse_size_value(&pa.value)?;
+                return Some(bits / 8);
+            }
+        }
+        None
     }
 
     /// Resolve a classifier reference from within a package context.

@@ -84,17 +84,18 @@ fn synth_aadl(n_threads: usize) -> String {
 }
 
 /// Build a `SystemInstance` from an AADL source string.
-fn build_instance(aadl: &str) -> SystemInstance {
+fn build_instance(aadl: &str) -> (GlobalScope, SystemInstance) {
     let db = HirDefDatabase::default();
     let sf = SourceFile::new(&db, "bench.aadl".to_string(), aadl.to_string());
     let tree = file_item_tree(&db, sf);
     let scope = GlobalScope::from_trees(vec![tree]);
-    SystemInstance::instantiate(
+    let inst = SystemInstance::instantiate(
         &scope,
         &Name::new("BenchSystem"),
         &Name::new("BenchRoot"),
         &Name::new("impl"),
-    )
+    );
+    (scope, inst)
 }
 
 fn bench_codegen_emit(c: &mut Criterion) {
@@ -105,7 +106,7 @@ fn bench_codegen_emit(c: &mut Criterion) {
 
     let n_threads = 64;
     let aadl = synth_aadl(n_threads);
-    let instance = build_instance(&aadl);
+    let (scope, instance) = build_instance(&aadl);
     let config = CodegenConfig {
         root_name: "bench_root".into(),
         output_dir: "output".into(),
@@ -121,7 +122,7 @@ fn bench_codegen_emit(c: &mut Criterion) {
     // workspace, concatenated into in-memory strings.
     group.bench_function("generate_full_64", |b| {
         b.iter(|| {
-            let output = generate(black_box(&instance), black_box(&config));
+            let output = generate(black_box(&instance), black_box(&scope), black_box(&config));
             black_box(output);
         });
     });
@@ -136,7 +137,11 @@ fn bench_codegen_emit(c: &mut Criterion) {
     };
     group.bench_function("generate_rust_only_64", |b| {
         b.iter(|| {
-            let output = generate(black_box(&instance), black_box(&rust_only_config));
+            let output = generate(
+                black_box(&instance),
+                black_box(&scope),
+                black_box(&rust_only_config),
+            );
             black_box(output);
         });
     });

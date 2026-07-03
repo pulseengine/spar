@@ -319,7 +319,15 @@ fn threads_for_processor(
 }
 
 /// Generate all code artifacts from an AADL instance model.
-pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput {
+///
+/// `scope` is the global scope the instance was built from; codegen resolves
+/// data-type classifiers through it (e.g. to decompose a `data implementation`
+/// into a WIT record — REQ-CODEGEN-WIT-RECORDS-001).
+pub fn generate(
+    inst: &SystemInstance,
+    scope: &spar_hir_def::resolver::GlobalScope,
+    config: &CodegenConfig,
+) -> CodegenOutput {
     let mut files = Vec::new();
 
     // Collect processes and threads
@@ -341,7 +349,7 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
     // Generate WIT files
     if config.format == OutputFormat::Wit || config.format == OutputFormat::Both {
         for &(idx, _comp) in &processes {
-            files.push(wit_gen::generate_wit(inst, idx));
+            files.push(wit_gen::generate_wit(inst, scope, idx));
         }
     }
 
