@@ -122,7 +122,8 @@ fn bench_codegen_emit(c: &mut Criterion) {
     // workspace, concatenated into in-memory strings.
     group.bench_function("generate_full_64", |b| {
         b.iter(|| {
-            let output = generate(black_box(&instance), black_box(&scope), black_box(&config));
+            let output = generate(black_box(&instance), black_box(&scope), black_box(&config))
+                .expect("bench codegen");
             black_box(output);
         });
     });
@@ -141,7 +142,8 @@ fn bench_codegen_emit(c: &mut Criterion) {
                 black_box(&instance),
                 black_box(&scope),
                 black_box(&rust_only_config),
-            );
+            )
+            .expect("bench codegen");
             black_box(output);
         });
     });

@@ -73,6 +73,32 @@ pub struct CodegenOutput {
     pub files: Vec<GeneratedFile>,
 }
 
+/// A hard code-generation failure: the model asks for something codegen refuses
+/// to emit — chiefly a data type that cannot be encoded without heap allocation
+/// (violating the no_alloc guarantee). Codegen fails rather than silently
+/// emitting an allocating `list<u8>`. REQ-CODEGEN-WIT-RECORDS-001 (#319).
+#[derive(Debug, Clone)]
+pub struct CodegenError {
+    /// One message per offending field/type; all are reported, not just the first.
+    pub errors: Vec<String>,
+}
+
+impl std::fmt::Display for CodegenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "codegen refused to generate ({} error(s)):",
+            self.errors.len()
+        )?;
+        for e in &self.errors {
+            writeln!(f, "  - {e}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CodegenError {}
+
 /// Extract timing properties from a component instance's property map.
 ///
 /// Returns (period_ps, deadline_ps, wcet_ps) in picoseconds, or None for each
@@ -327,7 +353,7 @@ pub fn generate(
     inst: &SystemInstance,
     scope: &spar_hir_def::resolver::GlobalScope,
     config: &CodegenConfig,
-) -> CodegenOutput {
+) -> Result<CodegenOutput, CodegenError> {
     let mut files = Vec::new();
 
     // Collect processes and threads
@@ -349,7 +375,7 @@ pub fn generate(
     // Generate WIT files
     if config.format == OutputFormat::Wit || config.format == OutputFormat::Both {
         for &(idx, _comp) in &processes {
-            files.push(wit_gen::generate_wit(inst, scope, idx));
+            files.push(wit_gen::generate_wit(inst, scope, idx)?);
         }
     }
 
@@ -435,7 +461,7 @@ pub fn generate(
         ));
     }
 
-    CodegenOutput { files }
+    Ok(CodegenOutput { files })
 }
 
 #[cfg(test)]

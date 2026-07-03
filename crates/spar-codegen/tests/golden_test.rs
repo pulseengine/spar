@@ -71,7 +71,7 @@ fn generate_all() -> CodegenOutput {
         rivet: true,
         dry_run: true,
     };
-    generate(&inst, &scope, &config)
+    generate(&inst, &scope, &config).expect("codegen should succeed on the golden model")
 }
 
 #[test]
@@ -126,7 +126,8 @@ fn wit_format_emits_only_wit_files() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &scope, &config);
+    let output =
+        generate(&inst, &scope, &config).expect("codegen should succeed on the golden model");
 
     assert!(
         !output.files.is_empty(),
@@ -158,7 +159,8 @@ fn rust_format_still_emits_workspace() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &scope, &config);
+    let output =
+        generate(&inst, &scope, &config).expect("codegen should succeed on the golden model");
 
     assert!(
         output.files.iter().any(|f| f.path == "Cargo.toml"),

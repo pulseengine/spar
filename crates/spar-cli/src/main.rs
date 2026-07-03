@@ -2074,7 +2074,10 @@ fn cmd_codegen(args: &[String]) {
         dry_run,
     };
 
-    let result = spar_codegen::generate(&inst, &scope, &config);
+    let result = spar_codegen::generate(&inst, &scope, &config).unwrap_or_else(|e| {
+        eprint!("{e}");
+        process::exit(1);
+    });
 
     if dry_run {
         eprintln!(

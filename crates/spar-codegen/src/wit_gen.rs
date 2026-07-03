@@ -31,22 +31,49 @@ fn scalar_wit(bytes: u64) -> Option<&'static str> {
     }
 }
 
-/// Build the `(field, wit-type)` rows for a record whose fields are ALL directly
-/// representable no_alloc scalars, in declaration order. Returns `None` if any
-/// field is not (a non-power-of-two scalar, a nested record, or opaque): P1
-/// keeps such a type as the legacy `list<u8>`; P2 turns this into a hard error
-/// and adds nested-record support. REQ-CODEGEN-WIT-RECORDS-001 (#319).
-fn record_fields(fields: &[DataField]) -> Option<Vec<(String, String)>> {
+/// Resolve a record's fields to WIT, in declaration order. Three outcomes
+/// (REQ-CODEGEN-WIT-RECORDS-001, #319):
+/// - `Err(msgs)` — one or more fields are genuinely NON-ENCODABLE without heap
+///   allocation (a non-power-of-two `Data_Size`, or an opaque type with neither
+///   size nor fields). Codegen must refuse (the user-chosen hard-error policy);
+///   every offending field is reported.
+/// - `Ok(None)` — no hard errors, but a field is a nested record, which is
+///   representable but NOT YET emitted (P2 follow-up). Caller keeps the legacy
+///   `list<u8>` for the whole type rather than fail on a supportable case.
+/// - `Ok(Some(rows))` — every field is a directly representable no_alloc scalar.
+fn record_fields(
+    record_name: &str,
+    fields: &[DataField],
+) -> Result<Option<Vec<(String, String)>>, Vec<String>> {
     let mut rows = Vec::with_capacity(fields.len());
+    let mut errors = Vec::new();
+    let mut has_nested = false;
     for f in fields {
+        let field = f.name.as_str();
         match &f.shape {
-            DataShape::Scalar { bytes } => {
-                rows.push((wit_ident(f.name.as_str()), scalar_wit(*bytes)?.to_string()));
-            }
-            _ => return None,
+            DataShape::Scalar { bytes } => match scalar_wit(*bytes) {
+                Some(w) => rows.push((wit_ident(field), w.to_string())),
+                None => errors.push(format!(
+                    "record `{record_name}` field `{field}`: Data_Size {bytes} bytes has no \
+                     no_alloc WIT scalar (only 1, 2, 4 or 8 bytes are representable)"
+                )),
+            },
+            // Representable in WIT (nested records are no_alloc), just not emitted
+            // yet — fall back rather than reject a supportable type.
+            DataShape::Record { .. } => has_nested = true,
+            DataShape::Opaque => errors.push(format!(
+                "record `{record_name}` field `{field}`: type declares no Data_Size and has no \
+                 fields — it cannot be encoded without heap allocation"
+            )),
         }
     }
-    Some(rows)
+    if !errors.is_empty() {
+        Err(errors)
+    } else if has_nested {
+        Ok(None)
+    } else {
+        Ok(Some(rows))
+    }
 }
 
 /// Generate a WIT file for a process instance.
@@ -59,7 +86,7 @@ pub fn generate_wit(
     inst: &SystemInstance,
     scope: &GlobalScope,
     proc_idx: ComponentInstanceIdx,
-) -> GeneratedFile {
+) -> Result<GeneratedFile, crate::CodegenError> {
     let comp = inst.component(proc_idx);
     let name = wit_ident(comp.name.as_str());
     let pkg_name = wit_ident(comp.package.as_str());
@@ -100,21 +127,23 @@ pub fn generate_wit(
     // (REQ-CODEGEN-WIT-RECORDS-001, #319) instead of an opaque `list<u8>` blob
     // that would force `cabi_realloc` at the ABI boundary. Scalar-sized data
     // types map to precise WIT integers (1 -> u8 ... 8 -> u64).
+    let mut errors: Vec<String> = Vec::new();
     for (ty, cref) in &referenced {
         match scope.resolve_data_shape(&comp.package, cref) {
-            DataShape::Record { fields } => match record_fields(&fields) {
-                Some(rows) => {
+            DataShape::Record { fields } => match record_fields(ty, &fields) {
+                Ok(Some(rows)) => {
                     wit.push_str(&format!("    record {ty} {{\n"));
                     for (fname, fty) in rows {
                         wit.push_str(&format!("        {fname}: {fty},\n"));
                     }
                     wit.push_str("    }\n");
                 }
-                // A field that can't be a no_alloc scalar (non-power-of-2 size,
-                // nested record, or opaque): keep the legacy byte-buffer alias
-                // for now. The hard-error diagnostic + nested records are P2/P3
-                // of REQ-CODEGEN-WIT-RECORDS-001.
-                None => wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n")),
+                // A nested-record field: representable but not yet emitted —
+                // keep the legacy byte-buffer alias (P2 follow-up).
+                Ok(None) => wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n")),
+                // A genuinely non-encodable field: refuse (no_alloc is a hard
+                // guarantee). Collect every offending field before failing.
+                Err(errs) => errors.extend(errs),
             },
             DataShape::Scalar { bytes } => {
                 let wit_ty = scalar_wit(bytes).unwrap_or(DEFAULT_WIT_TYPE);
@@ -124,6 +153,9 @@ pub fn generate_wit(
                 wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n"));
             }
         }
+    }
+    if !errors.is_empty() {
+        return Err(crate::CodegenError { errors });
     }
     if !referenced.is_empty() {
         wit.push('\n');
@@ -196,10 +228,10 @@ pub fn generate_wit(
 
     wit.push_str("}\n");
 
-    GeneratedFile {
+    Ok(GeneratedFile {
         path: format!("wit/{name}.wit"),
         content: wit,
-    }
+    })
 }
 
 /// WIT reserved words that must be `%`-escaped when used as identifiers.
@@ -378,7 +410,7 @@ end TestPkg;
             .map(|(idx, _)| idx);
 
         if let Some(idx) = proc_idx {
-            let file = generate_wit(&inst, &scope, idx);
+            let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
             assert!(file.path.ends_with(".wit"));
             assert!(file.content.contains("package"));
             assert!(file.content.contains("world"));
@@ -397,7 +429,7 @@ end TestPkg;
             .find(|(_, c)| c.category == ComponentCategory::Process)
             .map(|(idx, _)| idx)
             .expect("test model has a process");
-        let file = generate_wit(&inst, &scope, idx);
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
 
         // No stray underscores in the emitted WIT (kebab-case only). The header
         // comment echoes the AADL names, so check the body after it.
@@ -541,7 +573,7 @@ end RecPkg;
             .find(|(_, c)| c.category == ComponentCategory::Process)
             .map(|(idx, _)| idx)
             .expect("test model has a process");
-        let file = generate_wit(&inst, &scope, idx);
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
         let body: String = file
             .content
             .lines()
@@ -579,5 +611,109 @@ end RecPkg;
                     file.content
                 )
             });
+    }
+
+    /// Fixture for the hard-error path: a record with fields that CANNOT be
+    /// encoded without heap allocation — a 3-byte scalar (no WIT integer) and an
+    /// opaque type (no Data_Size, no fields).
+    fn build_bad_record_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package BadPkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Odd3
+        properties
+            Data_Size => 3 Bytes;
+    end Odd3;
+
+    data Blob
+    end Blob;
+
+    data BadRecord
+    end BadRecord;
+
+    data implementation BadRecord.Impl
+        subcomponents
+            good: data Word32;
+            odd: data Odd3;
+            blob: data Blob;
+    end BadRecord.Impl;
+
+    process BadStore
+        features
+            in_port: in data port BadRecord.Impl;
+    end BadStore;
+
+    process implementation BadStore.Impl
+        subcomponents
+            th: thread BadThread.Impl;
+    end BadStore.Impl;
+
+    thread BadThread
+    end BadThread;
+
+    thread implementation BadThread.Impl
+    end BadThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process BadStore.Impl;
+    end Top.Impl;
+end BadPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "bad.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("BadPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for the user-chosen hard-error policy (REQ-CODEGEN-WIT-RECORDS-001,
+    /// #319): a record field that cannot be a no_alloc scalar makes codegen
+    /// REFUSE (return an error) rather than silently emit an allocating
+    /// `list<u8>`. Both offending fields must be reported; the good field must
+    /// not appear as an error.
+    #[test]
+    fn non_encodable_record_field_is_a_hard_error() {
+        let (scope, inst) = build_bad_record_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+
+        let err = generate_wit(&inst, &scope, idx)
+            .expect_err("codegen must refuse a record with non-encodable fields");
+
+        // The 3-byte field and the opaque field are both reported…
+        assert!(
+            err.errors.iter().any(|e| e.contains("`odd`")),
+            "expected a hard error naming the 3-byte field `odd`: {:?}",
+            err.errors
+        );
+        assert!(
+            err.errors.iter().any(|e| e.contains("`blob`")),
+            "expected a hard error naming the opaque field `blob`: {:?}",
+            err.errors
+        );
+        // …and the representable `good` field is NOT flagged.
+        assert!(
+            !err.errors.iter().any(|e| e.contains("`good`")),
+            "the representable u32 field `good` must not be an error: {:?}",
+            err.errors
+        );
     }
 }
