@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, Direction, FeatureKind};
 use spar_hir_def::name::ClassifierRef;
-use spar_hir_def::resolver::{DataField, DataShape, GlobalScope};
+use spar_hir_def::resolver::{DataField, DataShape, GlobalScope, ScalarKind};
 
 use crate::GeneratedFile;
 
@@ -17,17 +17,32 @@ use crate::GeneratedFile;
 /// A byte buffer is always valid and bindable; `bytes` is NOT a WIT primitive.
 const DEFAULT_WIT_TYPE: &str = "list<u8>";
 
-/// The WIT integer type for a power-of-two `Data_Size` in bytes, or `None` if
-/// the size is not directly representable as a WIT scalar — which would force a
-/// heap-allocating `list<u8>` at the ABI boundary (a no_alloc violation).
+/// The WIT scalar for a power-of-two `Data_Size` in bytes and its numeric
+/// representation, or `None` if not directly representable — which would force a
+/// heap-allocating `list<u8>` at the ABI boundary (a no_alloc violation). WIT
+/// has no f8/f16, so sub-32-bit floats are unrepresentable.
 /// REQ-CODEGEN-WIT-RECORDS-001 (#319).
-fn scalar_wit(bytes: u64) -> Option<&'static str> {
-    match bytes {
-        1 => Some("u8"),
-        2 => Some("u16"),
-        4 => Some("u32"),
-        8 => Some("u64"),
-        _ => None,
+fn scalar_wit(bytes: u64, kind: ScalarKind) -> Option<&'static str> {
+    match kind {
+        ScalarKind::Float => match bytes {
+            4 => Some("f32"),
+            8 => Some("f64"),
+            _ => None,
+        },
+        ScalarKind::Signed => match bytes {
+            1 => Some("s8"),
+            2 => Some("s16"),
+            4 => Some("s32"),
+            8 => Some("s64"),
+            _ => None,
+        },
+        ScalarKind::Unsigned => match bytes {
+            1 => Some("u8"),
+            2 => Some("u16"),
+            4 => Some("u32"),
+            8 => Some("u64"),
+            _ => None,
+        },
     }
 }
 
@@ -51,11 +66,11 @@ fn record_fields(
     for f in fields {
         let field = f.name.as_str();
         match &f.shape {
-            DataShape::Scalar { bytes } => match scalar_wit(*bytes) {
+            DataShape::Scalar { bytes, kind } => match scalar_wit(*bytes, *kind) {
                 Some(w) => rows.push((wit_ident(field), w.to_string())),
                 None => errors.push(format!(
-                    "record `{record_name}` field `{field}`: Data_Size {bytes} bytes has no \
-                     no_alloc WIT scalar (only 1, 2, 4 or 8 bytes are representable)"
+                    "record `{record_name}` field `{field}`: {bytes}-byte {kind:?} has no \
+                     no_alloc WIT scalar (int 1/2/4/8, float 4/8 only)"
                 )),
             },
             // Representable in WIT (nested records are no_alloc), just not emitted
@@ -145,8 +160,8 @@ pub fn generate_wit(
                 // guarantee). Collect every offending field before failing.
                 Err(errs) => errors.extend(errs),
             },
-            DataShape::Scalar { bytes } => {
-                let wit_ty = scalar_wit(bytes).unwrap_or(DEFAULT_WIT_TYPE);
+            DataShape::Scalar { bytes, kind } => {
+                let wit_ty = scalar_wit(bytes, kind).unwrap_or(DEFAULT_WIT_TYPE);
                 wit.push_str(&format!("    type {ty} = {wit_ty};\n"));
             }
             DataShape::Opaque => {
@@ -715,5 +730,111 @@ end BadPkg;
             "the representable u32 field `good` must not be an error: {:?}",
             err.errors
         );
+    }
+
+    /// Fixture with signed / float / unsigned scalar fields (Data Modeling Annex
+    /// `Number_Representation` / `Data_Representation` properties).
+    fn build_signed_float_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package NumPkg
+public
+    data FloatWord
+        properties
+            Data_Size => 4 Bytes;
+            Data_Representation => Float;
+    end FloatWord;
+
+    data SignedWord
+        properties
+            Data_Size => 4 Bytes;
+            Number_Representation => Signed;
+    end SignedWord;
+
+    data Ushort
+        properties
+            Data_Size => 2 Bytes;
+    end Ushort;
+
+    data Reading
+    end Reading;
+
+    data implementation Reading.Impl
+        subcomponents
+            temp: data FloatWord;
+            offset: data SignedWord;
+            count: data Ushort;
+    end Reading.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port Reading.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end NumPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "num.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("NumPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for signed/float mapping (REQ-CODEGEN-WIT-RECORDS-001, #319 P2c):
+    /// `Data_Representation => Float` maps to `f32`/`f64`, `Number_Representation
+    /// => Signed` to `s8..s64`, and unspecified stays unsigned `u*`.
+    #[test]
+    fn record_fields_honor_signedness_and_float() {
+        let (scope, inst) = build_signed_float_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for field in ["temp: f32", "offset: s32", "count: u16"] {
+            assert!(
+                body.contains(field),
+                "expected record field `{field}` (signed/float mapping):\n{body}"
+            );
+        }
+
+        // Still valid, bindable WIT.
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("num.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!("generated WIT failed to parse: {e}\n---\n{}", file.content)
+            });
     }
 }

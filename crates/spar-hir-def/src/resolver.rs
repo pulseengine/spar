@@ -34,14 +34,25 @@ pub enum ResolvedClassifier {
 /// error without re-implementing classifier / `Data_Size` resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataShape {
-    /// A scalar `data` type with a resolved `Data_Size`, in bytes.
-    Scalar { bytes: u64 },
+    /// A scalar `data` type with a resolved `Data_Size`, in bytes, and its
+    /// numeric representation (signed / unsigned / float).
+    Scalar { bytes: u64, kind: ScalarKind },
     /// A `data implementation` decomposed into named fields (→ WIT record).
     /// Fields are in declaration order; each shape is resolved recursively.
     Record { fields: Vec<DataField> },
     /// A `data` classifier with neither a `Data_Size` nor subcomponents, or one
     /// that does not resolve — opaque (codegen keeps its legacy handling).
     Opaque,
+}
+
+/// Numeric representation of a scalar `data` type, from the Data Modeling Annex
+/// `Data_Representation` / `Number_Representation` properties. Defaults to
+/// `Unsigned` when unspecified (conservative). REQ-CODEGEN-WIT-RECORDS-001.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScalarKind {
+    Unsigned,
+    Signed,
+    Float,
 }
 
 /// One field of a [`DataShape::Record`] — a subcomponent of a data impl.
@@ -378,8 +389,8 @@ impl GlobalScope {
             return DataShape::Record { fields };
         }
         // A data type carrying Data_Size = a scalar.
-        if let Some(bytes) = self.data_size_bytes(from_package, classifier) {
-            return DataShape::Scalar { bytes };
+        if let Some((bytes, kind)) = self.scalar_of(from_package, classifier) {
+            return DataShape::Scalar { bytes, kind };
         }
         DataShape::Opaque
     }
@@ -388,6 +399,20 @@ impl GlobalScope {
     /// instance builder's private resolver so codegen can size record fields
     /// without instantiating them. REQ-CODEGEN-WIT-RECORDS-001.
     pub fn data_size_bytes(&self, from_package: &Name, classifier: &ClassifierRef) -> Option<u64> {
+        self.scalar_of(from_package, classifier)
+            .map(|(bytes, _)| bytes)
+    }
+
+    /// Resolve a scalar `data` type to its (`Data_Size` bytes, representation).
+    /// Reads the Data Modeling Annex `Data_Representation` (Integer vs Float) and
+    /// `Number_Representation` (Signed vs Unsigned); both default to
+    /// integer/unsigned when unspecified. Returns `None` when the classifier is
+    /// not a `data` type or declares no `Data_Size`. REQ-CODEGEN-WIT-RECORDS-001.
+    fn scalar_of(
+        &self,
+        from_package: &Name,
+        classifier: &ClassifierRef,
+    ) -> Option<(u64, ScalarKind)> {
         let resolved = self.resolve_classifier(from_package, classifier);
         let loc = match &resolved {
             ResolvedClassifier::ComponentType { loc, .. } => *loc,
@@ -398,16 +423,34 @@ impl GlobalScope {
             return None;
         }
         let tree = self.tree(loc.tree)?;
+        // Last path segment of an enum literal, so a qualified value like
+        // `Data_Model::Float` still matches `Float`.
+        fn leaf(v: &str) -> &str {
+            v.rsplit("::").next().unwrap_or(v).trim()
+        }
+        let mut bytes = None;
+        let mut is_float = false;
+        let mut is_signed = false;
         for &pa_idx in &ct.property_associations {
             let pa = &tree.property_associations[pa_idx];
             let pn = pa.name.property_name.as_str();
             if pn.eq_ignore_ascii_case("Data_Size") || pn.eq_ignore_ascii_case("Source_Data_Size") {
                 // parse_size_value returns BITS ("8 Bytes" -> 64).
-                let bits = crate::property_value::parse_size_value(&pa.value)?;
-                return Some(bits / 8);
+                bytes = crate::property_value::parse_size_value(&pa.value).map(|bits| bits / 8);
+            } else if pn.eq_ignore_ascii_case("Data_Representation") {
+                is_float = leaf(&pa.value).eq_ignore_ascii_case("Float");
+            } else if pn.eq_ignore_ascii_case("Number_Representation") {
+                is_signed = leaf(&pa.value).eq_ignore_ascii_case("Signed");
             }
         }
-        None
+        let kind = if is_float {
+            ScalarKind::Float
+        } else if is_signed {
+            ScalarKind::Signed
+        } else {
+            ScalarKind::Unsigned
+        };
+        Some((bytes?, kind))
     }
 
     /// Resolve a classifier reference from within a package context.
