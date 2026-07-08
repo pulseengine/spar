@@ -46,49 +46,55 @@ fn scalar_wit(bytes: u64, kind: ScalarKind) -> Option<&'static str> {
     }
 }
 
-/// Resolve a record's fields to WIT, in declaration order. Three outcomes
-/// (REQ-CODEGEN-WIT-RECORDS-001, #319):
-/// - `Err(msgs)` — one or more fields are genuinely NON-ENCODABLE without heap
-///   allocation (a non-power-of-two `Data_Size`, or an opaque type with neither
-///   size nor fields). Codegen must refuse (the user-chosen hard-error policy);
-///   every offending field is reported.
-/// - `Ok(None)` — no hard errors, but a field is a nested record, which is
-///   representable but NOT YET emitted (P2 follow-up). Caller keeps the legacy
-///   `list<u8>` for the whole type rather than fail on a supportable case.
-/// - `Ok(Some(rows))` — every field is a directly representable no_alloc scalar.
-fn record_fields(
-    record_name: &str,
+/// One emitted WIT record definition: `(wit-type-name, [(field, wit-type)])`.
+type RecordDef = (String, Vec<(String, String)>);
+
+/// Recursively flatten a `Record` shape into WIT record definitions, appending
+/// each distinct record to `out` in NESTED-FIRST order (a record is pushed after
+/// the records it depends on) and returning the top record's WIT type name.
+/// A nested-record field becomes a reference to that record's type; a genuinely
+/// non-encodable field (non-power-of-two `Data_Size`, sub-32-bit float, or an
+/// opaque type) is collected into `errors` — the caller refuses to generate
+/// (the user-chosen no_alloc hard-error policy). REQ-CODEGEN-WIT-RECORDS-001 (#319).
+fn flatten_record(
+    type_name: &str,
     fields: &[DataField],
-) -> Result<Option<Vec<(String, String)>>, Vec<String>> {
+    out: &mut Vec<RecordDef>,
+    seen: &mut std::collections::BTreeSet<String>,
+    errors: &mut Vec<String>,
+) -> String {
+    let wit_name = wit_ident(type_name);
+    if !seen.insert(wit_name.clone()) {
+        return wit_name; // already flattened (shared nested type)
+    }
     let mut rows = Vec::with_capacity(fields.len());
-    let mut errors = Vec::new();
-    let mut has_nested = false;
     for f in fields {
         let field = f.name.as_str();
         match &f.shape {
             DataShape::Scalar { bytes, kind } => match scalar_wit(*bytes, *kind) {
                 Some(w) => rows.push((wit_ident(field), w.to_string())),
                 None => errors.push(format!(
-                    "record `{record_name}` field `{field}`: {bytes}-byte {kind:?} has no \
+                    "record `{type_name}` field `{field}`: {bytes}-byte {kind:?} has no \
                      no_alloc WIT scalar (int 1/2/4/8, float 4/8 only)"
                 )),
             },
-            // Representable in WIT (nested records are no_alloc), just not emitted
-            // yet — fall back rather than reject a supportable type.
-            DataShape::Record { .. } => has_nested = true,
+            DataShape::Record {
+                type_name: nested_tn,
+                fields: nested_fields,
+            } => {
+                let nested = flatten_record(nested_tn, nested_fields, out, seen, errors);
+                rows.push((wit_ident(field), nested));
+            }
             DataShape::Opaque => errors.push(format!(
-                "record `{record_name}` field `{field}`: type declares no Data_Size and has no \
+                "record `{type_name}` field `{field}`: type declares no Data_Size and has no \
                  fields — it cannot be encoded without heap allocation"
             )),
         }
     }
-    if !errors.is_empty() {
-        Err(errors)
-    } else if has_nested {
-        Ok(None)
-    } else {
-        Ok(Some(rows))
-    }
+    // Pushed AFTER its nested records (post-order), so definitions are emitted
+    // dependency-first.
+    out.push((wit_name.clone(), rows));
+    wit_name
 }
 
 /// Generate a WIT file for a process instance.
@@ -142,35 +148,44 @@ pub fn generate_wit(
     // (REQ-CODEGEN-WIT-RECORDS-001, #319) instead of an opaque `list<u8>` blob
     // that would force `cabi_realloc` at the ABI boundary. Scalar-sized data
     // types map to precise WIT integers (1 -> u8 ... 8 -> u64).
+    let mut record_defs: Vec<RecordDef> = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut aliases: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for (ty, cref) in &referenced {
         match scope.resolve_data_shape(&comp.package, cref) {
-            DataShape::Record { fields } => match record_fields(ty, &fields) {
-                Ok(Some(rows)) => {
-                    wit.push_str(&format!("    record {ty} {{\n"));
-                    for (fname, fty) in rows {
-                        wit.push_str(&format!("        {fname}: {fty},\n"));
-                    }
-                    wit.push_str("    }\n");
-                }
-                // A nested-record field: representable but not yet emitted —
-                // keep the legacy byte-buffer alias (P2 follow-up).
-                Ok(None) => wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n")),
-                // A genuinely non-encodable field: refuse (no_alloc is a hard
-                // guarantee). Collect every offending field before failing.
-                Err(errs) => errors.extend(errs),
-            },
+            // A record (and its nested records, transitively) — refuse on any
+            // non-encodable field.
+            DataShape::Record { type_name, fields } => {
+                flatten_record(
+                    &type_name,
+                    &fields,
+                    &mut record_defs,
+                    &mut seen,
+                    &mut errors,
+                );
+            }
             DataShape::Scalar { bytes, kind } => {
                 let wit_ty = scalar_wit(bytes, kind).unwrap_or(DEFAULT_WIT_TYPE);
-                wit.push_str(&format!("    type {ty} = {wit_ty};\n"));
+                aliases.push((ty.clone(), wit_ty.to_string()));
             }
-            DataShape::Opaque => {
-                wit.push_str(&format!("    type {ty} = {DEFAULT_WIT_TYPE};\n"));
-            }
+            DataShape::Opaque => aliases.push((ty.clone(), DEFAULT_WIT_TYPE.to_string())),
         }
     }
     if !errors.is_empty() {
         return Err(crate::CodegenError { errors });
+    }
+    // Emit record definitions dependency-first (nested before outer), then the
+    // scalar / byte-buffer aliases.
+    for (rec_name, rows) in &record_defs {
+        wit.push_str(&format!("    record {rec_name} {{\n"));
+        for (fname, fty) in rows {
+            wit.push_str(&format!("        {fname}: {fty},\n"));
+        }
+        wit.push_str("    }\n");
+    }
+    for (alias, wit_ty) in &aliases {
+        wit.push_str(&format!("    type {alias} = {wit_ty};\n"));
     }
     if !referenced.is_empty() {
         wit.push('\n');
@@ -835,6 +850,150 @@ end NumPkg;
             .push_str("num.wit", &file.content)
             .unwrap_or_else(|e| {
                 panic!("generated WIT failed to parse: {e}\n---\n{}", file.content)
+            });
+    }
+
+    /// Fixture with a NESTED record: `Packet.Impl` has a field whose type is
+    /// itself a record (`Header.Impl`).
+    fn build_nested_record_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package NestPkg
+public
+    data Word16
+        properties
+            Data_Size => 2 Bytes;
+    end Word16;
+
+    data Byte
+        properties
+            Data_Size => 1 Bytes;
+    end Byte;
+
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Header
+    end Header;
+
+    data implementation Header.Impl
+        subcomponents
+            hi: data Word16;
+            lo: data Byte;
+    end Header.Impl;
+
+    data Packet
+    end Packet;
+
+    data implementation Packet.Impl
+        subcomponents
+            head: data Header.Impl;
+            body: data Word32;
+    end Packet.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port Packet.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end NestPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "nest.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("NestPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for nested records (REQ-CODEGEN-WIT-RECORDS-001, #319 P2b): a record
+    /// field whose type is another `data implementation` becomes a nested WIT
+    /// record, emitted dependency-first and referenced by name.
+    #[test]
+    fn nested_record_emits_inner_record_and_references_it() {
+        let (scope, inst) = build_nested_record_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Inner record with its scalar fields…
+        assert!(
+            body.contains("record header-impl {"),
+            "expected nested record `header-impl`:\n{body}"
+        );
+        for field in ["hi: u16", "lo: u8"] {
+            assert!(
+                body.contains(field),
+                "expected inner field `{field}`:\n{body}"
+            );
+        }
+        // …and the outer record referencing it by type name (not list<u8>).
+        assert!(
+            body.contains("record packet-impl {"),
+            "expected outer record `packet-impl`:\n{body}"
+        );
+        assert!(
+            body.contains("head: header-impl"),
+            "outer record must reference the nested record by name:\n{body}"
+        );
+        assert!(
+            body.contains("body: u32"),
+            "expected outer scalar field `body: u32`:\n{body}"
+        );
+        assert!(
+            !body.contains("= list<u8>"),
+            "nested record must NOT fall back to list<u8>:\n{body}"
+        );
+
+        // The nested record must be declared BEFORE the outer that references it,
+        // and the whole thing must bind under wit-parser.
+        let inner_at = body.find("record header-impl").unwrap();
+        let outer_at = body.find("record packet-impl").unwrap();
+        assert!(
+            inner_at < outer_at,
+            "nested record must be emitted dependency-first:\n{body}"
+        );
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("nest.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "nested-record WIT failed to parse: {e}\n---\n{}",
+                    file.content
+                )
             });
     }
 }

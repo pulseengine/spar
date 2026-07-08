@@ -38,8 +38,13 @@ pub enum DataShape {
     /// numeric representation (signed / unsigned / float).
     Scalar { bytes: u64, kind: ScalarKind },
     /// A `data implementation` decomposed into named fields (→ WIT record).
-    /// Fields are in declaration order; each shape is resolved recursively.
-    Record { fields: Vec<DataField> },
+    /// `type_name` is the source classifier string (e.g. `Packet.Impl`) so
+    /// codegen can name a nested record consistently; `fields` are in
+    /// declaration order, each shape resolved recursively.
+    Record {
+        type_name: String,
+        fields: Vec<DataField>,
+    },
     /// A `data` classifier with neither a `Data_Size` nor subcomponents, or one
     /// that does not resolve — opaque (codegen keeps its legacy handling).
     Opaque,
@@ -386,7 +391,10 @@ impl GlobalScope {
                     shape,
                 });
             }
-            return DataShape::Record { fields };
+            return DataShape::Record {
+                type_name: classifier.to_string(),
+                fields,
+            };
         }
         // A data type carrying Data_Size = a scalar.
         if let Some((bytes, kind)) = self.scalar_of(from_package, classifier) {
