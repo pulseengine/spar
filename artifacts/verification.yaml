@@ -3942,7 +3942,9 @@ artifacts:
       name-mangling/keyword/collision mismatch in the emitter is a compile error
       (verified GREEN: `Checking ctrl v0.1.0`; a deliberately renamed Guest
       method fails with E0046/E0407). This closes the string-match gap that a
-      pure assertion oracle would leave.
+      pure assertion oracle would leave. The `#[ignore]` gate runs in CI via the
+      `codegen-oracle` job (ci.yml) — `cargo nextest`/`cargo test` do NOT run
+      ignored tests, so without that job this oracle would not gate.
     fields:
       method: automated-test
       steps:
@@ -3972,7 +3974,10 @@ artifacts:
       the WIT records), and the process `Guest` delegating to each per-thread
       component — verified GREEN. emitted_crate_builds_to_wasm32_wasip2 (#[ignore],
       stronger evidence, not a completion gate) builds the record + multi-process
-      crate to wasm32-wasip2 warning-clean.
+      crate to wasm32-wasip2 warning-clean. Both `#[ignore]` oracles run in CI via
+      the `codegen-oracle` job (ci.yml), which installs wasm32-wasip2 and runs
+      `-- --ignored` — plain `cargo nextest`/`cargo test` skip ignored tests, so
+      that job is what makes these compile oracles actually gate.
     fields:
       method: automated-test
       steps:
