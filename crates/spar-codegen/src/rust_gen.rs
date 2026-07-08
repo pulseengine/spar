@@ -80,23 +80,26 @@ pub fn generate_rust_component(
 
     code.push_str("}\n\n");
 
-    // Component trait
+    // Component trait. The lifecycle methods are derived from the thread's
+    // `Dispatch_Protocol` (REQ-CODEGEN-WIT-RECORDS-001, #319 item 7): a Periodic
+    // thread exposes only `compute`; every other protocol gets the full
+    // `initialize` / `compute` / `finalize`. This matches the WIT world exports
+    // and the generated `Guest` impl — all three derive from `crate::Lifecycle`.
+    let methods = crate::lifecycle_for(dispatch).methods();
+
     code.push_str(&format!(
         "/// Dispatch trait for the {name} thread ({dispatch}).\n"
     ));
     code.push_str(&format!("pub trait {struct_name}Component {{\n"));
-    code.push_str("    /// Called once at initialization.\n");
-    code.push_str(&format!(
-        "    fn initialize(&mut self, ports: &mut {struct_name}Ports);\n\n"
-    ));
-    code.push_str(&format!("    /// Called on each dispatch ({dispatch}).\n"));
-    code.push_str(&format!(
-        "    fn compute(&mut self, ports: &mut {struct_name}Ports);\n\n"
-    ));
-    code.push_str("    /// Called on finalization.\n");
-    code.push_str(&format!(
-        "    fn finalize(&mut self, ports: &mut {struct_name}Ports);\n"
-    ));
+    for (i, method) in methods.iter().enumerate() {
+        code.push_str(&format!("    /// {}\n", lifecycle_doc(method, dispatch)));
+        code.push_str(&format!(
+            "    fn {method}(&mut self, ports: &mut {struct_name}Ports);\n"
+        ));
+        if i + 1 < methods.len() {
+            code.push('\n');
+        }
+    }
     code.push_str("}\n\n");
 
     // Skeleton implementation
@@ -105,21 +108,16 @@ pub fn generate_rust_component(
     code.push_str(&format!(
         "impl {struct_name}Component for {struct_name}Default {{\n"
     ));
-    code.push_str(&format!(
-        "    fn initialize(&mut self, _ports: &mut {struct_name}Ports) {{\n"
-    ));
-    code.push_str("        // TODO: initialization logic\n");
-    code.push_str("    }\n\n");
-    code.push_str(&format!(
-        "    fn compute(&mut self, _ports: &mut {struct_name}Ports) {{\n"
-    ));
-    code.push_str("        // TODO: periodic compute logic\n");
-    code.push_str("    }\n\n");
-    code.push_str(&format!(
-        "    fn finalize(&mut self, _ports: &mut {struct_name}Ports) {{\n"
-    ));
-    code.push_str("        // TODO: finalization logic\n");
-    code.push_str("    }\n");
+    for (i, method) in methods.iter().enumerate() {
+        code.push_str(&format!(
+            "    fn {method}(&mut self, _ports: &mut {struct_name}Ports) {{\n"
+        ));
+        code.push_str(&format!("        // TODO: {method} logic\n"));
+        code.push_str("    }\n");
+        if i + 1 < methods.len() {
+            code.push('\n');
+        }
+    }
     code.push_str("}\n");
 
     // Determine process parent name for path
@@ -130,6 +128,95 @@ pub fn generate_rust_component(
 
     GeneratedFile {
         path: format!("src/{parent_name}/{name}.rs"),
+        content: code,
+    }
+}
+
+/// Doc-comment text for a lifecycle trait method.
+fn lifecycle_doc(method: &str, dispatch: &str) -> String {
+    match method {
+        "initialize" => "Called once at initialization.".to_string(),
+        "compute" => format!("Called on each dispatch ({dispatch})."),
+        "finalize" => "Called on finalization.".to_string(),
+        other => format!("Lifecycle entry point: {other}."),
+    }
+}
+
+/// Generate the per-process WIT-binding crate root (`crates/{proc}/src/lib.rs`)
+/// that wires the AADL process's WIT `world` to Rust via `wit-bindgen`
+/// (REQ-CODEGEN-WIT-RECORDS-001, #319 items 4 & 7).
+///
+/// Emits the `wit_bindgen::generate!` for the process world, a `Component`
+/// struct, and an `impl Guest` whose methods are the lifecycle entry points every
+/// child thread's `Dispatch_Protocol` implies — the SAME set [`crate::wit_gen`]
+/// exports into the world. Because the `Guest` trait `generate!` produces is
+/// derived from that world, the Rust compiler (when the crate is built) *enforces*
+/// world⟷Guest alignment: a missing or misnamed method is a compile error, not a
+/// silent drift (the item-7 failure mode).
+///
+/// Method bodies are `todo!()` stubs. This unit proves the *interface* wiring
+/// compiles and matches the model; the behavior is supplied by the per-thread
+/// `{Struct}Component` implementations ([`generate_rust_component`]).
+pub fn generate_process_bindings(
+    inst: &SystemInstance,
+    proc_idx: ComponentInstanceIdx,
+) -> GeneratedFile {
+    let comp = inst.component(proc_idx);
+    // Crate directory matches workspace_gen's `crates/{sanitize_ident(name)}`.
+    let crate_dir = sanitize_ident(comp.name.as_str());
+    // World name + wit file name match wit_gen exactly (kebab-case).
+    let world_name = crate::wit_gen::wit_ident(comp.name.as_str());
+
+    let child_threads: Vec<_> = comp
+        .children
+        .iter()
+        .filter(|&&child_idx| {
+            inst.component(child_idx).category == spar_hir_def::item_tree::ComponentCategory::Thread
+        })
+        .collect();
+
+    let mut code = String::new();
+    code.push_str(&format!(
+        "//! Generated WIT bindings for AADL process: {}::{}\n",
+        comp.package, comp.name
+    ));
+    code.push_str("//! DO NOT EDIT — regenerate with `spar codegen`.\n\n");
+
+    // `generate!` loads the single world file emitted by wit_gen. The path is
+    // relative to this crate root (`crates/{proc}/`) reaching the top-level
+    // `wit/` directory. An unqualified world name resolves because the file
+    // declares exactly one package.
+    code.push_str("wit_bindgen::generate!({\n");
+    code.push_str(&format!("    world: \"{world_name}-world\",\n"));
+    code.push_str(&format!("    path: \"../../wit/{world_name}.wit\",\n"));
+    code.push_str("});\n\n");
+
+    code.push_str("/// Component entry point, exported to the WIT world.\n");
+    code.push_str("struct Component;\n\n");
+    code.push_str("impl Guest for Component {\n");
+    for &&child_idx in &child_threads {
+        let child = inst.component(child_idx);
+        let thread_kebab = crate::wit_gen::wit_ident(child.name.as_str());
+        let dispatch = crate::dispatch_protocol(inst, child_idx);
+        for method in crate::lifecycle_for(&dispatch).methods() {
+            // wit-bindgen mangles the kebab WIT export `{thread}-{method}` to the
+            // snake Rust method `{thread}_{method}`. Deriving both names from the
+            // same `wit_ident` keeps them consistent; the compiler is the final
+            // arbiter (see doc comment).
+            let rust_method = format!("{thread_kebab}-{method}").replace('-', "_");
+            code.push_str(&format!("    fn {rust_method}() {{\n"));
+            code.push_str(&format!(
+                "        todo!(\"{}::{method}\")\n",
+                child.name.as_str()
+            ));
+            code.push_str("    }\n");
+        }
+    }
+    code.push_str("}\n\n");
+    code.push_str("export!(Component);\n");
+
+    GeneratedFile {
+        path: format!("crates/{crate_dir}/src/lib.rs"),
         content: code,
     }
 }

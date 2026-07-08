@@ -2649,6 +2649,74 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT
 
+  - id: REQ-CODEGEN-WIT-RECORDS-001
+    type: requirement
+    title: "Structured WIT records + wit-bindgen-wired Rust from AADL"
+    description: >
+      Codegen shall emit no_alloc-representable structured interfaces from real
+      AADL components, closing the #319 gaps where a `data implementation` with
+      subcomponents degraded to an opaque `type x = list<u8>` (forcing
+      cabi_realloc) and the Rust skeleton had no wit-bindgen wiring. Delivered
+      and oracle-verified in this requirement:
+      (1) a `data implementation` with scalar subcomponents becomes a WIT
+      `record { field: type }`, recursively for nested data implementations,
+      emitted dependency-first (#319 items 1);
+      (2) scalar fields map to precise WIT scalars honoring signedness/float
+      (Data_Representation => Float -> f32/f64; Number_Representation => Signed
+      -> s8..s64; else u8..u64), and a field that cannot be a no_alloc scalar
+      (non-power-of-two size, sub-32-bit float, opaque type) is a HARD ERROR
+      naming the field — codegen refuses rather than emit an allocating fallback
+      (user-chosen policy);
+      (3) `wit_ident` breaks PascalCase word boundaries (EepromSnapshot ->
+      eeprom-snapshot, #319 item 6);
+      (4) each thread's WIT world exports the lifecycle its `Dispatch_Protocol`
+      implies — Periodic -> a single `{instance}-compute`; other protocols ->
+      `{instance}-initialize/compute/finalize` — replacing the old opaque single
+      `{thread}: func()` (#319 item 7); and
+      (5) a per-process binding crate root (`crates/{proc}/src/lib.rs`) wires the
+      world to Rust: `wit_bindgen::generate!` + `impl Guest` (methods matching the
+      world exports) + `export!`, and the per-thread `{Struct}Component` trait is
+      lifecycle-derived from the same single source (#319 item 4). All five share
+      `crate::Lifecycle`/`lifecycle_for`/`dispatch_protocol` so the WIT world and
+      the Rust Guest cannot drift — and because wit-bindgen derives the `Guest`
+      trait from the world, a `cargo check` of the emitted crate is a
+      compiler-enforced alignment oracle, not a string match.
+      OUT OF SCOPE (successor REQ-CODEGEN-WIT-RECORDS-002): defining the Rust
+      `*Impl` record structs + typed ports and module-wiring the per-thread files
+      so the WHOLE crate (not just the binding lib.rs) compiles, and the
+      wasm-component zero-`cabi_realloc` symbol check. Reported as GitHub #319.
+    status: implemented
+    tags: [codegen, wit, rust, wit-bindgen, interop]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-TYPES
+
+  - id: REQ-CODEGEN-WIT-RECORDS-002
+    type: requirement
+    title: "Whole generated component crate compiles + is cabi_realloc-free"
+    description: >
+      Successor to REQ-CODEGEN-WIT-RECORDS-001: make the ENTIRE generated
+      component crate compile and meet the no_alloc guarantee, not just the WIT
+      binding lib.rs. Requires (a) emitting Rust struct definitions for the
+      `*Impl` record types the per-thread port structs reference (today
+      `feature_to_rust_type` names PascalCase structs that are never defined —
+      #319 item 3), (b) module-wiring the per-thread `src/{proc}/{thread}.rs`
+      files into the crate and having the process `Guest` impl delegate to the
+      per-thread `{Struct}Component`s instead of `todo!()` stubs, and (c) a
+      wasm-component build (`wasm32-wasip2`) with an `nm`/symbol check asserting
+      zero `cabi_realloc` — the A1 acceptance gate that is structurally
+      wasm-toolchain-gated. Until then, the -001 oracle proves only that the
+      binding lib.rs + WIT world compile and align.
+    status: proposed
+    tags: [codegen, wit, rust, wit-bindgen, no-alloc, wasm]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
   - id: REQ-PROOF-SCHED-001
     type: requirement
     title: "Lean scheduling proofs (EDF, RMBound, RTA) wired into CI"

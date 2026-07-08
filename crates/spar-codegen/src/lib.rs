@@ -99,6 +99,65 @@ impl std::fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
+/// The lifecycle entry points a generated component exposes, derived from a
+/// thread's AADL `Dispatch_Protocol`.
+///
+/// Per the REQ-CODEGEN-WIT-RECORDS-001 design decision (#319): a **Periodic**
+/// thread runs a single `compute` every period, so it exposes only that entry
+/// point; every other protocol (Sporadic / Aperiodic / Timed / Hybrid /
+/// Background) gets the full `initialize` / `compute` / `finalize` lifecycle.
+///
+/// This is the single source of truth shared by `wit_gen` (which emits these as
+/// `world` exports) and `rust_gen` (which emits them as the component trait and
+/// the `wit-bindgen` `Guest` impl) so the two artifacts cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lifecycle {
+    /// Periodic dispatch: a single `compute` entry point.
+    ComputeOnly,
+    /// Non-periodic dispatch: `initialize`, `compute`, `finalize`.
+    Full,
+}
+
+impl Lifecycle {
+    /// The lifecycle entry-point method names, in call order. These are the
+    /// exact identifiers emitted as WIT world exports (`{thread}-{method}`) and
+    /// as Rust trait / `Guest` methods (`{method}`), so both sides stay aligned.
+    pub fn methods(self) -> &'static [&'static str] {
+        match self {
+            Lifecycle::ComputeOnly => &["compute"],
+            Lifecycle::Full => &["initialize", "compute", "finalize"],
+        }
+    }
+}
+
+/// Map an AADL `Dispatch_Protocol` value to the lifecycle a generated component
+/// exposes. Comparison is case-insensitive; an unset or unrecognized protocol
+/// is treated as non-periodic (the conservative full lifecycle). See
+/// [`Lifecycle`].
+pub fn lifecycle_for(dispatch: &str) -> Lifecycle {
+    if dispatch.trim().eq_ignore_ascii_case("Periodic") {
+        Lifecycle::ComputeOnly
+    } else {
+        Lifecycle::Full
+    }
+}
+
+/// Read a thread instance's `Dispatch_Protocol`, trying the property namespaces
+/// AADL models use in practice (canonical `Thread_Properties`, plus the
+/// `Timing_Properties` / `Deployment_Properties` / unqualified forms real models
+/// and our benches emit). Defaults to `"Periodic"` when unset — the AS5506
+/// default dispatch protocol.
+pub fn dispatch_protocol(inst: &SystemInstance, idx: ComponentInstanceIdx) -> String {
+    let props = inst.properties_for(idx);
+    props
+        .get("Thread_Properties", "Dispatch_Protocol")
+        .or_else(|| props.get("Timing_Properties", "Dispatch_Protocol"))
+        .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
+        .or_else(|| props.get("", "Dispatch_Protocol"))
+        .unwrap_or("Periodic")
+        .to_string()
+}
+
 /// Extract timing properties from a component instance's property map.
 ///
 /// Returns (period_ps, deadline_ps, wcet_ps) in picoseconds, or None for each
@@ -383,6 +442,13 @@ pub fn generate(
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
         for &(idx, _comp) in &threads {
             files.push(rust_gen::generate_rust_component(inst, idx));
+        }
+        // Per-process WIT-binding crate root (`crates/{proc}/src/lib.rs`): the
+        // `wit_bindgen::generate!` + `impl Guest` wiring that connects the WIT
+        // world to Rust (REQ-CODEGEN-WIT-RECORDS-001, #319 items 4 & 7). This
+        // replaces the placeholder lib.rs that workspace_gen used to emit.
+        for &(idx, _comp) in &processes {
+            files.push(rust_gen::generate_process_bindings(inst, idx));
         }
     }
 

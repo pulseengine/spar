@@ -250,13 +250,17 @@ fn golden_model_generates_tests() {
         test.content.contains("#[test]"),
         "Test harness should contain #[test] attributes"
     );
-    assert!(
-        test.content.contains("_initializes"),
-        "Test harness should have initialization test"
-    );
+    // The golden BuildingControl threads are Periodic, so the harness exposes the
+    // compute lifecycle only — no initialize/finalize tests (they'd call trait
+    // methods rust_gen no longer generates for a Periodic thread).
+    // REQ-CODEGEN-WIT-RECORDS-001 (#319 item 7).
     assert!(
         test.content.contains("_compute_dispatches"),
         "Test harness should have dispatch test"
+    );
+    assert!(
+        !test.content.contains("_initializes"),
+        "Periodic thread harness must not have an initialization test"
     );
 }
 

@@ -246,14 +246,23 @@ pub fn generate_wit(
 
     wit.push_str("}\n\n");
 
-    // Generate world
+    // Generate world. Each child thread exports the lifecycle entry points its
+    // `Dispatch_Protocol` implies (REQ-CODEGEN-WIT-RECORDS-001, #319 item 7): a
+    // Periodic thread exports a single `{thread}-compute`; every other protocol
+    // exports `{thread}-initialize` / `{thread}-compute` / `{thread}-finalize`.
+    // This replaces the old opaque single `{thread}: func()` export so the world
+    // and the generated Rust `Guest` impl expose the *same* lifecycle — the
+    // shared `crate::Lifecycle` helper is the single source both derive from.
     wit.push_str(&format!("world {name}-world {{\n"));
     wit.push_str(&format!("    import {name}-ports;\n"));
 
     for &&child_idx in &child_threads {
         let child = inst.component(child_idx);
         let child_name = wit_ident(child.name.as_str());
-        wit.push_str(&format!("    export {child_name}: func();\n"));
+        let dispatch = crate::dispatch_protocol(inst, child_idx);
+        for method in crate::lifecycle_for(&dispatch).methods() {
+            wit.push_str(&format!("    export {child_name}-{method}: func();\n"));
+        }
     }
 
     wit.push_str("}\n");
@@ -314,7 +323,10 @@ const WIT_KEYWORDS: &[&str] = &[
 /// [`crate::sanitize_ident`]. Underscores and other separators become hyphens,
 /// words that would start with a digit are letter-prefixed, and collisions with
 /// WIT keywords are `%`-escaped. See issue #254.
-fn wit_ident(name: &str) -> String {
+///
+/// `pub(crate)` so `rust_gen` can derive world-export / `Guest`-method names that
+/// exactly match the WIT this module emits (REQ-CODEGEN-WIT-RECORDS-001 #319 item 7).
+pub(crate) fn wit_ident(name: &str) -> String {
     // Split into lowercase alphanumeric words on any run of separators
     // (`_`, `.`, `-`, whitespace, etc.).
     let mut words: Vec<String> = Vec::new();
