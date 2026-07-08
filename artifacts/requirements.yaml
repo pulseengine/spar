@@ -2685,10 +2685,9 @@ artifacts:
       `*Impl` record structs + typed ports and module-wiring the per-thread files
       so the WHOLE crate (not just the binding lib.rs) compiles, and the
       wasm-component zero-`cabi_realloc` symbol check. Reported as GitHub #319.
-    status: implemented
+    status: verified
     tags: [codegen, wit, rust, wit-bindgen, interop]
-    fields:
-      release: v0.24.0
+    release: v0.24.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-TYPES
@@ -2726,10 +2725,9 @@ artifacts:
       imported WIT functions and persistent component state (Guest methods are
       free fns). Optional stronger evidence, not a completion gate: the crate also
       builds to `wasm32-wasip2` (toolchain present locally).
-    status: implemented
+    status: verified
     tags: [codegen, wit, rust, wit-bindgen, no-alloc]
-    fields:
-      release: v0.24.0
+    release: v0.24.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
