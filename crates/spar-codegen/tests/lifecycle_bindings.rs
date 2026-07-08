@@ -2,16 +2,16 @@
 //! `Dispatch_Protocol`-derived lifecycle + WIT world ⟷ Rust `Guest` alignment.
 //!
 //! Two levels of oracle:
-//!  1. **String alignment** (fast, always runs): the WIT world exports the exact
-//!     lifecycle a thread's `Dispatch_Protocol` implies, and the generated
-//!     bindings `impl Guest` names the matching methods.
-//!  2. **Compiler-enforced** (`#[ignore]`, opt-in): emit the whole crate and run
-//!     `cargo check`. wit-bindgen's `generate!` derives the `Guest` trait from
-//!     the world, so a mangling / keyword / collision bug in the emitter is a
-//!     compile error — the string test cannot catch a mismatch it replicates.
-//!     Ignored because it shells out to `cargo` (network for the first build,
-//!     disk for the target dir). Run with:
-//!       `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
+//! 1. **String alignment** (fast, always runs): the WIT world exports the exact
+//!    lifecycle a thread's `Dispatch_Protocol` implies, and the generated
+//!    bindings `impl Guest` names the matching methods.
+//! 2. **Compiler-enforced** (`#[ignore]`, opt-in): emit the whole crate and run
+//!    `cargo check`. wit-bindgen's `generate!` derives the `Guest` trait from
+//!    the world, so a mangling / keyword / collision bug in the emitter is a
+//!    compile error — the string test cannot catch a mismatch it replicates.
+//!    Ignored because it shells out to `cargo` (network for the first build,
+//!    disk for the target dir). Run with:
+//!    `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
 
 use spar_codegen::rust_gen::generate_process_bindings;
 use spar_codegen::wit_gen::generate_wit;
