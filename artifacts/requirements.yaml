@@ -2734,6 +2734,35 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
 
+  - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
+    type: requirement
+    title: "spar codegen --verify test/build emits inert artifacts"
+    description: >
+      Bug / honesty gap surfaced during REQ-CODEGEN-WIT-RECORDS-002: the
+      `--verify test` and `--verify build` (hence `--verify all`) outputs are
+      structurally inert in the generated multi-crate workspace and therefore
+      self-certify nothing. (1) test_gen emits `tests/<proc>/<thread>_test.rs`
+      with `use super::<thread>::*;` at the WORKSPACE ROOT — outside every crate
+      member, and `super::` is meaningless for a top-level file — so the harnesses
+      are never compiled or run. (2) build_gen emits `build.rs` + `aadl-contract.toml`
+      at the workspace ROOT, but workspace_gen makes a VIRTUAL workspace (a
+      `[workspace]`-only root with no `[package]`), and cargo never runs a build
+      script for a virtual manifest — so the timing-contract verifier never fires.
+      Both predate REQ-002 (they assume a flat single-crate layout that
+      workspace_gen does not produce). Fix: relocate the test harnesses under each
+      process crate (`crates/<proc>/tests/` or inline `#[cfg(test)]` modules using
+      the real crate paths, not `super::`), and move the contract build.rs +
+      manifest into each process crate so the build script actually runs. Until
+      then, `spar codegen --verify test/build/all` must not be read as producing a
+      runnable test/verification harness. Related to #319.
+    status: proposed
+    tags: [codegen, verify, workspace, bug]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-002
+
   - id: REQ-PROOF-SCHED-001
     type: requirement
     title: "Lean scheduling proofs (EDF, RMBound, RTA) wired into CI"
