@@ -62,6 +62,25 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
+  # ── Codegen compile oracle (the #[ignore] gates) ────────────────────
+  # `cargo nextest`/`cargo test` above do NOT run #[ignore] tests, so the
+  # compiler-enforced codegen oracles (emitted_crate_cargo_checks,
+  # emitted_crate_builds_to_wasm32_wasip2) would otherwise never gate in CI.
+  # They shell out to cargo to build a generated crate — including to
+  # wasm32-wasip2 — so this job installs that target and runs the ignored set.
+  # REQ-CODEGEN-WIT-RECORDS-001/002 (#319).
+  codegen-oracle:
+    name: Codegen compile oracle
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+      - name: Run generated-crate compile oracles (ignored tests)
+        run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
+
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
     name: Bench compile smoke

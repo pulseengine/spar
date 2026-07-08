@@ -41,11 +41,12 @@ pub fn generate_workspace(root_name: &str, process_names: &[String]) -> Vec<Gene
     // Root BUILD.bazel
     files.push(generate_workspace_build_bazel(root_name));
 
-    // Per-crate files
+    // Per-crate files. The crate root (`src/lib.rs`) is NOT emitted here — it is
+    // the `wit-bindgen` binding crate produced by `rust_gen::generate_process_bindings`
+    // (needs the instance model), emitted from `generate()`. See #319 items 4 & 7.
     for name in process_names {
         files.push(generate_crate_cargo_toml(name));
         files.push(generate_crate_build_bazel(name));
-        files.push(generate_crate_lib_rs(name));
     }
 
     files
@@ -186,23 +187,6 @@ fn generate_crate_build_bazel(name: &str) -> GeneratedFile {
     }
 }
 
-fn generate_crate_lib_rs(name: &str) -> GeneratedFile {
-    let safe = sanitize_path_component(name);
-    let mut code = String::new();
-
-    code.push_str(&format!(
-        "//! Generated component crate for AADL process: {safe}\n"
-    ));
-    code.push_str("//! DO NOT EDIT -- regenerate with `spar codegen`.\n\n");
-    code.push_str("// Component modules will be generated here by spar codegen.\n");
-    code.push_str("// Each thread becomes a submodule with port types and dispatch trait.\n");
-
-    GeneratedFile {
-        path: format!("crates/{safe}/src/lib.rs"),
-        content: code,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,16 +324,15 @@ mod tests {
     }
 
     #[test]
-    fn crate_lib_rs_generated() {
+    fn crate_lib_rs_not_emitted_by_workspace_gen() {
+        // The crate root is now the wit-bindgen binding crate emitted from
+        // generate() (rust_gen::generate_process_bindings), NOT workspace_gen.
         let files = generate_workspace("test_system", &["controller".to_string()]);
-
-        let lib_rs = files
-            .iter()
-            .find(|f| f.path == "crates/controller/src/lib.rs")
-            .unwrap();
         assert!(
-            lib_rs.content.contains("Generated component crate"),
-            "Must have generated header"
+            !files
+                .iter()
+                .any(|f| f.path == "crates/controller/src/lib.rs"),
+            "workspace_gen must not emit the crate lib.rs (bindings own it)"
         );
     }
 

@@ -11,16 +11,18 @@ use spar_hir_def::name::Name;
 use spar_hir_def::resolver::GlobalScope;
 
 /// Build a SystemInstance from inline AADL text.
-fn build_instance(aadl: &str, pkg: &str, typ: &str, imp: &str) -> SystemInstance {
+fn build_instance(aadl: &str, pkg: &str, typ: &str, imp: &str) -> (GlobalScope, SystemInstance) {
     let db = spar_hir_def::HirDefDatabase::default();
     let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
     let tree = spar_hir_def::file_item_tree(&db, sf);
     let scope = GlobalScope::from_trees(vec![tree]);
-    SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(typ), &Name::new(imp))
+    let inst =
+        SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(typ), &Name::new(imp));
+    (scope, inst)
 }
 
 /// Load the golden AADL model from test-data.
-fn golden_instance() -> SystemInstance {
+fn golden_instance() -> (GlobalScope, SystemInstance) {
     let aadl = include_str!("../../../test-data/codegen/building_control.aadl");
     build_instance(aadl, "BuildingControl", "BuildingSystem", "impl")
 }
@@ -29,7 +31,7 @@ fn golden_instance() -> SystemInstance {
 
 #[test]
 fn golden_instance_has_expected_hierarchy() {
-    let inst = golden_instance();
+    let (_scope, inst) = golden_instance();
 
     // Root is a system
     let root = inst.component(inst.root);
@@ -60,7 +62,7 @@ fn golden_instance_has_expected_hierarchy() {
 // ── Full generation: all modules produce output ────────────────────
 
 fn generate_all() -> CodegenOutput {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -69,7 +71,7 @@ fn generate_all() -> CodegenOutput {
         rivet: true,
         dry_run: true,
     };
-    generate(&inst, &config)
+    generate(&inst, &scope, &config).expect("codegen should succeed on the golden model")
 }
 
 #[test]
@@ -115,7 +117,7 @@ fn golden_model_generates_wit() {
 /// output as a predictably-shaped tree artifact.
 #[test]
 fn wit_format_emits_only_wit_files() {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -124,7 +126,8 @@ fn wit_format_emits_only_wit_files() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &config);
+    let output =
+        generate(&inst, &scope, &config).expect("codegen should succeed on the golden model");
 
     assert!(
         !output.files.is_empty(),
@@ -147,7 +150,7 @@ fn wit_format_emits_only_wit_files() {
 /// rust/both paths.
 #[test]
 fn rust_format_still_emits_workspace() {
-    let inst = golden_instance();
+    let (scope, inst) = golden_instance();
     let config = CodegenConfig {
         root_name: "building_system".into(),
         output_dir: "output".into(),
@@ -156,7 +159,8 @@ fn rust_format_still_emits_workspace() {
         rivet: false,
         dry_run: true,
     };
-    let output = generate(&inst, &config);
+    let output =
+        generate(&inst, &scope, &config).expect("codegen should succeed on the golden model");
 
     assert!(
         output.files.iter().any(|f| f.path == "Cargo.toml"),
@@ -180,7 +184,13 @@ fn golden_model_generates_rust_component() {
     let rust_files: Vec<_> = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .collect();
     assert!(
         !rust_files.is_empty(),
@@ -246,13 +256,17 @@ fn golden_model_generates_tests() {
         test.content.contains("#[test]"),
         "Test harness should contain #[test] attributes"
     );
-    assert!(
-        test.content.contains("_initializes"),
-        "Test harness should have initialization test"
-    );
+    // The golden BuildingControl threads are Periodic, so the harness exposes the
+    // compute lifecycle only — no initialize/finalize tests (they'd call trait
+    // methods rust_gen no longer generates for a Periodic thread).
+    // REQ-CODEGEN-WIT-RECORDS-001 (#319 item 7).
     assert!(
         test.content.contains("_compute_dispatches"),
         "Test harness should have dispatch test"
+    );
+    assert!(
+        !test.content.contains("_initializes"),
+        "Periodic thread harness must not have an initialization test"
     );
 }
 
@@ -441,7 +455,10 @@ fn golden_model_generates_build_contract() {
     for line in manifest.content.lines() {
         if let Some(rest) = line.trim().strip_prefix("[thread.\"") {
             let thread = rest.trim_end_matches("\"]");
-            let src = format!("src/{thread}.rs");
+            // Manifest key is "<process>/<thread>"; the source now lives under
+            // that process crate (crates/<process>/src/<thread>.rs).
+            let (proc_dir, th_name) = thread.split_once('/').unwrap_or(("", thread));
+            let src = format!("crates/{proc_dir}/src/{th_name}.rs");
             assert!(
                 output.files.iter().any(|f| f.path == src),
                 "manifest names {thread} but {src} was not generated"
@@ -465,7 +482,13 @@ fn golden_model_all_modules_produce_output() {
     let rust_count = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .count();
     let config_count = output
         .files
@@ -562,7 +585,13 @@ fn golden_model_timing_properties_in_rust() {
     let rust_files: Vec<_> = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .collect();
 
     let has_period = rust_files.iter().any(|f| f.content.contains("PERIOD_PS"));

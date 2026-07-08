@@ -73,6 +73,91 @@ pub struct CodegenOutput {
     pub files: Vec<GeneratedFile>,
 }
 
+/// A hard code-generation failure: the model asks for something codegen refuses
+/// to emit — chiefly a data type that cannot be encoded without heap allocation
+/// (violating the no_alloc guarantee). Codegen fails rather than silently
+/// emitting an allocating `list<u8>`. REQ-CODEGEN-WIT-RECORDS-001 (#319).
+#[derive(Debug, Clone)]
+pub struct CodegenError {
+    /// One message per offending field/type; all are reported, not just the first.
+    pub errors: Vec<String>,
+}
+
+impl std::fmt::Display for CodegenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "codegen refused to generate ({} error(s)):",
+            self.errors.len()
+        )?;
+        for e in &self.errors {
+            writeln!(f, "  - {e}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CodegenError {}
+
+/// The lifecycle entry points a generated component exposes, derived from a
+/// thread's AADL `Dispatch_Protocol`.
+///
+/// Per the REQ-CODEGEN-WIT-RECORDS-001 design decision (#319): a **Periodic**
+/// thread runs a single `compute` every period, so it exposes only that entry
+/// point; every other protocol (Sporadic / Aperiodic / Timed / Hybrid /
+/// Background) gets the full `initialize` / `compute` / `finalize` lifecycle.
+///
+/// This is the single source of truth shared by `wit_gen` (which emits these as
+/// `world` exports) and `rust_gen` (which emits them as the component trait and
+/// the `wit-bindgen` `Guest` impl) so the two artifacts cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lifecycle {
+    /// Periodic dispatch: a single `compute` entry point.
+    ComputeOnly,
+    /// Non-periodic dispatch: `initialize`, `compute`, `finalize`.
+    Full,
+}
+
+impl Lifecycle {
+    /// The lifecycle entry-point method names, in call order. These are the
+    /// exact identifiers emitted as WIT world exports (`{thread}-{method}`) and
+    /// as Rust trait / `Guest` methods (`{method}`), so both sides stay aligned.
+    pub fn methods(self) -> &'static [&'static str] {
+        match self {
+            Lifecycle::ComputeOnly => &["compute"],
+            Lifecycle::Full => &["initialize", "compute", "finalize"],
+        }
+    }
+}
+
+/// Map an AADL `Dispatch_Protocol` value to the lifecycle a generated component
+/// exposes. Comparison is case-insensitive; an unset or unrecognized protocol
+/// is treated as non-periodic (the conservative full lifecycle). See
+/// [`Lifecycle`].
+pub fn lifecycle_for(dispatch: &str) -> Lifecycle {
+    if dispatch.trim().eq_ignore_ascii_case("Periodic") {
+        Lifecycle::ComputeOnly
+    } else {
+        Lifecycle::Full
+    }
+}
+
+/// Read a thread instance's `Dispatch_Protocol`, trying the property namespaces
+/// AADL models use in practice (canonical `Thread_Properties`, plus the
+/// `Timing_Properties` / `Deployment_Properties` / unqualified forms real models
+/// and our benches emit). Defaults to `"Periodic"` when unset — the AS5506
+/// default dispatch protocol.
+pub fn dispatch_protocol(inst: &SystemInstance, idx: ComponentInstanceIdx) -> String {
+    let props = inst.properties_for(idx);
+    props
+        .get("Thread_Properties", "Dispatch_Protocol")
+        .or_else(|| props.get("Timing_Properties", "Dispatch_Protocol"))
+        .or_else(|| props.get("Deployment_Properties", "Dispatch_Protocol"))
+        .or_else(|| props.get("", "Dispatch_Protocol"))
+        .unwrap_or("Periodic")
+        .to_string()
+}
+
 /// Extract timing properties from a component instance's property map.
 ///
 /// Returns (period_ps, deadline_ps, wcet_ps) in picoseconds, or None for each
@@ -319,7 +404,15 @@ fn threads_for_processor(
 }
 
 /// Generate all code artifacts from an AADL instance model.
-pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput {
+///
+/// `scope` is the global scope the instance was built from; codegen resolves
+/// data-type classifiers through it (e.g. to decompose a `data implementation`
+/// into a WIT record — REQ-CODEGEN-WIT-RECORDS-001).
+pub fn generate(
+    inst: &SystemInstance,
+    scope: &spar_hir_def::resolver::GlobalScope,
+    config: &CodegenConfig,
+) -> Result<CodegenOutput, CodegenError> {
     let mut files = Vec::new();
 
     // Collect processes and threads
@@ -341,14 +434,25 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
     // Generate WIT files
     if config.format == OutputFormat::Wit || config.format == OutputFormat::Both {
         for &(idx, _comp) in &processes {
-            files.push(wit_gen::generate_wit(inst, idx));
+            files.push(wit_gen::generate_wit(inst, scope, idx)?);
         }
     }
 
     // Generate Rust files
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
         for &(idx, _comp) in &threads {
-            files.push(rust_gen::generate_rust_component(inst, idx));
+            files.push(rust_gen::generate_rust_component(inst, scope, idx));
+        }
+        // Per process: the crate-local record `types` module (REQ-CODEGEN-WIT-
+        // RECORDS-002, #319 item 3) and the WIT-binding crate root
+        // (`crates/{proc}/src/lib.rs`) — the `wit_bindgen::generate!` + `impl
+        // Guest` wiring that connects the WIT world to Rust and mod-wires the
+        // per-thread component modules (REQ-CODEGEN-WIT-RECORDS-001/002, #319
+        // items 3, 4 & 7). This replaces the placeholder lib.rs workspace_gen
+        // used to emit.
+        for &(idx, _comp) in &processes {
+            files.push(rust_gen::generate_types_module(inst, scope, idx));
+            files.push(rust_gen::generate_process_bindings(inst, idx));
         }
     }
 
@@ -427,7 +531,7 @@ pub fn generate(inst: &SystemInstance, config: &CodegenConfig) -> CodegenOutput 
         ));
     }
 
-    CodegenOutput { files }
+    Ok(CodegenOutput { files })
 }
 
 #[cfg(test)]

@@ -29,37 +29,54 @@ pub fn generate_test_harness(
 
     code.push_str(&format!("use super::{name}::*;\n\n"));
 
-    // Test: component initializes without panic
-    code.push_str("#[test]\n");
-    code.push_str(&format!("fn {name}_initializes() {{\n"));
-    code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
-    code.push_str(&format!(
-        "    let mut ports = {struct_name}Ports::default();\n"
-    ));
-    code.push_str("    comp.initialize(&mut ports);\n");
-    code.push_str("}\n\n");
+    // The harness may only call lifecycle methods the thread's `Dispatch_Protocol`
+    // actually exposes on the trait — a Periodic thread has `compute` only, so
+    // emitting `initialize`/`finalize` calls would reference methods that
+    // rust_gen no longer generates (REQ-CODEGEN-WIT-RECORDS-001 #319 item 7).
+    let dispatch = crate::dispatch_protocol(inst, thread_idx);
+    let methods = crate::lifecycle_for(&dispatch).methods();
+    let has_initialize = methods.contains(&"initialize");
+    let has_finalize = methods.contains(&"finalize");
 
-    // Test: compute dispatch executes
+    // Test: component initializes without panic (only if it has an initialize).
+    if has_initialize {
+        code.push_str("#[test]\n");
+        code.push_str(&format!("fn {name}_initializes() {{\n"));
+        code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
+        code.push_str(&format!(
+            "    let mut ports = {struct_name}Ports::default();\n"
+        ));
+        code.push_str("    comp.initialize(&mut ports);\n");
+        code.push_str("}\n\n");
+    }
+
+    // Test: compute dispatch executes (all threads have `compute`).
     code.push_str("#[test]\n");
     code.push_str(&format!("fn {name}_compute_dispatches() {{\n"));
     code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
     code.push_str(&format!(
         "    let mut ports = {struct_name}Ports::default();\n"
     ));
-    code.push_str("    comp.initialize(&mut ports);\n");
+    if has_initialize {
+        code.push_str("    comp.initialize(&mut ports);\n");
+    }
     code.push_str("    comp.compute(&mut ports);\n");
     code.push_str("}\n\n");
 
-    // Test: finalize executes
-    code.push_str("#[test]\n");
-    code.push_str(&format!("fn {name}_finalizes() {{\n"));
-    code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
-    code.push_str(&format!(
-        "    let mut ports = {struct_name}Ports::default();\n"
-    ));
-    code.push_str("    comp.initialize(&mut ports);\n");
-    code.push_str("    comp.finalize(&mut ports);\n");
-    code.push_str("}\n\n");
+    // Test: finalize executes (only if it has a finalize).
+    if has_finalize {
+        code.push_str("#[test]\n");
+        code.push_str(&format!("fn {name}_finalizes() {{\n"));
+        code.push_str(&format!("    let mut comp = {struct_name}Default;\n"));
+        code.push_str(&format!(
+            "    let mut ports = {struct_name}Ports::default();\n"
+        ));
+        if has_initialize {
+            code.push_str("    comp.initialize(&mut ports);\n");
+        }
+        code.push_str("    comp.finalize(&mut ports);\n");
+        code.push_str("}\n\n");
+    }
 
     // Test: timing constants are consistent
     if period.is_some() || deadline.is_some() || wcet.is_some() {
@@ -120,6 +137,8 @@ mod tests {
 package TestPkg
 public
     thread CtrlThread
+        properties
+            Thread_Properties::Dispatch_Protocol => Sporadic;
     end CtrlThread;
 
     thread implementation CtrlThread.Impl
@@ -164,11 +183,81 @@ end TestPkg;
             .map(|(idx, _)| idx);
 
         if let Some(idx) = thread_idx {
+            // CtrlThread is Sporadic → full initialize/compute/finalize lifecycle.
             let file = generate_test_harness(&inst, idx);
             assert!(file.path.contains("_test.rs"));
             assert!(file.content.contains("#[test]"));
             assert!(file.content.contains("_initializes"));
             assert!(file.content.contains("_compute_dispatches"));
+            assert!(file.content.contains("_finalizes"));
         }
+    }
+
+    /// A Periodic thread exposes only `compute`, so its harness must NOT call
+    /// (or define tests for) initialize/finalize — those methods no longer exist
+    /// on the trait (REQ-CODEGEN-WIT-RECORDS-001 #319 item 7). Guards against the
+    /// test_gen/rust_gen desync the lifecycle trimming could introduce.
+    #[test]
+    fn periodic_harness_omits_initialize_and_finalize() {
+        let aadl = r#"
+package PerPkg
+public
+    thread PWorker
+        properties
+            Thread_Properties::Dispatch_Protocol => Periodic;
+    end PWorker;
+
+    thread implementation PWorker.Impl
+    end PWorker.Impl;
+
+    process Proc
+    end Proc;
+
+    process implementation Proc.Impl
+        subcomponents
+            w: thread PWorker.Impl;
+    end Proc.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            p: process Proc.Impl;
+    end Top.Impl;
+end PerPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "per.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("PerPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Thread)
+            .map(|(idx, _)| idx)
+            .expect("model has a thread");
+        let file = generate_test_harness(&inst, idx);
+
+        assert!(
+            file.content.contains("_compute_dispatches"),
+            "periodic harness must still test compute:\n{}",
+            file.content
+        );
+        assert!(
+            !file.content.contains("comp.initialize"),
+            "periodic harness must not call initialize:\n{}",
+            file.content
+        );
+        assert!(
+            !file.content.contains("comp.finalize"),
+            "periodic harness must not call finalize:\n{}",
+            file.content
+        );
     }
 }

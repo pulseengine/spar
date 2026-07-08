@@ -2649,6 +2649,120 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT
 
+  - id: REQ-CODEGEN-WIT-RECORDS-001
+    type: requirement
+    title: "Structured WIT records + wit-bindgen-wired Rust from AADL"
+    description: >
+      Codegen shall emit no_alloc-representable structured interfaces from real
+      AADL components, closing the #319 gaps where a `data implementation` with
+      subcomponents degraded to an opaque `type x = list<u8>` (forcing
+      cabi_realloc) and the Rust skeleton had no wit-bindgen wiring. Delivered
+      and oracle-verified in this requirement:
+      (1) a `data implementation` with scalar subcomponents becomes a WIT
+      `record { field: type }`, recursively for nested data implementations,
+      emitted dependency-first (#319 items 1);
+      (2) scalar fields map to precise WIT scalars honoring signedness/float
+      (Data_Representation => Float -> f32/f64; Number_Representation => Signed
+      -> s8..s64; else u8..u64), and a field that cannot be a no_alloc scalar
+      (non-power-of-two size, sub-32-bit float, opaque type) is a HARD ERROR
+      naming the field — codegen refuses rather than emit an allocating fallback
+      (user-chosen policy);
+      (3) `wit_ident` breaks PascalCase word boundaries (EepromSnapshot ->
+      eeprom-snapshot, #319 item 6);
+      (4) each thread's WIT world exports the lifecycle its `Dispatch_Protocol`
+      implies — Periodic -> a single `{instance}-compute`; other protocols ->
+      `{instance}-initialize/compute/finalize` — replacing the old opaque single
+      `{thread}: func()` (#319 item 7); and
+      (5) a per-process binding crate root (`crates/{proc}/src/lib.rs`) wires the
+      world to Rust: `wit_bindgen::generate!` + `impl Guest` (methods matching the
+      world exports) + `export!`, and the per-thread `{Struct}Component` trait is
+      lifecycle-derived from the same single source (#319 item 4). All five share
+      `crate::Lifecycle`/`lifecycle_for`/`dispatch_protocol` so the WIT world and
+      the Rust Guest cannot drift — and because wit-bindgen derives the `Guest`
+      trait from the world, a `cargo check` of the emitted crate is a
+      compiler-enforced alignment oracle, not a string match.
+      OUT OF SCOPE (successor REQ-CODEGEN-WIT-RECORDS-002): defining the Rust
+      `*Impl` record structs + typed ports and module-wiring the per-thread files
+      so the WHOLE crate (not just the binding lib.rs) compiles, and the
+      wasm-component zero-`cabi_realloc` symbol check. Reported as GitHub #319.
+    status: implemented
+    tags: [codegen, wit, rust, wit-bindgen, interop]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-TYPES
+
+  - id: REQ-CODEGEN-WIT-RECORDS-002
+    type: requirement
+    title: "Whole generated component crate compiles + no unbounded ABI types"
+    description: >
+      Successor to REQ-CODEGEN-WIT-RECORDS-001: make the ENTIRE generated
+      component crate compile, not just the WIT binding lib.rs, and give the
+      no_alloc guarantee a sound oracle. Three parts:
+      (a) resolve each classifier-typed port to a real Rust type via the SAME
+      `DataShape` `wit_gen` uses (scalar -> u8..u64/i8..i64/f32/f64; record ->
+      a generated `#[derive(Default)]` struct in a shared per-crate `types`
+      module, nested-first and de-duplicated; opaque -> `Vec<u8>`), so the Rust
+      struct and the WIT record cannot drift — today `feature_to_rust_type` names
+      PascalCase structs that are never defined (#319 item 3);
+      (b) relocate the per-thread files UNDER the crate (`crates/{proc}/src/`) and
+      module-wire them from the binding lib.rs, with the process `Guest` impl
+      delegating each export to the per-thread `{Struct}Component` (construct-on-
+      call) instead of `todo!()`;
+      (c) NO-ALLOC ORACLE at the WIT level, not the wasm symbol level. A probe
+      (2026-07-08) showed `cabi_realloc` is UNCONDITIONAL wit-bindgen-rt glue —
+      present and called in both a scalar-record component and a `list<u8>` one —
+      so an `nm`/symbol "zero cabi_realloc" check cannot discriminate and is
+      unsound. The sound, by-construction signal is that `list`/`string` are the
+      only unbounded canonical-ABI types (the ones forcing dynamic `cabi_realloc`);
+      everything bounded uses a static return area. So the oracle asserts the
+      generated WIT for an all-scalar/record model contains no `list<`/`string`,
+      with an opaque-port model as the negative control (it deliberately keeps the
+      P2a `list<u8>` fallback and MUST contain it — proving the check can fire).
+      SCOPE: the no-alloc guarantee holds only for models whose ports are all
+      scalar/record; an opaque top-level port is out of the guarantee by design.
+      Deferred to a further requirement (data plane): populating ports from the
+      imported WIT functions and persistent component state (Guest methods are
+      free fns). Optional stronger evidence, not a completion gate: the crate also
+      builds to `wasm32-wasip2` (toolchain present locally).
+    status: implemented
+    tags: [codegen, wit, rust, wit-bindgen, no-alloc]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
+  - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
+    type: requirement
+    title: "spar codegen --verify test/build emits inert artifacts"
+    description: >
+      Bug / honesty gap surfaced during REQ-CODEGEN-WIT-RECORDS-002: the
+      `--verify test` and `--verify build` (hence `--verify all`) outputs are
+      structurally inert in the generated multi-crate workspace and therefore
+      self-certify nothing. (1) test_gen emits `tests/<proc>/<thread>_test.rs`
+      with `use super::<thread>::*;` at the WORKSPACE ROOT — outside every crate
+      member, and `super::` is meaningless for a top-level file — so the harnesses
+      are never compiled or run. (2) build_gen emits `build.rs` + `aadl-contract.toml`
+      at the workspace ROOT, but workspace_gen makes a VIRTUAL workspace (a
+      `[workspace]`-only root with no `[package]`), and cargo never runs a build
+      script for a virtual manifest — so the timing-contract verifier never fires.
+      Both predate REQ-002 (they assume a flat single-crate layout that
+      workspace_gen does not produce). Fix: relocate the test harnesses under each
+      process crate (`crates/<proc>/tests/` or inline `#[cfg(test)]` modules using
+      the real crate paths, not `super::`), and move the contract build.rs +
+      manifest into each process crate so the build script actually runs. Until
+      then, `spar codegen --verify test/build/all` must not be read as producing a
+      runnable test/verification harness. Related to #319.
+    status: proposed
+    tags: [codegen, verify, workspace, bug]
+    fields:
+      release: v0.24.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-002
+
   - id: REQ-PROOF-SCHED-001
     type: requirement
     title: "Lean scheduling proofs (EDF, RMBound, RTA) wired into CI"

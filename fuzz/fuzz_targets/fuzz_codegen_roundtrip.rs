@@ -30,7 +30,7 @@ struct Knobs {
     dry_run: bool,
 }
 
-fn build_seed_instance() -> SystemInstance {
+fn build_seed_instance() -> (GlobalScope, SystemInstance) {
     let db = spar_hir_def::HirDefDatabase::default();
     let sf = spar_base_db::SourceFile::new(
         &db,
@@ -39,16 +39,17 @@ fn build_seed_instance() -> SystemInstance {
     );
     let tree = spar_hir_def::file_item_tree(&db, sf);
     let scope = GlobalScope::from_trees(vec![tree]);
-    SystemInstance::instantiate(
+    let inst = SystemInstance::instantiate(
         &scope,
         &Name::new("BuildingControl"),
         &Name::new("BuildingSystem"),
         &Name::new("impl"),
-    )
+    );
+    (scope, inst)
 }
 
 fuzz_target!(|knobs: Knobs| {
-    let inst = build_seed_instance();
+    let (scope, inst) = build_seed_instance();
 
     let format = match knobs.format_pick % 3 {
         0 => OutputFormat::Rust,
@@ -74,11 +75,14 @@ fuzz_target!(|knobs: Knobs| {
     };
 
     // Contract: no panic on any config combination, even though inputs are
-    // identical for the instance model.
-    let out = generate(&inst, &config);
-    // Touch every file path + content length so a latent panic in formatting
-    // code would fire here rather than being dead-code-eliminated.
-    for f in &out.files {
-        std::hint::black_box((f.path.len(), f.content.len()));
+    // identical for the instance model. `generate` is fallible (it refuses,
+    // rather than panics, on non-encodable record fields — REQ-CODEGEN-WIT-
+    // RECORDS-001); a returned `Err` is a legitimate outcome, not a crash.
+    if let Ok(out) = generate(&inst, &scope, &config) {
+        // Touch every file path + content length so a latent panic in
+        // formatting code would fire here rather than being DCE'd.
+        for f in &out.files {
+            std::hint::black_box((f.path.len(), f.content.len()));
+        }
     }
 });

@@ -3900,6 +3900,95 @@ artifacts:
       - type: satisfies
         target: REQ-CODEGEN-WIT-TYPES
 
+  - id: TEST-CODEGEN-WIT-RECORDS
+    type: feature
+    title: AADL data implementations become no_alloc WIT records
+    description: >
+      wit_gen.rs unit oracles for REQ-CODEGEN-WIT-RECORDS-001 records path:
+      data_implementation_becomes_wit_record (EepromSnapshot.Impl = u32+u32+u8
+      -> `record eeprom-snapshot-impl { addr: u32, value: u32, flags: u8 }`, NOT
+      list<u8>), non_encodable_record_field_is_a_hard_error (3-byte + opaque
+      fields both reported, representable field not flagged),
+      record_fields_honor_signedness_and_float (temp: f32, offset: s32,
+      count: u16), and nested_record_emits_inner_record_and_references_it
+      (Header.Impl emitted dependency-first, referenced by name from Packet.Impl).
+      Each also feeds the output through wit-parser's Resolve::push_str, so the
+      records are valid bindable WIT, not just string-present.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --lib -- wit_gen
+    status: passing
+    tags: [codegen, wit, rust, interop, v0240]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
+  - id: TEST-CODEGEN-WIT-BINDINGS
+    type: feature
+    title: WIT world <-> Rust Guest lifecycle wiring (compiler-enforced)
+    description: >
+      tests/lifecycle_bindings.rs for REQ-CODEGEN-WIT-RECORDS-001 items 4 & 7.
+      world_exports_dispatch_derived_lifecycle asserts the WIT world exports the
+      Dispatch_Protocol-derived lifecycle per subcomponent instance (Periodic
+      `pw` -> compute only; Sporadic `sw` -> initialize/compute/finalize),
+      confirming Dispatch_Protocol resolves per-instance and the old opaque
+      single-func export is gone. bindings_wire_generate_guest_and_export asserts
+      the emitted crate root has `wit_bindgen::generate!` + `impl Guest for
+      Component` (methods matching the world) + `export!(Component)`.
+      The COMPILER-ENFORCED gate emitted_crate_cargo_checks (#[ignore], run with
+      `-- --ignored`) writes the full generated workspace to a tempdir and runs
+      `cargo check`: wit-bindgen derives the Guest trait from the world, so a
+      name-mangling/keyword/collision mismatch in the emitter is a compile error
+      (verified GREEN: `Checking ctrl v0.1.0`; a deliberately renamed Guest
+      method fails with E0046/E0407). This closes the string-match gap that a
+      pure assertion oracle would leave. The `#[ignore]` gate runs in CI via the
+      `codegen-oracle` job (ci.yml) — `cargo nextest`/`cargo test` do NOT run
+      ignored tests, so without that job this oracle would not gate.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --test lifecycle_bindings
+        - run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
+    status: passing
+    tags: [codegen, wit, rust, wit-bindgen, interop, v0240]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
+  - id: TEST-CODEGEN-WIT-WHOLECRATE
+    type: feature
+    title: Whole generated crate compiles + no unbounded ABI types
+    description: >
+      tests/lifecycle_bindings.rs for REQ-CODEGEN-WIT-RECORDS-002. The NO-ALLOC
+      oracle is at the WIT level (a probe proved the wasm `cabi_realloc` symbol is
+      unconditional wit-bindgen-rt glue and cannot discriminate):
+      no_alloc_all_scalar_record_model_has_no_unbounded_wit_types asserts a
+      record + multi-process model emits no `list<`/`string`, and the negative
+      control no_alloc_opaque_port_model_does_contain_list_fallback asserts an
+      opaque top-level port DOES emit `list<u8>` (so the check can fire; opaque
+      ports are out of the no-alloc guarantee by design). The compiler-enforced
+      gate emitted_crate_cargo_checks (#[ignore]) now `cargo check`s the WHOLE
+      crate — the relocated per-thread modules (crates/{proc}/src/{thread}.rs),
+      the crate-local `types` record structs (derived from the same DataShape as
+      the WIT records), and the process `Guest` delegating to each per-thread
+      component — verified GREEN. emitted_crate_builds_to_wasm32_wasip2 (#[ignore],
+      stronger evidence, not a completion gate) builds the record + multi-process
+      crate to wasm32-wasip2 warning-clean. Both `#[ignore]` oracles run in CI via
+      the `codegen-oracle` job (ci.yml), which installs wasm32-wasip2 and runs
+      `-- --ignored` — plain `cargo nextest`/`cargo test` skip ignored tests, so
+      that job is what makes these compile oracles actually gate.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --test lifecycle_bindings
+        - run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
+    status: passing
+    tags: [codegen, wit, rust, wit-bindgen, no-alloc, v0240]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-RECORDS-002
+
   - id: TEST-NC-TFA
     type: feature
     title: FP-TFA / TFA++ total-flow bounds, golden + soundness

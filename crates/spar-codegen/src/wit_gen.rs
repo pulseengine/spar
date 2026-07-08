@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, Direction, FeatureKind};
+use spar_hir_def::name::ClassifierRef;
+use spar_hir_def::resolver::{DataField, DataShape, GlobalScope, ScalarKind};
 
 use crate::GeneratedFile;
 
@@ -15,13 +17,97 @@ use crate::GeneratedFile;
 /// A byte buffer is always valid and bindable; `bytes` is NOT a WIT primitive.
 const DEFAULT_WIT_TYPE: &str = "list<u8>";
 
+/// The WIT scalar for a power-of-two `Data_Size` in bytes and its numeric
+/// representation, or `None` if not directly representable — which would force a
+/// heap-allocating `list<u8>` at the ABI boundary (a no_alloc violation). WIT
+/// has no f8/f16, so sub-32-bit floats are unrepresentable.
+/// REQ-CODEGEN-WIT-RECORDS-001 (#319).
+fn scalar_wit(bytes: u64, kind: ScalarKind) -> Option<&'static str> {
+    match kind {
+        ScalarKind::Float => match bytes {
+            4 => Some("f32"),
+            8 => Some("f64"),
+            _ => None,
+        },
+        ScalarKind::Signed => match bytes {
+            1 => Some("s8"),
+            2 => Some("s16"),
+            4 => Some("s32"),
+            8 => Some("s64"),
+            _ => None,
+        },
+        ScalarKind::Unsigned => match bytes {
+            1 => Some("u8"),
+            2 => Some("u16"),
+            4 => Some("u32"),
+            8 => Some("u64"),
+            _ => None,
+        },
+    }
+}
+
+/// One emitted WIT record definition: `(wit-type-name, [(field, wit-type)])`.
+type RecordDef = (String, Vec<(String, String)>);
+
+/// Recursively flatten a `Record` shape into WIT record definitions, appending
+/// each distinct record to `out` in NESTED-FIRST order (a record is pushed after
+/// the records it depends on) and returning the top record's WIT type name.
+/// A nested-record field becomes a reference to that record's type; a genuinely
+/// non-encodable field (non-power-of-two `Data_Size`, sub-32-bit float, or an
+/// opaque type) is collected into `errors` — the caller refuses to generate
+/// (the user-chosen no_alloc hard-error policy). REQ-CODEGEN-WIT-RECORDS-001 (#319).
+fn flatten_record(
+    type_name: &str,
+    fields: &[DataField],
+    out: &mut Vec<RecordDef>,
+    seen: &mut std::collections::BTreeSet<String>,
+    errors: &mut Vec<String>,
+) -> String {
+    let wit_name = wit_ident(type_name);
+    if !seen.insert(wit_name.clone()) {
+        return wit_name; // already flattened (shared nested type)
+    }
+    let mut rows = Vec::with_capacity(fields.len());
+    for f in fields {
+        let field = f.name.as_str();
+        match &f.shape {
+            DataShape::Scalar { bytes, kind } => match scalar_wit(*bytes, *kind) {
+                Some(w) => rows.push((wit_ident(field), w.to_string())),
+                None => errors.push(format!(
+                    "record `{type_name}` field `{field}`: {bytes}-byte {kind:?} has no \
+                     no_alloc WIT scalar (int 1/2/4/8, float 4/8 only)"
+                )),
+            },
+            DataShape::Record {
+                type_name: nested_tn,
+                fields: nested_fields,
+            } => {
+                let nested = flatten_record(nested_tn, nested_fields, out, seen, errors);
+                rows.push((wit_ident(field), nested));
+            }
+            DataShape::Opaque => errors.push(format!(
+                "record `{type_name}` field `{field}`: type declares no Data_Size and has no \
+                 fields — it cannot be encoded without heap allocation"
+            )),
+        }
+    }
+    // Pushed AFTER its nested records (post-order), so definitions are emitted
+    // dependency-first.
+    out.push((wit_name.clone(), rows));
+    wit_name
+}
+
 /// Generate a WIT file for a process instance.
 ///
 /// Identifiers are emitted in WIT kebab-case (see [`wit_ident`]) — NOT the
 /// Rust `snake_case` used elsewhere in codegen — and every named data type a
 /// port references is emitted as a `type` alias so the interface resolves
 /// under `wasm-tools` / `wit-bindgen` (see issue #254).
-pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> GeneratedFile {
+pub fn generate_wit(
+    inst: &SystemInstance,
+    scope: &GlobalScope,
+    proc_idx: ComponentInstanceIdx,
+) -> Result<GeneratedFile, crate::CodegenError> {
     let comp = inst.component(proc_idx);
     let name = wit_ident(comp.name.as_str());
     let pkg_name = wit_ident(comp.package.as_str());
@@ -40,47 +126,68 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
         .filter(|&&child_idx| inst.component(child_idx).category == ComponentCategory::Thread)
         .collect();
 
-    // First pass: collect every named data type referenced by a port so we can
-    // emit `type` definitions. WIT rejects references to undefined types, so an
-    // interface that names `mattermessage` without defining it will not bind.
-    // The instance model carries each feature's resolved Data_Size (bytes), so
-    // scalar-sized data types map to precise WIT scalars instead of a byte
-    // buffer (REQ-CODEGEN-WIT-TYPES): 1 -> u8, 2 -> u16, 4 -> u32, 8 -> u64;
-    // anything else (or undeclared) stays list<u8>. If two features reference
-    // the same type name with conflicting sizes, fall back to list<u8> rather
-    // than guess.
-    let mut referenced_types: BTreeMap<String, Option<u64>> = BTreeMap::new();
+    // First pass: collect every named data type a port references, keyed by its
+    // WIT identifier, remembering the classifier so we can resolve its shape.
+    // WIT rejects references to undefined types, so every referenced type must
+    // be emitted (as a scalar alias, a record, or a byte-buffer fallback).
+    let mut referenced: BTreeMap<String, ClassifierRef> = BTreeMap::new();
     for &fi in &comp.features {
         let feat = &inst.features[fi];
-        if let Some(c) = feat.classifier.as_ref() {
-            let ty = wit_ident(&c.to_string());
-            match referenced_types.entry(ty) {
-                std::collections::btree_map::Entry::Vacant(e) => {
-                    e.insert(feat.data_size_bytes);
-                }
-                std::collections::btree_map::Entry::Occupied(mut e) => {
-                    if *e.get() != feat.data_size_bytes {
-                        e.insert(None); // conflicting sizes: stay list<u8>
-                    }
-                }
-            }
+        if let Some(cref) = feat.classifier.as_ref() {
+            referenced
+                .entry(wit_ident(&cref.to_string()))
+                .or_insert_with(|| cref.clone());
         }
     }
 
-    // Generate an interface for the process's own ports
+    // Generate an interface for the process's own ports.
     wit.push_str(&format!("interface {name}-ports {{\n"));
 
-    for (ty, size) in &referenced_types {
-        let wit_ty = match size {
-            Some(1) => "u8",
-            Some(2) => "u16",
-            Some(4) => "u32",
-            Some(8) => "u64",
-            _ => DEFAULT_WIT_TYPE,
-        };
-        wit.push_str(&format!("    type {ty} = {wit_ty};\n"));
+    // Resolve each referenced data type to its shape and emit it. A
+    // `data implementation` with scalar subcomponents becomes a WIT `record`
+    // (REQ-CODEGEN-WIT-RECORDS-001, #319) instead of an opaque `list<u8>` blob
+    // that would force `cabi_realloc` at the ABI boundary. Scalar-sized data
+    // types map to precise WIT integers (1 -> u8 ... 8 -> u64).
+    let mut record_defs: Vec<RecordDef> = Vec::new();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut aliases: Vec<(String, String)> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    for (ty, cref) in &referenced {
+        match scope.resolve_data_shape(&comp.package, cref) {
+            // A record (and its nested records, transitively) — refuse on any
+            // non-encodable field.
+            DataShape::Record { type_name, fields } => {
+                flatten_record(
+                    &type_name,
+                    &fields,
+                    &mut record_defs,
+                    &mut seen,
+                    &mut errors,
+                );
+            }
+            DataShape::Scalar { bytes, kind } => {
+                let wit_ty = scalar_wit(bytes, kind).unwrap_or(DEFAULT_WIT_TYPE);
+                aliases.push((ty.clone(), wit_ty.to_string()));
+            }
+            DataShape::Opaque => aliases.push((ty.clone(), DEFAULT_WIT_TYPE.to_string())),
+        }
     }
-    if !referenced_types.is_empty() {
+    if !errors.is_empty() {
+        return Err(crate::CodegenError { errors });
+    }
+    // Emit record definitions dependency-first (nested before outer), then the
+    // scalar / byte-buffer aliases.
+    for (rec_name, rows) in &record_defs {
+        wit.push_str(&format!("    record {rec_name} {{\n"));
+        for (fname, fty) in rows {
+            wit.push_str(&format!("        {fname}: {fty},\n"));
+        }
+        wit.push_str("    }\n");
+    }
+    for (alias, wit_ty) in &aliases {
+        wit.push_str(&format!("    type {alias} = {wit_ty};\n"));
+    }
+    if !referenced.is_empty() {
         wit.push('\n');
     }
 
@@ -139,22 +246,31 @@ pub fn generate_wit(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> Ge
 
     wit.push_str("}\n\n");
 
-    // Generate world
+    // Generate world. Each child thread exports the lifecycle entry points its
+    // `Dispatch_Protocol` implies (REQ-CODEGEN-WIT-RECORDS-001, #319 item 7): a
+    // Periodic thread exports a single `{thread}-compute`; every other protocol
+    // exports `{thread}-initialize` / `{thread}-compute` / `{thread}-finalize`.
+    // This replaces the old opaque single `{thread}: func()` export so the world
+    // and the generated Rust `Guest` impl expose the *same* lifecycle — the
+    // shared `crate::Lifecycle` helper is the single source both derive from.
     wit.push_str(&format!("world {name}-world {{\n"));
     wit.push_str(&format!("    import {name}-ports;\n"));
 
     for &&child_idx in &child_threads {
         let child = inst.component(child_idx);
         let child_name = wit_ident(child.name.as_str());
-        wit.push_str(&format!("    export {child_name}: func();\n"));
+        let dispatch = crate::dispatch_protocol(inst, child_idx);
+        for method in crate::lifecycle_for(&dispatch).methods() {
+            wit.push_str(&format!("    export {child_name}-{method}: func();\n"));
+        }
     }
 
     wit.push_str("}\n");
 
-    GeneratedFile {
+    Ok(GeneratedFile {
         path: format!("wit/{name}.wit"),
         content: wit,
-    }
+    })
 }
 
 /// WIT reserved words that must be `%`-escaped when used as identifiers.
@@ -207,13 +323,28 @@ const WIT_KEYWORDS: &[&str] = &[
 /// [`crate::sanitize_ident`]. Underscores and other separators become hyphens,
 /// words that would start with a digit are letter-prefixed, and collisions with
 /// WIT keywords are `%`-escaped. See issue #254.
-fn wit_ident(name: &str) -> String {
+///
+/// `pub(crate)` so `rust_gen` can derive world-export / `Guest`-method names that
+/// exactly match the WIT this module emits (REQ-CODEGEN-WIT-RECORDS-001 #319 item 7).
+pub(crate) fn wit_ident(name: &str) -> String {
     // Split into lowercase alphanumeric words on any run of separators
     // (`_`, `.`, `-`, whitespace, etc.).
     let mut words: Vec<String> = Vec::new();
     let mut cur = String::new();
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() {
+            // Break camelCase / PascalCase boundaries: an uppercase letter that
+            // follows a lowercase letter or digit starts a new word, so
+            // `EepromSnapshot` -> `eeprom-snapshot` (issue #319 item 6) instead
+            // of the collapsed `eepromsnapshot`.
+            if ch.is_ascii_uppercase()
+                && cur
+                    .chars()
+                    .last()
+                    .is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+            {
+                words.push(std::mem::take(&mut cur));
+            }
             cur.push(ch.to_ascii_lowercase());
         } else if !cur.is_empty() {
             words.push(std::mem::take(&mut cur));
@@ -250,7 +381,7 @@ mod tests {
     use spar_hir_def::name::Name;
     use spar_hir_def::resolver::GlobalScope;
 
-    fn build_test_instance() -> SystemInstance {
+    fn build_test_instance() -> (GlobalScope, SystemInstance) {
         let aadl = r#"
 package TestPkg
 public
@@ -302,17 +433,18 @@ end TestPkg;
         let sf = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), aadl.to_string());
         let tree = spar_hir_def::file_item_tree(&db, sf);
         let scope = GlobalScope::from_trees(vec![tree]);
-        SystemInstance::instantiate(
+        let inst = SystemInstance::instantiate(
             &scope,
             &Name::new("TestPkg"),
             &Name::new("Top"),
             &Name::new("Impl"),
-        )
+        );
+        (scope, inst)
     }
 
     #[test]
     fn wit_gen_produces_output() {
-        let inst = build_test_instance();
+        let (scope, inst) = build_test_instance();
         // Find the process instance
         let proc_idx = inst
             .all_components()
@@ -320,7 +452,7 @@ end TestPkg;
             .map(|(idx, _)| idx);
 
         if let Some(idx) = proc_idx {
-            let file = generate_wit(&inst, idx);
+            let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
             assert!(file.path.ends_with(".wit"));
             assert!(file.content.contains("package"));
             assert!(file.content.contains("world"));
@@ -333,13 +465,13 @@ end TestPkg;
     /// files that only fail later in `wasm-tools` / `wit-bindgen`.
     #[test]
     fn generated_wit_is_valid_and_bindable() {
-        let inst = build_test_instance();
+        let (scope, inst) = build_test_instance();
         let idx = inst
             .all_components()
             .find(|(_, c)| c.category == ComponentCategory::Process)
             .map(|(idx, _)| idx)
             .expect("test model has a process");
-        let file = generate_wit(&inst, idx);
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
 
         // No stray underscores in the emitted WIT (kebab-case only). The header
         // comment echoes the AADL names, so check the body after it.
@@ -403,5 +535,477 @@ end TestPkg;
         // Degenerate input.
         assert_eq!(wit_ident("___"), "unnamed");
         assert_eq!(wit_ident(""), "unnamed");
+    }
+
+    /// Fixture for REQ-CODEGEN-WIT-RECORDS-001 (#319): a `data implementation`
+    /// with scalar subcomponents (the real-world `EepromSnapshot.Impl` =
+    /// u32 + u32 + u8 pattern), referenced by a process port.
+    fn build_record_test_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package RecPkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Byte8
+        properties
+            Data_Size => 1 Bytes;
+    end Byte8;
+
+    data EepromSnapshot
+    end EepromSnapshot;
+
+    data implementation EepromSnapshot.Impl
+        subcomponents
+            addr: data Word32;
+            value: data Word32;
+            flags: data Byte8;
+    end EepromSnapshot.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port EepromSnapshot.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end RecPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "rec.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("RecPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// RED-before-green oracle for REQ-CODEGEN-WIT-RECORDS-001 (#319 items 1,3,6):
+    /// an AADL `data implementation` with scalar subcomponents must generate a
+    /// WIT `record` with one typed field per subcomponent — NOT an opaque
+    /// `list<u8>` blob (which would need `cabi_realloc` at the ABI boundary,
+    /// defeating no_alloc). Currently RED: wit_gen emits `type ... = list<u8>`.
+    #[test]
+    fn data_implementation_becomes_wit_record() {
+        let (scope, inst) = build_record_test_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Must NOT degrade the structured type to an opaque byte blob.
+        assert!(
+            !body.contains("= list<u8>"),
+            "data implementation must NOT degrade to list<u8>:\n{body}"
+        );
+        // Must emit a typed record (name kebab-cased with PascalCase boundaries
+        // preserved: EepromSnapshot.Impl -> eeprom-snapshot-impl).
+        assert!(
+            body.contains("record eeprom-snapshot-impl {"),
+            "expected a WIT record for EepromSnapshot.Impl:\n{body}"
+        );
+        // One typed field per scalar subcomponent (4B->u32, 4B->u32, 1B->u8).
+        for field in ["addr: u32", "value: u32", "flags: u8"] {
+            assert!(
+                body.contains(field),
+                "expected record field `{field}`:\n{body}"
+            );
+        }
+
+        // The record must be VALID, bindable WIT — not just string-present.
+        // wit-parser rejects malformed records / undefined type references.
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("record.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "generated record WIT failed to parse/resolve: {e}\n---\n{}",
+                    file.content
+                )
+            });
+    }
+
+    /// Fixture for the hard-error path: a record with fields that CANNOT be
+    /// encoded without heap allocation — a 3-byte scalar (no WIT integer) and an
+    /// opaque type (no Data_Size, no fields).
+    fn build_bad_record_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package BadPkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Odd3
+        properties
+            Data_Size => 3 Bytes;
+    end Odd3;
+
+    data Blob
+    end Blob;
+
+    data BadRecord
+    end BadRecord;
+
+    data implementation BadRecord.Impl
+        subcomponents
+            good: data Word32;
+            odd: data Odd3;
+            blob: data Blob;
+    end BadRecord.Impl;
+
+    process BadStore
+        features
+            in_port: in data port BadRecord.Impl;
+    end BadStore;
+
+    process implementation BadStore.Impl
+        subcomponents
+            th: thread BadThread.Impl;
+    end BadStore.Impl;
+
+    thread BadThread
+    end BadThread;
+
+    thread implementation BadThread.Impl
+    end BadThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process BadStore.Impl;
+    end Top.Impl;
+end BadPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "bad.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("BadPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for the user-chosen hard-error policy (REQ-CODEGEN-WIT-RECORDS-001,
+    /// #319): a record field that cannot be a no_alloc scalar makes codegen
+    /// REFUSE (return an error) rather than silently emit an allocating
+    /// `list<u8>`. Both offending fields must be reported; the good field must
+    /// not appear as an error.
+    #[test]
+    fn non_encodable_record_field_is_a_hard_error() {
+        let (scope, inst) = build_bad_record_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+
+        let err = generate_wit(&inst, &scope, idx)
+            .expect_err("codegen must refuse a record with non-encodable fields");
+
+        // The 3-byte field and the opaque field are both reported…
+        assert!(
+            err.errors.iter().any(|e| e.contains("`odd`")),
+            "expected a hard error naming the 3-byte field `odd`: {:?}",
+            err.errors
+        );
+        assert!(
+            err.errors.iter().any(|e| e.contains("`blob`")),
+            "expected a hard error naming the opaque field `blob`: {:?}",
+            err.errors
+        );
+        // …and the representable `good` field is NOT flagged.
+        assert!(
+            !err.errors.iter().any(|e| e.contains("`good`")),
+            "the representable u32 field `good` must not be an error: {:?}",
+            err.errors
+        );
+    }
+
+    /// Fixture with signed / float / unsigned scalar fields (Data Modeling Annex
+    /// `Number_Representation` / `Data_Representation` properties).
+    fn build_signed_float_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package NumPkg
+public
+    data FloatWord
+        properties
+            Data_Size => 4 Bytes;
+            Data_Representation => Float;
+    end FloatWord;
+
+    data SignedWord
+        properties
+            Data_Size => 4 Bytes;
+            Number_Representation => Signed;
+    end SignedWord;
+
+    data Ushort
+        properties
+            Data_Size => 2 Bytes;
+    end Ushort;
+
+    data Reading
+    end Reading;
+
+    data implementation Reading.Impl
+        subcomponents
+            temp: data FloatWord;
+            offset: data SignedWord;
+            count: data Ushort;
+    end Reading.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port Reading.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end NumPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "num.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("NumPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for signed/float mapping (REQ-CODEGEN-WIT-RECORDS-001, #319 P2c):
+    /// `Data_Representation => Float` maps to `f32`/`f64`, `Number_Representation
+    /// => Signed` to `s8..s64`, and unspecified stays unsigned `u*`.
+    #[test]
+    fn record_fields_honor_signedness_and_float() {
+        let (scope, inst) = build_signed_float_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        for field in ["temp: f32", "offset: s32", "count: u16"] {
+            assert!(
+                body.contains(field),
+                "expected record field `{field}` (signed/float mapping):\n{body}"
+            );
+        }
+
+        // Still valid, bindable WIT.
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("num.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!("generated WIT failed to parse: {e}\n---\n{}", file.content)
+            });
+    }
+
+    /// Fixture with a NESTED record: `Packet.Impl` has a field whose type is
+    /// itself a record (`Header.Impl`).
+    fn build_nested_record_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package NestPkg
+public
+    data Word16
+        properties
+            Data_Size => 2 Bytes;
+    end Word16;
+
+    data Byte
+        properties
+            Data_Size => 1 Bytes;
+    end Byte;
+
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Header
+    end Header;
+
+    data implementation Header.Impl
+        subcomponents
+            hi: data Word16;
+            lo: data Byte;
+    end Header.Impl;
+
+    data Packet
+    end Packet;
+
+    data implementation Packet.Impl
+        subcomponents
+            head: data Header.Impl;
+            body: data Word32;
+    end Packet.Impl;
+
+    process Store
+        features
+            snapshot_in: in data port Packet.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            st_thread: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end StoreThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end NestPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "nest.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("NestPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for nested records (REQ-CODEGEN-WIT-RECORDS-001, #319 P2b): a record
+    /// field whose type is another `data implementation` becomes a nested WIT
+    /// record, emitted dependency-first and referenced by name.
+    #[test]
+    fn nested_record_emits_inner_record_and_references_it() {
+        let (scope, inst) = build_nested_record_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Inner record with its scalar fields…
+        assert!(
+            body.contains("record header-impl {"),
+            "expected nested record `header-impl`:\n{body}"
+        );
+        for field in ["hi: u16", "lo: u8"] {
+            assert!(
+                body.contains(field),
+                "expected inner field `{field}`:\n{body}"
+            );
+        }
+        // …and the outer record referencing it by type name (not list<u8>).
+        assert!(
+            body.contains("record packet-impl {"),
+            "expected outer record `packet-impl`:\n{body}"
+        );
+        assert!(
+            body.contains("head: header-impl"),
+            "outer record must reference the nested record by name:\n{body}"
+        );
+        assert!(
+            body.contains("body: u32"),
+            "expected outer scalar field `body: u32`:\n{body}"
+        );
+        assert!(
+            !body.contains("= list<u8>"),
+            "nested record must NOT fall back to list<u8>:\n{body}"
+        );
+
+        // The nested record must be declared BEFORE the outer that references it,
+        // and the whole thing must bind under wit-parser.
+        let inner_at = body.find("record header-impl").unwrap();
+        let outer_at = body.find("record packet-impl").unwrap();
+        assert!(
+            inner_at < outer_at,
+            "nested record must be emitted dependency-first:\n{body}"
+        );
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("nest.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "nested-record WIT failed to parse: {e}\n---\n{}",
+                    file.content
+                )
+            });
     }
 }
