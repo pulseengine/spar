@@ -2695,22 +2695,39 @@ artifacts:
 
   - id: REQ-CODEGEN-WIT-RECORDS-002
     type: requirement
-    title: "Whole generated component crate compiles + is cabi_realloc-free"
+    title: "Whole generated component crate compiles + no unbounded ABI types"
     description: >
       Successor to REQ-CODEGEN-WIT-RECORDS-001: make the ENTIRE generated
-      component crate compile and meet the no_alloc guarantee, not just the WIT
-      binding lib.rs. Requires (a) emitting Rust struct definitions for the
-      `*Impl` record types the per-thread port structs reference (today
-      `feature_to_rust_type` names PascalCase structs that are never defined —
-      #319 item 3), (b) module-wiring the per-thread `src/{proc}/{thread}.rs`
-      files into the crate and having the process `Guest` impl delegate to the
-      per-thread `{Struct}Component`s instead of `todo!()` stubs, and (c) a
-      wasm-component build (`wasm32-wasip2`) with an `nm`/symbol check asserting
-      zero `cabi_realloc` — the A1 acceptance gate that is structurally
-      wasm-toolchain-gated. Until then, the -001 oracle proves only that the
-      binding lib.rs + WIT world compile and align.
-    status: proposed
-    tags: [codegen, wit, rust, wit-bindgen, no-alloc, wasm]
+      component crate compile, not just the WIT binding lib.rs, and give the
+      no_alloc guarantee a sound oracle. Three parts:
+      (a) resolve each classifier-typed port to a real Rust type via the SAME
+      `DataShape` `wit_gen` uses (scalar -> u8..u64/i8..i64/f32/f64; record ->
+      a generated `#[derive(Default)]` struct in a shared per-crate `types`
+      module, nested-first and de-duplicated; opaque -> `Vec<u8>`), so the Rust
+      struct and the WIT record cannot drift — today `feature_to_rust_type` names
+      PascalCase structs that are never defined (#319 item 3);
+      (b) relocate the per-thread files UNDER the crate (`crates/{proc}/src/`) and
+      module-wire them from the binding lib.rs, with the process `Guest` impl
+      delegating each export to the per-thread `{Struct}Component` (construct-on-
+      call) instead of `todo!()`;
+      (c) NO-ALLOC ORACLE at the WIT level, not the wasm symbol level. A probe
+      (2026-07-08) showed `cabi_realloc` is UNCONDITIONAL wit-bindgen-rt glue —
+      present and called in both a scalar-record component and a `list<u8>` one —
+      so an `nm`/symbol "zero cabi_realloc" check cannot discriminate and is
+      unsound. The sound, by-construction signal is that `list`/`string` are the
+      only unbounded canonical-ABI types (the ones forcing dynamic `cabi_realloc`);
+      everything bounded uses a static return area. So the oracle asserts the
+      generated WIT for an all-scalar/record model contains no `list<`/`string`,
+      with an opaque-port model as the negative control (it deliberately keeps the
+      P2a `list<u8>` fallback and MUST contain it — proving the check can fire).
+      SCOPE: the no-alloc guarantee holds only for models whose ports are all
+      scalar/record; an opaque top-level port is out of the guarantee by design.
+      Deferred to a further requirement (data plane): populating ports from the
+      imported WIT functions and persistent component state (Guest methods are
+      free fns). Optional stronger evidence, not a completion gate: the crate also
+      builds to `wasm32-wasip2` (toolchain present locally).
+    status: implemented
+    tags: [codegen, wit, rust, wit-bindgen, no-alloc]
     fields:
       release: v0.24.0
     links:

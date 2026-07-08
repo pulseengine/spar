@@ -3954,6 +3954,36 @@ artifacts:
       - type: satisfies
         target: REQ-CODEGEN-WIT-RECORDS-001
 
+  - id: TEST-CODEGEN-WIT-WHOLECRATE
+    type: feature
+    title: Whole generated crate compiles + no unbounded ABI types
+    description: >
+      tests/lifecycle_bindings.rs for REQ-CODEGEN-WIT-RECORDS-002. The NO-ALLOC
+      oracle is at the WIT level (a probe proved the wasm `cabi_realloc` symbol is
+      unconditional wit-bindgen-rt glue and cannot discriminate):
+      no_alloc_all_scalar_record_model_has_no_unbounded_wit_types asserts a
+      record + multi-process model emits no `list<`/`string`, and the negative
+      control no_alloc_opaque_port_model_does_contain_list_fallback asserts an
+      opaque top-level port DOES emit `list<u8>` (so the check can fire; opaque
+      ports are out of the no-alloc guarantee by design). The compiler-enforced
+      gate emitted_crate_cargo_checks (#[ignore]) now `cargo check`s the WHOLE
+      crate — the relocated per-thread modules (crates/{proc}/src/{thread}.rs),
+      the crate-local `types` record structs (derived from the same DataShape as
+      the WIT records), and the process `Guest` delegating to each per-thread
+      component — verified GREEN. emitted_crate_builds_to_wasm32_wasip2 (#[ignore],
+      stronger evidence, not a completion gate) builds the record + multi-process
+      crate to wasm32-wasip2 warning-clean.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-codegen --test lifecycle_bindings
+        - run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
+    status: passing
+    tags: [codegen, wit, rust, wit-bindgen, no-alloc, v0240]
+    links:
+      - type: satisfies
+        target: REQ-CODEGEN-WIT-RECORDS-002
+
   - id: TEST-NC-TFA
     type: feature
     title: FP-TFA / TFA++ total-flow bounds, golden + soundness

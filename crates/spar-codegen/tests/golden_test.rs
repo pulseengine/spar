@@ -184,7 +184,13 @@ fn golden_model_generates_rust_component() {
     let rust_files: Vec<_> = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .collect();
     assert!(
         !rust_files.is_empty(),
@@ -449,7 +455,10 @@ fn golden_model_generates_build_contract() {
     for line in manifest.content.lines() {
         if let Some(rest) = line.trim().strip_prefix("[thread.\"") {
             let thread = rest.trim_end_matches("\"]");
-            let src = format!("src/{thread}.rs");
+            // Manifest key is "<process>/<thread>"; the source now lives under
+            // that process crate (crates/<process>/src/<thread>.rs).
+            let (proc_dir, th_name) = thread.split_once('/').unwrap_or(("", thread));
+            let src = format!("crates/{proc_dir}/src/{th_name}.rs");
             assert!(
                 output.files.iter().any(|f| f.path == src),
                 "manifest names {thread} but {src} was not generated"
@@ -473,7 +482,13 @@ fn golden_model_all_modules_produce_output() {
     let rust_count = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .count();
     let config_count = output
         .files
@@ -570,7 +585,13 @@ fn golden_model_timing_properties_in_rust() {
     let rust_files: Vec<_> = output
         .files
         .iter()
-        .filter(|f| f.path.starts_with("src/") && f.path.ends_with(".rs"))
+        .filter(|f| {
+            f.path.starts_with("crates/")
+                && f.path.contains("/src/")
+                && f.path.ends_with(".rs")
+                && !f.path.ends_with("/lib.rs")
+                && !f.path.ends_with("/types.rs")
+        })
         .collect();
 
     let has_period = rust_files.iter().any(|f| f.content.contains("PERIOD_PS"));

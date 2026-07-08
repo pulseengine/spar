@@ -244,6 +244,87 @@ public
 end MpkgRec;
 "#;
 
+/// A model with an OPAQUE top-level port (a `data` type with no Data_Size and no
+/// subcomponents). This is the negative control for the no_alloc oracle: wit_gen
+/// deliberately keeps the `list<u8>` fallback here (P2a), so the generated WIT
+/// MUST contain `list<u8>` — proving the no-alloc check can actually fire.
+const OPAQUE_PORT_AADL: &str = r#"
+package OpaquePkg
+public
+    data Blob
+    end Blob;
+
+    thread Worker
+        properties
+            Thread_Properties::Dispatch_Protocol => Periodic;
+    end Worker;
+
+    thread implementation Worker.Impl
+    end Worker.Impl;
+
+    process Proc
+        features
+            blob_in: in data port Blob;
+    end Proc;
+
+    process implementation Proc.Impl
+        subcomponents
+            w: thread Worker.Impl;
+    end Proc.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            p: process Proc.Impl;
+    end Top.Impl;
+end OpaquePkg;
+"#;
+
+/// NO-ALLOC ORACLE (REQ-CODEGEN-WIT-RECORDS-002 item 3c). The sound signal is at
+/// the WIT level: `list`/`string` are the only unbounded canonical-ABI types (the
+/// ones forcing dynamic `cabi_realloc`); everything scalar/record is bounded. A
+/// probe (2026-07-08) showed the wasm `cabi_realloc` SYMBOL is unconditional
+/// wit-bindgen-rt glue — present in both alloc and no-alloc components — so a
+/// symbol check cannot discriminate. This checks the WIT instead.
+#[test]
+fn no_alloc_all_scalar_record_model_has_no_unbounded_wit_types() {
+    let (scope, inst) = build(RECORDS_MP_AADL, "MpkgRec", "Top", "Impl");
+    // Check every process's generated WIT.
+    let mut checked = 0;
+    for (idx, comp) in inst.all_components() {
+        if comp.category != ComponentCategory::Process {
+            continue;
+        }
+        let wit = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        assert!(
+            !wit.content.contains("list<") && !wit.content.contains("string"),
+            "all-scalar/record model must emit no unbounded (list/string) WIT \
+             types:\n{}",
+            wit.content
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 2, "fixture has two processes");
+}
+
+/// Negative control: the no_alloc oracle can fire. An opaque top-level port keeps
+/// the `list<u8>` fallback, so its WIT MUST contain `list<u8>` — confirming the
+/// assertion above is not vacuous, and marking the scope boundary (opaque ports
+/// are out of the no-alloc guarantee).
+#[test]
+fn no_alloc_opaque_port_model_does_contain_list_fallback() {
+    let (scope, inst) = build(OPAQUE_PORT_AADL, "OpaquePkg", "Top", "Impl");
+    let idx = process_idx(&inst);
+    let wit = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+    assert!(
+        wit.content.contains("list<u8>"),
+        "opaque port must fall back to list<u8> (negative control):\n{}",
+        wit.content
+    );
+}
+
 /// COMPILER-ENFORCED oracle (opt-in): emit the full crate and `cargo check` it.
 /// This is the real item-4/7 gate — it runs wit-bindgen's `generate!`, so the
 /// `impl Guest` is type-checked against the world. A name-mangling or keyword
@@ -295,6 +376,57 @@ fn emitted_crate_cargo_checks() {
         status.success(),
         "generated crate failed to `cargo check` (world⟷Guest wiring is broken); \
          inspect {}",
+        root.display()
+    );
+}
+
+/// STRONGER EVIDENCE (opt-in, not a completion gate): the emitted crate builds all
+/// the way to the real deployment target `wasm32-wasip2` — proving the records +
+/// bindings + delegation survive componentization, not just a host type-check.
+/// Per REQ-CODEGEN-WIT-RECORDS-002 this is nice-to-have; the required no-alloc
+/// oracle is the WIT-level check above (a wasm `cabi_realloc` symbol is
+/// unconditional wit-bindgen-rt glue and cannot discriminate).
+///
+/// `#[ignore]` — needs the wasm32-wasip2 target + shells out to cargo. Run:
+///   `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
+#[test]
+#[ignore = "needs wasm32-wasip2 target + shells out to cargo; run with --ignored"]
+fn emitted_crate_builds_to_wasm32_wasip2() {
+    use std::process::Command;
+
+    let (scope, inst) = build(RECORDS_MP_AADL, "MpkgRec", "Top", "Impl");
+    let config = CodegenConfig {
+        root_name: "life".into(),
+        output_dir: "out".into(),
+        format: OutputFormat::Both,
+        verify: None,
+        rivet: false,
+        dry_run: true,
+    };
+    let out = generate(&inst, &scope, &config).expect("codegen should succeed");
+
+    let root = std::env::temp_dir().join("spar-p3-wasm-oracle");
+    let _ = std::fs::remove_dir_all(&root);
+    for f in &out.files {
+        let path = root.join(&f.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &f.content).unwrap();
+    }
+
+    let target_dir = std::env::temp_dir().join("spar-p3-wasm-target");
+    let status = Command::new("cargo")
+        .arg("build")
+        .arg("--target")
+        .arg("wasm32-wasip2")
+        .current_dir(&root)
+        .env("CARGO_INCREMENTAL", "0")
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .status()
+        .expect("failed to spawn cargo build");
+
+    assert!(
+        status.success(),
+        "generated crate failed to build to wasm32-wasip2; inspect {}",
         root.display()
     );
 }

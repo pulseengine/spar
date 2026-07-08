@@ -441,13 +441,17 @@ pub fn generate(
     // Generate Rust files
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
         for &(idx, _comp) in &threads {
-            files.push(rust_gen::generate_rust_component(inst, idx));
+            files.push(rust_gen::generate_rust_component(inst, scope, idx));
         }
-        // Per-process WIT-binding crate root (`crates/{proc}/src/lib.rs`): the
-        // `wit_bindgen::generate!` + `impl Guest` wiring that connects the WIT
-        // world to Rust (REQ-CODEGEN-WIT-RECORDS-001, #319 items 4 & 7). This
-        // replaces the placeholder lib.rs that workspace_gen used to emit.
+        // Per process: the crate-local record `types` module (REQ-CODEGEN-WIT-
+        // RECORDS-002, #319 item 3) and the WIT-binding crate root
+        // (`crates/{proc}/src/lib.rs`) — the `wit_bindgen::generate!` + `impl
+        // Guest` wiring that connects the WIT world to Rust and mod-wires the
+        // per-thread component modules (REQ-CODEGEN-WIT-RECORDS-001/002, #319
+        // items 3, 4 & 7). This replaces the placeholder lib.rs workspace_gen
+        // used to emit.
         for &(idx, _comp) in &processes {
+            files.push(rust_gen::generate_types_module(inst, scope, idx));
             files.push(rust_gen::generate_process_bindings(inst, idx));
         }
     }
