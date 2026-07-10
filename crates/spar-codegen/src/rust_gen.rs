@@ -341,7 +341,13 @@ pub fn generate_process_bindings(
     // shims; on the edition-2024 generated crate that trips the
     // `unsafe_op_in_unsafe_fn` future-compat lint inside macro-expanded code the
     // user cannot edit. Allow it crate-wide so the generated crate is warning-clean.
-    code.push_str("#![allow(unsafe_op_in_unsafe_fn)]\n\n");
+    //
+    // `dead_code`: a generated SKELETON legitimately has unread port fields — an
+    // unconnected thread port, or an inter-thread port whose connection is deferred
+    // (REQ-CODEGEN-WIT-STATE-001) — until the user writes `compute` logic. These are
+    // model-derived, not defects, so the generated crate must not fail under a
+    // downstream `-D warnings` (as CI applies). REQ-CODEGEN-WIT-DATAPLANE-001.
+    code.push_str("#![allow(unsafe_op_in_unsafe_fn, dead_code)]\n\n");
 
     // The crate-local record types and the per-thread component modules, wired in.
     code.push_str("mod types;\n");
