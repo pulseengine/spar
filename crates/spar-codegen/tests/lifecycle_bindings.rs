@@ -250,86 +250,7 @@ end MpkgRec;
 ///   * `e.unwired` — a thread In port with NO process connection → no route.
 ///   * `prod.p_out -> cons.c_in` — an inter-thread connection (both ends
 ///     `Some(...)`) → must be SKIPPED, not misrouted as a boundary port.
-const DATAPLANE_AADL: &str = r#"
-package DpPkg
-public
-    data Word32
-        properties
-            Data_Size => 4 Bytes;
-    end Word32;
-
-    data Byte8
-        properties
-            Data_Size => 1 Bytes;
-    end Byte8;
-
-    data Snapshot
-    end Snapshot;
-
-    data implementation Snapshot.Impl
-        subcomponents
-            addr: data Word32;
-            flags: data Byte8;
-    end Snapshot.Impl;
-
-    thread Echo
-        features
-            din: in data port Word32;
-            dout: out data port Word32;
-            rec_in: in data port Snapshot.Impl;
-            rec_out: out data port Snapshot.Impl;
-            unwired: in data port Word32;
-    end Echo;
-
-    thread implementation Echo.Impl
-    end Echo.Impl;
-
-    thread Producer
-        features
-            p_out: out data port Word32;
-    end Producer;
-
-    thread implementation Producer.Impl
-    end Producer.Impl;
-
-    thread Consumer
-        features
-            c_in: in data port Word32;
-    end Consumer;
-
-    thread implementation Consumer.Impl
-    end Consumer.Impl;
-
-    process Proc
-        features
-            pin: in data port Word32;
-            pout: out data port Word32;
-            psnap_in: in data port Snapshot.Impl;
-            psnap_out: out data port Snapshot.Impl;
-    end Proc;
-
-    process implementation Proc.Impl
-        subcomponents
-            e: thread Echo.Impl;
-            prod: thread Producer.Impl;
-            cons: thread Consumer.Impl;
-        connections
-            c1: port pin -> e.din;
-            c2: port e.dout -> pout;
-            c3: port psnap_in -> e.rec_in;
-            c4: port e.rec_out -> psnap_out;
-            c5: port prod.p_out -> cons.c_in;
-    end Proc.Impl;
-
-    system Top
-    end Top;
-
-    system implementation Top.Impl
-        subcomponents
-            p: process Proc.Impl;
-    end Top.Impl;
-end DpPkg;
-"#;
+const DATAPLANE_AADL: &str = include_str!("../../../test-data/codegen/dataplane.aadl");
 
 /// Find a thread instance by its subcomponent instance name.
 fn thread_idx_by_name(inst: &SystemInstance, name: &str) -> ComponentInstanceIdx {
@@ -450,6 +371,29 @@ fn compute_body_marshals_scalar_and_record_ports() {
     assert!(
         !src.contains("ports.unwired ="),
         "unconnected thread port must not be marshalled:\n{src}"
+    );
+}
+
+/// GOLDEN LOCK for the exec oracle (REQ-CODEGEN-WIT-DATAPLANE-001): the
+/// out-of-workspace `codegen-exec-oracle` crate host-binds against a COMMITTED
+/// `codegen-exec-oracle/wit/dp.wit` via `wasmtime::component::bindgen!` (compile
+/// time), but `generate()` produces the WIT at runtime. This fast test asserts the
+/// two cannot drift — `generate_wit` for the DATAPLANE process must reproduce the
+/// committed fixture BYTE-FOR-BYTE. If codegen's WIT output changes, regenerate the
+/// fixture (see the crate README) so the exec oracle keeps binding the real ABI.
+#[test]
+fn dataplane_wit_matches_exec_oracle_fixture() {
+    let (scope, inst) = build(DATAPLANE_AADL, "DpPkg", "Top", "Impl");
+    let idx = process_idx(&inst);
+    let generated = generate_wit(&inst, &scope, idx)
+        .expect("wit generation should succeed")
+        .content;
+    let committed = include_str!("../../../codegen-exec-oracle/wit/dp.wit");
+    assert_eq!(
+        generated, committed,
+        "generated DATAPLANE WIT drifted from the committed exec-oracle fixture; \
+         the wasmtime host `bindgen!` would bind a stale ABI. Regenerate \
+         codegen-exec-oracle/wit/dp.wit."
     );
 }
 
@@ -641,10 +585,11 @@ fn emitted_crate_cargo_checks() {
 
 /// STRONGER EVIDENCE (opt-in, not a completion gate): the emitted crate builds all
 /// the way to the real deployment target `wasm32-wasip2` — proving the records +
-/// bindings + delegation survive componentization, not just a host type-check.
-/// Per REQ-CODEGEN-WIT-RECORDS-002 this is nice-to-have; the required no-alloc
-/// oracle is the WIT-level check above (a wasm `cabi_realloc` symbol is
-/// unconditional wit-bindgen-rt glue and cannot discriminate).
+/// bindings + delegation + DATA-PLANE MARSHALLING survive componentization, not
+/// just a host type-check. Uses the DATAPLANE fixture (scalar + record boundary
+/// ports routed through to a thread) so the componentized artifact actually
+/// contains the marshalling code; this is also the artifact the out-of-workspace
+/// wasmtime exec oracle builds and runs (REQ-CODEGEN-WIT-DATAPLANE-001).
 ///
 /// `#[ignore]` — needs the wasm32-wasip2 target + shells out to cargo. Run:
 ///   `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
@@ -653,9 +598,9 @@ fn emitted_crate_cargo_checks() {
 fn emitted_crate_builds_to_wasm32_wasip2() {
     use std::process::Command;
 
-    let (scope, inst) = build(RECORDS_MP_AADL, "MpkgRec", "Top", "Impl");
+    let (scope, inst) = build(DATAPLANE_AADL, "DpPkg", "Top", "Impl");
     let config = CodegenConfig {
-        root_name: "life".into(),
+        root_name: "dp".into(),
         output_dir: "out".into(),
         format: OutputFormat::Both,
         verify: None,
@@ -664,7 +609,7 @@ fn emitted_crate_builds_to_wasm32_wasip2() {
     };
     let out = generate(&inst, &scope, &config).expect("codegen should succeed");
 
-    let root = std::env::temp_dir().join("spar-p3-wasm-oracle");
+    let root = std::env::temp_dir().join("spar-dataplane-wasm-oracle");
     let _ = std::fs::remove_dir_all(&root);
     for f in &out.files {
         let path = root.join(&f.path);
@@ -672,7 +617,7 @@ fn emitted_crate_builds_to_wasm32_wasip2() {
         std::fs::write(&path, &f.content).unwrap();
     }
 
-    let target_dir = std::env::temp_dir().join("spar-p3-wasm-target");
+    let target_dir = std::env::temp_dir().join("spar-dataplane-wasm-target");
     let status = Command::new("cargo")
         .arg("build")
         .arg("--target")
@@ -685,7 +630,7 @@ fn emitted_crate_builds_to_wasm32_wasip2() {
 
     assert!(
         status.success(),
-        "generated crate failed to build to wasm32-wasip2; inspect {}",
+        "generated data-plane crate failed to build to wasm32-wasip2; inspect {}",
         root.display()
     );
 }

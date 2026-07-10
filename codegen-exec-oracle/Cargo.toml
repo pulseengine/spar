@@ -1,0 +1,26 @@
+[package]
+name = "codegen-exec-oracle"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+# Out-of-workspace (like `fuzz/`) so the heavy `wasmtime` dependency never
+# poisons the main workspace build. This crate is the RUNTIME data-flow oracle
+# for REQ-CODEGEN-WIT-DATAPLANE-001: it generates the data-plane crate, builds it
+# to a wasm component, and RUNS it under wasmtime to prove a value the host
+# supplied at an In port comes back at the wired Out port.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+wasmtime = { version = "36", features = ["component-model", "cranelift", "runtime", "std"] }
+wasmtime-wasi = "36"
+
+spar-codegen = { path = "../crates/spar-codegen" }
+spar-hir-def = { path = "../crates/spar-hir-def" }
+spar-base-db = { path = "../crates/spar-base-db" }
+
+[[bin]]
+name = "exec-oracle"
+path = "src/main.rs"

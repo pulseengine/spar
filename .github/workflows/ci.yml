@@ -65,10 +65,13 @@ jobs:
   # ── Codegen compile oracle (the #[ignore] gates) ────────────────────
   # `cargo nextest`/`cargo test` above do NOT run #[ignore] tests, so the
   # compiler-enforced codegen oracles (emitted_crate_cargo_checks,
-  # emitted_crate_builds_to_wasm32_wasip2) would otherwise never gate in CI.
-  # They shell out to cargo to build a generated crate — including to
-  # wasm32-wasip2 — so this job installs that target and runs the ignored set.
-  # REQ-CODEGEN-WIT-RECORDS-001/002 (#319).
+  # emitted_dataplane_crate_cargo_checks, emitted_crate_builds_to_wasm32_wasip2)
+  # would otherwise never gate in CI. They shell out to cargo to build a generated
+  # crate — including to wasm32-wasip2 — so this job installs that target and runs
+  # the ignored set. Then the out-of-workspace `codegen-exec-oracle` RUNS the
+  # generated component under wasmtime and asserts a value flows In->Out across the
+  # WIT ABI (the runtime data-flow gate; wasmtime is kept out of the main workspace
+  # build). REQ-CODEGEN-WIT-RECORDS-001/002 (#319), REQ-CODEGEN-WIT-DATAPLANE-001.
   codegen-oracle:
     name: Codegen compile oracle
     runs-on: [self-hosted, linux, x64, rust-cpu]
@@ -80,6 +83,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run generated-crate compile oracles (ignored tests)
         run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
+      - name: Run wasmtime runtime data-flow oracle (REQ-CODEGEN-WIT-DATAPLANE-001)
+        run: cargo run --release --manifest-path codegen-exec-oracle/Cargo.toml --bin exec-oracle
 
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
