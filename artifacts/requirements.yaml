@@ -2819,6 +2819,58 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-002
 
+  - id: REQ-CODEGEN-WIT-STATE-001
+    type: requirement
+    title: "Persistent component state + inter-thread connections in generated Guest"
+    description: >
+      Successor to REQ-CODEGEN-WIT-DATAPLANE-001 (its stated scope boundary). The
+      data plane constructs each thread's component FRESH per dispatch
+      (`{Struct}Default` in every `{thread}_compute`), so (a) a stateful user
+      component does NOT retain state across dispatches, and (b) inter-thread
+      connections (a `ConnectionInstance` with BOTH ends `Some(...)`, e.g. thread A
+      out -> thread B in within one process) are skipped by `resolve_port_routes`
+      because routing them requires a value that survives between two dispatches.
+      Both need the same mechanism: per-component persistent state in the
+      single-threaded wasm component (a `thread_local!`/`static` holding the
+      component instance and inter-thread buffers), initialized once and reused.
+      This requirement adds that: components persist across dispatches, and
+      inter-thread connections marshal through a shared buffer. Oracle extends the
+      wasmtime exec harness: a stateful accumulator component whose output on
+      dispatch N depends on dispatch N-1, plus a producer->consumer inter-thread
+      value observed at the consumer's boundary out port.
+    status: proposed
+    tags: [codegen, wit, rust, wit-bindgen, data-plane, state]
+    fields:
+      release: v0.26.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-DATAPLANE-001
+
+  - id: REQ-CODEGEN-WIT-DATAPLANE-KILN-001
+    type: requirement
+    title: "kiln integration oracle: generated data-plane component runs on kilnd"
+    description: >
+      Integration (dogfood) successor to REQ-CODEGEN-WIT-DATAPLANE-001. The v0.25
+      runtime proof uses wasmtime (an INDEPENDENT typed canonical-ABI impl via
+      `component::bindgen!`) because it cross-checks spar's own lowering — it proves
+      CORRECTNESS. This requirement proves INTEGRATION: the same generated component
+      runs on kiln (`kilnd`), the PulseEngine safety-critical wasm runtime (Component
+      Model + WASI 0.2, no_std-capable), closing the "spar generates -> kiln fires"
+      loop on the target substrate. kiln's host path is raw-ABI
+      (`call_import(module, function, args, memory)`), so the harness must decode the
+      `p-ports` imports from linear memory (or a higher-level kiln host binding if
+      one lands). Deliberately NOT a v0.25 gate: a cross-repo dependency on kiln's
+      host-import maturity must not stall the spar release cadence. Oracle: feed the
+      same sentinel-distinct values through kilnd and assert the round-trip, mirroring
+      the wasmtime exec oracle.
+    status: proposed
+    tags: [codegen, wit, wit-bindgen, data-plane, kiln, integration, dogfood]
+    fields:
+      release: v0.26.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-DATAPLANE-001
+
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
     title: "spar codegen --verify test/build emits inert artifacts"
