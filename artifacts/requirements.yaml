@@ -2732,6 +2732,145 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
 
+  - id: REQ-CODEGEN-WIT-DATAPLANE-001
+    type: requirement
+    title: "Generated Guest marshals typed data process<->thread across the WIT ABI"
+    description: >
+      Successor to REQ-CODEGEN-WIT-RECORDS-002 (the deferred "data plane"): make
+      the generated `Guest` actually MOVE typed data across the component ABI
+      instead of running each thread on a fresh, empty `{Struct}Ports::default()`.
+      Today `{thread}_{method}()` constructs the component, hands it an all-Default
+      ports struct, calls the lifecycle method, and drops the result — the imported
+      `{proc}-ports` functions are never called, so no input reaches the component
+      and no output leaves it. This requirement wires that path.
+
+      ROUTING (the topology fact, empirically confirmed 2026-07-10). The
+      process<->thread hop is encoded in the per-component `connections`
+      (`Vec<ConnectionInstanceIdx>`) of the PROCESS instance, NOT in
+      `semantic_connections` (which traces leaf-to-leaf and is empty here — a
+      process boundary port is a waypoint, not a leaf). In a `ConnectionInstance`,
+      `ConnectionEnd { subcomponent: None, feature }` denotes the process's OWN
+      boundary port (the imported WIT func); `subcomponent: Some(thread)` denotes a
+      thread subcomponent port (a `{Struct}Ports` field). So for a thread `t`:
+      an In field `t.f` is fed by the process connection whose `dst == {Some(t),f}`,
+      reading imported `{src.feature}()` (src.subcomponent == None); an Out field
+      `t.g` drives the process connection whose `src == {Some(t),g}`, calling
+      imported `set-{dst.feature}(ports.g)` (dst.subcomponent == None). A connection
+      with BOTH ends `Some(...)` is an inter-thread hop — OUT OF SCOPE here (needs a
+      value that survives between two dispatches, i.e. shared state) — and MUST be
+      skipped, not misrouted as a boundary port. A thread port with no matching
+      process connection emits NO marshalling line (the field stays Default) and
+      must still compile.
+
+      MARSHALLING. Scalar ports need no conversion (WIT `u32` == Rust `u32`).
+      Record ports do: the imported func returns wit-bindgen's generated struct but
+      the port field is `crate::types::{Record}`, so codegen emits `From`/`Into`
+      bridges at the Guest boundary (field-by-field, nested-first) and keeps
+      `crate::types` as the user-facing type. Both scalar and record ports are in
+      scope for this requirement.
+
+      OUT OF SCOPE (tracked successors): (i) inter-thread connections and any
+      persistent component state — the generated Guest still constructs the
+      component fresh per dispatch, so a STATEFUL user component is broken by
+      construction; this is a STATED limitation, documented in the generated code,
+      not silent (successor REQ-CODEGEN-WIT-STATE-001, v0.26). (ii) running the
+      generated component on the kiln runtime as a dogfood integration oracle
+      (successor REQ-CODEGEN-WIT-DATAPLANE-KILN-001) — see the oracle rationale
+      below for why kiln follows rather than gates.
+
+      ORACLE (executed, gate for this requirement — NOT a prose/compile-only claim,
+      per the #294 lesson that a gate proving compilation must not back a
+      requirement claiming data flow):
+      (1) ROUTING RESOLVER unit test — the pure `SystemInstance -> per-thread
+      [(thread_feature, direction, boundary_feature)]` resolver is asserted EXACT
+      against a full-path fixture (process in -> thread in, thread out -> process
+      out), plus the two blind-spot asserts: an inter-thread connection is SKIPPED,
+      an unconnected thread port yields NO route.
+      (2) COMPILE to `wasm32-wasip2` — the emitted marshalling code (including the
+      record `From`/`Into` bridges) type-checks against the REAL wit-bindgen
+      lowering; a wrong port name or type is a compile error.
+      (3) WASMTIME COMPONENT EXECUTION — the load-bearing runtime proof. A host
+      implements the imported `{proc}-ports` interface via wasmtime's typed
+      `component::bindgen!` (an INDEPENDENT canonical-ABI impl — `fn pin() -> u32`),
+      instantiates the built component, calls the exported `compute`, and asserts
+      the value supplied to an In port is exactly what the component wrote to the
+      wired Out port (identity/echo component), for a scalar port AND a record port
+      (the record case is where a wrong-but-compiling `From` bridge — e.g. swapped
+      same-typed fields — is caught; a wiring-only test cannot). Because
+      `component::bindgen!` is compile-time but the `.wit` is generated at test
+      runtime, the expected `.wit` is committed as a fixture, the host is bound
+      against that fixture, and a golden assertion proves `generate()` reproduces it
+      byte-for-byte (the `golden_test.rs` pattern).
+
+      ORACLE RATIONALE — why wasmtime gates and kiln follows. wasmtime's
+      `component::bindgen!` gives a typed, independent host ABI impl: a genuine
+      cross-check of spar's lowering. kiln's host path is raw-ABI
+      (`call_import(module, function, args, memory)`), so a kiln harness would
+      hand-decode linear memory — re-implementing the very marshalling it verifies,
+      letting a shared wrong assumption pass. So wasmtime proves CORRECTNESS
+      (independent ABI) and gates v0.25.0; kiln proves INTEGRATION (the component
+      runs on the target safety-critical substrate) and is a tracked follow-on so a
+      cross-repo dependency on kiln's host-import maturity cannot stall the release.
+    status: proposed
+    tags: [codegen, wit, rust, wit-bindgen, data-plane]
+    fields:
+      release: v0.25.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-002
+
+  - id: REQ-CODEGEN-WIT-STATE-001
+    type: requirement
+    title: "Persistent component state + inter-thread connections in generated Guest"
+    description: >
+      Successor to REQ-CODEGEN-WIT-DATAPLANE-001 (its stated scope boundary). The
+      data plane constructs each thread's component FRESH per dispatch
+      (`{Struct}Default` in every `{thread}_compute`), so (a) a stateful user
+      component does NOT retain state across dispatches, and (b) inter-thread
+      connections (a `ConnectionInstance` with BOTH ends `Some(...)`, e.g. thread A
+      out -> thread B in within one process) are skipped by `resolve_port_routes`
+      because routing them requires a value that survives between two dispatches.
+      Both need the same mechanism: per-component persistent state in the
+      single-threaded wasm component (a `thread_local!`/`static` holding the
+      component instance and inter-thread buffers), initialized once and reused.
+      This requirement adds that: components persist across dispatches, and
+      inter-thread connections marshal through a shared buffer. Oracle extends the
+      wasmtime exec harness: a stateful accumulator component whose output on
+      dispatch N depends on dispatch N-1, plus a producer->consumer inter-thread
+      value observed at the consumer's boundary out port.
+    status: proposed
+    tags: [codegen, wit, rust, wit-bindgen, data-plane, state]
+    fields:
+      release: v0.26.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-DATAPLANE-001
+
+  - id: REQ-CODEGEN-WIT-DATAPLANE-KILN-001
+    type: requirement
+    title: "kiln integration oracle: generated data-plane component runs on kilnd"
+    description: >
+      Integration (dogfood) successor to REQ-CODEGEN-WIT-DATAPLANE-001. The v0.25
+      runtime proof uses wasmtime (an INDEPENDENT typed canonical-ABI impl via
+      `component::bindgen!`) because it cross-checks spar's own lowering — it proves
+      CORRECTNESS. This requirement proves INTEGRATION: the same generated component
+      runs on kiln (`kilnd`), the PulseEngine safety-critical wasm runtime (Component
+      Model + WASI 0.2, no_std-capable), closing the "spar generates -> kiln fires"
+      loop on the target substrate. kiln's host path is raw-ABI
+      (`call_import(module, function, args, memory)`), so the harness must decode the
+      `p-ports` imports from linear memory (or a higher-level kiln host binding if
+      one lands). Deliberately NOT a v0.25 gate: a cross-repo dependency on kiln's
+      host-import maturity must not stall the spar release cadence. Oracle: feed the
+      same sentinel-distinct values through kilnd and assert the round-trip, mirroring
+      the wasmtime exec oracle.
+    status: proposed
+    tags: [codegen, wit, wit-bindgen, data-plane, kiln, integration, dogfood]
+    fields:
+      release: v0.26.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-DATAPLANE-001
+
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
     title: "spar codegen --verify test/build emits inert artifacts"

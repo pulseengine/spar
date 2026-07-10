@@ -1,0 +1,22 @@
+// Generated from AADL process: DpPkg::p
+package dp-pkg:p;
+
+interface p-ports {
+    record snapshot-impl {
+        addr: u32,
+        %flags: u8,
+    }
+    type word32 = u32;
+
+    pin: func() -> word32;
+    set-pout: func(val: word32);
+    psnap-in: func() -> snapshot-impl;
+    set-psnap-out: func(val: snapshot-impl);
+}
+
+world p-world {
+    import p-ports;
+    export e-compute: func();
+    export prod-compute: func();
+    export cons-compute: func();
+}

@@ -56,6 +56,88 @@ fn data_shape_to_rust_type(shape: &DataShape) -> String {
     }
 }
 
+/// Direction of a data-plane marshalling route at the Guest boundary
+/// (REQ-CODEGEN-WIT-DATAPLANE-001).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteDir {
+    /// Thread In port: read the imported process-port func into the port field
+    /// BEFORE `compute` (`ports.{thread_feature} = {boundary_call};`).
+    In,
+    /// Thread Out port: write the port field to the imported process-port func
+    /// AFTER `compute` (`{boundary_set_call}(ports.{thread_feature});`).
+    Out,
+}
+
+/// One resolved data-plane route: a thread port field wired to a process
+/// boundary port (the imported WIT function). REQ-CODEGEN-WIT-DATAPLANE-001.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PortRoute {
+    /// The `{Struct}Ports` field name — a thread subcomponent feature.
+    pub thread_feature: String,
+    /// The process boundary feature — the imported WIT port function's base name.
+    pub boundary_feature: String,
+    /// Read (In) or write (Out) at the Guest boundary.
+    pub dir: RouteDir,
+}
+
+/// Resolve the process<->thread marshalling routes for a thread instance from
+/// its parent PROCESS's `connections` (REQ-CODEGEN-WIT-DATAPLANE-001).
+///
+/// The hop lives in the process's per-component `connections`, NOT in
+/// `semantic_connections` (which traces leaf-to-leaf and is empty for a single
+/// process<->thread hop — a boundary port is a waypoint, not a leaf). In a
+/// `ConnectionInstance`, `ConnectionEnd.subcomponent == None` is the process's
+/// OWN boundary port (the imported WIT func); `Some(thread)` is a thread
+/// subcomponent port (a `{Struct}Ports` field). So:
+///   * `boundary -> this.thread`  (src None, dst == this thread)  => In route
+///   * `this.thread -> boundary`  (src == this thread, dst None)  => Out route
+///
+/// A connection with BOTH ends `Some(...)` is an inter-thread hop — deferred
+/// (needs state between dispatches) and SKIPPED here, never misrouted. A thread
+/// port with no matching process connection yields no route (field stays
+/// Default). Routes are returned in the process's connection-declaration order.
+pub fn resolve_port_routes(
+    inst: &SystemInstance,
+    thread_idx: ComponentInstanceIdx,
+) -> Vec<PortRoute> {
+    let thread = inst.component(thread_idx);
+    let Some(proc_idx) = thread.parent else {
+        return Vec::new();
+    };
+    let thread_name = thread.name.clone();
+    let proc = inst.component(proc_idx);
+
+    let mut routes = Vec::new();
+    for &conn_idx in &proc.connections {
+        let conn = &inst.connections[conn_idx];
+        let (Some(src), Some(dst)) = (conn.src.as_ref(), conn.dst.as_ref()) else {
+            continue;
+        };
+        let src_boundary = src.subcomponent.is_none();
+        let dst_boundary = dst.subcomponent.is_none();
+        let src_this = src.subcomponent.as_ref() == Some(&thread_name);
+        let dst_this = dst.subcomponent.as_ref() == Some(&thread_name);
+
+        if src_boundary && dst_this {
+            // boundary In port feeds this thread's In field.
+            routes.push(PortRoute {
+                thread_feature: dst.feature.as_str().to_string(),
+                boundary_feature: src.feature.as_str().to_string(),
+                dir: RouteDir::In,
+            });
+        } else if src_this && dst_boundary {
+            // this thread's Out field drives a boundary Out port.
+            routes.push(PortRoute {
+                thread_feature: src.feature.as_str().to_string(),
+                boundary_feature: dst.feature.as_str().to_string(),
+                dir: RouteDir::Out,
+            });
+        }
+        // both-`Some` (inter-thread, deferred) or unrelated -> skipped.
+    }
+    routes
+}
+
 /// Generate a Rust component skeleton for a thread instance.
 ///
 /// `scope` resolves each port's data classifier to a concrete Rust type (scalar,
@@ -210,11 +292,18 @@ fn lifecycle_doc(method: &str, dispatch: &str) -> String {
 /// world⟷Guest alignment: a missing or misnamed method is a compile error, not a
 /// silent drift (the item-7 failure mode).
 ///
-/// Method bodies are `todo!()` stubs. This unit proves the *interface* wiring
-/// compiles and matches the model; the behavior is supplied by the per-thread
-/// `{Struct}Component` implementations ([`generate_rust_component`]).
+/// The `compute` method body wires the DATA PLANE (REQ-CODEGEN-WIT-DATAPLANE-001):
+/// In ports are read from the imported `{proc}-ports` funcs BEFORE `compute`, Out
+/// ports are written AFTER — routed through [`resolve_port_routes`]. Scalars marshal
+/// directly (WIT `u32` == Rust `u32`); records go through a generated `From`/`Into`
+/// bridge (wit-bindgen's struct <-> `crate::types`). `initialize`/`finalize` keep
+/// the plain construct-and-call body. LIMITATION (stated, deferred to
+/// REQ-CODEGEN-WIT-STATE-001): the component is constructed fresh per dispatch, so
+/// a stateful user component does NOT retain state between dispatches, and
+/// inter-thread connections are not yet plumbed.
 pub fn generate_process_bindings(
     inst: &SystemInstance,
+    scope: &GlobalScope,
     proc_idx: ComponentInstanceIdx,
 ) -> GeneratedFile {
     let comp = inst.component(proc_idx);
@@ -222,6 +311,8 @@ pub fn generate_process_bindings(
     let crate_dir = sanitize_ident(comp.name.as_str());
     // World name + wit file name match wit_gen exactly (kebab-case).
     let world_name = crate::wit_gen::wit_ident(comp.name.as_str());
+    // Rust module path at which wit-bindgen exposes the imported ports interface.
+    let boundary_path = boundary_module_path(comp);
 
     let child_threads: Vec<_> = comp
         .children
@@ -236,13 +327,27 @@ pub fn generate_process_bindings(
         "//! Generated WIT bindings for AADL process: {}::{}\n",
         comp.package, comp.name
     ));
-    code.push_str("//! DO NOT EDIT — regenerate with `spar codegen`.\n\n");
+    code.push_str("//! DO NOT EDIT — regenerate with `spar codegen`.\n");
+    code.push_str("//!\n");
+    code.push_str(
+        "//! Data plane: each thread's `compute` reads its In ports from the imported\n\
+         //! `{proc}-ports` functions, runs the component, and writes its Out ports back\n\
+         //! (REQ-CODEGEN-WIT-DATAPLANE-001). LIMITATION: the component is constructed\n\
+         //! fresh per dispatch, so state does NOT persist across dispatches, and\n\
+         //! inter-thread connections are not yet plumbed (REQ-CODEGEN-WIT-STATE-001).\n\n",
+    );
 
     // The `wit_bindgen::generate!` + `export!` glue calls its own unsafe `*_cabi`
     // shims; on the edition-2024 generated crate that trips the
     // `unsafe_op_in_unsafe_fn` future-compat lint inside macro-expanded code the
     // user cannot edit. Allow it crate-wide so the generated crate is warning-clean.
-    code.push_str("#![allow(unsafe_op_in_unsafe_fn)]\n\n");
+    //
+    // `dead_code`: a generated SKELETON legitimately has unread port fields — an
+    // unconnected thread port, or an inter-thread port whose connection is deferred
+    // (REQ-CODEGEN-WIT-STATE-001) — until the user writes `compute` logic. These are
+    // model-derived, not defects, so the generated crate must not fail under a
+    // downstream `-D warnings` (as CI applies). REQ-CODEGEN-WIT-DATAPLANE-001.
+    code.push_str("#![allow(unsafe_op_in_unsafe_fn, dead_code)]\n\n");
 
     // The crate-local record types and the per-thread component modules, wired in.
     code.push_str("mod types;\n");
@@ -261,22 +366,37 @@ pub fn generate_process_bindings(
     code.push_str(&format!("    path: \"../../wit/{world_name}.wit\",\n"));
     code.push_str("});\n\n");
 
+    // Record types that a marshalling route touches, collected nested-first and
+    // de-duplicated; each needs a `From`/`Into` bridge (emitted after the impl).
+    let mut bridge_records: Vec<(String, Vec<DataField>)> = Vec::new();
+    let mut bridge_seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
     code.push_str("/// Component entry point, exported to the WIT world.\n");
     code.push_str("struct Component;\n\n");
     code.push_str("impl Guest for Component {\n");
-    for &&child_idx in &child_threads {
+    for (ti, &&child_idx) in child_threads.iter().enumerate() {
         let child = inst.component(child_idx);
         let thread_kebab = crate::wit_gen::wit_ident(child.name.as_str());
         let child_mod = sanitize_ident(child.name.as_str());
         let child_struct = to_pascal_case(child.name.as_str());
         let dispatch = crate::dispatch_protocol(inst, child_idx);
-        for method in crate::lifecycle_for(&dispatch).methods() {
+
+        // Data-plane marshalling lines apply to `compute` only (port I/O happens
+        // at dispatch). Resolve them once per thread.
+        let (reads, writes) = marshalling_for_thread(
+            inst,
+            scope,
+            child_idx,
+            &boundary_path,
+            &mut bridge_records,
+            &mut bridge_seen,
+        );
+
+        for (mi, method) in crate::lifecycle_for(&dispatch).methods().iter().enumerate() {
             // wit-bindgen mangles the kebab WIT export `{thread}-{method}` to the
             // snake Rust method `{thread}_{method}`. Deriving both names from the
             // same `wit_ident` keeps them consistent; the compiler is the final
-            // arbiter (see doc comment). The body delegates to the per-thread
-            // component (construct-on-call); populating ports from the imported
-            // WIT functions + persistent state is the deferred data plane.
+            // arbiter (see doc comment).
             let rust_method = format!("{thread_kebab}-{method}").replace('-', "_");
             code.push_str(&format!("    fn {rust_method}() {{\n"));
             code.push_str(&format!(
@@ -288,17 +408,184 @@ pub fn generate_process_bindings(
             code.push_str(&format!(
                 "        let mut ports = crate::{child_mod}::{child_struct}Ports::default();\n"
             ));
+            if *method == "compute" {
+                for line in &reads {
+                    code.push_str(line);
+                    code.push('\n');
+                }
+            }
             code.push_str(&format!("        component.{method}(&mut ports);\n"));
+            if *method == "compute" {
+                for line in &writes {
+                    code.push_str(line);
+                    code.push('\n');
+                }
+            }
             code.push_str("    }\n");
+            let _ = (ti, mi);
         }
     }
     code.push_str("}\n\n");
     code.push_str("export!(Component);\n");
 
+    // Emit the record `From`/`Into` bridges (both directions) between wit-bindgen's
+    // generated structs (in the imported ports module) and `crate::types::*`.
+    if !bridge_records.is_empty() {
+        code.push('\n');
+        code.push_str(
+            "// Record marshalling bridges: wit-bindgen's ABI structs <-> crate::types.\n",
+        );
+        for (type_name, fields) in &bridge_records {
+            code.push_str(&record_bridge(&boundary_path, type_name, fields));
+        }
+    }
+
     GeneratedFile {
         path: format!("crates/{crate_dir}/src/lib.rs"),
         content: code,
     }
+}
+
+/// The Rust module path (inside the generated bindings crate) where wit-bindgen
+/// exposes the imported `{proc}-ports` interface funcs and record types. wit-bindgen
+/// mirrors the WIT package `{ns}:{pkg}` + interface as nested snake_case modules:
+/// `crate::{ns}::{pkg}::{pkg}_ports`. Derived from the SAME `wit_ident` wit_gen uses
+/// so the path stays in lock-step with the emitted WIT (empirically confirmed
+/// against `wit-bindgen rust`, 2026-07-10).
+fn boundary_module_path(proc_comp: &spar_hir_def::instance::ComponentInstance) -> String {
+    let pkg_mod = crate::wit_gen::wit_ident(proc_comp.package.as_str()).replace('-', "_");
+    let name_mod = crate::wit_gen::wit_ident(proc_comp.name.as_str()).replace('-', "_");
+    format!("crate::{pkg_mod}::{name_mod}::{name_mod}_ports")
+}
+
+/// Build the In-read (pre-compute) and Out-write (post-compute) marshalling lines
+/// for one thread, and register any record types that need a `From`/`Into` bridge.
+/// Only DataPort routes are marshalled here (event/event-data use `on-`/`emit-` +
+/// `option<>` and are out of the v0.25 data-plane scope).
+fn marshalling_for_thread(
+    inst: &SystemInstance,
+    scope: &GlobalScope,
+    thread_idx: ComponentInstanceIdx,
+    boundary_path: &str,
+    bridge_records: &mut Vec<(String, Vec<DataField>)>,
+    bridge_seen: &mut std::collections::BTreeSet<String>,
+) -> (Vec<String>, Vec<String>) {
+    let thread = inst.component(thread_idx);
+    let mut reads = Vec::new();
+    let mut writes = Vec::new();
+
+    for route in resolve_port_routes(inst, thread_idx) {
+        let Some(feat) = thread
+            .features
+            .iter()
+            .map(|&fi| &inst.features[fi])
+            .find(|f| f.name.as_str() == route.thread_feature)
+        else {
+            continue;
+        };
+        // Data-plane scope: DataPort only.
+        if feat.kind != FeatureKind::DataPort {
+            continue;
+        }
+        let field = sanitize_ident(&route.thread_feature);
+        // The imported func base name: In -> `{feat}`, Out -> `set-{feat}`, snake.
+        let fn_base = crate::wit_gen::wit_ident(&route.boundary_feature).replace('-', "_");
+
+        // Records marshal through `.into()`; scalars/opaque marshal directly.
+        let record_shape = feat.classifier.as_ref().and_then(|c| {
+            match scope.resolve_data_shape(&thread.package, c) {
+                DataShape::Record { type_name, fields } => Some((type_name, fields)),
+                _ => None,
+            }
+        });
+        let conv_in = if record_shape.is_some() {
+            ".into()"
+        } else {
+            ""
+        };
+
+        match route.dir {
+            RouteDir::In => reads.push(format!(
+                "        ports.{field} = {boundary_path}::{fn_base}(){conv_in};"
+            )),
+            RouteDir::Out => {
+                let arg = if record_shape.is_some() {
+                    format!("ports.{field}.into()")
+                } else {
+                    format!("ports.{field}")
+                };
+                writes.push(format!("        {boundary_path}::set_{fn_base}({arg});"));
+            }
+        }
+
+        // Register the record (and its nested records) for bridge emission.
+        if let Some((type_name, fields)) = record_shape {
+            collect_bridge_records(&type_name, &fields, bridge_records, bridge_seen);
+        }
+    }
+    (reads, writes)
+}
+
+/// Collect a record shape (nested-first, de-duplicated) into the bridge worklist,
+/// mirroring [`flatten_record_rust`] so a nested record is bridged before the outer
+/// that references it via `.into()`.
+fn collect_bridge_records(
+    type_name: &str,
+    fields: &[DataField],
+    out: &mut Vec<(String, Vec<DataField>)>,
+    seen: &mut std::collections::BTreeSet<String>,
+) {
+    let key = to_pascal_case(type_name);
+    if !seen.insert(key) {
+        return;
+    }
+    for f in fields {
+        if let DataShape::Record {
+            type_name: nt,
+            fields: nf,
+        } = &f.shape
+        {
+            collect_bridge_records(nt, nf, out, seen);
+        }
+    }
+    out.push((type_name.to_string(), fields.to_vec()));
+}
+
+/// Emit both `From` directions for one record type: wit-bindgen's ABI struct
+/// (`{boundary}::{Pascal}`) <-> spar's `crate::types::{Pascal}`. The two structs
+/// have identical field layout (both derived from the SAME `DataShape`); a
+/// scalar/opaque field copies directly, a nested-record field recurses via
+/// `.into()`. This is the hand-authored conversion the wasmtime exec oracle is
+/// load-bearing for (a swapped same-typed field compiles but fails at runtime).
+fn record_bridge(boundary_path: &str, type_name: &str, fields: &[DataField]) -> String {
+    let pascal = to_pascal_case(type_name);
+    let wit_ty = format!("{boundary_path}::{pascal}");
+    let spar_ty = format!("crate::types::{pascal}");
+
+    let field_map = |receiver: &str| -> String {
+        fields
+            .iter()
+            .map(|f| {
+                let name = sanitize_ident(f.name.as_str());
+                let conv = if matches!(f.shape, DataShape::Record { .. }) {
+                    ".into()"
+                } else {
+                    ""
+                };
+                format!("            {name}: {receiver}.{name}{conv},")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "impl From<{wit_ty}> for {spar_ty} {{\n    \
+             fn from(v: {wit_ty}) -> Self {{\n        Self {{\n{fwd}\n        }}\n    }}\n}}\n\
+         impl From<{spar_ty}> for {wit_ty} {{\n    \
+             fn from(v: {spar_ty}) -> Self {{\n        Self {{\n{back}\n        }}\n    }}\n}}\n",
+        fwd = field_map("v"),
+        back = field_map("v"),
+    )
 }
 
 /// Convert a feature kind + optional classifier to a Rust type. The classifier

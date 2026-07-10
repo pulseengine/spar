@@ -1,0 +1,78 @@
+package DpPkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data Byte8
+        properties
+            Data_Size => 1 Bytes;
+    end Byte8;
+
+    data Snapshot
+    end Snapshot;
+
+    data implementation Snapshot.Impl
+        subcomponents
+            addr: data Word32;
+            flags: data Byte8;
+    end Snapshot.Impl;
+
+    thread Echo
+        features
+            din: in data port Word32;
+            dout: out data port Word32;
+            rec_in: in data port Snapshot.Impl;
+            rec_out: out data port Snapshot.Impl;
+            unwired: in data port Word32;
+    end Echo;
+
+    thread implementation Echo.Impl
+    end Echo.Impl;
+
+    thread Producer
+        features
+            p_out: out data port Word32;
+    end Producer;
+
+    thread implementation Producer.Impl
+    end Producer.Impl;
+
+    thread Consumer
+        features
+            c_in: in data port Word32;
+    end Consumer;
+
+    thread implementation Consumer.Impl
+    end Consumer.Impl;
+
+    process Proc
+        features
+            pin: in data port Word32;
+            pout: out data port Word32;
+            psnap_in: in data port Snapshot.Impl;
+            psnap_out: out data port Snapshot.Impl;
+    end Proc;
+
+    process implementation Proc.Impl
+        subcomponents
+            e: thread Echo.Impl;
+            prod: thread Producer.Impl;
+            cons: thread Consumer.Impl;
+        connections
+            c1: port pin -> e.din;
+            c2: port e.dout -> pout;
+            c3: port psnap_in -> e.rec_in;
+            c4: port e.rec_out -> psnap_out;
+            c5: port prod.p_out -> cons.c_in;
+    end Proc.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            p: process Proc.Impl;
+    end Top.Impl;
+end DpPkg;
