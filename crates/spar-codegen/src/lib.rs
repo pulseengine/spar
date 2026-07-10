@@ -452,7 +452,7 @@ pub fn generate(
         // used to emit.
         for &(idx, _comp) in &processes {
             files.push(rust_gen::generate_types_module(inst, scope, idx));
-            files.push(rust_gen::generate_process_bindings(inst, idx));
+            files.push(rust_gen::generate_process_bindings(inst, scope, idx));
         }
     }
 
