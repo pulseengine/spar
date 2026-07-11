@@ -2856,10 +2856,9 @@ artifacts:
       `{thread}.rs` skeleton, which carries `DO NOT EDIT — regenerate`; adding real
       state means editing a file regen overwrites. The mechanism (instance reuse) is
       delivered here; a regen-safe user-authoring split is a separate successor.
-    status: proposed
+    status: verified
     tags: [codegen, wit, rust, wit-bindgen, data-plane, state]
-    fields:
-      release: v0.26.0
+    release: v0.26.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-DATAPLANE-001
@@ -2884,7 +2883,7 @@ artifacts:
     status: proposed
     tags: [codegen, wit, wit-bindgen, data-plane, kiln, integration, dogfood]
     fields:
-      release: v0.26.0
+      release: v0.27.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-DATAPLANE-001
