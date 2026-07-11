@@ -2832,11 +2832,30 @@ artifacts:
       Both need the same mechanism: per-component persistent state in the
       single-threaded wasm component (a `thread_local!`/`static` holding the
       component instance and inter-thread buffers), initialized once and reused.
-      This requirement adds that: components persist across dispatches, and
-      inter-thread connections marshal through a shared buffer. Oracle extends the
-      wasmtime exec harness: a stateful accumulator component whose output on
-      dispatch N depends on dispatch N-1, plus a producer->consumer inter-thread
-      value observed at the consumer's boundary out port.
+      This requirement adds that:
+      (1) PERSISTENT STATE — the generated binding REUSES the component instance
+      across dispatches (a `thread_local! { RefCell<{Struct}Default> }`, borrowed per
+      `compute` instead of `{Struct}Default` constructed fresh) so any state the
+      component holds survives between dispatches; the skeleton struct gains
+      `#[derive(Default)]` for the one-time init. `borrow_mut` assumes single-
+      threaded, non-reentrant dispatch (a wasip2 component), stated in the binding.
+      (2) INTER-THREAD — a `ConnectionInstance` with BOTH ends `Some(...)` routes
+      through a `thread_local!` buffer with LATEST-VALUE / SAMPLING semantics: the
+      source thread's Out field writes the buffer after its `compute`, the
+      destination thread's In field reads the latest buffered value before its
+      `compute`. This is sampling (last-writer-wins), NOT AADL immediate (same-frame,
+      src-before-dst ordered) nor delayed (previous-frame latch) connection timing —
+      immediate-vs-delayed timing is explicitly OUT OF SCOPE.
+      Oracle extends the wasmtime exec harness on ONE live instance: (a) a stateful
+      accumulator called twice (feed 5 then 7, assert out == 12 — fresh-construct or
+      a call-local buffer yields 7, so the number discriminates persistence); (b) a
+      producer->consumer inter-thread value delivered across two SEPARATE dispatches
+      and observed at the consumer's boundary out port. Both sabotaged (revert the
+      thread_local to per-call Default / drop the buffer write) to prove non-vacuity.
+      STATED LIMITATION (skeleton authoring): user state lives in the generated
+      `{thread}.rs` skeleton, which carries `DO NOT EDIT — regenerate`; adding real
+      state means editing a file regen overwrites. The mechanism (instance reuse) is
+      delivered here; a regen-safe user-authoring split is a separate successor.
     status: proposed
     tags: [codegen, wit, rust, wit-bindgen, data-plane, state]
     fields:

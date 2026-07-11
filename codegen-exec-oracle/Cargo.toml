@@ -24,3 +24,7 @@ spar-base-db = { path = "../crates/spar-base-db" }
 [[bin]]
 name = "exec-oracle"
 path = "src/main.rs"
+
+[[bin]]
+name = "state-oracle"
+path = "src/state_main.rs"

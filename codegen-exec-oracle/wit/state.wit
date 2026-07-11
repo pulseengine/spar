@@ -1,0 +1,18 @@
+// Generated from AADL process: StatePkg::p
+package state-pkg:p;
+
+interface p-ports {
+    type word32 = u32;
+
+    acc-in: func() -> word32;
+    set-acc-out: func(val: word32);
+    src-in: func() -> word32;
+    set-sink-out: func(val: word32);
+}
+
+world p-world {
+    import p-ports;
+    export a-compute: func();
+    export pr-compute: func();
+    export cn-compute: func();
+}

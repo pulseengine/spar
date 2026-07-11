@@ -85,6 +85,8 @@ jobs:
         run: cargo test -p spar-codegen --test lifecycle_bindings -- --ignored
       - name: Run wasmtime runtime data-flow oracle (REQ-CODEGEN-WIT-DATAPLANE-001)
         run: cargo run --release --manifest-path codegen-exec-oracle/Cargo.toml --bin exec-oracle
+      - name: Run wasmtime state + inter-thread oracle (REQ-CODEGEN-WIT-STATE-001)
+        run: cargo run --release --manifest-path codegen-exec-oracle/Cargo.toml --bin state-oracle
 
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
