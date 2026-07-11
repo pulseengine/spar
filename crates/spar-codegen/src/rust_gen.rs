@@ -357,11 +357,13 @@ fn lifecycle_doc(method: &str, dispatch: &str) -> String {
 /// In ports are read from the imported `{proc}-ports` funcs BEFORE `compute`, Out
 /// ports are written AFTER — routed through [`resolve_port_routes`]. Scalars marshal
 /// directly (WIT `u32` == Rust `u32`); records go through a generated `From`/`Into`
-/// bridge (wit-bindgen's struct <-> `crate::types`). `initialize`/`finalize` keep
-/// the plain construct-and-call body. LIMITATION (stated, deferred to
-/// REQ-CODEGEN-WIT-STATE-001): the component is constructed fresh per dispatch, so
-/// a stateful user component does NOT retain state between dispatches, and
-/// inter-thread connections are not yet plumbed.
+/// bridge (wit-bindgen's struct <-> `crate::types`).
+///
+/// Each thread's component instance is held in a `thread_local!` and REUSED across
+/// dispatches (borrowed in every lifecycle method), so component state persists;
+/// inter-thread connections are carried by `thread_local!` buffers with latest-value
+/// semantics (REQ-CODEGEN-WIT-STATE-001). Remaining limitation: user state lives in
+/// the generated `{thread}.rs` skeleton, which regen overwrites.
 pub fn generate_process_bindings(
     inst: &SystemInstance,
     scope: &GlobalScope,
@@ -393,9 +395,11 @@ pub fn generate_process_bindings(
     code.push_str(
         "//! Data plane: each thread's `compute` reads its In ports from the imported\n\
          //! `{proc}-ports` functions, runs the component, and writes its Out ports back\n\
-         //! (REQ-CODEGEN-WIT-DATAPLANE-001). LIMITATION: the component is constructed\n\
-         //! fresh per dispatch, so state does NOT persist across dispatches, and\n\
-         //! inter-thread connections are not yet plumbed (REQ-CODEGEN-WIT-STATE-001).\n\n",
+         //! (REQ-CODEGEN-WIT-DATAPLANE-001). Each thread's component instance is held in\n\
+         //! a `thread_local!` and reused across dispatches so state persists;\n\
+         //! inter-thread connections are carried by `thread_local!` buffers with\n\
+         //! latest-value semantics (REQ-CODEGEN-WIT-STATE-001). Note: user state lives\n\
+         //! in the `{thread}.rs` skeleton, which regen overwrites.\n\n",
     );
 
     // The `wit_bindgen::generate!` + `export!` glue calls its own unsafe `*_cabi`
