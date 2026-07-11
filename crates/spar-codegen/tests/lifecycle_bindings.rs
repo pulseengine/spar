@@ -13,7 +13,10 @@
 //!    disk for the target dir). Run with:
 //!    `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
 
-use spar_codegen::rust_gen::{PortRoute, RouteDir, generate_process_bindings, resolve_port_routes};
+use spar_codegen::rust_gen::{
+    InterThreadRoute, PortRoute, RouteDir, generate_process_bindings, resolve_interthread_routes,
+    resolve_port_routes,
+};
 use spar_codegen::wit_gen::generate_wit;
 use spar_codegen::{CodegenConfig, OutputFormat, generate};
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
@@ -317,6 +320,42 @@ fn routing_resolver_is_exact_including_blind_spots() {
     );
 }
 
+/// The state/inter-thread fixture (REQ-CODEGEN-WIT-STATE-001): an Accum thread
+/// (boundary in->out, for persistent state) plus a Producer->Consumer inter-thread
+/// pair (`pr.po -> cn.ci`) whose value is observable at Consumer's boundary out.
+const STATE_AADL: &str = include_str!("../../../test-data/codegen/state.aadl");
+
+/// INTER-THREAD RESOLVER oracle (REQ-CODEGEN-WIT-STATE-001): `resolve_interthread_routes`
+/// returns exactly the both-ends-`Some` connection `pr.po -> cn.ci`, and NOT the
+/// boundary connections (which `resolve_port_routes` owns). Complements
+/// `routing_resolver_is_exact_including_blind_spots`, which asserts these same
+/// inter-thread connections are absent from the boundary routes.
+#[test]
+fn interthread_resolver_is_exact() {
+    let (_scope, inst) = build(STATE_AADL, "StatePkg", "Top", "Impl");
+    let idx = process_idx(&inst);
+    let routes = resolve_interthread_routes(&inst, idx);
+    assert_eq!(
+        routes,
+        vec![InterThreadRoute {
+            src_thread: "pr".into(),
+            src_feature: "po".into(),
+            dst_thread: "cn".into(),
+            dst_feature: "ci".into(),
+        }],
+        "only the both-ends-Some connection pr.po -> cn.ci is an inter-thread route"
+    );
+    // The boundary connections (acc_in->a.ai, a.ao->acc_out, src_in->pr.pi,
+    // cn.co->sink_out) must NOT appear as inter-thread routes.
+    assert_eq!(
+        routes.len(),
+        1,
+        "boundary connections are not inter-thread: {routes:?}"
+    );
+    // And the buffer ident is stable/unique.
+    assert_eq!(routes[0].buffer_ident(), "ITB_PR_PO__CN_CI");
+}
+
 /// MARSHALLING string oracle (REQ-CODEGEN-WIT-DATAPLANE-001): the generated Guest
 /// `compute` reads In ports from the imported funcs before compute and writes Out
 /// ports after — scalars directly, records via a `From`/`Into` bridge. This is the
@@ -394,6 +433,111 @@ fn dataplane_wit_matches_exec_oracle_fixture() {
         "generated DATAPLANE WIT drifted from the committed exec-oracle fixture; \
          the wasmtime host `bindgen!` would bind a stale ABI. Regenerate \
          codegen-exec-oracle/wit/dp.wit."
+    );
+}
+
+/// STATE fixture generates the persistent-state + inter-thread wiring
+/// (REQ-CODEGEN-WIT-STATE-001): a per-thread `thread_local!` component instance
+/// (reused across dispatches) and a `thread_local!` inter-thread buffer. Fast shape
+/// check; the exec oracle proves state persists and the buffer carries the value.
+#[test]
+fn state_bindings_emit_threadlocal_and_interthread_buffer() {
+    let (scope, inst) = build(STATE_AADL, "StatePkg", "Top", "Impl");
+    let idx = process_idx(&inst);
+    let src = generate_process_bindings(&inst, &scope, idx).content;
+
+    // Persistent instance: each thread's component held in a thread_local RefCell,
+    // borrowed per dispatch (not constructed fresh).
+    assert!(
+        src.contains(
+            "static A_STATE: std::cell::RefCell<crate::a::ADefault> = \
+             std::cell::RefCell::new(Default::default());"
+        ),
+        "Accum must hold a persistent thread_local instance:\n{src}"
+    );
+    assert!(
+        src.contains("A_STATE.with(|__st| {")
+            && src.contains("let mut component = __st.borrow_mut();"),
+        "compute must borrow the persistent instance, not construct fresh:\n{src}"
+    );
+    assert!(
+        !src.contains("let mut component = crate::a::ADefault;"),
+        "must NOT fresh-construct the component:\n{src}"
+    );
+    // Inter-thread buffer: pr.po -> cn.ci carried by a thread_local buffer.
+    assert!(
+        src.contains("static ITB_PR_PO__CN_CI: std::cell::RefCell<u32>"),
+        "inter-thread buffer must be declared:\n{src}"
+    );
+    assert!(
+        src.contains("ITB_PR_PO__CN_CI.with(|__b| *__b.borrow_mut() = ports.po.clone());"),
+        "producer must write its Out port to the buffer:\n{src}"
+    );
+    assert!(
+        src.contains("ports.ci = ITB_PR_PO__CN_CI.with(|__b| __b.borrow().clone());"),
+        "consumer must read its In port from the buffer:\n{src}"
+    );
+}
+
+/// GOLDEN LOCK for the STATE exec oracle: `generate_wit` for the STATE process must
+/// reproduce the committed `codegen-exec-oracle/wit/state.wit` byte-for-byte (the
+/// `bindgen!` host binds against it). Same guard as the DATAPLANE golden lock.
+#[test]
+fn state_wit_matches_exec_oracle_fixture() {
+    let (scope, inst) = build(STATE_AADL, "StatePkg", "Top", "Impl");
+    let idx = process_idx(&inst);
+    let generated = generate_wit(&inst, &scope, idx)
+        .expect("wit generation should succeed")
+        .content;
+    let committed = include_str!("../../../codegen-exec-oracle/wit/state.wit");
+    assert_eq!(
+        generated, committed,
+        "generated STATE WIT drifted from the committed exec-oracle fixture; \
+         regenerate codegen-exec-oracle/wit/state.wit."
+    );
+}
+
+/// COMPILE oracle for STATE (REQ-CODEGEN-WIT-STATE-001): the thread_local instance
+/// reuse + inter-thread buffer wiring type-checks against real wit-bindgen output.
+///
+/// `#[ignore]` (shells out to cargo). Run with `-- --ignored`.
+#[test]
+#[ignore = "shells out to cargo check (network/disk); run with --ignored"]
+fn emitted_state_crate_cargo_checks() {
+    use std::process::Command;
+
+    let (scope, inst) = build(STATE_AADL, "StatePkg", "Top", "Impl");
+    let config = CodegenConfig {
+        root_name: "st".into(),
+        output_dir: "out".into(),
+        format: OutputFormat::Both,
+        verify: None,
+        rivet: false,
+        dry_run: true,
+    };
+    let out = generate(&inst, &scope, &config).expect("codegen should succeed");
+
+    let root = std::env::temp_dir().join("spar-state-oracle");
+    let _ = std::fs::remove_dir_all(&root);
+    for f in &out.files {
+        let path = root.join(&f.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &f.content).unwrap();
+    }
+
+    let target_dir = std::env::temp_dir().join("spar-state-target");
+    let status = Command::new("cargo")
+        .arg("check")
+        .current_dir(&root)
+        .env("CARGO_INCREMENTAL", "0")
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .status()
+        .expect("failed to spawn cargo check");
+    assert!(
+        status.success(),
+        "generated STATE crate failed to `cargo check` (thread_local/inter-thread \
+         wiring broken); inspect {}",
+        root.display()
     );
 }
 

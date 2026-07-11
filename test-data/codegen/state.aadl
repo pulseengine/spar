@@ -1,0 +1,67 @@
+package StatePkg
+public
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    -- Accumulator: boundary in -> (stateful) -> boundary out. Exercises
+    -- persistent component state across dispatches.
+    thread Accum
+        features
+            ai: in data port Word32;
+            ao: out data port Word32;
+    end Accum;
+
+    thread implementation Accum.Impl
+    end Accum.Impl;
+
+    -- Producer -> Consumer inter-thread pair. Producer boundary-in -> its out
+    -- port -> (inter-thread buffer) -> Consumer in port -> boundary-out.
+    thread Producer
+        features
+            pi: in data port Word32;
+            po: out data port Word32;
+    end Producer;
+
+    thread implementation Producer.Impl
+    end Producer.Impl;
+
+    thread Consumer
+        features
+            ci: in data port Word32;
+            co: out data port Word32;
+    end Consumer;
+
+    thread implementation Consumer.Impl
+    end Consumer.Impl;
+
+    process Sp
+        features
+            acc_in: in data port Word32;
+            acc_out: out data port Word32;
+            src_in: in data port Word32;
+            sink_out: out data port Word32;
+    end Sp;
+
+    process implementation Sp.Impl
+        subcomponents
+            a: thread Accum.Impl;
+            pr: thread Producer.Impl;
+            cn: thread Consumer.Impl;
+        connections
+            k1: port acc_in -> a.ai;
+            k2: port a.ao -> acc_out;
+            k3: port src_in -> pr.pi;
+            k4: port pr.po -> cn.ci;
+            k5: port cn.co -> sink_out;
+    end Sp.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            p: process Sp.Impl;
+    end Top.Impl;
+end StatePkg;

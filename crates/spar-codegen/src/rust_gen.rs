@@ -138,6 +138,62 @@ pub fn resolve_port_routes(
     routes
 }
 
+/// One resolved INTER-THREAD route: a source thread's Out port wired directly to a
+/// destination thread's In port within the same process (REQ-CODEGEN-WIT-STATE-001).
+/// Both connection ends are `Some(subcomponent)` — neither is a process boundary
+/// port — so this value never leaves the component; it is carried between the two
+/// threads' dispatches by a `thread_local!` buffer with latest-value (sampling)
+/// semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterThreadRoute {
+    pub src_thread: String,
+    pub src_feature: String,
+    pub dst_thread: String,
+    pub dst_feature: String,
+}
+
+impl InterThreadRoute {
+    /// Stable, unique Rust identifier for this route's `thread_local!` buffer.
+    /// UPPER_SNAKE (a `static` name) so it satisfies `non_upper_case_globals`.
+    pub fn buffer_ident(&self) -> String {
+        format!(
+            "ITB_{}_{}__{}_{}",
+            sanitize_ident(&self.src_thread).to_uppercase(),
+            sanitize_ident(&self.src_feature).to_uppercase(),
+            sanitize_ident(&self.dst_thread).to_uppercase(),
+            sanitize_ident(&self.dst_feature).to_uppercase(),
+        )
+    }
+}
+
+/// Resolve every inter-thread connection in a PROCESS (REQ-CODEGEN-WIT-STATE-001):
+/// a `ConnectionInstance` whose `src` and `dst` are BOTH `Some(subcomponent)` — the
+/// case [`resolve_port_routes`] deliberately skips. Returned in connection order.
+pub fn resolve_interthread_routes(
+    inst: &SystemInstance,
+    proc_idx: ComponentInstanceIdx,
+) -> Vec<InterThreadRoute> {
+    let proc = inst.component(proc_idx);
+    let mut routes = Vec::new();
+    for &conn_idx in &proc.connections {
+        let conn = &inst.connections[conn_idx];
+        let (Some(src), Some(dst)) = (conn.src.as_ref(), conn.dst.as_ref()) else {
+            continue;
+        };
+        if let (Some(src_thread), Some(dst_thread)) =
+            (src.subcomponent.as_ref(), dst.subcomponent.as_ref())
+        {
+            routes.push(InterThreadRoute {
+                src_thread: src_thread.as_str().to_string(),
+                src_feature: src.feature.as_str().to_string(),
+                dst_thread: dst_thread.as_str().to_string(),
+                dst_feature: dst.feature.as_str().to_string(),
+            });
+        }
+    }
+    routes
+}
+
 /// Generate a Rust component skeleton for a thread instance.
 ///
 /// `scope` resolves each port's data classifier to a concrete Rust type (scalar,
@@ -240,9 +296,14 @@ pub fn generate_rust_component(
     }
     code.push_str("}\n\n");
 
-    // Skeleton implementation
+    // Skeleton implementation. `#[derive(Default)]` lets the process binding hold
+    // ONE instance in a `thread_local!` (constructed once via `Default`) and reuse
+    // it across dispatches so component state persists (REQ-CODEGEN-WIT-STATE-001);
+    // a user adding state fields keeps them `Default`-constructible.
     code.push_str("/// Default implementation skeleton.\n");
-    code.push_str(&format!("pub struct {struct_name}Default;\n\n"));
+    code.push_str(&format!(
+        "#[derive(Default)]\npub struct {struct_name}Default;\n\n"
+    ));
     code.push_str(&format!(
         "impl {struct_name}Component for {struct_name}Default {{\n"
     ));
@@ -371,18 +432,54 @@ pub fn generate_process_bindings(
     let mut bridge_records: Vec<(String, Vec<DataField>)> = Vec::new();
     let mut bridge_seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
+    // Inter-thread connections (both ends `Some`) are carried between the two
+    // threads' dispatches by a thread_local buffer with latest-value (sampling)
+    // semantics (REQ-CODEGEN-WIT-STATE-001).
+    let itc_routes = resolve_interthread_routes(inst, proc_idx);
+
+    // PERSISTENT STATE: the binding holds ONE instance of each thread's component in
+    // a thread_local RefCell, borrowed per dispatch, instead of constructing
+    // `{Struct}Default` fresh — so component state survives across dispatches. Plus
+    // one thread_local buffer per inter-thread route. A wasip2 component is
+    // single-threaded and non-reentrant, so `borrow_mut` here cannot alias.
+    code.push_str(
+        "// Persistent per-thread component state + inter-thread buffers. Reused\n\
+         // across dispatches; single-threaded, non-reentrant wasip2 component so the\n\
+         // RefCell borrows cannot alias. REQ-CODEGEN-WIT-STATE-001.\n",
+    );
+    for &&child_idx in &child_threads {
+        let child = inst.component(child_idx);
+        let m = sanitize_ident(child.name.as_str());
+        let s = to_pascal_case(child.name.as_str());
+        code.push_str(&format!(
+            "thread_local! {{ static {up}_STATE: std::cell::RefCell<crate::{m}::{s}Default> = \
+             std::cell::RefCell::new(Default::default()); }}\n",
+            up = m.to_uppercase(),
+        ));
+    }
+    for route in &itc_routes {
+        let ty = interthread_buffer_type(inst, scope, proc_idx, route);
+        code.push_str(&format!(
+            "thread_local! {{ static {b}: std::cell::RefCell<{ty}> = \
+             std::cell::RefCell::new(Default::default()); }}\n",
+            b = route.buffer_ident(),
+        ));
+    }
+    code.push('\n');
+
     code.push_str("/// Component entry point, exported to the WIT world.\n");
     code.push_str("struct Component;\n\n");
     code.push_str("impl Guest for Component {\n");
-    for (ti, &&child_idx) in child_threads.iter().enumerate() {
+    for &&child_idx in &child_threads {
         let child = inst.component(child_idx);
+        let thread_name = child.name.as_str().to_string();
         let thread_kebab = crate::wit_gen::wit_ident(child.name.as_str());
         let child_mod = sanitize_ident(child.name.as_str());
         let child_struct = to_pascal_case(child.name.as_str());
+        let state_ident = format!("{}_STATE", child_mod.to_uppercase());
         let dispatch = crate::dispatch_protocol(inst, child_idx);
 
-        // Data-plane marshalling lines apply to `compute` only (port I/O happens
-        // at dispatch). Resolve them once per thread.
+        // Boundary marshalling (process ports), compute only.
         let (reads, writes) = marshalling_for_thread(
             inst,
             scope,
@@ -391,38 +488,63 @@ pub fn generate_process_bindings(
             &mut bridge_records,
             &mut bridge_seen,
         );
+        // Inter-thread reads (this thread is a destination) / writes (a source),
+        // through the shared buffers. `.clone()` covers scalar (Copy) and record.
+        let itc_reads: Vec<String> = itc_routes
+            .iter()
+            .filter(|r| r.dst_thread == thread_name)
+            .map(|r| {
+                format!(
+                    "        ports.{f} = {b}.with(|__b| __b.borrow().clone());",
+                    f = sanitize_ident(&r.dst_feature),
+                    b = r.buffer_ident(),
+                )
+            })
+            .collect();
+        let itc_writes: Vec<String> = itc_routes
+            .iter()
+            .filter(|r| r.src_thread == thread_name)
+            .map(|r| {
+                format!(
+                    "        {b}.with(|__b| *__b.borrow_mut() = ports.{f}.clone());",
+                    f = sanitize_ident(&r.src_feature),
+                    b = r.buffer_ident(),
+                )
+            })
+            .collect();
 
-        for (mi, method) in crate::lifecycle_for(&dispatch).methods().iter().enumerate() {
+        for method in crate::lifecycle_for(&dispatch).methods() {
             // wit-bindgen mangles the kebab WIT export `{thread}-{method}` to the
-            // snake Rust method `{thread}_{method}`. Deriving both names from the
-            // same `wit_ident` keeps them consistent; the compiler is the final
-            // arbiter (see doc comment).
+            // snake Rust method `{thread}_{method}`.
             let rust_method = format!("{thread_kebab}-{method}").replace('-', "_");
+            let is_compute = *method == "compute";
             code.push_str(&format!("    fn {rust_method}() {{\n"));
             code.push_str(&format!(
                 "        use crate::{child_mod}::{child_struct}Component;\n"
             ));
+            // Borrow the persistent instance; all port I/O happens inside the borrow.
+            code.push_str(&format!("        {state_ident}.with(|__st| {{\n"));
+            code.push_str("            let mut component = __st.borrow_mut();\n");
             code.push_str(&format!(
-                "        let mut component = crate::{child_mod}::{child_struct}Default;\n"
+                "            let mut ports = crate::{child_mod}::{child_struct}Ports::default();\n"
             ));
-            code.push_str(&format!(
-                "        let mut ports = crate::{child_mod}::{child_struct}Ports::default();\n"
-            ));
-            if *method == "compute" {
-                for line in &reads {
+            if is_compute {
+                for line in reads.iter().chain(itc_reads.iter()) {
+                    code.push_str("    ");
                     code.push_str(line);
                     code.push('\n');
                 }
             }
-            code.push_str(&format!("        component.{method}(&mut ports);\n"));
-            if *method == "compute" {
-                for line in &writes {
+            code.push_str(&format!("            component.{method}(&mut ports);\n"));
+            if is_compute {
+                for line in writes.iter().chain(itc_writes.iter()) {
+                    code.push_str("    ");
                     code.push_str(line);
                     code.push('\n');
                 }
             }
+            code.push_str("        });\n");
             code.push_str("    }\n");
-            let _ = (ti, mi);
         }
     }
     code.push_str("}\n\n");
@@ -524,6 +646,30 @@ fn marshalling_for_thread(
         }
     }
     (reads, writes)
+}
+
+/// The Rust type of an inter-thread buffer — the source thread port's resolved Rust
+/// type (scalar/record/Vec<u8>), matching both endpoints of the connection.
+fn interthread_buffer_type(
+    inst: &SystemInstance,
+    scope: &GlobalScope,
+    proc_idx: ComponentInstanceIdx,
+    route: &InterThreadRoute,
+) -> String {
+    let proc = inst.component(proc_idx);
+    for &child_idx in &proc.children {
+        let child = inst.component(child_idx);
+        if child.name.as_str() != route.src_thread {
+            continue;
+        }
+        for &fi in &child.features {
+            let feat = &inst.features[fi];
+            if feat.name.as_str() == route.src_feature {
+                return feature_to_rust_type(feat.kind, &feat.classifier, scope, &child.package);
+            }
+        }
+    }
+    "Vec<u8>".to_string()
 }
 
 /// Collect a record shape (nested-first, de-duplicated) into the bridge worklist,
