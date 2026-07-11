@@ -2811,10 +2811,9 @@ artifacts:
       (independent ABI) and gates v0.25.0; kiln proves INTEGRATION (the component
       runs on the target safety-critical substrate) and is a tracked follow-on so a
       cross-repo dependency on kiln's host-import maturity cannot stall the release.
-    status: proposed
+    status: verified
     tags: [codegen, wit, rust, wit-bindgen, data-plane]
-    fields:
-      release: v0.25.0
+    release: v0.25.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-002
