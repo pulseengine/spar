@@ -2865,28 +2865,56 @@ artifacts:
 
   - id: REQ-CODEGEN-WIT-DATAPLANE-KILN-001
     type: requirement
-    title: "kiln integration oracle: generated data-plane component runs on kilnd"
+    title: "kiln integration oracle: generated component runs on kiln via meld"
     description: >
-      Integration (dogfood) successor to REQ-CODEGEN-WIT-DATAPLANE-001. The v0.25
-      runtime proof uses wasmtime (an INDEPENDENT typed canonical-ABI impl via
-      `component::bindgen!`) because it cross-checks spar's own lowering — it proves
-      CORRECTNESS. This requirement proves INTEGRATION: the same generated component
-      runs on kiln (`kilnd`), the PulseEngine safety-critical wasm runtime (Component
-      Model + WASI 0.2, no_std-capable), closing the "spar generates -> kiln fires"
-      loop on the target substrate. kiln's host path is raw-ABI
-      (`call_import(module, function, args, memory)`), so the harness must decode the
-      `p-ports` imports from linear memory (or a higher-level kiln host binding if
-      one lands). Deliberately NOT a v0.25 gate: a cross-repo dependency on kiln's
-      host-import maturity must not stall the spar release cadence. Oracle: feed the
-      same sentinel-distinct values through kilnd and assert the round-trip, mirroring
-      the wasmtime exec oracle.
-    status: proposed
-    tags: [codegen, wit, wit-bindgen, data-plane, kiln, integration, dogfood]
+      Integration (dogfood) successor to REQ-CODEGEN-WIT-DATAPLANE-001 /
+      REQ-CODEGEN-WIT-STATE-001. wasmtime proves CORRECTNESS (an INDEPENDENT typed
+      canonical-ABI impl via `component::bindgen!`); this proves INTEGRATION on a
+      SECOND runtime — the same generated component executes on kiln, the
+      PulseEngine safety-critical wasm interpreter — closing the "spar generates ->
+      kiln fires" loop on the target substrate.
+
+      ARCHITECTURE FINDING (spike, 2026-07-11): kiln runs CORE wasm modules, NOT
+      Component Model components. Direct component instantiation via
+      `from_parsed_*` is a won't-fix path (kiln#269) that still panics on HEAD
+      (`.expect()` in resolve_exports; filed kiln#427). The blessed path (RFC #46)
+      is `component -> meld fuse -> core module -> kiln`. meld flattens the
+      `state-pkg:p/p-ports` interface into flat core (module, field) imports, which
+      kiln drives via a host import handler with TYPED `Value` args (no manual
+      linear-memory decoding needed for scalars — better than the raw-ABI decode the
+      original scope assumed).
+
+      ORACLE (executed, gate — `codegen-kiln-oracle/`, out-of-workspace so the kiln
+      + meld dependency trees never poison the main build; git-pinned kiln + meld):
+      the full chain runs mechanically every CI build —
+      (1) spar codegen of state.aadl -> multi-crate wasip2 workspace;
+      (2) `cargo build --target wasm32-wasip2` -> component;
+      (3) `meld fuse` IN-PROCESS (meld-core `Fuser`) -> CORE module;
+      (4) kiln `CapabilityAwareEngine` (QM) loads + instantiates the core module,
+      `enable_wasi` + a chained `HostImportHandler` routing `wasi:*` -> WasiDispatcher
+      and the custom AADL ports -> host state;
+      (5) TWO proofs on ONE live kiln instance (same discriminators as the wasmtime
+      state-oracle): PERSISTENCE — feed acc-in 5 then 7 across two `a-compute`
+      dispatches, assert set-acc-out == 12 (a fresh instance / call-local yields 7);
+      INTER-THREAD — feed src-in=42, dispatch `pr-compute` then `cn-compute`
+      separately, assert set-sink-out == 42 (the thread_local buffer surviving
+      between dispatches inside the one kiln instance is under test).
+      SABOTAGE (non-vacuity): reverting the accumulator to overwrite drops
+      persistence to 7; the spike sweep (acc-in {5,9,123456} -> same) proves the
+      guest computes the value, not the harness.
+
+      Deliberately NOT a v0.25/v0.26 gate: a cross-repo dependency on kiln + meld
+      must not stall the spar release cadence; it follows once the substrate is
+      proven, which it now is.
+    status: implemented
+    tags: [codegen, wit, wit-bindgen, data-plane, kiln, meld, integration, dogfood]
     fields:
       release: v0.27.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-DATAPLANE-001
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-STATE-001
 
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
