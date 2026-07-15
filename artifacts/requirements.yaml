@@ -2906,10 +2906,9 @@ artifacts:
       Deliberately NOT a v0.25/v0.26 gate: a cross-repo dependency on kiln + meld
       must not stall the spar release cadence; it follows once the substrate is
       proven, which it now is.
-    status: implemented
+    status: verified
     tags: [codegen, wit, wit-bindgen, data-plane, kiln, meld, integration, dogfood]
-    fields:
-      release: v0.27.0
+    release: v0.27.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-DATAPLANE-001
