@@ -1,0 +1,45 @@
+[package]
+name = "codegen-kiln-oracle"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+# Out-of-workspace (like `codegen-exec-oracle/` and `fuzz/`) so the heavy kiln +
+# meld dependency trees never poison the main workspace build. This crate is the
+# RUNTIME oracle for REQ-CODEGEN-WIT-DATAPLANE-KILN-001: it dogfoods the full
+# PulseEngine chain — spar codegen → wasip2 component → `meld fuse` (in-process,
+# meld-core) → CORE module → executed on the kiln interpreter — and asserts a
+# value the host supplies at an AADL In port comes back at the wired Out port.
+#
+# kiln runs CORE modules, not Component Model components (kiln#269 — direct
+# component instantiation is a won't-fix path that still panics, kiln#427). meld
+# is the mandatory lowering step: it flattens the component's `state-pkg:p/p-ports`
+# interface into flat core (module, field) imports that kiln drives via a host
+# import handler.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+
+spar-codegen = { path = "../crates/spar-codegen" }
+spar-hir-def = { path = "../crates/spar-hir-def" }
+spar-base-db = { path = "../crates/spar-base-db" }
+
+# meld — in-process component→core fusion (Fuser). Default features (no
+# attestation → deterministic, no wsc-attestation dep). Pinned to meld v0.40.0
+# (origin/main); the Fuser/FuserConfig API + CoreModule default are stable.
+meld-core = { git = "https://github.com/pulseengine/meld.git", rev = "ccf6672a5a044c2e38dd548a4db57e29d129d5b0" }
+
+# kiln — core-module interpreter + WASI + host import handler. Pinned to the same
+# rev the spike proved (c6bcaab, origin/main). git-dep is the established cross-repo
+# PulseEngine pattern (spar already uses it for etch).
+kiln-error      = { git = "https://github.com/pulseengine/kiln.git", rev = "c6bcaab3cdca69c212a63412f4d5bfcddb127e47", default-features = false, features = ["std"] }
+kiln-foundation = { git = "https://github.com/pulseengine/kiln.git", rev = "c6bcaab3cdca69c212a63412f4d5bfcddb127e47", default-features = false, features = ["std", "kiln-allocator"] }
+kiln-wasi       = { git = "https://github.com/pulseengine/kiln.git", rev = "c6bcaab3cdca69c212a63412f4d5bfcddb127e47", default-features = false, features = ["std", "preview2", "wasi-cli", "wasi-io", "wasi-clocks", "wasi-random", "wasi-filesystem"] }
+kiln-runtime    = { git = "https://github.com/pulseengine/kiln.git", rev = "c6bcaab3cdca69c212a63412f4d5bfcddb127e47", default-features = false, features = ["std", "wasi"] }
+kiln-host       = { git = "https://github.com/pulseengine/kiln.git", rev = "c6bcaab3cdca69c212a63412f4d5bfcddb127e47", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "kiln-oracle"
+path = "src/main.rs"
