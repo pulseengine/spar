@@ -619,7 +619,7 @@ struct IrqChainSource {
 }
 
 /// Read the `Deployment_Properties::Priority` value.
-fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
+pub(crate) fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
     // Typed path
     if let Some(expr) = props
         .get_typed("Deployment_Properties", "Priority")

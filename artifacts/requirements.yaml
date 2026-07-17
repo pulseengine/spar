@@ -1953,6 +1953,74 @@ artifacts:
     status: implemented
     tags: [rta, timing, isr, v093, tier-a-5]
 
+  - id: REQ-RTA-ARINC-SUPPLY-001
+    type: requirement
+    title: ARINC-653 partition-supply-derived inner response-time bound
+    description: >
+      System shall, for inner threads bound under an ARINC-653 virtual
+      processor (periodic resource Γ = (Π, Θ), parsed today for
+      ARINC-WINDOW-UTILIZATION), emit a per-thread worst-case
+      response-time bound that accounts for the partition *supply*, not
+      wall-clock, by extending the Lean-verified jittered+blocking RTA
+      recurrence (scheduling_verified::compute_response_time_jittered_blocking,
+      RTAJittered.lean, 0 sorry) with:
+
+      (b) a supply-derived release jitter J_i = 2(Π−Θ) (the worst-case
+      contiguous blackout of the periodic resource), computed from the
+      enclosing VP's (Period, Execution_Time) and injected into the
+      recurrence in place of the user Dispatch_Jitter path for
+      partition-bound threads; the busy-window w-form is emitted as
+      R_i = 2(Π−Θ) + w_i where w_i is the fixed point of
+      w = C_i + B_i + Σ_{hp j}⌈(w+J_j)/T_j⌉·C_j (each hp J_j = 2(Π−Θ)),
+      sound under the side condition w_i ≤ Θ.
+
+      (c) a cooperative non-preemptive blocking term B_i = max_{lp} C_j^seg
+      (longest lower-priority run-to-completion poll segment), carried in
+      the existing blocking_ps slot.
+
+      (d) a demand-vs-supply fallback when w_i > Θ: with linear supply
+      lower bound lsbf_Γ(t) = ⌊(Θ/Π)·(t − 2(Π−Θ))⌋ (0 for t ≤ 2(Π−Θ)),
+      the emitted bound is R_i = min{ t ∈ (0, D_i] : rbf_i(t) ≤ lsbf_Γ(t) }
+      with rbf_i(t) = C_i + B_i + Σ_{hp j}⌈t/T_j⌉·C_j (no supply-derived
+      jitter in rbf — the sbf already carries the blackout). Unschedulable
+      or ill-formed sets (no admissible t, Θ > Π, or the existing
+      overcommit gate) produce a hard Error of the same severity class as
+      ARINC-WINDOW-UTILIZATION — never a silently-wrong number. The v1
+      fallback is scoped to J^extra = 0; the extra-jitter + fallback
+      combination is declined with the same hard Error, not analyzed with
+      jitter dropped.
+
+      PROVEN (Lean, 0 sorry): monotonicity and least-fixed-point
+      convergence of the recurrence WITH the constant blocking term
+      (rta_step_jittered_blocking C J B = rta_step_jittered C (J+B) — both
+      own-jitter and blocking are pure additive constants, so the existing
+      RTAJittered theorems transfer by instantiation; a thin corollary
+      records it); and that lsbf_Γ is a sound lower bound of the periodic
+      resource's supply-bound function.
+
+      ASSUMED (the OS's obligation, the theorem's hypothesis, NOT spar's
+      proof): that the partition scheduler actually delivers supply ≥
+      lsbf_Γ(t) in every interval of length t. gust owns this contract.
+
+      Honesty caveats carried in spar's docs for this feature: (1) the
+      emitted bound is only as sound as its inputs — C_i / C_j^seg / Θ
+      must come from a sound static WCET bound, not measured
+      high-water-marks; (2) an unqualified proof assistant carries no
+      tool-qualification credit by itself — the machine-checked bound is a
+      safety-case input, not a certification claim. Tracks issue #331;
+      companion input-side issue synth#778.
+    status: implemented
+    tags: [rta, arinc653, supply, timing, proofs, v0280]
+    fields:
+      release: v0.28.0
+    links:
+      - type: traces-to
+        target: REQ-RTA-001
+      - type: traces-to
+        target: REQ-PROOF-SCHED-001
+      - type: traces-to
+        target: REQ-PROOF-ARINC653-001
+
   - id: REQ-TRACE-TOPOLOGY-004
     type: requirement
     title: LLDP JSON TopologySource for runtime adjacency ingest
