@@ -2015,10 +2015,9 @@ artifacts:
       tool-qualification credit by itself — the machine-checked bound is a
       safety-case input, not a certification claim. Tracks issue #331;
       companion input-side issue synth#778.
-    status: implemented
+    status: verified
     tags: [rta, arinc653, supply, timing, proofs, v0280]
-    fields:
-      release: v0.28.0
+    release: v0.28.0
     links:
       - type: traces-to
         target: REQ-RTA-001
