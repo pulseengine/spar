@@ -62,10 +62,14 @@
 //!   credit by itself**: the machine-checked recurrence is a safety-case
 //!   input, not a certification claim.
 //! - PROVEN (Lean, 0 sorry): recurrence monotonicity + least-fixed-point
-//!   convergence *with the constant blocking term*, and that `lsbf_Γ` is a
-//!   sound lower bound of the resource's supply. ASSUMED (the OS's
-//!   obligation, the theorem's hypothesis): that the partition scheduler
-//!   actually delivers supply ≥ `lsbf_Γ(t)`.
+//!   convergence *with the constant blocking term*; `lsbf_Γ` monotone and
+//!   zero below the blackout; and *conditional* fallback soundness —
+//!   given the supply guarantee, `rbf(t) ≤ lsbf_Γ(t)` implies demand ≤
+//!   supply at `t`. ASSUMED (the OS's obligation, the theorem's
+//!   hypothesis — NOT proven here): that the partition scheduler actually
+//!   delivers supply ≥ `lsbf_Γ(t)`, i.e. that `lsbf_Γ` is a sound lower
+//!   bound of the real supply. spar does not formalize the periodic-
+//!   resource supply-bound function or prove `lsbf_Γ ≤ supply`.
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;

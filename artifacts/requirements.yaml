@@ -1995,12 +1995,18 @@ artifacts:
       (rta_step_jittered_blocking C J B = rta_step_jittered C (J+B) — both
       own-jitter and blocking are pure additive constants, so the existing
       RTAJittered theorems transfer by instantiation; a thin corollary
-      records it); and that lsbf_Γ is a sound lower bound of the periodic
-      resource's supply-bound function.
+      records it); that lsbf_Γ is monotone in t and zero below the
+      blackout; and the CONDITIONAL fallback soundness — GIVEN the supply
+      guarantee, passing rbf(t) ≤ lsbf_Γ(t) implies real demand ≤ real
+      supply at t (fallback_sound_of_supply_guarantee, pure transitivity).
 
       ASSUMED (the OS's obligation, the theorem's hypothesis, NOT spar's
       proof): that the partition scheduler actually delivers supply ≥
-      lsbf_Γ(t) in every interval of length t. gust owns this contract.
+      lsbf_Γ(t) in every interval of length t — i.e. that lsbf_Γ is a
+      sound lower bound of the resource's real supply. spar does NOT
+      formalize the periodic-resource supply-bound function or prove
+      lsbf_Γ ≤ supply; it is the SupplyGuarantee hypothesis. gust owns
+      this contract.
 
       Honesty caveats carried in spar's docs for this feature: (1) the
       emitted bound is only as sound as its inputs — C_i / C_j^seg / Θ
