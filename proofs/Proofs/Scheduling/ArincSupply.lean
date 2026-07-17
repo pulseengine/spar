@@ -155,8 +155,9 @@ theorem lsbf_mono (Pi Theta : Nat) {t₁ t₂ : Nat} (h : t₁ ≤ t₂) :
     exact Nat.zero_le _
   · have h2 : ¬ t₂ ≤ blackout Pi Theta := by omega
     rw [if_neg h1, if_neg h2]
+    -- `gcongr` peels `Θ·(·)/Π` monotonicity and discharges the residual
+    -- `t₁ − blackout ≤ t₂ − blackout` from `h : t₁ ≤ t₂` in context.
     gcongr
-    omega
 
 /-- The ASSUMED supply contract: the partition scheduler delivers at least
     the linear supply lower bound in every interval of length `t`. This is
