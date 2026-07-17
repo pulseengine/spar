@@ -19,6 +19,7 @@ import Proofs.Scheduling.RTA
 import Proofs.Scheduling.RMBound
 import Proofs.Scheduling.EDF
 import Proofs.Scheduling.RTAJittered
+import Proofs.Scheduling.ArincSupply
 import Proofs.Scheduling.Latency
 import Proofs.Scheduling.Arinc653Isolation
 import Proofs.Network.MinPlus

@@ -16,6 +16,7 @@
 
 pub mod ai_ml;
 pub mod arinc653;
+pub mod arinc_supply;
 pub mod binding_check;
 pub mod binding_rules;
 pub mod bus_bandwidth;
@@ -194,6 +195,7 @@ impl AnalysisRunner {
         self.register(Box::new(Emv2PropagationAnalysis));
         self.register(Box::new(Emv2StpaBridgeAnalysis));
         self.register(Box::new(Arinc653Analysis));
+        self.register(Box::new(crate::arinc_supply::Arinc653SupplyRtaAnalysis));
         self.register(Box::new(WrpcBindingAnalysis));
         self.register(Box::new(ModeReachabilityAnalysis));
         self.register(Box::new(WeightPowerAnalysis));
@@ -266,6 +268,7 @@ impl AnalysisRunner {
         self.register(Box::new(Emv2PropagationAnalysis));
         self.register(Box::new(Emv2StpaBridgeAnalysis));
         self.register(Box::new(Arinc653Analysis));
+        self.register(Box::new(crate::arinc_supply::Arinc653SupplyRtaAnalysis));
         self.register(Box::new(WrpcBindingAnalysis));
         self.register(Box::new(ModeReachabilityAnalysis));
         self.register(Box::new(WeightPowerAnalysis));
