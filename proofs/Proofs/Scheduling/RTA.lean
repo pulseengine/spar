@@ -21,11 +21,12 @@ import Proofs.Scheduling.RTACore
 namespace Spar.Scheduling.RTA
 
 -- The combinational core (`Task`, `ceilDiv`, `interference`,
--- `totalInterference`, `rtaStep`) lives in `RTACore.lean` — a
--- mathlib-free module so `Codegen.lean` can reflect over these exact
--- definitions to generate the Rust (issue #321). The theorems below are
--- proved about those same definitions, so the proofs and the generated
--- Rust share one source.
+-- `totalInterference`, `rtaStep`) lives in the mathlib-free
+-- `RTACore.lean` — the named single source of the scheduling math that a
+-- future reflection-based generator will consume (issue #321,
+-- REQ-PROOF-SCHED-CODEGEN-001, OPEN). The theorems below are proved about
+-- those same definitions; today the Rust in scheduling_verified.rs mirrors
+-- them by hand, bound by property tests, not yet generated.
 
 -- Key property: ceilDiv is monotone in its first argument.
 theorem ceilDiv_mono {a₁ a₂ b : Nat} (hb : b > 0) (h : a₁ ≤ a₂) :
