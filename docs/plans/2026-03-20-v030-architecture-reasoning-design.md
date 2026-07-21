@@ -255,7 +255,14 @@ Where possible, analysis algorithms should be **proven correct** using rules_lea
 **Approach:**
 1. Define the analysis algorithm in Lean4
 2. Prove correctness theorems
-3. Generate Rust via `lake exe codegen` (existing infrastructure)
+3. Generate Rust from the Lean definitions
+   > **Superseded (2026-07, #321):** the `lake exe codegen` "existing
+   > infrastructure" this line assumed was a string-emitting stub that
+   > only covered base RTA and was removed as fiction
+   > (REQ-PROOF-SCHED-SPEC-SOURCE-001). A real reflection-based generator
+   > is tracked as REQ-PROOF-SCHED-CODEGEN-001 (OPEN); until it lands,
+   > `scheduling_verified.rs` is hand-written and bound to the Lean by
+   > property tests.
 4. Conformance tests verify Lean output matches Rust implementation
 
 This builds on the existing `proofs/` directory and `scheduling_verified.rs` pattern. Each new analysis pass gets a corresponding proof file.

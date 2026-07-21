@@ -16,36 +16,17 @@
   crates/spar-analysis/src/scheduling.rs.
 -/
 import Mathlib.Tactic
+import Proofs.Scheduling.RTACore
 
 namespace Spar.Scheduling.RTA
 
--- A task is characterized by its worst-case execution time,
--- period, and deadline (all positive naturals in picoseconds).
-structure Task where
-  exec : Nat      -- worst-case execution time C_i
-  period : Nat    -- minimum inter-arrival time T_i
-  deadline : Nat  -- relative deadline D_i
-  exec_pos : exec > 0
-  period_pos : period > 0
-  deadline_pos : deadline > 0
-
--- Ceiling division: ⌈a / b⌉
-def ceilDiv (a b : Nat) (_ : b > 0) : Nat :=
-  (a + b - 1) / b
-
--- The interference from a single higher-priority task hp over
--- interval of length r.
-def interference (hp : Task) (r : Nat) : Nat :=
-  ceilDiv r hp.period hp.period_pos * hp.exec
-
--- Total interference from all higher-priority tasks (recursive).
-def totalInterference : List Task → Nat → Nat
-  | [], _ => 0
-  | hp :: rest, r => interference hp r + totalInterference rest r
-
--- The RTA recurrence function: R_{n+1} = C_i + Σ ⌈R_n/T_j⌉ × C_j
-def rtaStep (task : Task) (hps : List Task) (r : Nat) : Nat :=
-  task.exec + totalInterference hps r
+-- The combinational core (`Task`, `ceilDiv`, `interference`,
+-- `totalInterference`, `rtaStep`) lives in the mathlib-free
+-- `RTACore.lean` — the named single source of the scheduling math that a
+-- future reflection-based generator will consume (issue #321,
+-- REQ-PROOF-SCHED-CODEGEN-001, OPEN). The theorems below are proved about
+-- those same definitions; today the Rust in scheduling_verified.rs mirrors
+-- them by hand, bound by property tests, not yet generated.
 
 -- Key property: ceilDiv is monotone in its first argument.
 theorem ceilDiv_mono {a₁ a₂ b : Nat} (hb : b > 0) (h : a₁ ≤ a₂) :

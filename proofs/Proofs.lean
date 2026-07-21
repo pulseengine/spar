@@ -15,6 +15,7 @@
 --   6. Flow latency monotonicity in component WCETs (Feiertag et al. 2009)
 --   7. ARINC 653 partition isolation (ARINC 653P1-5 §3)
 
+import Proofs.Scheduling.RTACore
 import Proofs.Scheduling.RTA
 import Proofs.Scheduling.RMBound
 import Proofs.Scheduling.EDF
