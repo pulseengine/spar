@@ -35,66 +35,21 @@
 
 import Mathlib.Tactic
 import Proofs.Scheduling.RTA
+import Proofs.Scheduling.RTAJitteredCore
 
 namespace Spar.Scheduling.RTAJittered
 
 open Spar.Scheduling.RTA (ceilDiv ceilDiv_mono iterN iterN_mono iterN_nondecreasing
   no_fp_implies_growth bounded_mono_nat_seq)
 
-/-! ## Type definitions mirroring the Rust API -/
+/-! ## Definitions
 
-/-- A higher-priority task with release jitter, mirroring the Rust tuple
-    `(period, exec, jitter) : (u64, u64, u64)`. -/
-structure JitteredHigherPriorityTask where
-  period : Nat
-  exec : Nat
-  jitter : Nat
-  period_pos : period > 0
-
-/-- A task under analysis, mirroring the Rust signature
-    `compute_response_time_jittered(exec, deadline, jitter, …)`. -/
-structure JitteredTask where
-  exec : Nat
-  deadline : Nat
-  jitter : Nat
-  exec_pos : exec > 0
-  deadline_pos : deadline > 0
-
-/-- ISR interference as an opaque monotone function `R ↦ overhead(R)`.
-    The Rust side computes this from a list of `(period, exec)` tuples
-    via `total_isr_interference`; we abstract over the list because the
-    convergence argument only needs monotonicity. -/
-abbrev IsrOverhead := Nat → Nat
-
-/-- Constructor matching the Rust `total_isr_interference` (which is
-    just `total_interference` over `(period, exec)` pairs).  Lifts a
-    list of ISR specs into an `IsrOverhead` function. -/
-def isrOverheadOfList (isrs : List Spar.Scheduling.RTA.Task) : IsrOverhead :=
-  fun r => Spar.Scheduling.RTA.totalInterference isrs r
-
-/-! ## Step function — the right-hand side of the jittered recurrence -/
-
-/-- Interference from one higher-priority task with release jitter:
-    `⌈(r + J_j) / T_j⌉ × C_j`.  Mirrors `interference_jittered` in
-    `scheduling_verified.rs`. -/
-def interferenceJittered (hp : JitteredHigherPriorityTask) (r : Nat) : Nat :=
-  ceilDiv (r + hp.jitter) hp.period hp.period_pos * hp.exec
-
-/-- Total higher-priority interference, summed over all HP tasks.
-    Mirrors `total_interference_jittered`. -/
-def totalInterferenceJittered : List JitteredHigherPriorityTask → Nat → Nat
-  | [], _ => 0
-  | hp :: rest, r => interferenceJittered hp r + totalInterferenceJittered rest r
-
-/-- The jittered RTA recurrence step:
-      R_{n+1} = C_i + J_i + Σ_j ⌈(R_n + J_j)/T_j⌉ × C_j + ISR(R_n).
-    Mirrors `rta_step_jittered` in `scheduling_verified.rs`. -/
-def rtaStepJittered
-    (task : JitteredTask)
-    (hps : List JitteredHigherPriorityTask)
-    (isr : IsrOverhead)
-    (r : Nat) : Nat :=
-  task.exec + task.jitter + totalInterferenceJittered hps r + isr r
+The structures (`JitteredHigherPriorityTask`, `JitteredTask`), the
+`IsrOverhead` abbreviation, and the step functions (`isrOverheadOfList`,
+`interferenceJittered`, `totalInterferenceJittered`, `rtaStepJittered`)
+live in the mathlib-free `Proofs.Scheduling.RTAJitteredCore` (same
+namespace) so codegen reflection can read them.  The theorems below are
+proved about those exact definitions. -/
 
 /-! ## Theorem 1 — Monotonicity -/
 

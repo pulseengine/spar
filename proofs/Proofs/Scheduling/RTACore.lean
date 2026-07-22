@@ -2,22 +2,22 @@
   RTACore — the mathlib-free combinational core of the RTA theory.
 
   These are the pure `def`s (no tactics, no Mathlib) that the Rust
-  analysis in `crates/spar-analysis/src/scheduling_verified.rs` mirrors.
-  They are separated out of `RTA.lean` (which imports `Mathlib.Tactic`
-  for the proofs) so a future reflection-based generator can import THIS
-  file and read the real definitions while staying mathlib-free — the
+  analysis in `crates/spar-analysis/src/scheduling_verified.rs` is
+  GENERATED from. They are separated out of `RTA.lean` (which imports
+  `Mathlib.Tactic` for the proofs) so `Codegen.lean` can import THIS file
+  and reflect over the real definitions while staying mathlib-free — the
   named single source of the scheduling math for issue #321
-  (REQ-PROOF-SCHED-CODEGEN-001, OPEN). Today the Rust is hand-written to
-  mirror these defs and bound to them by property tests; it is not yet
-  generated.
+  (REQ-PROOF-SCHED-CODEGEN-001, CLOSED v0.30.0). `lake exe codegen` reads
+  the elaborated `Expr` of these defs and lowers it to the Rust recurrence
+  arithmetic; a byte-diff gate in `proofs.yml` fails on drift.
 
   `RTA.lean` imports this module and proves the theorems (monotonicity,
-  convergence) about these exact definitions, so the proofs are stated
-  over the same source the Rust mirrors.
+  convergence) about these exact definitions, so the proofs and the
+  generated Rust are stated over one source.
 
   DO NOT add `import Mathlib.*` here — keeping this module mathlib-free is
-  what will let the future generator reflect over it without dragging in
-  mathlib (the fast build path the generator needs).
+  what lets `Codegen.lean` reflect over it without dragging in mathlib
+  (the fast build path the generator needs).
 -/
 
 namespace Spar.Scheduling.RTA
