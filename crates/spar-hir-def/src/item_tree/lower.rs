@@ -2885,6 +2885,22 @@ mod lowering_diagnostic_tests {
     use spar_syntax::parse;
 
     #[test]
+    fn based_integer_underscore_separators_value(/* #339 */) {
+        // `_` digit separators inside a based literal must be ignored and yield
+        // the same value as the separator-free form (AADL v2.3). This guards the
+        // value semantics; the lexer change is what makes the whole token reach
+        // this path in the first place.
+        assert_eq!(parse_aadl_integer("16#0800_0000#"), Some(134_217_728));
+        assert_eq!(
+            parse_aadl_integer("16#0800_0000#"),
+            parse_aadl_integer("16#08000000#"),
+            "separated and unseparated base-16 literals must be equal"
+        );
+        assert_eq!(parse_aadl_integer("2#1010_1010#"), Some(170));
+        assert_eq!(parse_aadl_integer_or_real("16#0800_0000#"), 134_217_728);
+    }
+
+    #[test]
     fn annex_library_emits_diagnostic() {
         let src = r#"
 package Pkg

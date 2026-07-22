@@ -565,6 +565,32 @@ artifacts:
     status: implemented
     tags: [parsing, as5506, v030]
 
+  - id: REQ-PARSER-002
+    type: requirement
+    title: Underscore digit separators inside based numeric literals
+    description: >
+      Closes #339. The lexer accepted `_` digit separators in decimal
+      literals (`131_072`) but rejected them inside based literals
+      (`16#0800_0000#`), splitting the token at the first `_` so the value
+      failed to parse. AADL v2.3 permits `_` as a digit separator in based
+      literals too. Fix: the based-literal scan loop in
+      `crates/spar-parser/src/lexer.rs` now also consumes `_`, so
+      `16#0800_0000#` lexes as one INTEGER_LIT and lowers to the same value
+      as `16#08000000#` (= 134217728). The value path already stripped `_`
+      before radix conversion, so no downstream change was needed.
+      PROVEN by executed oracles: a lexer unit test that the whole token is
+      a single INTEGER_LIT (confirmed red before the fix), a value test that
+      `parse_aadl_integer("16#0800_0000#") == parse_aadl_integer("16#08000000#")
+      == 134217728`, and an end-to-end lower test that the property value
+      survives lexing + lowering intact.
+    status: implemented
+    tags: [parsing, lexer, literals, as5506, bug]
+    fields:
+      release: v0.31.0
+    links:
+      - type: traces-to
+        target: REQ-PARSER-001
+
   # ── Property Verification ────────────────────────────────────────────
 
   - id: REQ-VERIFY-001

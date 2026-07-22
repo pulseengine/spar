@@ -612,6 +612,38 @@ end P;
     }
 
     #[test]
+    fn based_literal_underscore_separator_property_value() {
+        // End-to-end (#339): a base-16 property value with `_` digit separators
+        // must survive lexing + lowering as a single value. Before the fix the
+        // lexer split `16#0800_0000#` at the first `_`, corrupting the token.
+        let db = make_db();
+        let src = r#"package P
+public
+  device D
+    properties
+      Deployment::Priority => 16#0800_0000#;
+  end D;
+end P;
+"#;
+        let file = spar_base_db::SourceFile::new(&db, "based.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+
+        let ct = &tree.component_types[tree.component_types.iter().next().unwrap().0];
+        assert_eq!(
+            ct.property_associations.len(),
+            1,
+            "expected exactly 1 property association, got {}",
+            ct.property_associations.len()
+        );
+        let pa = &tree.property_associations[ct.property_associations[0]];
+        assert_eq!(pa.name.property_name.as_str(), "Priority");
+        assert_eq!(
+            pa.value, "16#0800_0000#",
+            "the whole based literal (with separators) must be captured as the value"
+        );
+    }
+
+    #[test]
     fn property_inheritance_type_to_impl() {
         let db = make_db();
         let src = r#"package P
