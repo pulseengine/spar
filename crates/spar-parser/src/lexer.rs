@@ -166,11 +166,15 @@ fn scan_number(c: &mut Cursor<'_>) -> SyntaxKind {
 
     // Check for based literal: digits followed by `#`.
     if !c.is_eof() && c.current() == b'#' {
-        // Based literal — consume `#`, then hex digits (possibly with a `.`),
-        // then closing `#`, then optional exponent.
+        // Based literal — consume `#`, then hex digits (possibly with a `.`
+        // and `_` digit separators), then closing `#`, then optional exponent.
+        // AADL v2.3 permits `_` as a digit separator inside based literals
+        // (e.g. `16#0800_0000#`), consistent with the decimal path below.
         c.bump(); // skip `#`
         let mut is_real = false;
-        while !c.is_eof() && (is_hex_digit(c.current()) || c.current() == b'.') {
+        while !c.is_eof()
+            && (is_hex_digit(c.current()) || c.current() == b'.' || c.current() == b'_')
+        {
             if c.current() == b'.' {
                 is_real = true;
             }
@@ -635,6 +639,21 @@ mod tests {
     fn integer_binary() {
         let tokens = lex_tokens("2#1010#");
         assert_eq!(tokens, vec![(INTEGER_LIT, "2#1010#")]);
+    }
+
+    #[test]
+    fn integer_based_with_underscores() {
+        // AADL v2.3 permits `_` digit separators inside based literals (#339).
+        // The whole `16#0800_0000#` must lex as ONE integer token — before the
+        // fix the lexer stopped at the first `_` and split it into three tokens.
+        let tokens = lex_tokens("16#0800_0000#");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "16#0800_0000#")]);
+    }
+
+    #[test]
+    fn integer_binary_with_underscores() {
+        let tokens = lex_tokens("2#1010_1010#");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "2#1010_1010#")]);
     }
 
     // -- Real literals --
