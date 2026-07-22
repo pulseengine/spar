@@ -2559,6 +2559,50 @@ end P;
     }
 
     #[test]
+    fn based_hex_integer_lowers_to_correct_value() {
+        // Positive control for #337: the AADL-native based form must lower to
+        // the correct integer value (0x40003000 == 1073754112).
+        let src = r#"package P
+public
+  system S
+    properties
+      Base => 16#40003000#;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert_eq!(
+            val,
+            Some(item_tree::PropertyExpr::Integer(1073754112, None)),
+            "expected Integer(1073754112, None), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn c_style_hex_does_not_silently_lower_to_zero() {
+        // #337: `0x40003000` is not a valid AADL literal. It must NOT silently
+        // lower to `Integer(0, Some("x40003000"))` (value 0 with the dropped
+        // hex digits misread as a unit). After the fix the malformed literal
+        // is an ERROR token, so no INTEGER_VALUE node exists and lowering
+        // yields no typed value — a hard failure, never a silent wrong value.
+        let src = r#"package P
+public
+  system S
+    properties
+      Base => 0x40003000;
+  end S;
+end P;
+"#;
+        let val = lower_first_typed_value(src);
+        assert!(
+            !matches!(val, Some(item_tree::PropertyExpr::Integer(0, Some(_)))),
+            "0x40003000 silently lowered to a zero-with-bogus-unit integer: {:?}",
+            val
+        );
+    }
+
+    #[test]
     fn lower_real_value() {
         let src = r#"package P
 public

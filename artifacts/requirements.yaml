@@ -591,6 +591,47 @@ artifacts:
       - type: traces-to
         target: REQ-PARSER-001
 
+  - id: REQ-PARSER-003
+    type: requirement
+    title: Reject C-style radix-prefixed integer literals with a diagnostic
+    description: >
+      Closes #337. A `0x…`-style (C-style hex) integer literal in a property
+      association silently parsed to `0`: the lexer split `0x40003000` into
+      INTEGER_LIT `0` + IDENT `x40003000`, and the parser then treated the
+      trailing identifier as a *unit*, yielding `Integer(0, unit="x40003000")`
+      with no diagnostic — a silent wrong value for any downstream consumer.
+      C-style radix prefixes are NOT valid AADL v2.3 numeric literals (AADL
+      uses based notation `base#digits#`, e.g. `16#40003000#`); accepting them
+      would introduce a spar-specific dialect divergence, so — per the issue's
+      stated preference ("a hard error is strictly better than silent 0") —
+      spar now rejects them. Fix: `scan_number` in
+      `crates/spar-parser/src/lexer.rs` recognizes a lone leading `0` glued to
+      a radix marker (`x`/`X`, `b`/`B`, `o`/`O`) followed by a valid digit of
+      that radix, and lexes the whole malformed run as one ERROR token; the
+      property-value grammar in `crates/spar-parser/src/grammar/properties.rs`
+      attaches a targeted diagnostic ("C-style radix literal is not valid AADL;
+      use based notation, e.g. `16#…#`") on that token.
+      PROVEN by executed oracles: lexer unit tests that `0x40003000` / `0X1F` /
+      `0b1010` / `0o17` each lex as a single ERROR token (confirmed red before
+      the fix — they split into `0` + IDENT), with negative controls that
+      `0 ns`, `0bar`, `0x`, and the AADL-native `16#40003000#` are unaffected;
+      an end-to-end lowering test that `=> 0x40003000;` no longer lowers to
+      `Integer(0, Some(unit))`; a parser test that the same input yields a
+      diagnostic and an ERROR token in the tree; and a positive control that
+      `16#40003000#` lowers to `Integer(1073754112, None)`. `spar parse`
+      reports the diagnostic with location and exits non-zero; `spar items`
+      no longer emits a deceptive `Integer[0]` for the input.
+      ASSUMED/NOT-CLAIMED: this closes the token-split silent-zero path (the
+      reported bug); it does not make `spar items` itself exit non-zero on the
+      malformed input (that command remains a best-effort structural dump).
+    status: verified
+    tags: [parsing, lexer, literals, as5506, bug]
+    fields:
+      release: v0.32.0
+    links:
+      - type: traces-to
+        target: REQ-PARSER-001
+
   # ── Property Verification ────────────────────────────────────────────
 
   - id: REQ-VERIFY-001

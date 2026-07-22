@@ -257,10 +257,34 @@ fn property_expression_primary(p: &mut Parser) {
             property_expression_primary(p);
             m.complete(p, SyntaxKind::PROPERTY_EXPRESSION);
         }
+        SyntaxKind::ERROR if is_c_style_radix_literal(p.current_text()) => {
+            // A C-style radix literal (`0x40003000`, `0b1010`, `0o17`) — the
+            // lexer emits these as a single ERROR token because they are not
+            // valid AADL. Emit a targeted, actionable diagnostic and consume
+            // the token so the property association recovers to the `;` (#337).
+            let m = p.start();
+            p.error(
+                "C-style radix literal is not valid AADL; use based notation, \
+                 e.g. `16#…#` for hexadecimal",
+            );
+            p.bump_any();
+            m.complete(p, SyntaxKind::ERROR);
+        }
         _ => {
             p.error("expected property expression");
         }
     }
+}
+
+/// Whether `text` is a C-style radix-prefixed literal (`0x…`, `0b…`, `0o…`,
+/// any case). The lexer produces these as ERROR tokens; the parser uses this
+/// to attach a specific diagnostic rather than the generic "expected
+/// expression" message.
+fn is_c_style_radix_literal(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() > 2
+        && bytes[0] == b'0'
+        && matches!(bytes[1], b'x' | b'X' | b'o' | b'O' | b'b' | b'B')
 }
 
 /// Parse `applies to path1, path2 ...`
