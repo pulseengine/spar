@@ -373,6 +373,17 @@ mod tests {
     }
 
     #[test]
+    fn jittered_fold_multi_element() {
+        // Guards the templated total_interference_jittered fold against a
+        // dropped-tail bug: with two HP tasks the fold must sum BOTH.
+        // interference_jittered(10,2,3,10) = ceil_div(13,10)*2 = 2*2 = 4
+        // interference_jittered(5,1,1,10)  = ceil_div(11,5)*1  = 3*1 = 3
+        // total = 7 (a fold that drops `rest` would return 4).
+        let hp = [(10u64, 2u64, 3u64), (5u64, 1u64, 1u64)];
+        assert_eq!(total_interference_jittered(&hp, 10), 7);
+    }
+
+    #[test]
     fn jittered_isr_interference_adds_term() {
         // Task: C=3, D=100. No HP tasks. One ISR: T=10, C=1.
         // R0 = 3, R1 = 3 + ceil(3/10)*1 = 3 + 1 = 4, R2 = 3 + ceil(4/10)*1 = 4. Converged.

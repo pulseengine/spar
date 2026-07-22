@@ -3159,9 +3159,12 @@ artifacts:
       calls `rta_step_jittered_blocking`), so the analysis spar ships is
       generated, not hand-extracted.
 
-      TEMPLATED — the trusted base, gated by the property tests
-      `ceil_div_matches_lean_definition` and
-      `compute_response_time_matches_lean_spec` (NOT by reflection), named
+      TEMPLATED — the trusted base, gated by the (example-based unit +
+      differential-conformance) tests `ceil_div_matches_lean_definition`,
+      `compute_response_time_matches_lean_spec`, the convergence/divergence
+      cases, and `scheduling.rs`'s `rta_conformance_systematic` differential
+      sweep against an independent RTA impl (NOT by reflection; these are
+      unit/conformance tests, not proptest property tests), named
       explicitly: (a) `ceil_div` — leaf primitive lowered to the idiom
       `a.div_ceil(b)`; (b) the summation folds `total_interference`,
       `total_interference_jittered`, `total_isr_interference` — they have
