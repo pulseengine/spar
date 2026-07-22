@@ -583,7 +583,7 @@ artifacts:
       `parse_aadl_integer("16#0800_0000#") == parse_aadl_integer("16#08000000#")
       == 134217728`, and an end-to-end lower test that the property value
       survives lexing + lowering intact.
-    status: implemented
+    status: verified
     tags: [parsing, lexer, literals, as5506, bug]
     fields:
       release: v0.31.0
