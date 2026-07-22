@@ -1718,3 +1718,47 @@ end Regression;
     check_no_errors(input);
     check_lossless(input);
 }
+
+// ── #337: C-style radix literals are rejected with a diagnostic ──────────
+
+/// A `0x…`-style hex literal in a property value must produce a parse
+/// diagnostic, not silently parse to integer 0 with the dropped hex digits
+/// misread as a unit. This is the exact regression from issue #337.
+#[test]
+fn c_style_hex_literal_in_property_reports_error() {
+    let input = "package M
+public
+  device Dev
+    properties
+      Base => 0x40003000;
+  end Dev;
+end M;
+";
+    let result = parse(input);
+    assert!(
+        !result.errors().is_empty(),
+        "expected a diagnostic for the C-style hex literal 0x40003000, got none"
+    );
+    // The malformed literal is surfaced as an ERROR token in the tree.
+    let root = result.syntax_node();
+    assert!(
+        root.descendants_with_tokens()
+            .filter_map(|e| e.into_token())
+            .any(|t| t.kind() == SyntaxKind::ERROR && t.text() == "0x40003000"),
+        "expected the whole `0x40003000` to be a single ERROR token"
+    );
+}
+
+/// The AADL-native based form must still parse cleanly (positive control).
+#[test]
+fn based_hex_literal_in_property_parses_clean() {
+    let input = "package M
+public
+  device Dev
+    properties
+      Base => 16#40003000#;
+  end Dev;
+end M;
+";
+    check_no_errors(input);
+}

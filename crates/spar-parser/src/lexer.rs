@@ -111,6 +111,12 @@ fn is_hex_digit(b: u8) -> bool {
     b.is_ascii_hexdigit()
 }
 
+/// Whether ASCII byte `b` is a valid digit in the given `radix` (2, 8, or 16).
+/// Used to recognize C-style radix prefixes (`0x`/`0b`/`0o`) that AADL rejects.
+fn is_radix_digit(b: u8, radix: u32) -> bool {
+    (b as char).is_digit(radix)
+}
+
 /// Scan whitespace (one or more whitespace characters).
 fn scan_whitespace(c: &mut Cursor<'_>) {
     while !c.is_eof() && is_whitespace(c.current()) {
@@ -159,9 +165,42 @@ fn scan_string(c: &mut Cursor<'_>) -> bool {
 ///
 /// Returns the `SyntaxKind` for the scanned literal.
 fn scan_number(c: &mut Cursor<'_>) -> SyntaxKind {
+    let start = c.pos;
+
     // Consume leading decimal digits.
     while !c.is_eof() && is_digit(c.current()) {
         c.bump();
+    }
+
+    // Reject C-style radix-prefixed integer literals (`0x1F`, `0b1010`,
+    // `0o17`). These are NOT valid AADL v2.3 numeric literals — AADL uses
+    // based notation `base#digits#` (e.g. `16#1F#`). Without this guard the
+    // lexer would split `0x40003000` into `0` + identifier `x40003000`, and
+    // the parser would then silently treat the identifier as a *unit*,
+    // lowering the property to integer `0` with a bogus unit and no
+    // diagnostic (issue #337). Lex the whole malformed run as a single ERROR
+    // token so the parser reports a hard error instead of dropping the digits.
+    //
+    // The guard fires only on the exact C-style shape: a lone leading `0`,
+    // glued to a radix marker, followed by a valid digit of that radix. This
+    // leaves valid AADL untouched — `0 ns` (whitespace-separated unit) and
+    // `0bar` (`a` is not a binary digit) still lex as INTEGER_LIT + IDENT.
+    if c.pos - start == 1 && c.input.as_bytes()[start] == b'0' && !c.is_eof() {
+        let radix = match c.current() {
+            b'x' | b'X' => 16,
+            b'o' | b'O' => 8,
+            b'b' | b'B' => 2,
+            _ => 0,
+        };
+        if radix != 0 && is_radix_digit(c.peek(1), radix) {
+            c.bump(); // radix marker
+            // Consume the whole `[0-9A-Za-z_]` run so the malformed literal is
+            // one token, not a valid `0` followed by a stray identifier.
+            while !c.is_eof() && is_ident_continue(c.current()) {
+                c.bump();
+            }
+            return SyntaxKind::ERROR;
+        }
     }
 
     // Check for based literal: digits followed by `#`.
@@ -654,6 +693,79 @@ mod tests {
     fn integer_binary_with_underscores() {
         let tokens = lex_tokens("2#1010_1010#");
         assert_eq!(tokens, vec![(INTEGER_LIT, "2#1010_1010#")]);
+    }
+
+    // -- C-style radix literals are NOT valid AADL (#337) --
+
+    #[test]
+    fn c_style_hex_is_error() {
+        // `0x…` is not an AADL numeric literal (AADL uses based notation
+        // `16#…#`). Before the fix this split into `0` + IDENT `x40003000`,
+        // and the parser silently treated the identifier as a *unit* — the
+        // property lowered to integer 0 with a bogus unit and no diagnostic.
+        // The whole malformed literal must lex as ONE ERROR token so a hard
+        // error is reported instead of a silent wrong value.
+        let tokens = lex_tokens("0x40003000");
+        assert_eq!(tokens, vec![(ERROR, "0x40003000")]);
+    }
+
+    #[test]
+    fn c_style_hex_upper_is_error() {
+        let tokens = lex_tokens("0X1F");
+        assert_eq!(tokens, vec![(ERROR, "0X1F")]);
+    }
+
+    #[test]
+    fn c_style_binary_is_error() {
+        // Same silent-zero failure class as hex.
+        let tokens = lex_tokens("0b1010");
+        assert_eq!(tokens, vec![(ERROR, "0b1010")]);
+    }
+
+    #[test]
+    fn c_style_octal_is_error() {
+        let tokens = lex_tokens("0o17");
+        assert_eq!(tokens, vec![(ERROR, "0o17")]);
+    }
+
+    #[test]
+    fn c_style_hex_with_underscores_is_error() {
+        // A `_` separator inside the malformed literal must stay part of the
+        // single ERROR token, not split it.
+        let tokens = lex_tokens("0xDEAD_BEEF");
+        assert_eq!(tokens, vec![(ERROR, "0xDEAD_BEEF")]);
+    }
+
+    #[test]
+    fn based_literal_unaffected_by_c_style_guard() {
+        // The AADL-native form must still lex as a single INTEGER_LIT.
+        let tokens = lex_tokens("16#40003000#");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "16#40003000#")]);
+    }
+
+    #[test]
+    fn zero_with_unit_not_c_style() {
+        // `0 ns` (whitespace-separated unit) is a valid integer-with-unit and
+        // must keep lexing as INTEGER_LIT + IDENT — the guard only fires on a
+        // glued C-style radix marker followed by a valid digit of that radix.
+        let tokens = lex_tokens("0 ns");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "0"), (IDENT, "ns")]);
+    }
+
+    #[test]
+    fn glued_non_radix_ident_not_c_style() {
+        // `0bar`: `b` is a radix marker but `a` is not a binary digit, so this
+        // is NOT a C-style literal — it stays `0` + `bar` (as before).
+        let tokens = lex_tokens("0bar");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "0"), (IDENT, "bar")]);
+    }
+
+    #[test]
+    fn bare_zero_x_without_hex_digit_not_c_style() {
+        // `0x` with no following hex digit is not a C-style literal (no digits
+        // are silently dropped); it stays `0` + `x`.
+        let tokens = lex_tokens("0x");
+        assert_eq!(tokens, vec![(INTEGER_LIT, "0"), (IDENT, "x")]);
     }
 
     // -- Real literals --
