@@ -32,24 +32,20 @@
 import Mathlib.Tactic
 import Proofs.Scheduling.RTA
 import Proofs.Scheduling.RTAJittered
+import Proofs.Scheduling.RTAJitteredCore
 
 namespace Spar.Scheduling.ArincSupply
 
 open Spar.Scheduling.RTA (iterN bounded_mono_nat_seq)
 open Spar.Scheduling.RTAJittered
 
-/-! ## Part 1 — Constant blocking folds into the jittered recurrence -/
+/-! ## Part 1 — Constant blocking folds into the jittered recurrence
 
-/-- The blocking-augmented step: the jittered recurrence plus a constant
-    blocking term `B`. Mirrors `rta_step_jittered_blocking` in
-    `scheduling_verified.rs`. -/
-def rtaStepJitteredBlocking
-    (task : JitteredTask)
-    (hps : List JitteredHigherPriorityTask)
-    (isr : IsrOverhead)
-    (blocking : Nat)
-    (r : Nat) : Nat :=
-  rtaStepJittered task hps isr r + blocking
+`rtaStepJitteredBlocking` (the jittered recurrence plus a constant
+blocking term `B`, mirroring `rta_step_jittered_blocking` in
+`scheduling_verified.rs`) is defined in the mathlib-free
+`Proofs.Scheduling.RTAJitteredCore`; the theorems below are proved
+about that exact definition. -/
 
 /-- **Fold-in.** The blocking step is exactly the jittered step with the
     blocking constant absorbed into the release jitter: `B` and `J_i` are

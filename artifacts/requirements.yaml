@@ -3142,12 +3142,50 @@ artifacts:
       cosplay, drift still representable. The generator MUST read the Lean
       definitions.
 
-      Extends to the jittered/blocking/ISR recurrences (RTAJittered.lean)
-      and the supply-model funcs (lsbf/rbf, REQ-RTA-ARINC-SUPPLY-001) once
-      the base mechanism works. Tracks #321. Builds on
-      REQ-PROOF-SCHED-SPEC-SOURCE-001.
-    status: proposed
-    tags: [proofs, lean, scheduling, codegen, single-source, reflection]
+      AS DELIVERED (v0.30.0). `proofs/Codegen.lean` is a reflection
+      generator: `exprToRust` reads the elaborated `Expr` of each recurrence
+      definition (from the mathlib-free `RTACore.lean` + new
+      `RTAJitteredCore.lean`) and lowers it to Rust. `lake exe codegen`
+      emits the whole `scheduling_verified.rs`; a byte-diff gate in
+      `proofs.yml` (`lake exe codegen | diff` the committed file) fails on
+      any drift. The honest reflected-vs-templated ledger:
+
+      REFLECTED from the Lean def bodies — the recurrence ARITHMETIC, now a
+      function of the proven defs, drift-proof via the gate (change the Lean
+      formula and the emitted Rust changes): `interference`, `rta_step`,
+      `interference_jittered`, `rta_step_jittered`,
+      `rta_step_jittered_blocking`. This INCLUDES the jittered+blocking step
+      that spar actually runs (`compute_response_time_jittered_blocking`
+      calls `rta_step_jittered_blocking`), so the analysis spar ships is
+      generated, not hand-extracted.
+
+      TEMPLATED — the trusted base, gated by the property tests
+      `ceil_div_matches_lean_definition` and
+      `compute_response_time_matches_lean_spec` (NOT by reflection), named
+      explicitly: (a) `ceil_div` — leaf primitive lowered to the idiom
+      `a.div_ceil(b)`; (b) the summation folds `total_interference`,
+      `total_interference_jittered`, `total_isr_interference` — they have
+      Lean defs but compile to `List.brecOn`, which does not reflect
+      cleanly; their bodies just loop the reflected `interference*`; (c) the
+      three `compute_response_time*` fixed-point drivers + `RtaResult` —
+      there is NO executable Lean counterpart to reflect (the Lean side is
+      `iterN` + the convergence theorems `rtaJittered_finds_least_fixed_point`
+      et al.); the driver loop is the Lean↔Rust boundary, justified by those
+      theorems and gated by the spec test.
+
+      CLOSURE JUDGEMENT: #321's concern is the recurrence math being
+      manually extracted and drift-prone. That math — every function with a
+      reflectable Lean def encoding the formula — is now generated. The
+      templated set is either trivial (leaf/folds calling the reflected
+      arithmetic) or has no Lean def to generate from (the drivers), and is
+      theorem-justified + property-test-gated. On that basis #321 is
+      considered closed; the templated trusted base is stated above so the
+      claim is auditable, not blanket "the Rust is generated". Follow-on
+      (not blocking closure): reflect the supply-model funcs (lsbf/rbf,
+      REQ-RTA-ARINC-SUPPLY-001). Builds on REQ-PROOF-SCHED-SPEC-SOURCE-001.
+    status: verified
+    tags: [proofs, lean, scheduling, codegen, single-source, reflection, v0300]
+    release: v0.30.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-SPEC-SOURCE-001
