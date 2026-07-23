@@ -3101,8 +3101,9 @@ artifacts:
       equivalence is NOT proven here (that is #327's ordeal work), and the Rust
       port type (`[T; N]`/`Vec<T>`) mirrors wit-bindgen's documented lowering but
       no compiled-crate oracle for array ports is asserted in this requirement.
-    status: implemented
+    status: verified
     tags: [codegen, wit, interop, no-alloc]
+    release: v0.33.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
