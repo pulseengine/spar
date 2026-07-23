@@ -52,6 +52,16 @@ fn data_shape_to_rust_type(shape: &DataShape) -> String {
         DataShape::Record { type_name, .. } => {
             format!("crate::types::{}", to_pascal_case(type_name))
         }
+        // wit-bindgen lowers a fixed-size `list<T, N>` to a Rust `[T; N]` and an
+        // unbounded `list<T>` to `Vec<T>`; mirror that so the port field type
+        // matches the ABI lowering. REQ-CODEGEN-WIT-ARRAY-001 (#345).
+        DataShape::Array { element, len } => {
+            let elem = data_shape_to_rust_type(element);
+            match len {
+                Some(n) => format!("[{elem}; {n}]"),
+                None => format!("Vec<{elem}>"),
+            }
+        }
         DataShape::Opaque => "Vec<u8>".to_string(),
     }
 }
@@ -833,11 +843,17 @@ fn flatten_record_rust(
     }
     let mut rows = Vec::with_capacity(fields.len());
     for f in fields {
-        // Recurse into nested records first so they are defined before use.
+        // Recurse into nested records first so they are defined before use —
+        // including a record reached through array element(s) (#345), so an
+        // `array of record` field does not reference an undefined struct.
+        let mut inner = &f.shape;
+        while let DataShape::Array { element, .. } = inner {
+            inner = element;
+        }
         if let DataShape::Record {
             type_name: nt,
             fields: nf,
-        } = &f.shape
+        } = inner
         {
             flatten_record_rust(nt, nf, out, seen);
         }
@@ -918,5 +934,90 @@ mod tests {
             }),
             "Vec<u8>"
         );
+    }
+
+    /// REQ-CODEGEN-WIT-ARRAY-001 (#345): an `Array` shape mirrors wit-bindgen's
+    /// lowering — a fixed `Dimension` → a Rust fixed array `[T; N]`, an unbounded
+    /// array → `Vec<T>`, recursively over the element (scalar, record, or a
+    /// nested array).
+    #[test]
+    fn array_shape_maps_to_rust_types() {
+        let f32_scalar = || DataShape::Scalar {
+            bytes: 4,
+            kind: ScalarKind::Float,
+        };
+        // Fixed 16 × f32 (the #345 NavState case) → `[f32; 16]`.
+        assert_eq!(
+            data_shape_to_rust_type(&DataShape::Array {
+                element: Box::new(f32_scalar()),
+                len: Some(16)
+            }),
+            "[f32; 16]"
+        );
+        // Unbounded (no Dimension) → `Vec<f32>`.
+        assert_eq!(
+            data_shape_to_rust_type(&DataShape::Array {
+                element: Box::new(f32_scalar()),
+                len: None
+            }),
+            "Vec<f32>"
+        );
+        // Array of a record → `[crate::types::Nav; 4]`.
+        assert_eq!(
+            data_shape_to_rust_type(&DataShape::Array {
+                element: Box::new(DataShape::Record {
+                    type_name: "Nav".to_string(),
+                    fields: vec![]
+                }),
+                len: Some(4)
+            }),
+            "[crate::types::Nav; 4]"
+        );
+        // Nested array (array of arrays) recurses on both levels.
+        assert_eq!(
+            data_shape_to_rust_type(&DataShape::Array {
+                element: Box::new(DataShape::Array {
+                    element: Box::new(f32_scalar()),
+                    len: Some(3)
+                }),
+                len: Some(2)
+            }),
+            "[[f32; 3]; 2]"
+        );
+    }
+
+    /// REQ-CODEGEN-WIT-ARRAY-001 (#345): a record FIELD whose type is an array
+    /// of a nested record still emits the nested record's struct (the array
+    /// recursion in `flatten_record_rust`), so `crate::types::Inner` resolves.
+    #[test]
+    fn record_field_of_array_of_record_defines_the_inner_struct() {
+        let inner = DataField {
+            name: spar_hir_def::name::Name::new("hi"),
+            shape: DataShape::Scalar {
+                bytes: 2,
+                kind: ScalarKind::Unsigned,
+            },
+        };
+        let outer_fields = vec![DataField {
+            name: spar_hir_def::name::Name::new("items"),
+            shape: DataShape::Array {
+                element: Box::new(DataShape::Record {
+                    type_name: "Inner".to_string(),
+                    fields: vec![inner],
+                }),
+                len: Some(8),
+            },
+        }];
+        let mut structs = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        flatten_record_rust("Outer", &outer_fields, &mut structs, &mut seen);
+
+        // Both the outer and the array-nested inner struct are emitted, inner-first.
+        let names: Vec<&str> = structs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["Inner", "Outer"], "structs: {names:?}");
+        // The outer field references the array-of-record type.
+        let outer = &structs.iter().find(|(n, _)| n == "Outer").unwrap().1;
+        assert_eq!(outer[0].0, "items");
+        assert_eq!(outer[0].1, "[crate::types::Inner; 8]");
     }
 }

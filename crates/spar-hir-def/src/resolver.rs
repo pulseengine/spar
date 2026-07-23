@@ -45,6 +45,15 @@ pub enum DataShape {
         type_name: String,
         fields: Vec<DataField>,
     },
+    /// A `data` classifier whose Data Modeling Annex `Data_Representation` is
+    /// `Array`: a homogeneous sequence of `element`, with `len` copies when the
+    /// `Dimension` property fixes the size (→ a bounded WIT `list<T, N>`) or
+    /// `None` for an unbounded array (→ `list<T>`). REQ-CODEGEN-WIT-ARRAY-001
+    /// (GitHub #345).
+    Array {
+        element: Box<DataShape>,
+        len: Option<u64>,
+    },
     /// A `data` classifier with neither a `Data_Size` nor subcomponents, or one
     /// that does not resolve — opaque (codegen keeps its legacy handling).
     Opaque,
@@ -400,7 +409,98 @@ impl GlobalScope {
         if let Some((bytes, kind)) = self.scalar_of(from_package, classifier) {
             return DataShape::Scalar { bytes, kind };
         }
+        // A data type declaring an Array Data_Representation = a WIT list of its
+        // Base_Type element (fixed-size when Dimension is set).
+        if let Some(array) = self.array_of(from_package, classifier) {
+            return array;
+        }
         DataShape::Opaque
+    }
+
+    /// Resolve a `data` type whose Data Modeling Annex `Data_Representation` is
+    /// `Array` into a [`DataShape::Array`]: the element shape comes from the
+    /// `Base_Type` classifier (resolved recursively) and the length from the
+    /// first `Dimension` value (absent → unbounded). Returns `None` when the
+    /// classifier is not an `Array` `data` type or has no resolvable
+    /// `Base_Type`. REQ-CODEGEN-WIT-ARRAY-001 (GitHub #345).
+    fn array_of(&self, from_package: &Name, classifier: &ClassifierRef) -> Option<DataShape> {
+        use crate::item_tree::PropertyExpr;
+        let resolved = self.resolve_classifier(from_package, classifier);
+        let (loc, decl_package) = match &resolved {
+            ResolvedClassifier::ComponentType { loc, package } => (*loc, package.clone()),
+            _ => return None,
+        };
+        let ct = self.get_component_type(loc)?;
+        if ct.category != crate::item_tree::ComponentCategory::Data {
+            return None;
+        }
+        let tree = self.tree(loc.tree)?;
+        // Last path segment of an enum literal, so a qualified value like
+        // `Data_Model::Array` still matches `Array`.
+        fn leaf(v: &str) -> &str {
+            v.rsplit("::").next().unwrap_or(v).trim()
+        }
+        // A `Base_Type => (classifier(Pkg::T))` value lowers to a `List` holding
+        // one `ClassifierValue`; a bare `classifier(Pkg::T)` lowers to the
+        // `ClassifierValue` directly. Accept both shapes.
+        fn first_classifier(expr: &PropertyExpr) -> Option<&ClassifierRef> {
+            match expr {
+                PropertyExpr::ClassifierValue(cr) => Some(cr),
+                PropertyExpr::List(items) => items.iter().find_map(first_classifier),
+                _ => None,
+            }
+        }
+        // A `Dimension => (16)` value lowers to a `List` holding one `Integer`;
+        // a bare `16` lowers to the `Integer` directly.
+        fn first_int(expr: &PropertyExpr) -> Option<i64> {
+            match expr {
+                PropertyExpr::Integer(n, _) => Some(*n),
+                PropertyExpr::List(items) => items.iter().find_map(first_int),
+                _ => None,
+            }
+        }
+        let mut is_array = false;
+        let mut base_type: Option<ClassifierRef> = None;
+        let mut dim: Option<u64> = None;
+        for &pa_idx in &ct.property_associations {
+            let pa = &tree.property_associations[pa_idx];
+            let pn = pa.name.property_name.as_str();
+            if pn.eq_ignore_ascii_case("Data_Representation") {
+                is_array = match &pa.typed_value {
+                    Some(PropertyExpr::Enum(n)) => n.as_str().eq_ignore_ascii_case("Array"),
+                    _ => leaf(&pa.value).eq_ignore_ascii_case("Array"),
+                };
+            } else if pn.eq_ignore_ascii_case("Base_Type") {
+                base_type = pa.typed_value.as_ref().and_then(first_classifier).cloned();
+            } else if pn.eq_ignore_ascii_case("Dimension") {
+                dim = pa
+                    .typed_value
+                    .as_ref()
+                    .and_then(first_int)
+                    .filter(|&n| n >= 0)
+                    .map(|n| n as u64);
+            }
+        }
+        if !is_array {
+            return None;
+        }
+        // Without a Base_Type the element is unknown — leave it Opaque so codegen
+        // keeps its legacy handling rather than fabricating an element type.
+        let base = base_type?;
+        let element = self.resolve_data_shape(&decl_package, &base);
+        // If the element itself does not resolve to a concrete shape (an unsized
+        // or unresolvable Base_Type — e.g. a `Base_Types::Float` with no
+        // `Data_Size`), do NOT fabricate a typed list. Fall back to Opaque so a
+        // top-level array port keeps its legacy `list<u8>` (no regression) and an
+        // array-typed record field hits the record no_alloc hard-error path,
+        // rather than emitting a `list<u8-of-unknown-element>`.
+        if matches!(element, DataShape::Opaque) {
+            return None;
+        }
+        Some(DataShape::Array {
+            element: Box::new(element),
+            len: dim,
+        })
     }
 
     /// Resolve a `data` classifier's declared `Data_Size`, in bytes. Mirrors the
