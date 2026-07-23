@@ -49,6 +49,49 @@ fn scalar_wit(bytes: u64, kind: ScalarKind) -> Option<&'static str> {
 /// One emitted WIT record definition: `(wit-type-name, [(field, wit-type)])`.
 type RecordDef = (String, Vec<(String, String)>);
 
+/// Resolve a [`DataShape`] to the WIT type string used to reference it (a scalar
+/// keyword, a nested record name, or a `list<T[, N]>`), emitting any nested
+/// record definitions into `out` along the way. A non-encodable scalar/opaque
+/// leaf is collected into `errors` (the no_alloc hard-error policy) and a `u8`
+/// placeholder returned — the caller aborts on any error before emitting.
+/// REQ-CODEGEN-WIT-ARRAY-001 (#345) extends this to array elements.
+fn shape_wit_type(
+    shape: &DataShape,
+    out: &mut Vec<RecordDef>,
+    seen: &mut std::collections::BTreeSet<String>,
+    errors: &mut Vec<String>,
+) -> String {
+    match shape {
+        DataShape::Scalar { bytes, kind } => match scalar_wit(*bytes, *kind) {
+            Some(w) => w.to_string(),
+            None => {
+                errors.push(format!(
+                    "{bytes}-byte {kind:?} has no no_alloc WIT scalar (int 1/2/4/8, float 4/8 only)"
+                ));
+                "u8".to_string()
+            }
+        },
+        DataShape::Record { type_name, fields } => {
+            flatten_record(type_name, fields, out, seen, errors)
+        }
+        DataShape::Array { element, len } => {
+            let elem = shape_wit_type(element, out, seen, errors);
+            match len {
+                Some(n) => format!("list<{elem}, {n}>"),
+                None => format!("list<{elem}>"),
+            }
+        }
+        DataShape::Opaque => {
+            errors.push(
+                "array element type declares no Data_Size and has no fields — it cannot be \
+                 encoded without heap allocation"
+                    .to_string(),
+            );
+            "u8".to_string()
+        }
+    }
+}
+
 /// Recursively flatten a `Record` shape into WIT record definitions, appending
 /// each distinct record to `out` in NESTED-FIRST order (a record is pushed after
 /// the records it depends on) and returning the top record's WIT type name.
@@ -84,6 +127,10 @@ fn flatten_record(
             } => {
                 let nested = flatten_record(nested_tn, nested_fields, out, seen, errors);
                 rows.push((wit_ident(field), nested));
+            }
+            DataShape::Array { .. } => {
+                let wit_ty = shape_wit_type(&f.shape, out, seen, errors);
+                rows.push((wit_ident(field), wit_ty));
             }
             DataShape::Opaque => errors.push(format!(
                 "record `{type_name}` field `{field}`: type declares no Data_Size and has no \
@@ -168,6 +215,13 @@ pub fn generate_wit(
             DataShape::Scalar { bytes, kind } => {
                 let wit_ty = scalar_wit(bytes, kind).unwrap_or(DEFAULT_WIT_TYPE);
                 aliases.push((ty.clone(), wit_ty.to_string()));
+            }
+            // An Array data type aliases to a `list<T[, N]>` (fixed-size when the
+            // Dimension is known — bounded, no `cabi_realloc`). Any nested record
+            // element is emitted into `record_defs` first. #345.
+            shape @ DataShape::Array { .. } => {
+                let wit_ty = shape_wit_type(&shape, &mut record_defs, &mut seen, &mut errors);
+                aliases.push((ty.clone(), wit_ty));
             }
             DataShape::Opaque => aliases.push((ty.clone(), DEFAULT_WIT_TYPE.to_string())),
         }
@@ -1004,6 +1058,274 @@ end NestPkg;
             .unwrap_or_else(|e| {
                 panic!(
                     "nested-record WIT failed to parse: {e}\n---\n{}",
+                    file.content
+                )
+            });
+    }
+
+    /// Fixture for REQ-CODEGEN-WIT-ARRAY-001 (#345): a Data Modeling Annex
+    /// `Array` data type — `Data_Representation => Array`, a `Base_Type`
+    /// classifier, and a fixed `Dimension` — the real jess NavState case
+    /// (16 × f32). Also declares an UNBOUNDED array (no `Dimension`), an
+    /// array with the maintainer's exact `(classifier(...))` / `(16)`
+    /// list-wrapped property syntax, and a NEGATIVE control (Array with no
+    /// `Base_Type`, which must stay opaque). Referenced by process ports.
+    fn build_array_test_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package ArrPkg
+public
+    data Float32
+        properties
+            Data_Size => 4 Bytes;
+            Data_Representation => Float;
+    end Float32;
+
+    -- Fixed 16 x f32 (the #345 NavState message). Maintainer's exact
+    -- list-wrapped Base_Type / Dimension syntax.
+    data VehicleState
+        properties
+            Data_Representation => Array;
+            Base_Type => (classifier(Float32));
+            Dimension => (16);
+    end VehicleState;
+
+    -- Unbounded array (no Dimension) -> list<f32>.
+    data Samples
+        properties
+            Data_Representation => Array;
+            Base_Type => (classifier(Float32));
+    end Samples;
+
+    -- Array with no Base_Type -> must stay opaque (list<u8>), not fabricated.
+    data Mystery
+        properties
+            Data_Representation => Array;
+            Dimension => (8);
+    end Mystery;
+
+    -- Element with NO Data_Size (an unsized Float, like the standard
+    -- Base_Types::Float): the element does not resolve to a concrete WIT
+    -- type, so the array must NOT be fabricated -> stays opaque list<u8>.
+    data UnsizedF
+        properties
+            Data_Representation => Float;
+    end UnsizedF;
+
+    data Blurry
+        properties
+            Data_Representation => Array;
+            Base_Type => (classifier(UnsizedF));
+            Dimension => (4);
+    end Blurry;
+
+    process Estimator
+        features
+            state_out: out data port VehicleState;
+            samples_out: out data port Samples;
+            mystery_out: out data port Mystery;
+            blurry_out: out data port Blurry;
+    end Estimator;
+
+    process implementation Estimator.Impl
+        subcomponents
+            est_thread: thread EstThread.Impl;
+    end Estimator.Impl;
+
+    thread EstThread
+    end EstThread;
+
+    thread implementation EstThread.Impl
+    end EstThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            est: process Estimator.Impl;
+    end Top.Impl;
+end ArrPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "arr.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("ArrPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// RED-before-green oracle for REQ-CODEGEN-WIT-ARRAY-001 (#345): an AADL
+    /// `data` type with `Data_Representation => Array` + `Base_Type` + a fixed
+    /// `Dimension` must generate a bounded WIT `list<T, N>` (no `cabi_realloc`),
+    /// NOT the opaque `list<u8>` blob. An unbounded array (no `Dimension`) is a
+    /// plain `list<T>`, and an Array with no `Base_Type` stays opaque.
+    #[test]
+    fn array_data_type_becomes_wit_list() {
+        let (scope, inst) = build_array_test_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Fixed Dimension -> bounded fixed-size list of the element scalar.
+        assert!(
+            body.contains("type vehicle-state = list<f32, 16>;"),
+            "fixed Array must map to `list<f32, 16>`, not opaque:\n{body}"
+        );
+        // Unbounded array -> plain list<f32>.
+        assert!(
+            body.contains("type samples = list<f32>;"),
+            "unbounded Array must map to `list<f32>`:\n{body}"
+        );
+        // No Base_Type -> the element is unknown, so it must NOT be fabricated;
+        // it stays the legacy opaque byte buffer.
+        assert!(
+            body.contains("type mystery = list<u8>;"),
+            "Array with no Base_Type must stay opaque `list<u8>`:\n{body}"
+        );
+        // Unsized element (Float with no Data_Size, like standard
+        // Base_Types::Float) -> element does not resolve, so the array must NOT
+        // be fabricated; it stays opaque `list<u8>` (no regression, no error).
+        assert!(
+            body.contains("type blurry = list<u8>;"),
+            "Array with an unsized element must stay opaque `list<u8>`:\n{body}"
+        );
+
+        // Authoritative: the fixed-size list must PARSE + RESOLVE under
+        // wit-parser (proves `list<f32, 16>` is real, bindable WIT).
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("array.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "generated array WIT failed to parse/resolve: {e}\n---\n{}",
+                    file.content
+                )
+            });
+    }
+
+    /// Fixture: a `data implementation` record whose field is itself an Array
+    /// data type (`nav: VehicleState` where VehicleState is 16 x f32).
+    fn build_record_with_array_field_instance() -> (GlobalScope, SystemInstance) {
+        let aadl = r#"
+package RecArrPkg
+public
+    data Float32
+        properties
+            Data_Size => 4 Bytes;
+            Data_Representation => Float;
+    end Float32;
+
+    data Word32
+        properties
+            Data_Size => 4 Bytes;
+    end Word32;
+
+    data VehicleState
+        properties
+            Data_Representation => Array;
+            Base_Type => (classifier(Float32));
+            Dimension => (16);
+    end VehicleState;
+
+    data Frame
+    end Frame;
+
+    data implementation Frame.Impl
+        subcomponents
+            seq: data Word32;
+            nav: data VehicleState;
+    end Frame.Impl;
+
+    process Store
+        features
+            frame_in: in data port Frame.Impl;
+    end Store;
+
+    process implementation Store.Impl
+        subcomponents
+            th: thread StoreThread.Impl;
+    end Store.Impl;
+
+    thread StoreThread
+    end SinkThread;
+
+    thread implementation StoreThread.Impl
+    end StoreThread.Impl;
+
+    system Top
+    end Top;
+
+    system implementation Top.Impl
+        subcomponents
+            store: process Store.Impl;
+    end Top.Impl;
+end RecArrPkg;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "recarr.aadl".to_string(), aadl.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("RecArrPkg"),
+            &Name::new("Top"),
+            &Name::new("Impl"),
+        );
+        (scope, inst)
+    }
+
+    /// Oracle for an Array-typed record FIELD (#345): a record subcomponent whose
+    /// type is an Array data type becomes a `field: list<T, N>` inside the WIT
+    /// record — the element resolves recursively through `shape_wit_type`.
+    #[test]
+    fn record_field_of_array_type_becomes_list() {
+        let (scope, inst) = build_record_with_array_field_instance();
+        let idx = inst
+            .all_components()
+            .find(|(_, c)| c.category == ComponentCategory::Process)
+            .map(|(idx, _)| idx)
+            .expect("test model has a process");
+        let file = generate_wit(&inst, &scope, idx).expect("wit generation should succeed");
+        let body: String = file
+            .content
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            body.contains("record frame-impl {"),
+            "expected record `frame-impl`:\n{body}"
+        );
+        assert!(
+            body.contains("seq: u32"),
+            "expected scalar field `seq: u32`:\n{body}"
+        );
+        assert!(
+            body.contains("nav: list<f32, 16>"),
+            "Array-typed record field must be `list<f32, 16>`:\n{body}"
+        );
+
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str("recarr.wit", &file.content)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "record-with-array WIT failed to parse/resolve: {e}\n---\n{}",
                     file.content
                 )
             });

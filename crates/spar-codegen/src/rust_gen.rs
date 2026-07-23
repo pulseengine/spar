@@ -52,6 +52,16 @@ fn data_shape_to_rust_type(shape: &DataShape) -> String {
         DataShape::Record { type_name, .. } => {
             format!("crate::types::{}", to_pascal_case(type_name))
         }
+        // wit-bindgen lowers a fixed-size `list<T, N>` to a Rust `[T; N]` and an
+        // unbounded `list<T>` to `Vec<T>`; mirror that so the port field type
+        // matches the ABI lowering. REQ-CODEGEN-WIT-ARRAY-001 (#345).
+        DataShape::Array { element, len } => {
+            let elem = data_shape_to_rust_type(element);
+            match len {
+                Some(n) => format!("[{elem}; {n}]"),
+                None => format!("Vec<{elem}>"),
+            }
+        }
         DataShape::Opaque => "Vec<u8>".to_string(),
     }
 }
@@ -833,11 +843,17 @@ fn flatten_record_rust(
     }
     let mut rows = Vec::with_capacity(fields.len());
     for f in fields {
-        // Recurse into nested records first so they are defined before use.
+        // Recurse into nested records first so they are defined before use —
+        // including a record reached through array element(s) (#345), so an
+        // `array of record` field does not reference an undefined struct.
+        let mut inner = &f.shape;
+        while let DataShape::Array { element, .. } = inner {
+            inner = element;
+        }
         if let DataShape::Record {
             type_name: nt,
             fields: nf,
-        } = &f.shape
+        } = inner
         {
             flatten_record_rust(nt, nf, out, seen);
         }

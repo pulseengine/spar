@@ -3055,6 +3055,58 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT-STATE-001
 
+  - id: REQ-CODEGEN-WIT-ARRAY-001
+    type: requirement
+    title: "Structured WIT list from a Data Modeling Annex Array data type"
+    description: >
+      Codegen WIT emission shall map an AADL `data` type whose Data Modeling Annex
+      `Data_Representation` is `Array` to a typed WIT `list`, closing the #345 gap
+      where EVERY array data type degraded to the opaque `type x = list<u8>` blob
+      (element type, signedness/float, and dimension all dropped), so an inter-core
+      contract could only say `list`, not the real payload. Delivered and
+      oracle-verified:
+      (1) `resolve_data_shape` gains a `DataShape::Array { element, len }` arm
+      (spar-hir-def): a `data` type with `Data_Representation => Array` resolves its
+      `Base_Type` classifier to the element shape (recursively, reusing the same
+      scalar/record resolution as records) and reads the first `Dimension` value as
+      the length. Both the maintainer's list-wrapped property syntax
+      (`Base_Type => (classifier(Pkg::T))`, `Dimension => (16)`) and the bare forms
+      are accepted (typed_value: `List([ClassifierValue])`/`ClassifierValue`,
+      `List([Integer])`/`Integer`).
+      (2) A FIXED `Dimension` emits a BOUNDED fixed-size WIT `list<T, N>` — no
+      `cabi_realloc`, consistent with the RECORDS-002 no_alloc discipline (only
+      unbounded `list`/`string` force dynamic allocation); an array with NO
+      `Dimension` emits an unbounded `list<T>`; an `Array` with NO resolvable
+      `Base_Type` is NOT fabricated — it keeps the legacy opaque `list<u8>`.
+      (3) The element resolves through the shared `shape_wit_type` helper, so an
+      array-of-record and an array-typed record FIELD both work; the generated Rust
+      port type mirrors wit-bindgen's lowering (`list<T, N>` -> `[T; N]`,
+      `list<T>` -> `Vec<T>`).
+      ORACLE (executed unit tests, spar-codegen/src/wit_gen.rs): the #345 NavState
+      case (`Data_Representation => Array` + `Base_Type => (classifier(Float32))` +
+      `Dimension => (16)`) generates `type vehicle-state = list<f32, 16>;`; an
+      unbounded array -> `list<f32>`; a Base_Type-less array -> `list<u8>`
+      (negative control); an array-typed record field -> `nav: list<f32, 16>`. Each
+      asserts the emitted WIT PARSES + RESOLVES under `wit_parser` (a real
+      fixed-size-list bind, not a string match).
+      SCOPE / NOT CLAIMED: element bit-width comes from the `Base_Type`'s own
+      `Data_Size`; when the `Base_Type` resolves to an element with no concrete
+      shape (an unsized `Base_Types::Float` with no `Data_Size`, or an
+      unresolvable classifier) `array_of` returns `None`, so the array type is
+      NOT fabricated — a top-level array port GRACEFULLY falls back to the legacy
+      opaque `type x = list<u8>` (no regression, no hard error), and an
+      array-typed record FIELD takes the record no_alloc hard-error path (as an
+      opaque field would). Multi-dimensional arrays use only the first
+      `Dimension`. `list<T>`/`list<T, N>` byte-layout-vs-canonical-ABI
+      equivalence is NOT proven here (that is #327's ordeal work), and the Rust
+      port type (`[T; N]`/`Vec<T>`) mirrors wit-bindgen's documented lowering but
+      no compiled-crate oracle for array ports is asserted in this requirement.
+    status: implemented
+    tags: [codegen, wit, interop, no-alloc]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
     title: "spar codegen --verify test/build emits inert artifacts"
