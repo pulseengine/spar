@@ -2564,31 +2564,43 @@ artifacts:
       shared interface with aligned types; a type mismatch fails codegen.
       Tracks GitHub #282 (jess DD-009).
     status: proposed
+    release: v0.39.0
     tags: [codegen, wit, wrpc, capability]
-    fields:
-      release: v0.23.0
+
+  - id: REQ-RELEASE-PUBLISH-001
+    type: requirement
+    title: "Publish spar to crates.io + npm from signed OIDC CI (distribution half of #297)"
+    description: >
+      Track B (distribution) of the org release-artifact standard, carved out
+      of #297 as the lower-risk, ship-first half (roadmap v0.37.0): publish the
+      spar CLI to crates.io from signed OIDC CI, and add an npm CLI wrapper
+      (spar is user-facing). Independent of the wasm-gate work
+      (REQ-RELEASE-WASM-GATES-001) so it can land without waiting on witness/
+      scry. Coordination hub pulseengine/pulseengine.eu#98. Oracle: the release
+      workflow publishes to crates.io + npm from OIDC. Tracks GitHub #297.
+    status: proposed
+    release: v0.37.0
+    tags: [release, distribution, crates-io, npm, supply-chain]
 
   - id: REQ-RELEASE-WASM-GATES-001
     type: requirement
-    title: wasm verification gates + crates.io/npm distribution in the release standard
+    title: witness MC/DC + scry gates on the wasm component in the release standard
     description: >
       spar ships a jco-transpiled wasm component with NO wasm verification
       (not even a wasmtime load-check) while the native binary gets the
-      full cosign + SLSA + SBOM treatment. Per the org-wide
-      release-artifact-pipeline five-track standard, spar shall add —
-      Track C (wasm gates): a witness MC/DC gate and a scry
+      full cosign + SLSA + SBOM treatment. Track C (wasm gates) of the
+      org-wide release-artifact standard: add a witness MC/DC gate and a scry
       abstract-interpretation gate on the wasm component (sigil-signing is
-      blocked on pulseengine/sigil#164, use cosign in the interim); and
-      Track B (distribution): publish to crates.io from signed OIDC CI and
-      add an npm CLI wrapper (spar is user-facing). Coordination hub
-      pulseengine/pulseengine.eu#98 — any deviation/sequencing is decided
-      there in the open, not diverged silently. Oracle: the release
-      workflow runs the witness + scry gates on the wasm artifact and
-      publishes to crates.io + npm. Tracks GitHub #297.
+      blocked on pulseengine/sigil#164, use cosign in the interim). The
+      distribution half (crates.io + npm) was split out to
+      REQ-RELEASE-PUBLISH-001 so it can ship first without waiting on the
+      gates. Coordination hub pulseengine/pulseengine.eu#98 — sequencing
+      decided there in the open. Oracle: the release workflow runs the witness
+      + scry gates on the wasm artifact. Backlog (after the ordeal arc and the
+      publish half). Tracks GitHub #297.
     status: proposed
-    tags: [release, wasm, witness, scry, supply-chain, npm]
-    fields:
-      release: v0.23.0
+    release: v0.42.0
+    tags: [release, wasm, witness, scry, supply-chain]
 
   # ── CI / Verification gate ──────────────────────────────────────────────
 
@@ -3184,10 +3196,94 @@ artifacts:
       standard-property-backed base/size core first rather than over-claiming a
       register/binding convention that is not yet decided.
     status: proposed
+    release: v0.36.0
     tags: [codegen, target-artifacts, hardware, wit]
     links:
       - type: traces-to
         target: REQ-CODEGEN-TARGET-ARTIFACTS-001
+
+  - id: REQ-CODEGEN-LAYOUT-CERT-001
+    type: requirement
+    title: "Certify AADL↔WIT↔canonical-ABI byte-layout equivalence via ordeal"
+    description: >
+      spar's FIRST ordeal integration and the ordeal-edge pipe-cleaner
+      (roadmap v0.35.0). The AADL `data implementation` → WIT `record` →
+      canonical-ABI width/offset table is syntactic and unchecked today —
+      #319's 9-byte EepromSnapshot collapsing to an opaque list<u8> is the
+      symptom (#327). Encode the source layout and the generated WIT encoding
+      as ordeal QF_BV bit-vector terms (field offsets/widths via extract/
+      concat, endianness via ordeal's to_le_bytes/from_le_bytes helpers,
+      conditional fields via ite) and discharge `Solver::prove_equiv`: UNSAT
+      = the encoding faithfully represents the layout, carrying a re-checkable
+      LRAT certificate (ordeal-lrat, the Lean-verified trusted checker) emitted
+      as typed evidence; SAT = the differing bits as a counterexample.
+
+      Ordeal readiness CONFIRMED (audit, ordeal v0.17.0): prove_equiv +
+      layout.rs ship, with a worked "spar #38 layout oracle" example in
+      ordeal's docs; the enablers ordeal#64 (layout/arithmetic completeness)
+      and #66 (equivalence toolkit) are closed. So this is spar-side model-
+      translation work (the layout→BvTerm encoder), not solver work. Scope
+      limit: any single field ≤128 bits (ordeal's u128 const/model ceiling —
+      realistic for AADL/WIT). Establishes the ordeal Cargo dependency, the
+      BvTerm encoding pattern, and LRAT-cert-as-rivet-artifact that
+      REQ-BMC-CONCURRENCY-001 and REQ-PROOF-NC-CERT-001 then reuse. Tracks
+      #327; closes the #319 layout gap.
+    status: proposed
+    release: v0.35.0
+    tags: [codegen, ordeal, certificate, layout, wit, v0350]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-RECORDS-001
+
+  - id: REQ-BMC-CONCURRENCY-001
+    type: requirement
+    title: "Native bounded model checking of concurrency, certificate-checked via ordeal (v0.1 spike)"
+    description: >
+      A native bounded model checker for concurrent behaviour, discharged
+      through ordeal so verdicts are certificate-checked rather than trusting
+      an external oracle (TLA+/TLC/Apalache) — the certifying-algorithm pattern
+      one layer above where ordeal sits (#350). A new spar-analysis pass
+      encodes the AADL/SysML concurrency IR (threads + Dispatch_Protocol,
+      event-port queues bounded by Queue_Size, locks per
+      Concurrency_Control_Protocol, priorities, bindings) as a QF_BV transition
+      relation, bounded-unrolled to depth k; ordeal decides each query
+      (SAT → replayable counterexample trace; UNSAT → LRAT cert → verified
+      checker). Properties are free from the model: event-port queue overflow,
+      mutual exclusion, deadlock freedom, lost wakeup.
+
+      v0.1 SPIKE scope (deliberately narrowed from the issue): ONE property +
+      a tiny hand-model + the FALSIFICATION kill-criterion (seed a known defect
+      — undersize a Queue_Size, delete a wait/signal, invert a lock order — and
+      the checker MUST go red with a replayable counterexample; a green run
+      that can't be made red means the encoding is not load-bearing and the
+      spike failed) + an HONEST practical-k measurement on a gale-sized model
+      (that number decides gate-vs-occasional-analysis).
+
+      Division of labour (audit, ordeal v0.17.0): ordeal is ONLY the per-query
+      certified QF_BV leaf — it has no transition-system, unrolling, BMC, or
+      k-induction machinery, and no incremental solving (explicitly not
+      planned), so every depth k is a COLD re-solve and deep BMC is an
+      unvalidated regime for ordeal's CDCL. spar builds 100% of the BMC
+      superstructure: per-step SSA state, the transition relation, the unroll
+      driver, and trace reconstruction from ordeal's flat model. Design
+      constraints: QF_BV ≤128-bit words; shared memory only via concrete-index
+      arrays (symbolic addresses → Unknown).
+
+      Honest limits (carry in docs): BOUNDED — "no counterexample within k",
+      never proof-for-all (unbounded needs k-induction, a follow-on); SAFETY,
+      not liveness — fairness/"eventually" stays TLA+'s domain and out of
+      scope; DESIGN, not code — the refinement gap (model vs implementation)
+      stays a trusted-base entry; state explosion is real (symmetry/POR is a
+      later optimisation). DO-333 framing: checking the design artifact itself
+      (not a hand re-model that drifts) is the strongest provenance story, and
+      is stated as provenance, not certification credit. Builds on
+      REQ-CODEGEN-LAYOUT-CERT-001 (the proven ordeal edge). Tracks #350.
+    status: proposed
+    release: v0.40.0
+    tags: [analysis, ordeal, bmc, concurrency, certificate, spike]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-LAYOUT-CERT-001
 
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
@@ -4345,9 +4441,8 @@ artifacts:
       ratchet for the NC substrate; never gates a near-term feature.
       Lean has nothing in NC today [SOLID, absence].
     status: proposed
+    release: v0.38.0
     tags: [proof, lean, network-calculus, soundness, tier3]
-    fields:
-      release: v0.23.0
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
@@ -4363,6 +4458,5 @@ artifacts:
       "verified network calculus" until REQ-PROOF-NC-MINPLUS-001 closes
       and a concrete cert-driven buyer asks. [SOLID]
     status: proposed
+    release: v0.38.0
     tags: [proof, certificate, network-calculus, soundness, tier3]
-    fields:
-      release: v0.23.0
