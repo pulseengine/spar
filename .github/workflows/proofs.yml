@@ -29,8 +29,44 @@ on:
     branches: [main]
 
 jobs:
+  # Same construct (and the same required-check caveat) as ci.yml's `changes`
+  # job — see the comment there for why this is a job-level skip and not an
+  # `on: paths:` filter. An artifacts/docs-only diff cannot alter a Lean proof
+  # or the reflected codegen, so this job lets those PRs skip the lake build.
+  changes:
+    name: Detect changed paths (proofs)
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: Classify diff as code vs artifacts/docs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD)
+          printf '%s\n' "$changed"
+          if [ -z "$changed" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|[^/]*\.md|.*/.*\.md)$'
+          n_code=$(printf '%s\n' "$changed" | grep -cvE "$allow" || true)
+          echo "code-ish files in diff: $n_code"
+          if [ "$n_code" -gt 0 ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lean:
     name: Lean proof typecheck (lake build)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # 90 min covers cold-cache Mathlib fetches via `lake exe cache get`
     # plus our in-tree proof compile. Warm runs land in well under 10 min.
