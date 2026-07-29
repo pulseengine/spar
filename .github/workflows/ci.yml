@@ -310,12 +310,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        # Do NOT restore/save ~/.cargo/bin here. rust-cache caches installed
+        # binaries by default (cache-bin: true), which lets a `rivet` built
+        # elsewhere be restored under this job's key. `cargo install` then sees
+        # `rivet` already present and skips the pinned reinstall, so validation
+        # silently runs the wrong rivet — the source of the v0.33.0 bump's
+        # false-red (464 phantom errors vs the pinned v0.4.3's genuine PASS).
+        with:
+          cache-bin: false
       - name: Install rivet CLI
         # The binary `rivet` ships in the `rivet-cli` package (renamed
         # in the 0.4.x rework). v0.1.0 used a single `rivet` package
         # and treated unknown fields as errors, which fails on legitimate
         # schema-extension fields used by Track A/B/D/E artifacts.
-        run: cargo install --locked --git https://github.com/pulseengine/rivet --tag v0.4.3 rivet-cli
+        # `--force` guarantees this exact pinned tag is the binary that runs,
+        # even if a stale `rivet` is present, so the gate is deterministic.
+        run: cargo install --force --locked --git https://github.com/pulseengine/rivet --tag v0.4.3 rivet-cli
       - name: rivet validate
         run: rivet validate --format text
 
