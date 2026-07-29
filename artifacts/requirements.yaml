@@ -3108,6 +3108,87 @@ artifacts:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
 
+  - id: REQ-CODEGEN-TARGET-ARTIFACTS-001
+    type: requirement
+    title: "Emit hardware-target constants module + linker memory map from an AADL model"
+    description: >
+      Closes the memory-map slice of #338: make an analyzed *hardware* AADL model
+      the single source of truth for an embedded-target build, so downstream
+      (gale/gust) no longer re-derives structure spar already holds. Two build-time
+      artifacts, both reachable from the CLI as `spar emit --format <fmt> --root
+      Package::Type.Impl <files>` and derived purely from standard AADL
+      `Memory_Properties` on the RESOLVED instance model (type/impl inheritance and
+      `applies to` already folded in):
+      (1) `--format constants` — a Rust constants module: `pub const <NAME>_BASE`
+      (from `Base_Address`) and `<NAME>_SIZE` (from `Byte_Count`, else `Memory_Size`
+      normalized to bytes) for each `memory` component, plus `<NAME>_BASE` for each
+      memory-mapped `device` (peripheral base). Constant names are the component's
+      instance leaf name uppercased and identifier-sanitized.
+      (2) `--format linker` — a GNU-ld `MEMORY` block (the rust-embedded
+      `memory.x` shape), one region per sized `memory` component, `ORIGIN` in hex and
+      `LENGTH` in exact decimal bytes.
+      PROVEN by executed oracles (crates/spar-codegen/src/target_gen.rs unit tests +
+      crates/spar-cli/tests/emit_target.rs):
+      `constants_golden` / `linker_golden` assert byte-exact output for an
+      STM32-shaped fixture (flash via `Memory_Size => 1024 KByte`, sram via
+      `Byte_Count => 131072`, two mapped devices, one non-mapped device);
+      `constants_match_instance_model` is the #338 round-trip — every emitted
+      `*_BASE`/`*_SIZE` equals the value INDEPENDENTLY re-derived from the resolved
+      instance property map through the raw-string path (a different accessor +
+      parser than the emitter's typed `PropertyExpr`), and asserts the non-mapped
+      device emits no constant and exactly 2 memory + 2 devices are captured;
+      `non_hardware_model_errors` and the CLI `emit_constants_non_hardware_model_exits_nonzero`
+      assert that a model with no base-addressed memory/device is a HARD non-zero
+      error, never a vacuous empty artifact; `ident_sanitizes` pins the identifier
+      derivation and `collision_is_hard_error` builds two same-leaf-named memory
+      components under different parents and asserts the emitter returns an `Err`
+      rather than dropping/overwriting a constant. Base addresses use AADL based
+      notation (`16#08000000#`), consistent with the #337 radix-literal fix.
+      ASSUMED / NOT CLAIMED (honest scope): this emits ONLY base addresses and
+      sizes. Device register-detail OFFSETS, the device presence FLAG, and the WIT
+      device-driver WORLD binding (asks 1 and 3 of #338) are NOT implemented — see
+      the successor REQ-CODEGEN-TARGET-ARTIFACTS-002. Size sources are limited to
+      `Byte_Count` and `Memory_Size` (`Word_Count`×`Word_Size` is not handled).
+      Linker region names are the AADL component leaf names uppercased, NOT the
+      cortex-m-rt-conventional `FLASH`/`RAM`, so the firmware's `link.x` must
+      reference the emitted names (or the model must name the components accordingly).
+      `Base_Address` is taken verbatim (no bus/binding offset resolution). Constants
+      are typed `usize`, so a base or size ≥ 2^32 is emitted faithfully but only
+      compiles for a 64-bit-`usize` host/target. The generated module's constants are
+      valid Rust `const` items by construction (sanitized identifiers + hex integer
+      literals; sanitizer unit-tested), but a per-CI rustc-compilation oracle for the
+      generated file is NOT asserted. The existing `spar items --json` bridge remains
+      the supported downstream contract; this adds a first-class emission path over
+      the same model data.
+    status: implemented
+    tags: [codegen, target-artifacts, hardware, memory-map]
+    release: v0.34.0
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-001
+
+  - id: REQ-CODEGEN-TARGET-ARTIFACTS-002
+    type: requirement
+    title: "Emit device register offsets + a WIT device-driver world binding (successor)"
+    description: >
+      Successor to REQ-CODEGEN-TARGET-ARTIFACTS-001, covering the remaining #338
+      asks that require conventions AADL does not standardize: (1) device
+      REGISTER-DETAIL offsets and a presence FLAG in the emitted constants module —
+      needs an agreed property shape for register maps (a `Spar_*` property set or a
+      Data Modeling Annex layout) so offsets are read from the model rather than
+      guessed; (2) a WIT WORLD binding a generic device-driver import to the
+      target's device instance, so swapping the target is swapping the generated
+      binding (zero-runtime-cost retargeting). Acceptance = golden fixtures for the
+      register map + WIT world plus a round-trip that emitted offsets match the
+      model. Deferred deliberately: TARGET-ARTIFACTS-001 shipped the mechanical,
+      standard-property-backed base/size core first rather than over-claiming a
+      register/binding convention that is not yet decided.
+    status: proposed
+    tags: [codegen, target-artifacts, hardware, wit]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-TARGET-ARTIFACTS-001
+
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement
     title: "spar codegen --verify test/build emits inert artifacts"

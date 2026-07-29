@@ -78,7 +78,7 @@ fn print_usage() {
     eprintln!("  allocate   Allocate threads to processors via bin-packing");
     eprintln!("  diff       Compare two model versions and report changes");
     eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
-    eprintln!("  emit       Emit a text diagram (Mermaid flowchart) from an instantiated system");
+    eprintln!("  emit       Emit a Mermaid diagram, target constants module, or linker memory map");
     eprintln!("  render     Render architecture SVG from an instantiated system");
     eprintln!("  verify     Verify requirements against analysis results");
     eprintln!("  codegen    Generate code from an instantiated system model");
@@ -110,13 +110,15 @@ fn print_usage() {
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!(
-        "  emit     [--format mermaid|mermaid-class|mermaid-req] \
+        "  emit     [--format mermaid|mermaid-class|mermaid-req|constants|linker] \
          [--root Package::Type.Impl] [--category <cat,...>] \
-         [--max-depth N] [--no-connections] [-o output.md] [<file...>]\n\
+         [--max-depth N] [--no-connections] [-o output] [<file...>]\n\
          \n\
          \t\t  mermaid       flowchart TD (default)\n\
          \t\t  mermaid-class classDiagram of component types\n\
-         \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml"
+         \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml\n\
+         \t\t  constants     Rust constants module (memory/peripheral base addresses + sizes)\n\
+         \t\t  linker        GNU-ld MEMORY block / rust-embedded memory.x from memory components"
     );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -1351,12 +1353,12 @@ fn cmd_emit(args: &[String]) {
                 if i < args.len() {
                     let f = args[i].as_str();
                     match f {
-                        "mermaid" | "mermaid-class" | "mermaid-req" => {
+                        "mermaid" | "mermaid-class" | "mermaid-req" | "constants" | "linker" => {
                             format = f.to_string();
                         }
                         other => {
                             eprintln!(
-                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' (got '{other}')"
+                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' | 'constants' | 'linker' (got '{other}')"
                             );
                             process::exit(1);
                         }
@@ -1424,6 +1426,47 @@ fn cmd_emit(args: &[String]) {
             process::exit(1);
         });
         return emit_output(diagram, output);
+    }
+
+    // ── constants / linker: hardware-target artifacts from the instance model ─
+    if format == "constants" || format == "linker" {
+        let root = root.unwrap_or_else(|| {
+            eprintln!("--root Package::Type.Impl is required");
+            process::exit(1);
+        });
+        if files.is_empty() {
+            eprintln!("Missing file argument(s)");
+            process::exit(1);
+        }
+
+        let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+        let db = spar_hir_def::HirDefDatabase::default();
+        let mut trees = Vec::new();
+        for file_path in &files {
+            let source = read_file(file_path);
+            let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+            trees.push(spar_hir_def::file_item_tree(&db, sf));
+        }
+        let scope = spar_hir_def::GlobalScope::from_trees(trees);
+        let inst = spar_hir_def::instance::SystemInstance::instantiate(
+            &scope,
+            &spar_hir_def::Name::new(&pkg_name),
+            &spar_hir_def::Name::new(&type_name),
+            &spar_hir_def::Name::new(&impl_name),
+        );
+
+        let result = if format == "constants" {
+            spar_codegen::target_gen::emit_constants(&inst, &root)
+        } else {
+            spar_codegen::target_gen::emit_linker(&inst, &root)
+        };
+        match result {
+            Ok(content) => return emit_output(content, output),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
     }
 
     // ── mermaid / mermaid-class: require --root and AADL files ──────────────
