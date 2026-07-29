@@ -7,6 +7,7 @@
 //! - **rust_gen**: Rust component skeletons per thread
 //! - **config_gen**: TOML/JSON configuration files
 //! - **test_gen**: Test harnesses per thread
+//! - **target_gen**: hardware-target constants module + linker memory map
 //! - **proof_gen**: Lean4 scheduling proofs + Kani harnesses
 //! - **doc_gen**: Rivet design documents with YAML frontmatter
 //! - **workspace_gen**: Cargo.toml + BUILD.bazel workspace generation
@@ -16,6 +17,7 @@ pub mod config_gen;
 pub mod doc_gen;
 pub mod proof_gen;
 pub mod rust_gen;
+pub mod target_gen;
 pub mod test_gen;
 pub mod wit_gen;
 pub mod workspace_gen;
