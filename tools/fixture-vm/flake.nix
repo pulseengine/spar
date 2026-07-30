@@ -251,6 +251,30 @@
           # Enable sch_taprio and CBS as kernel modules.
           boot.kernelModules = [ "sch_taprio" "sch_cbs" ];
 
+          # Put the kernel console on the serial port QEMU is actually
+          # reading. Without this the guest is silent from the moment the
+          # kernel starts, and every failure inside it looks identical.
+          #
+          # The harness runs `-nographic -serial mon:stdio` and inherits
+          # stdout, which is correct and was never the problem. The problem
+          # is that only *firmware* output survived it: under `-nographic`
+          # SeaBIOS redirects the BIOS text console onto the serial port,
+          # and GRUB draws via BIOS calls, so GRUB rode that redirect for
+          # free. Linux does not use BIOS calls — at handoff it switches to
+          # whatever `console=` names, which defaults to `tty0`, the VGA
+          # framebuffer `-nographic` has disconnected. So the kernel,
+          # systemd, and gen-fixtures all logged into a void.
+          #
+          # That is exactly what the log of run 30569595760 shows: SeaBIOS,
+          # iPXE and "Welcome to GRUB!", then 900 seconds of nothing and the
+          # harness timeout. The silence was not the guest hanging early; it
+          # was the last line we were able to see.
+          #
+          # Order is load-bearing. Every `console=` receives kernel messages,
+          # but the LAST one becomes /dev/console, which is what init and
+          # `serial-getty@ttyS0` attach to. ttyS0 must therefore come last.
+          boot.kernelParams = [ "console=tty0" "console=ttyS0,115200" ];
+
           # Boot directly from the qcow2's virtio disk (no PXE/UEFI menu).
           boot.loader.grub = {
             enable = true;
