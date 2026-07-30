@@ -4690,15 +4690,20 @@ artifacts:
       RECONCILIATION (measured, not asserted): 303 raw `status:` text matches
       across 9 committed files, minus 21 in the unloaded file, minus 6 in the
       fields bag, equals the 276 errors rivet reports. The three planes agree.
-      NOTE ON THE MISSING LINK: this artifact deliberately carries no
-      `traces-to: REQ-GUARD-RELEASE-PLANE-001`, even though that is its natural
-      sibling. That artifact arrives in a different unmerged PR, and a `links:`
-      target is resolved at validate time — so the link would make this branch's
-      oracle pass or fail depending on which PR merges first. Add it once both
-      have landed; a flaky gate is not a traceability improvement.
+      NOTE ON THE LINK BELOW, and why it arrived a commit late: the
+      `traces-to: REQ-GUARD-RELEASE-PLANE-001` was deliberately withheld while
+      these two requirements sat in separate unmerged PRs. A `links:` target is
+      resolved at validate time, so the link would have made each branch's
+      oracle pass or fail depending on which PR merged first — and a gate whose
+      verdict depends on merge order is not a traceability improvement. The
+      target landed on main in #373; the link is now present and resolves
+      against the same tree that validates it.
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, traceability, rivet, tooling]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-RELEASE-PLANE-001
 
   - id: REQ-GUARD-GATE-EVIDENCE-001
     type: requirement
