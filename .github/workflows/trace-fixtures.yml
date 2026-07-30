@@ -41,6 +41,28 @@ env:
   # different images: a probe that greens a different image than the one
   # built proves nothing about the build.
   NIX_IMAGE_DIGEST: "sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
+  # Nix settings, shared verbatim by the KVM precondition probe and the build it
+  # guards. Hoisted here for the same reason NIX_IMAGE_DIGEST is: the probe and
+  # the build must not drift onto different configurations. A probe that greens a
+  # differently-configured Nix proves nothing about the build — and until run
+  # 30572572863 they *did* differ (the build appended these; the probe appended
+  # nothing), which is half of why the probe passed a build that then failed.
+  #
+  # `sandbox = false` drops Nix's in-container build sandbox (not host root — the
+  # container is already rootless). Without it, sandboxed builds fail inside the
+  # already-containerised environment.
+  #
+  # `build-users-group =` (empty) makes builds run as the container's own root
+  # rather than dropping to a `nixbld` user, and it is what makes /dev/kvm
+  # reachable AT BUILD TIME. /dev/kvm is mode 0660 owned by the host's root:kvm,
+  # neither of which is mapped into the rootless userns — so both render as
+  # 65534/nobody, and access is granted purely by the supplementary group that
+  # `--group-add keep-groups` carries in. Supplementary groups do not survive the
+  # switch to a nixbld build user. Root keeps them; nixbld does not.
+  NIX_CONF_EXTRA: |
+    experimental-features = nix-command flakes
+    sandbox = false
+    build-users-group =
 
 jobs:
   generate-fixtures:
@@ -120,19 +142,51 @@ jobs:
       #
       # — a correct and precise diagnostic, emitted after ~5 minutes of
       # compiling and buried under ~700 `building '/nix/store/…drv'` lines
-      # (run 30565973744).  This step asks Nix the same question in two
-      # seconds, at the top of the log, before anything is built.
+      # (run 30565973744).  This step asks the question in two seconds, at
+      # the top of the log, before anything is built.
       #
-      # It asserts on Nix's OWN computed feature set rather than on a shell
-      # `[ -w /dev/kvm ]` test: the feature set is what the build is actually
-      # matched against, so a probe of anything else could pass while the
-      # build still fails.
-      - name: Require /dev/kvm usable inside the container
+      # WHY THIS PROBE RUNS A BUILD INSTEAD OF READING A CONFIG VALUE.
+      #
+      # It used to assert on Nix's own computed `system-features`, defended in
+      # this comment as strictly better than a shell `[ -w /dev/kvm ]` test
+      # because "the feature set is what the build is actually matched against".
+      # That is true, and it is the wrong question. Run 30572572863 passed this
+      # probe and then failed the build it guards:
+      #
+      #   probe:  nix system-features = benchmark big-parallel kvm …   (green)
+      #   build:  qemu-system-x86_64: Could not access KVM kernel module:
+      #           Permission denied   →   falling back to tcg   →   SIGABRT
+      #
+      # Both readings were correct. `system-features` governs SCHEDULING —
+      # whether nixos-disk-image.drv may be PLACED on this machine — and Nix
+      # computes it in the parent process, uid 0, which carries the supplementary
+      # group `--group-add keep-groups` brought in. The build then ran its
+      # builder as a `nixbld` user, which carries no such group, and QEMU's
+      # open("/dev/kvm", O_RDWR) got EPERM. Different principal, different
+      # syscall. The more rigorous-looking probe measured the layer next to the
+      # one that broke; `[ -w /dev/kvm ]` would have been wrong the same way,
+      # because it too runs as the parent.
+      #
+      # So the probe now does the actual thing: a real derivation, carrying the
+      # real `requiredSystemFeatures = [ "kvm" ]`, whose builder performs the
+      # real open(O_RDWR). Same principal, same syscall, same Nix settings
+      # (NIX_CONF_EXTRA) as the build it guards. It needs no nixpkgs and no
+      # network, and it prints `id` from inside the builder — the one line whose
+      # absence made this cost twelve minutes and a 700-line log to see.
+      #
+      # Note that TCG is not a usable fallback: with KVM denied, QEMU fell back
+      # to software emulation and aborted on an assertion at -smp 32. There is no
+      # degraded mode to tolerate here, which is why this is a hard gate.
+      - name: Require /dev/kvm openable by a Nix BUILD process
+        env:
+          WORKSPACE: ${{ github.workspace }}
         run: |
           podman run --rm \
             --device /dev/kvm \
             --group-add keep-groups \
             --security-opt label=disable \
+            -e NIX_CONF_EXTRA \
+            -v "${WORKSPACE}:/spar:Z" \
             "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
             sh -c '
               set -eu
@@ -141,24 +195,34 @@ jobs:
                 echo "::error::/dev/kvm is not present in the container at all."
                 exit 1
               }
-              FEATURES="$(nix --extra-experimental-features nix-command \
-                config show system-features 2>/dev/null || echo "<unavailable>")"
-              echo "nix system-features = ${FEATURES}"
-              case " ${FEATURES} " in
-                *" kvm "*)
-                  echo "ok: nix advertises kvm; nixos-disk-image.drv is buildable here"
-                  ;;
-                *)
-                  echo "::error::Nix does not advertise the kvm system feature, so"
-                  echo "::error::nixos-disk-image.drv cannot be built on this runner."
-                  echo "::error::/dev/kvm is root:kvm 0660 and rootless podman drops"
-                  echo "::error::supplementary groups; --group-add keep-groups needs a"
-                  echo "::error::crun-based runtime. Check: podman info --format"
-                  echo "::error::{{.Host.OCIRuntime.Name}} and that the runner user is"
-                  echo "::error::in the kvm group on the host."
-                  exit 1
-                  ;;
-              esac
+
+              # Identical settings to the build step — see NIX_CONF_EXTRA.
+              mkdir -p /etc/nix
+              printf "%s\n" "${NIX_CONF_EXTRA}" >> /etc/nix/nix.conf
+
+              echo "nix build-users-group = [$(nix config show build-users-group)]"
+              echo "nix system-features   = $(nix config show system-features)"
+
+              if nix build --no-link --print-build-logs \
+                   -f /spar/tools/fixture-vm/kvm-probe.nix; then
+                echo "ok: a Nix BUILD process opened /dev/kvm O_RDWR."
+              else
+                echo "::error::A Nix build process cannot open /dev/kvm, so the"
+                echo "::error::transient VM inside nixos-disk-image.drv cannot start."
+                echo "::error::"
+                echo "::error::If scheduling succeeded but the open failed, the build"
+                echo "::error::principal lost the supplementary group that reaches the"
+                echo "::error::device: check that build-users-group is EMPTY above, so"
+                echo "::error::builds run as the container root that --group-add"
+                echo "::error::keep-groups actually granted."
+                echo "::error::"
+                echo "::error::If scheduling itself failed (a features{kvm} error), the"
+                echo "::error::container never got the group: --group-add keep-groups"
+                echo "::error::needs a crun-based runtime. Check podman info --format"
+                echo "::error::{{.Host.OCIRuntime.Name}} and that the runner user is in"
+                echo "::error::the kvm group on the host."
+                exit 1
+              fi
             '
 
       - name: Build NixOS fixture-vm qcow2
@@ -169,14 +233,16 @@ jobs:
             --device /dev/kvm \
             --group-add keep-groups \
             --security-opt label=disable \
+            -e NIX_CONF_EXTRA \
             -v "${WORKSPACE}:/spar:Z" \
             "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
             sh -c '
               set -euo pipefail
-              # Enable flakes + nix-command.
+              # The SAME settings the precondition probe just proved out — see
+              # NIX_CONF_EXTRA. Writing them inline here instead is what let the
+              # probe and the build drift apart before run 30572572863.
               mkdir -p /etc/nix
-              echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
-              echo "sandbox = false" >> /etc/nix/nix.conf
+              printf "%s\n" "${NIX_CONF_EXTRA}" >> /etc/nix/nix.conf
               cd /spar/tools/fixture-vm
               # Build the qcow2 image against the committed flake.lock.
               #
