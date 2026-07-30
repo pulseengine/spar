@@ -35,6 +35,12 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   FIXTURE_OUTPUT_DIR: fixture-output
+  # sha256 digest of docker.io/nixos/nix:2.24.9 — see the "Build NixOS
+  # fixture-vm qcow2" step for how to re-resolve it. Hoisted here so the
+  # kvm precondition probe and the build it guards cannot drift onto
+  # different images: a probe that greens a different image than the one
+  # built proves nothing about the build.
+  NIX_IMAGE_DIGEST: "sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
 
 jobs:
   generate-fixtures:
@@ -73,10 +79,10 @@ jobs:
       # different version.  Update the digest here when a newer Nix release
       # is needed.
       #
-      # sha256 digest of docker.io/nixos/nix:2.24.9 — the multi-arch INDEX
-      # manifest (manifest.list.v2), not a per-arch leaf; podman resolves
-      # the right arch from it. Verified: `podman run <image> nix --version`
-      # → 2.24.9.  Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
+      # NIX_IMAGE_DIGEST (workflow `env:`) is the multi-arch INDEX manifest
+      # (manifest.list.v2), not a per-arch leaf; podman resolves the right
+      # arch from it. Verified: `podman run <image> nix --version` → 2.24.9.
+      # Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
       #
       # Note: "sandbox = false" in nix.conf drops Nix's in-container build
       # sandbox (not host root — the container is already rootless).
@@ -84,19 +90,87 @@ jobs:
       # containerised environment.  --device /dev/kvm is required because
       # the NixOS qcow2 builder boots a transient builder VM.
       #
+      # --group-add keep-groups is required for the SAME reason and is not
+      # implied by --device.  See the precondition step below for why.
+      #
       # --no-update-lock-file makes `nix build` FAIL rather than re-resolve
       # if the committed lock is stale/incomplete — belt-and-suspenders with
       # the guard step above.
+
+      # ── 3a. Precondition: Nix must actually advertise the `kvm` feature ──
+      #
+      # `--device /dev/kvm` puts the node in the container; it does NOT make
+      # it usable.  /dev/kvm is `crw-rw---- root:kvm`, and **rootless podman
+      # drops the caller's supplementary groups by default** — so the
+      # in-container process is not in `kvm` and the node is present but
+      # unopenable.  The host runner user being in the `kvm` group (true on
+      # this fleet) does not carry into the user namespace without
+      # `--group-add keep-groups`.
+      #
+      # Nix adds `kvm` to its system-features only when
+      # access("/dev/kvm", R_OK|W_OK) succeeds (settings.cc,
+      # getDefaultSystemFeatures).  make-disk-image.nix builds through
+      # vmTools.runInLinuxVM, whose derivation carries
+      # `requiredSystemFeatures = [ "kvm" ]`.  Miss the group and the build
+      # dies with:
+      #
+      #   error: a 'x86_64-linux' with features {kvm} is required to build
+      #   '…-nixos-disk-image.drv', but I am a 'x86_64-linux' with features
+      #   {benchmark, big-parallel, nixos-test, uid-range}
+      #
+      # — a correct and precise diagnostic, emitted after ~5 minutes of
+      # compiling and buried under ~700 `building '/nix/store/…drv'` lines
+      # (run 30565973744).  This step asks Nix the same question in two
+      # seconds, at the top of the log, before anything is built.
+      #
+      # It asserts on Nix's OWN computed feature set rather than on a shell
+      # `[ -w /dev/kvm ]` test: the feature set is what the build is actually
+      # matched against, so a probe of anything else could pass while the
+      # build still fails.
+      - name: Require /dev/kvm usable inside the container
+        run: |
+          podman run --rm \
+            --device /dev/kvm \
+            --group-add keep-groups \
+            --security-opt label=disable \
+            "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
+            sh -c '
+              set -eu
+              echo "container process: $(id)"
+              ls -l /dev/kvm || {
+                echo "::error::/dev/kvm is not present in the container at all."
+                exit 1
+              }
+              FEATURES="$(nix --extra-experimental-features nix-command \
+                config show system-features 2>/dev/null || echo "<unavailable>")"
+              echo "nix system-features = ${FEATURES}"
+              case " ${FEATURES} " in
+                *" kvm "*)
+                  echo "ok: nix advertises kvm; nixos-disk-image.drv is buildable here"
+                  ;;
+                *)
+                  echo "::error::Nix does not advertise the kvm system feature, so"
+                  echo "::error::nixos-disk-image.drv cannot be built on this runner."
+                  echo "::error::/dev/kvm is root:kvm 0660 and rootless podman drops"
+                  echo "::error::supplementary groups; --group-add keep-groups needs a"
+                  echo "::error::crun-based runtime. Check: podman info --format"
+                  echo "::error::{{.Host.OCIRuntime.Name}} and that the runner user is"
+                  echo "::error::in the kvm group on the host."
+                  exit 1
+                  ;;
+              esac
+            '
+
       - name: Build NixOS fixture-vm qcow2
         env:
           WORKSPACE: ${{ github.workspace }}
         run: |
-          DIGEST="sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
           podman run --rm \
             --device /dev/kvm \
+            --group-add keep-groups \
             --security-opt label=disable \
             -v "${WORKSPACE}:/spar:Z" \
-            "docker.io/nixos/nix@${DIGEST}" \
+            "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
             sh -c '
               set -euo pipefail
               # Enable flakes + nix-command.
