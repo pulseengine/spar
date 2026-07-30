@@ -279,7 +279,32 @@
       modules = [
         # ── Base NixOS configuration ──────────────────────────────────────
 
-        ({ config, pkgs, lib, ... }: {
+        ({ config, pkgs, lib, modulesPath, ... }: {
+          # Without this the initrd has no virtio drivers, so /dev/vda1 —
+          # the root device declared 40 lines below — never appears, and
+          # stage 1 dies with "Timed out waiting for device /dev/vda1".
+          #
+          # `nixpkgs.lib.nixosSystem` imports neither profiles/base.nix nor
+          # this profile; the virtio module set that every NixOS-under-QEMU
+          # user takes for granted arrives HERE and nowhere else. Measured on
+          # the config as it stood, `config.boot.initrd.availableKernelModules`
+          # was ahci / ata_piix / nvme / sd_mod / sr_mod / usbhid — IDE, SATA,
+          # NVMe and USB keyboards, and not one virtio_*.
+          #
+          # WHY IT SURVIVED SO LONG. Nothing cross-checks `fileSystems."/"`
+          # against the drivers the initrd can load, so the image evaluated,
+          # built and PARTLY booted: SeaBIOS and GRUB reach the disk through
+          # BIOS int 13h, which works for any controller, so run 30580839772
+          # got all the way to "<<< NixOS Stage 1 >>>" before failing. A disk
+          # that boots is not a disk the kernel can mount.
+          #
+          # It also carries 9p/9pnet_virtio, which the /fixtures share needs —
+          # and that mount is `nofail`, so without them gen-fixtures would
+          # have written its output into an ordinary directory inside the
+          # guest and the host would have collected nothing, with every step
+          # green. Two failure modes, one import.
+          imports = [ "${toString modulesPath}/profiles/qemu-guest.nix" ];
+
           # Pin the kernel to a recent stable version that includes
           # sch_taprio and CLOCK_TAI (present since Linux 4.18;
           # linuxPackages_latest tracks the latest stable).
