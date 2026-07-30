@@ -435,6 +435,19 @@ jobs:
             --artifacts-dir artifacts \
             --artifacts-dir safety/stpa
 
+      # Required-context drift (#372). Same stdlib-only, fail-closed rules as
+      # above, and here for the same reason: it must run on the PR that edits a
+      # workflow, and that PR need not touch anything a path filter selects.
+      #
+      # Deliberately steps of *this* job rather than a job of its own. A new job
+      # would itself be gateable, so it would have to be added to
+      # .github/required-contexts.txt — and syncing branch protection to match
+      # needs an admin token CI does not have. It would ship permanently red.
+      - name: Required-context guardrail self-test
+        run: tools/check_required_contexts.py --self-test
+      - name: Required-context guardrail
+        run: tools/check_required_contexts.py
+
   # ── Bazel test sweep ───────────────────────────────────────────────
   # Issue #135 acceptance: `bazel test //...` to pick up Rust + Lean
   # targets via tools/bazel/rules_lean and rules_wasm_component.
@@ -446,7 +459,11 @@ jobs:
   #
   # Time budget: cold cache ≤30 min, warm ≤5 min (per #135).
   bazel-test:
-    name: Bazel test (//...)
+    # "(advisory)" is in the NAME, not just the comment above, because the name
+    # is the only thing a PR reader sees. `continue-on-error` makes the tick
+    # green whatever happened — without the marker the check-run renders a claim
+    # the run does not support. Enforced by tools/check_required_contexts.py.
+    name: Bazel test (//...) (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest until Bazel is installed on the smithy host.
@@ -497,7 +514,12 @@ jobs:
   #      continue-on-error to false and add to the required-checks list.
   #   3. At that point, extend MAX_TASKS from 4 to 8 and re-tune unwinds.
   kani:
-    name: Kani Bounded Model Checking
+    # "(advisory)" belongs in the name for as long as step 2 above is pending:
+    # `continue-on-error` greens the tick regardless, and "Kani Bounded Model
+    # Checking ✓" is exactly the claim a reader should not draw from that.
+    # Drop the marker in the same commit that flips continue-on-error to false
+    # and adds this to .github/required-contexts.txt — the gate will insist.
+    name: Kani Bounded Model Checking (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest because kani-verifier bundles CBMC (~100 MB)
