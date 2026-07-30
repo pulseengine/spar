@@ -33,6 +33,11 @@ jobs:
     # (newuidmap EPERM) — confirmed on runner8 on 2026-05-23.
     runs-on: [self-hosted, linux, x64, podman]
 
+    # Resolving flake inputs is a network operation with no internal
+    # watchdog; without a bound it inherits GitHub's 6-hour default and a
+    # stalled fetch holds a self-hosted slot for the rest of the day.
+    timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
 

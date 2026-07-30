@@ -108,6 +108,15 @@ jobs:
     # 2026-05-23).
     runs-on: [self-hosted, linux, x64, podman]
 
+    # Without this the job inherits GitHub's 6-hour default. The inner QEMU
+    # harness has its own 900s guest watchdog, but everything outside it —
+    # the nix build of the qcow2, a wedged podman, a runner that loses its
+    # KVM device — is unbounded, and a self-hosted runner sitting idle for
+    # six hours blocks the whole fleet slot. Warm-cache runs finish in ~30
+    # min (30583284365: 21:27:49 -> 21:57:50); 180 leaves room for a cold
+    # rustc + nixpkgs build without leaving the failure mode open-ended.
+    timeout-minutes: 180
+
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
       - uses: actions/checkout@v4
