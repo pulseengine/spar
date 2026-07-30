@@ -2,6 +2,7 @@
 name = "spar-parser"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "AADL parser — tree-agnostic recursive descent with error recovery"

@@ -435,6 +435,19 @@ jobs:
             --artifacts-dir artifacts \
             --artifacts-dir safety/stpa
 
+      # Closure MSRV drift (#369). Here rather than in a code-gated job for the
+      # same reason as above, and it matters more here than anywhere: the PR
+      # that raises the real floor is a `cargo update`, which touches only
+      # Cargo.lock. Behind `needs.changes.outputs.code` that is exactly the PR
+      # most likely to be filtered out.
+      #
+      # Cheap despite needing cargo: `cargo metadata` resolves, it does not
+      # compile, and this job already installs a toolchain for the rivet CLI.
+      - name: MSRV guardrail self-test
+        run: tools/check_msrv.py --self-test
+      - name: MSRV guardrail
+        run: tools/check_msrv.py
+
   # ── Bazel test sweep ───────────────────────────────────────────────
   # Issue #135 acceptance: `bazel test //...` to pick up Rust + Lean
   # targets via tools/bazel/rules_lean and rules_wasm_component.

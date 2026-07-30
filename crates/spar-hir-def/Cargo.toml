@@ -2,6 +2,7 @@
 name = "spar-hir-def"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "HIR definitions and name resolution for AADL analysis"

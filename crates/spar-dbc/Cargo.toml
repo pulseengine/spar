@@ -2,6 +2,7 @@
 name = "spar-dbc"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "CAN .dbc ingest: parse a DBC network and emit AADL v2.3 source text"

@@ -2,6 +2,7 @@
 name = "spar-trace-topology"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Runtime/declared topology reconciliation for spar (PCAPNG + LLDP + Qcc + AADL)"
