@@ -732,7 +732,7 @@ artifacts:
 
   - id: VAL-CODEGEN-001
     type: feature
-    status: pass
+    status: passing
     title: Golden model integration tests for codegen
     description: >
       19 golden model integration tests validating end-to-end code generation
@@ -754,7 +754,7 @@ artifacts:
 
   - id: VAL-CODEGEN-002
     type: feature
-    status: pass
+    status: passing
     title: WIT/Rust/Config/Test/Proof generation output validation
     description: >
       Tests validating each codegen output layer independently: WIT interface
@@ -795,7 +795,7 @@ artifacts:
 
   - id: VAL-SYSML2-LOWER-001
     type: feature
-    status: pass
+    status: passing
     title: SysML v2 lowering tests
     description: >
       Tests for SysML v2 to AADL lowering covering diagnostic handling for
@@ -814,7 +814,7 @@ artifacts:
 
   - id: VAL-VERIFY-MACROS-001
     type: feature
-    status: pass
+    status: passing
     title: Verify macro proc-macro tests
     description: >
       Tests for spar-verify-macros proc-macro crate covering #[aadl(...)]
@@ -837,7 +837,7 @@ artifacts:
 
   - id: VAL-KANI-SOLVER-001
     type: feature
-    status: pending
+    status: planned
     title: Kani — solver output implies no deadline miss
     description: >
       kani_schedule_implies_no_deadline_miss harness: for any TaskSet of
@@ -861,7 +861,7 @@ artifacts:
 
   - id: VAL-KANI-SOLVER-002
     type: feature
-    status: pending
+    status: planned
     title: Kani — priority ordering is monotone and antisymmetric
     description: >
       kani_priority_monotonicity harness: for any two tasks in a ≤4-task
@@ -885,7 +885,7 @@ artifacts:
 
   - id: VAL-KANI-SOLVER-003
     type: feature
-    status: pending
+    status: planned
     title: Kani — EDF accepts U=1 at n=2, RM rejects
     description: >
       kani_zero_laxity_handled harness: a 2-task implicit-deadline set
@@ -909,7 +909,7 @@ artifacts:
 
   - id: VAL-KANI-CODEGEN-001
     type: feature
-    status: pending
+    status: planned
     title: Kani — codegen emission preserves schedule task IDs
     description: >
       kani_emit_preserves_schedule harness: for any Schedule of size
@@ -980,7 +980,7 @@ artifacts:
 
   - id: VAL-MUTATION-001
     type: feature
-    status: pass
+    status: passing
     title: Mutation testing for analysis passes
     description: >
       Mutation testing campaign covering 674 analysis tests. Validates that
