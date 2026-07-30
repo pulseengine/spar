@@ -1,0 +1,44 @@
+# Required status checks on `main` — the expected set (issue #372).
+#
+# This file is the committed half of a reconciliation that has three moving
+# parts and only ever had two of them written down:
+#
+#   .github/workflows/*   what actually runs
+#   THIS FILE             what we intend to enforce
+#   branch protection     what GitHub enforces
+#
+# `tools/check_required_contexts.py` reconciles the first two on every PR. It
+# cannot reconcile the third: reading branch protection needs an ADMIN token and
+# the Actions GITHUB_TOKEN is not one. Run
+# `tools/check_required_contexts.py --against-api` with admin credentials to
+# close that leg. Regenerate this file with `--print`.
+#
+# A context belongs here if and only if its job runs on every PR against main
+# and cannot fail open. Two kinds of job must NOT be listed:
+#
+#   * `continue-on-error` jobs — they report success whatever happened, so
+#     requiring one enforces nothing.
+#   * jobs in workflows with a workflow-level `on.pull_request.paths` filter —
+#     a workflow that does not trigger reports NOTHING, so the context sits at
+#     "Expected — waiting for status" and the PR deadlocks. Move the filter to a
+#     job-level `if:` first; an if:-skipped job reports "skipped", which
+#     satisfies a required context.
+#
+Bench compile smoke
+Cargo Deny
+Clippy
+Code Coverage
+Codegen compile oracle
+Detect changed paths
+Detect changed paths (proofs)
+Format
+Fuzz smoke (60s/target)
+Lean proof typecheck (lake build)
+Miri
+Mutation Testing
+Proptest (extended)
+Rivet validate (artifacts)
+Security Audit (RustSec)
+Supply Chain (cargo-vet)
+Test
+Verification Gate (rivet-driven)
