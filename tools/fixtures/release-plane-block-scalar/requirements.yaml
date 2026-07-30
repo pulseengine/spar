@@ -1,0 +1,41 @@
+# Fixture for tools/check_release_plane.py — NOT part of the real trace.
+#
+# Proves the checker parses rather than greps. `release:` inside a
+# `description: >` block scalar is PROSE — it is indented deeper than the
+# artifact's key plane, so the obvious implementation
+#
+#     grep -nE '^ {6,}release: '
+#
+# reds the build for a sentence. There is no such line in the real tree today;
+# this fixture exists so that writing one is not a trap, and so the block-scalar
+# branch is an exercised claim rather than an asserted one.
+#
+# The second artifact carries a genuine top-level `release:`. Without it, exit 0
+# would be consistent with "the checker found nothing anywhere" — including a
+# checker that had stopped parsing entirely. With it, exit 0 means the checker
+# read the file, counted the real assignment, and still declined to count the
+# prose.
+artifacts:
+  - id: FIXTURE-RELEASE-PLANE-PROSE
+    type: requirement
+    title: release mentioned in prose, not assigned
+    description: >
+      This requirement was originally scoped for v0.23.0 and the field
+      release: v0.23.0 appeared in the plan at the time. The line above is
+      narrative — it is inside a folded block scalar, so YAML reads it as part
+      of this sentence and rivet never sees a `release` key here. A checker that
+      reports it is reporting an English sentence as a configuration defect.
+    status: proposed
+    fields:
+      category: fixture
+
+  - id: FIXTURE-RELEASE-PLANE-REAL
+    type: requirement
+    title: a real release assignment, so exit 0 is not vacuous
+    description: >
+      Carries an actual top-level `release:`. This is what makes the fixture
+      assert that the checker is still reading the file at all.
+    status: proposed
+    release: v0.36.0
+    fields:
+      category: fixture

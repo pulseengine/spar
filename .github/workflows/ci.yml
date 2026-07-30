@@ -435,6 +435,38 @@ jobs:
             --artifacts-dir artifacts \
             --artifacts-dir safety/stpa
 
+      # ── release-plane guardrail (#370) ────────────────────────────────
+      # rivet has two field planes. `release` is a CORE field, read by the CLI
+      # query surface (`rivet list --release vX.Y`); separately each artifact
+      # may carry a `fields:` bag for schema-declared custom keys. Writing
+      # `release:` into the bag is valid YAML, is tolerated by the schema, and
+      # is completely invisible to the query.
+      #
+      # 59 of 85 assignments were on the wrong plane. Eleven shipped releases
+      # returned ZERO artifacts from `rivet list --release` — which renders
+      # identically to a genuinely empty release. Release readiness in this
+      # project is a query ("what must we implement for vX.Y"), and for eleven
+      # releases the query was answering "nothing to do".
+      #
+      # rivet DID diagnose it — `INFO: field 'release' is not defined in
+      # schema`, once per offending artifact, all 59 correct and precise. They
+      # sat under 276 unrelated `ERROR:` lines from #371. This is a gate rather
+      # than a lint because the diagnostic already existed and was unreadable.
+      #
+      # Same stdlib-only, fail-closed rationale as the pair above.
+      - name: Release-plane guardrail self-test
+        # Runs FIRST, same reason. Asserts the finding COUNTS, not just the
+        # exit code: `exit 1` on the violation fixture is equally consistent
+        # with a checker that reports every `release:` it sees — one that does
+        # not discriminate on plane at all. Mutation-tested: each of the four
+        # fixtures kills exactly one guard, and deleting any guard reds this.
+        run: tools/check_release_plane.py --self-test
+      - name: Release-plane guardrail
+        run: |
+          tools/check_release_plane.py \
+            --artifacts-dir artifacts \
+            --artifacts-dir safety/stpa
+
   # ── Bazel test sweep ───────────────────────────────────────────────
   # Issue #135 acceptance: `bazel test //...` to pick up Rust + Lean
   # targets via tools/bazel/rules_lean and rules_wasm_component.
