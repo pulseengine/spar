@@ -189,10 +189,50 @@
       # Disable tests (they require Linux netns — only valid inside the VM).
       doCheck = false;
 
-      # Runtime toolchain executables that gen-fixtures invokes via PATH.
-      # These are linked into the build environment so the resulting binary
-      # can find them at runtime.
-      nativeBuildInputs = [ pkgs.pkg-config ];
+      # Build-time tools. `cmake` is here for a non-obvious reason: it is not
+      # used by gen-fixtures, it is used by a build script five levels down.
+      #
+      #   spar-trace-topology -> spar-network -> good_lp -> highs -> highs-sys
+      #
+      # highs-sys compiles the HiGHS C++ LP solver from vendored source via
+      # the `cmake` crate, and without cmake on PATH its build script panics
+      # with `failed to execute command: No such file or directory` /
+      # `is cmake not installed?`.
+      #
+      # Note this is NOT fixed by narrowing cargoBuildFlags. `--bin
+      # gen-fixtures` selects what gets LINKED; cargo still compiles the
+      # dependency graph of the whole `-p spar-trace-topology` package, and
+      # gen-fixtures never calls the solver. Same shape as the etch vendoring
+      # below: the lock file, not the binary, decides what must build.
+      #
+      # `dontUseCmakeConfigure` is load-bearing, not defensive. Putting cmake
+      # in nativeBuildInputs makes nixpkgs' cmake setup-hook install
+      # cmakeConfigurePhase as the package's configurePhase (setup-hook.sh:145
+      # guards on exactly this variable), which would try to cmake the Rust
+      # workspace root — it has no CMakeLists.txt. We want cmake on PATH for
+      # the build script and nothing else.
+      #
+      # `bindgenHook` is here for the SAME build script, found by reading the
+      # dependency graph rather than by waiting for the next red dispatch:
+      # highs-sys also build-depends on bindgen 0.71, which reaches libclang
+      # through clang-sys -> libloading, i.e. it dlopen()s libclang.so at
+      # build-script runtime. Nothing in the sandbox provides that, and the
+      # failure ("Unable to find libclang") would have surfaced only after the
+      # cmake fix cleared the way — the same one-blocker-at-a-time pattern that
+      # made this workflow take 60 red runs to diagnose. The hook exports
+      # LIBCLANG_PATH and BINDGEN_EXTRA_CLANG_ARGS; nothing else here sets them.
+      #
+      # This is a PREDICTION, not a verification. Reading the graph says the
+      # dependency exists; only an x86_64-linux build says the fix is
+      # sufficient. clang-sys and highs-sys are the only two -sys crates in the
+      # graph, so this should be the last of this species — "should be" doing
+      # real work in that sentence.
+      nativeBuildInputs = [
+        pkgs.cmake
+        pkgs.pkg-config
+        pkgs.rustPlatform.bindgenHook
+      ];
+      dontUseCmakeConfigure = true;
     };
 
   in {
