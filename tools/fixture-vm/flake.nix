@@ -96,7 +96,32 @@
       # cargoLock.lockFile points to the workspace Cargo.lock.  Nix reads
       # this to reproduce the exact crate set without running `cargo fetch`
       # inside the sandbox.
-      cargoLock.lockFile = ../../Cargo.lock;
+      cargoLock = {
+        lockFile = ../../Cargo.lock;
+
+        # Registry crates carry their checksum in Cargo.lock; git dependencies
+        # do not, so Nix cannot vendor them without an explicit hash and fails
+        # evaluation with "No hash was found while vendoring the git
+        # dependency etch-0.2.0" (#365). The workspace has exactly one such
+        # dependency — `etch`, from pulseengine/rivet at the rev pinned in the
+        # root Cargo.toml. It is vendored even though gen-fixtures does not
+        # use it: importCargoLock vendors the whole lock file, not just the
+        # subtree that `cargoBuildFlags` selects.
+        #
+        # The value is the NAR hash of nixpkgs' `fetchgit` with its default
+        # arguments (fetchSubmodules = true, leaveDotGit = false), keyed by
+        # "<name>-<version>".
+        #
+        # MAINTENANCE: this hash pins the *rev*, so bumping the rivet rev in
+        # the root Cargo.toml invalidates it and this build fails with a
+        # fixed-output hash mismatch. Recompute with:
+        #
+        #   nix-prefetch-git --url https://github.com/pulseengine/rivet.git \
+        #     --rev <new-rev> --fetch-submodules
+        outputHashes = {
+          "etch-0.2.0" = "sha256-x37urQw97R/ARqvlVpXpp3tJqbvztbOiUyAGNZItlA0=";
+        };
+      };
 
       # Build only the gen-fixtures binary from spar-trace-topology.
       cargoBuildFlags = [
@@ -135,8 +160,13 @@
           boot.loader.grub = {
             enable = true;
             device = "/dev/vda";
-            timeout = 0;
           };
+
+          # Not `boot.loader.grub.timeout`: nixpkgs renamed it to the
+          # bootloader-agnostic `boot.loader.timeout`, and the old spelling
+          # emits a rename warning on every evaluation. It still works, but
+          # the warning is noise in a log we want to read for real failures.
+          boot.loader.timeout = 0;
 
           # Filesystem: a single ext4 root on vda.
           fileSystems."/" = {
@@ -199,6 +229,50 @@
           systemd.services."serial-getty@ttyS0".enable = true;
 
           system.stateVersion = "24.05";
+        })
+
+        # ── The qcow2 build product ───────────────────────────────────────
+        #
+        # `system.build.qcow2` is NOT a stock NixOS option — nothing in
+        # nixpkgs defines it. The header comment at the top of this file and
+        # the nightly workflow both build
+        # `…fixture-vm.config.system.build.qcow2`, but until this module
+        # existed that attribute appeared only in prose, so evaluation died
+        # with `error: attribute 'qcow2' missing` before a single byte was
+        # built (#365). nixos-generators defines its `qcow` format the same
+        # way: by importing nixpkgs' own make-disk-image.nix as a build
+        # product rather than depending on an option that doesn't exist.
+        ({ config, lib, pkgs, modulesPath, ... }: {
+          system.build.qcow2 =
+            import "${toString modulesPath}/../lib/make-disk-image.nix" {
+              inherit lib config pkgs;
+
+              # `format` is the only argument that names the output file:
+              # make-disk-image.nix computes `filename = "nixos." + ext`, so
+              # qcow2 yields `$out/nixos.qcow2` — the exact path the
+              # workflow's "Locate qcow2" step reads. The derivation `name`
+              # argument does NOT rename the image; don't reach for it.
+              format = "qcow2";
+
+              # Must agree with the base module above, which puts grub on
+              # /dev/vda and root on /dev/vda1. `legacy` is the one layout
+              # whose rootPartition is "1" — efi is "2", hybrid is "3" — so
+              # any other value here yields an image that partitions and
+              # builds cleanly and then cannot find its root at boot.
+              partitionTableType = "legacy";
+
+              # Defaults to true, which copies the whole nixpkgs tree into
+              # the image so nix-env/nix-build work inside the guest. This
+              # guest boots once, runs one oneshot service, and powers off;
+              # it never evaluates Nix. Skipping the channel costs nothing
+              # we use and saves several hundred MB plus the copy.
+              copyChannel = false;
+
+              # diskSize is left at its "auto" default, which sizes the
+              # image from the actual closure plus 512M. The guest writes
+              # its fixtures to /fixtures — a host-backed 9p share, not the
+              # disk — so there is no growth here to budget for.
+            };
         })
       ];
     };
