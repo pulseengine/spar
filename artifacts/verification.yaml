@@ -929,25 +929,6 @@ artifacts:
       - type: verifies
         target: REQ-CODEGEN-VERIFY-PROOF
 
-  - id: TEST-LAYOUT-CERT
-    type: feature
-    title: Certificate-checked AADL↔WIT byte-layout equivalence (ordeal)
-    description: >
-      The layout_cert oracle in crates/spar-codegen/src/layout_cert.rs
-      (REQ-CODEGEN-LAYOUT-CERT-001, #327). The real resolved EepromSnapshot.Impl
-      record is certified faithful and its LRAT certificate is re-checked
-      through ordeal-lrat (the trusted checker), so the verdict does not rest on
-      the solver. The FALSIFICATION test proves the oracle is load-bearing: an
-      overlapping WIT layout is rejected Sat with a counterexample — a green run
-      that could not be made red would mean the encoding proves nothing.
-    fields:
-      method: automated-test
-      steps:
-        - run: cargo test -p spar-codegen layout_cert
-    links:
-      - type: satisfies
-        target: REQ-CODEGEN-LAYOUT-CERT-001
-
   - id: TEST-KANI-CODEGEN
     type: feature
     status: passing
