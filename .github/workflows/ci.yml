@@ -64,7 +64,18 @@ jobs:
           # both artifacts and Rust must still run the full suite.
           # Counted explicitly rather than relying on `grep -q` exit semantics,
           # so the gate's decision is readable in the job log.
-          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|[^/]*\.md|.*/.*\.md)$'
+          #
+          # `rivet.yaml` is on the list (#379) because it is a rivet artifact by
+          # every other statement in this file — the header above says "rivet
+          # artifacts", and the rivet-validate job says it catches regressions
+          # "in artifacts/, safety/stpa/, and rivet.yaml" — but it lives at the
+          # repo root, so `artifacts/.*` never matched it and a rivet.yaml-only
+          # PR ran the entire heavy suite. Safe to skip those jobs for it:
+          # nothing that compiles reads the file (no .rs, no build script, no
+          # Cargo.toml references it; only AGENTS.md, docs/, this workflow, and
+          # artifacts themselves), and it stays gated regardless because
+          # rivet-validate has no `changes` gate at all.
+          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|rivet\.yaml|[^/]*\.md|.*/.*\.md)$'
           n_code=$(printf '%s\n' "$changed" | grep -cvE "$allow" || true)
           echo "code-ish files in diff: $n_code"
           if [ "$n_code" -gt 0 ]; then
