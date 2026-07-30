@@ -3204,70 +3204,137 @@ artifacts:
 
   - id: REQ-CODEGEN-LAYOUT-CERT-001
     type: requirement
-    title: "Certify AADL↔WIT↔canonical-ABI byte-layout equivalence via ordeal"
+    title: "WITHDRAWN — the layout certificate is a layout-independent tautology"
     description: >
-      spar's FIRST ordeal integration and the ordeal-edge pipe-cleaner
-      (roadmap v0.35.0). The AADL `data implementation` → WIT `record` →
-      canonical-ABI width/offset table is syntactic and unchecked today —
-      #319's 9-byte EepromSnapshot collapsing to an opaque list<u8> is the
-      symptom (#327). Encode the source layout and the generated WIT encoding
-      as ordeal QF_BV bit-vector terms (field offsets/widths via extract/
-      concat, endianness via ordeal's to_le_bytes/from_le_bytes helpers,
-      conditional fields via ite) and discharge `Solver::prove_equiv`: UNSAT
-      = the encoding faithfully represents the layout, carrying a re-checkable
-      LRAT certificate (ordeal-lrat, the trusted checker — dependency-free and
-      slated for Lean 4 verification) emitted as typed evidence; SAT = the
-      differing bits as a counterexample.
+      WITHDRAWN in v0.35.0. This requirement was implemented (#354,
+      crates/spar-codegen/src/layout_cert.rs) and marked `verified`, then
+      audited before the v0.35.0 tag and found not to establish what it
+      claimed. The module and the `ordeal` dependency it introduced have been
+      removed; nothing was ever tagged, so no release carried the claim.
 
-      Ordeal readiness CONFIRMED (audit, ordeal v0.17.0): prove_equiv +
-      layout.rs ship, with a worked "spar #38 layout oracle" example in
-      ordeal's docs; the enablers ordeal#64 (layout/arithmetic completeness)
-      and #66 (equivalence toolkit) are closed. So this is spar-side model-
-      translation work (the layout→BvTerm encoder), not solver work. Scope
-      limit: any single field ≤128 bits (ordeal's u128 const/model ceiling —
-      realistic for AADL/WIT). Establishes the ordeal Cargo dependency, the
-      BvTerm encoding pattern, and LRAT-cert-as-rivet-artifact that
-      REQ-BMC-CONCURRENCY-001 and REQ-PROOF-NC-CERT-001 then reuse. Tracks
-      #327; closes the #319 layout gap.
+      Four findings, each from an executed probe rather than review:
 
-      Landed (v0.35.0): the `spar-codegen::layout_cert` module encodes both
-      layouts as ordeal QF_BV terms (`to_le_bytes`/`from_le_bytes` byte maps,
-      `Extract` per field) and discharges `Solver::prove_valid`; a faithful
-      verdict carries an `ordeal-lrat`-re-checkable LRAT certificate. Verified
-      by TEST-LAYOUT-CERT: the real resolved `EepromSnapshot.Impl` certifies
-      faithful (cert re-checked through the trusted checker), and the
-      FALSIFICATION oracle proves the check is load-bearing (an overlapping WIT
-      layout is rejected Sat with a counterexample). PROVEN: the computed
-      offset/width table is a non-overlapping, in-bounds, value-preserving
-      codec. ASSUMED: the canonical-ABI alignment constants themselves. Scope:
-      flat scalar records (1/2/4/8-byte fields); nested records/arrays are a
-      successor increment (REQ-CODEGEN-LAYOUT-CERT-002, planned).
-    status: verified
-    release: v0.35.0
-    tags: [codegen, ordeal, certificate, layout, wit, v0350]
+      (1) THE CERTIFICATE IS CONSTANT. The proof goal was
+      `Extract(src_term, src_off) == Extract(wit_term, wit_off)` per field —
+      but both sides reduce to the SAME free variable, so ordeal's bit-blaster
+      constant-folds the goal to `true` before CDCL runs. Five structurally
+      different records (16/32/96/128 wit bits, including EepromSnapshot.Impl)
+      returned a byte-identical proof object: `cnf = [[-1], [1]]`,
+      `lrat = "3 0 1 2 0"` — the trivial refutation of a one-variable
+      contradiction. `Certificate::recheck()`, sold as the reason the verdict
+      "does not rest on the solver", re-validated a tautology unrelated to the
+      offset table stapled beside it.
+
+      (2) THE FALSIFICATION TEST WAS UNREACHABLE. `record_layout` advanced both
+      cursors monotonically (`src_cursor_bits += width`, and
+      `wit_off = align_up(cursor, align) >= cursor`), so overlapping byte
+      ranges were impossible by construction. A sweep of all 1364 flat scalar
+      shapes of 1..5 fields over {1,2,4,8} bytes produced 0 Divergent. The
+      red-making test hand-built a `RecordLayout` (two 32-bit fields both at
+      offset 0) that the constructor could not emit — so the check could be
+      made red only by bypassing the code path it was guarding.
+
+      (3) THE STATED SCOPE LIMIT WAS WRONG. The claim was "any single field
+      <=128 bits (realistic for AADL/WIT)". In fact `prove_layout` concatenated
+      every byte into ONE term via `from_le_bytes`, so ordeal's 128-bit width
+      ceiling bound the WHOLE RECORD at 16 bytes. A plain 5 x u32 telemetry
+      record (160 bits, max field 32 bits) returned `Undecided`; so did 3 x u64
+      and 17 x u8. 942 of the 1364 swept shapes (69%) were uncertifiable, and
+      no shipped test exercised one — EepromSnapshot.Impl is 12 WIT bytes and
+      sits just under the cliff.
+
+      (4) IT DID NOT CLOSE #319. Nothing in the codegen pipeline referenced the
+      module: a repo-wide search for `layout_cert|certify_shape|prove_layout|
+      record_layout` outside the module itself hit only `pub mod layout_cert;`.
+      It could not change one byte of emitted WIT. #319 was in fact closed by
+      9962aa9 (structured WIT records, v0.24.0), eleven releases earlier.
+
+      LESSON (the reusable part): byte-layout equivalence for independent
+      scalar fields packed by a monotone cursor is decided by interval
+      arithmetic, not by a solver. An SMT/QF_BV certificate earns its keep only
+      where the property is NOT a structural invariant of the code that
+      produces it. The ordeal beachhead moves to REQ-PROOF-RTA-OVERFLOW-001,
+      where bit-precise u64 wraparound is exactly such a property.
+    status: rejected
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, v0350]
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
 
   - id: REQ-CODEGEN-LAYOUT-CERT-002
     type: requirement
-    title: "Extend layout-equivalence certification to nested records and arrays"
+    title: "WITHDRAWN — successor to a withdrawn layout certificate"
     description: >
-      Successor to REQ-CODEGEN-LAYOUT-CERT-001, whose v0.35.0 increment
-      certifies only FLAT scalar records (1/2/4/8-byte fields). Extend the
-      `layout_cert` BvTerm encoder to the shapes wit_gen already emits but the
-      certificate does not yet cover: nested `data implementation` records
-      (recursive canonical-ABI alignment, the outer record aligned to the
-      inner's maximum alignment) and bounded `list<T, N>` arrays (element
-      stride + N). The certified property and the LRAT-cert-as-evidence
-      plumbing are unchanged — this is encoder coverage, not new solver work.
-      Also certify the record's TOTAL size (padding tail), which the flat
-      increment computes but does not yet include in the proof goal.
-    status: planned
-    tags: [codegen, ordeal, certificate, layout, wit]
+      WITHDRAWN in v0.35.0 together with its parent
+      REQ-CODEGEN-LAYOUT-CERT-001. This would have extended the `layout_cert`
+      BvTerm encoder to nested records and bounded arrays, on the premise that
+      the flat increment had established a working certified-layout pattern.
+      That premise does not hold: the flat increment's proof goal
+      constant-folded to `true` and its certificate was layout-independent
+      (see the parent for the evidence), so there is no pattern to extend.
+
+      Nested and array layout arithmetic is genuinely harder than the flat
+      case — recursive alignment and element stride are not a single monotone
+      cursor — so a future certificate here is not ruled out on the same
+      grounds. But it would have to be re-derived from scratch with a proof
+      goal that a wrong encoder can actually falsify, and justified against
+      plain interval arithmetic. Not planned.
+    status: rejected
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn]
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
+
+  - id: REQ-PROOF-RTA-OVERFLOW-001
+    type: requirement
+    title: "Certificate-checked absence of u64 overflow in the generated RTA recurrence"
+    description: >
+      The re-aimed ordeal beachhead, replacing REQ-CODEGEN-LAYOUT-CERT-001.
+
+      `crates/spar-analysis/src/scheduling_verified.rs` is GENERATED from the
+      elaborated Lean `Expr` of the recurrence definitions by `lake exe
+      codegen` (REQ-PROOF-SCHED-CODEGEN-001, #321), and the proofs.yml
+      freshness gate byte-diffs it against the generator on every PR. That
+      makes the emitted recurrence structurally faithful to the Lean source —
+      and that is ALL it makes it. The Lean theorems quantify over unbounded
+      naturals; the emitted Rust evaluates the same recurrence in `u64`. Every
+      `+` and `*` in the response-time fixed point is a potential wraparound
+      that the reflection gate cannot see, because a wrapped sum is still the
+      right SHAPE. A silently wrapped interference term yields a response time
+      far BELOW the true value — an optimistic schedulability verdict, the
+      failure direction that matters.
+
+      Encode the generated recurrence's arithmetic as ordeal QF_BV terms over
+      the actual u64 machine words and discharge the no-overflow obligation
+      for the documented input envelope (periods, WCETs, jitter, blocking
+      within their declared AADL ranges). UNSAT = no input in the envelope
+      overflows, carrying an `ordeal-lrat`-re-checkable certificate; SAT = a
+      concrete witness assignment, which is a real bug in either the bound or
+      the declared envelope.
+
+      Why a solver earns its keep here, unlike the withdrawn layout work:
+      overflow is NOT a structural invariant of the code that produces the
+      value. Nothing in the generator or the type system prevents it, the
+      property is genuinely bit-precise, and the goal does NOT constant-fold —
+      wraparound depends on the concrete input values, so the SAT/UNSAT verdict
+      carries information no interval check supplies. The falsification oracle
+      is reachable from the real code path: widen the input envelope past the
+      point where the recurrence can wrap and the check must go red.
+
+      Acceptance: (a) a hand-computed overflowing input is rejected Sat with a
+      witness; (b) distinct input envelopes produce DISTINCT certificates (the
+      explicit regression against the tautology failure above); (c) the
+      certificate re-checks through ordeal-lrat; (d) the check runs in CI over
+      the committed scheduling_verified.rs, so a regenerated recurrence that
+      introduces a new multiplication cannot land silently.
+    status: proposed
+    release: v0.36.0
+    tags: [proofs, ordeal, certificate, rta, overflow, v0360]
+    links:
+      - type: traces-to
+        target: REQ-PROOF-SCHED-CODEGEN-001
+      - type: traces-to
+        target: REQ-RTA-001
 
   - id: REQ-BMC-CONCURRENCY-001
     type: requirement
@@ -3311,13 +3378,19 @@ artifacts:
       later optimisation). DO-333 framing: checking the design artifact itself
       (not a hand re-model that drifts) is the strongest provenance story, and
       is stated as provenance, not certification credit. Builds on
-      REQ-CODEGEN-LAYOUT-CERT-001 (the proven ordeal edge). Tracks #350.
+      REQ-PROOF-RTA-OVERFLOW-001, which is the ordeal edge this depends on.
+      (It formerly named REQ-CODEGEN-LAYOUT-CERT-001 as "the proven ordeal
+      edge"; that requirement was WITHDRAWN in v0.35.0 because its certificate
+      was a layout-independent tautology, so it never established a working
+      edge. RTA-OVERFLOW is the replacement beachhead, and its acceptance
+      criterion (b) — distinct inputs must produce distinct certificates —
+      applies to this spike too.) Tracks #350.
     status: proposed
     release: v0.40.0
     tags: [analysis, ordeal, bmc, concurrency, certificate, spike]
     links:
       - type: traces-to
-        target: REQ-CODEGEN-LAYOUT-CERT-001
+        target: REQ-PROOF-RTA-OVERFLOW-001
 
   - id: REQ-CODEGEN-VERIFY-WORKSPACE-001
     type: requirement

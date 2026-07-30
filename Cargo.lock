@@ -831,19 +831,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
-name = "ordeal"
-version = "0.17.0"
-source = "git+https://github.com/pulseengine/ordeal.git?tag=v0.17.0#22c4e34a91d2c87152abfdbb38af08c21bcbfa6a"
-dependencies = [
- "ordeal-lrat",
-]
-
-[[package]]
-name = "ordeal-lrat"
-version = "0.17.0"
-source = "git+https://github.com/pulseengine/ordeal.git?tag=v0.17.0#22c4e34a91d2c87152abfdbb38af08c21bcbfa6a"
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1454,7 +1441,6 @@ version = "0.35.0"
 dependencies = [
  "criterion",
  "la-arena",
- "ordeal",
  "serde",
  "serde_json",
  "spar-analysis",
