@@ -307,11 +307,19 @@ fn run() -> Result<(), FixtureError> {
         "ip",
         &["addr", "add", "169.254.1.2/24", "dev", veth_sw_l],
     )?;
-    let _ = netns_exec(
+    // Deliberately non-fatal: arping exits non-zero when it gets no reply,
+    // and the capture is still usable without ARP frames. But it must not be
+    // SILENT. `let _ =` here discarded the one signal that would have said
+    // arping was missing from the image entirely — which it was, absent from
+    // both environment.systemPackages and the unit `path`, so this line has
+    // been a no-op that reported nothing. Non-fatal and unobserved are
+    // different things; the surrounding lldpd/lldpctl/pmc calls already warn.
+    netns_exec(
         &ns_gm.name,
         "arping",
         &["-c", "5", "-I", veth_gm, "169.254.1.2"],
-    );
+    )
+    .unwrap_or_else(|e| eprintln!("gen-fixtures: warning: arping: {e}"));
     thread::sleep(Duration::from_secs(2));
 
     // 11. Start ptp4l (software timestamping, GM role) and poll pmc.
