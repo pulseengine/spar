@@ -3215,8 +3215,9 @@ artifacts:
       concat, endianness via ordeal's to_le_bytes/from_le_bytes helpers,
       conditional fields via ite) and discharge `Solver::prove_equiv`: UNSAT
       = the encoding faithfully represents the layout, carrying a re-checkable
-      LRAT certificate (ordeal-lrat, the Lean-verified trusted checker) emitted
-      as typed evidence; SAT = the differing bits as a counterexample.
+      LRAT certificate (ordeal-lrat, the trusted checker — dependency-free and
+      slated for Lean 4 verification) emitted as typed evidence; SAT = the
+      differing bits as a counterexample.
 
       Ordeal readiness CONFIRMED (audit, ordeal v0.17.0): prove_equiv +
       layout.rs ship, with a worked "spar #38 layout oracle" example in
@@ -3228,12 +3229,45 @@ artifacts:
       BvTerm encoding pattern, and LRAT-cert-as-rivet-artifact that
       REQ-BMC-CONCURRENCY-001 and REQ-PROOF-NC-CERT-001 then reuse. Tracks
       #327; closes the #319 layout gap.
-    status: proposed
+
+      Landed (v0.35.0): the `spar-codegen::layout_cert` module encodes both
+      layouts as ordeal QF_BV terms (`to_le_bytes`/`from_le_bytes` byte maps,
+      `Extract` per field) and discharges `Solver::prove_valid`; a faithful
+      verdict carries an `ordeal-lrat`-re-checkable LRAT certificate. Verified
+      by TEST-LAYOUT-CERT: the real resolved `EepromSnapshot.Impl` certifies
+      faithful (cert re-checked through the trusted checker), and the
+      FALSIFICATION oracle proves the check is load-bearing (an overlapping WIT
+      layout is rejected Sat with a counterexample). PROVEN: the computed
+      offset/width table is a non-overlapping, in-bounds, value-preserving
+      codec. ASSUMED: the canonical-ABI alignment constants themselves. Scope:
+      flat scalar records (1/2/4/8-byte fields); nested records/arrays are a
+      successor increment (REQ-CODEGEN-LAYOUT-CERT-002, planned).
+    status: implemented
     release: v0.35.0
     tags: [codegen, ordeal, certificate, layout, wit, v0350]
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
+
+  - id: REQ-CODEGEN-LAYOUT-CERT-002
+    type: requirement
+    title: "Extend layout-equivalence certification to nested records and arrays"
+    description: >
+      Successor to REQ-CODEGEN-LAYOUT-CERT-001, whose v0.35.0 increment
+      certifies only FLAT scalar records (1/2/4/8-byte fields). Extend the
+      `layout_cert` BvTerm encoder to the shapes wit_gen already emits but the
+      certificate does not yet cover: nested `data implementation` records
+      (recursive canonical-ABI alignment, the outer record aligned to the
+      inner's maximum alignment) and bounded `list<T, N>` arrays (element
+      stride + N). The certified property and the LRAT-cert-as-evidence
+      plumbing are unchanged — this is encoder coverage, not new solver work.
+      Also certify the record's TOTAL size (padding tail), which the flat
+      increment computes but does not yet include in the proof goal.
+    status: planned
+    tags: [codegen, ordeal, certificate, layout, wit]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-LAYOUT-CERT-001
 
   - id: REQ-BMC-CONCURRENCY-001
     type: requirement

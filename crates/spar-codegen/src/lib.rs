@@ -15,6 +15,7 @@
 pub mod build_gen;
 pub mod config_gen;
 pub mod doc_gen;
+pub mod layout_cert;
 pub mod proof_gen;
 pub mod rust_gen;
 pub mod target_gen;
