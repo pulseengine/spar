@@ -4073,6 +4073,60 @@ artifacts:
       - type: satisfies
         target: REQ-INGEST-DBC-FLOWS-001
 
+  - id: TEST-GUARD-HUMAN-SCOPED
+    type: feature
+    title: Human-scoped guardrail detects a done-status violation and refuses input it cannot read
+    description: >
+      `tools/check_human_scoped.py --self-test` runs the checker against three
+      committed fixtures and asserts the exit code of each, so the guardrail is
+      proven non-vacuous on every CI run rather than only against compliant
+      input — the distinction REQ-CODEGEN-LAYOUT-CERT-001 turned on.
+
+      `tools/fixtures/human-scoped-violation/` must exit 1. It holds two
+      artifacts differing ONLY in status: one human-scoped + `verified` (must be
+      reported) and one human-scoped + `proposed` (must NOT be), which is what
+      makes the fixture discriminate on status rather than merely on the tag.
+
+      `tools/fixtures/human-scoped-unsupported/` must exit 2, not 0. It uses
+      block-form `tags:`, which the narrow parser does not handle. The tempting
+      shortcut — treating an unreadable `tags:` line as "no tags" — would
+      silently EXEMPT that artifact and report success even though it is also a
+      would-be violation (human-scoped + verified). Asserting 2 rather than 1 is
+      what pins the fail-closed behaviour.
+
+      `tools/fixtures/human-scoped-duplicate-id/` must exit 1. It defines the
+      same id twice, the violating copy FIRST, so a checker that keyed artifacts
+      by id would let the second copy shadow the violation and report success.
+      This is not hypothetical: six real duplicate ids exist on `main` and the
+      required gate cannot see them (#360). It is what pins the checker to
+      iterating RECORDS rather than a `{id: record}` dict.
+
+      FALSIFICATION EDGE: making the checker toothless (widening the parser to
+      swallow unknown syntax, dropping a DONE_STATUS, ignoring the tag,
+      deduplicating by id) turns this red. The self-test runs BEFORE the real
+      artifact scan in the `rivet-validate` job, so a broken checker fails
+      loudly instead of letting the real scan pass vacuously.
+
+      Parser equivalence was additionally measured out-of-band against PyYAML
+      over every committed artifact under artifacts/ and safety/stpa/: identical
+      id sets and identical (status, tags) for every artifact, zero divergence.
+      That is a one-off measurement, not part of this gate, because CI has no
+      PyYAML. Deliberately no artifact COUNT is recorded here — it drifts with
+      every merge (884 -> 886 -> 889 in one day), and a stale count in prose is
+      the defect claim-verification exists to prevent.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_human_scoped.py --self-test
+        - run: tools/check_human_scoped.py --artifacts-dir artifacts --artifacts-dir safety/stpa
+    status: passing
+    tags: [process, guardrail, autonomy, ci, tooling, v0360]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-HUMAN-SCOPED-001
+      - type: verifies
+        target: REQ-GUARD-HUMAN-SCOPED-001
+
   - id: TEST-NC-BUS-PAYLOAD
     type: feature
     title: Bus bandwidth reports unmeasurable connections instead of scoring them zero

@@ -1,0 +1,37 @@
+# Fixture for tools/check_human_scoped.py — NOT part of the real trace.
+#
+# Pins that a DUPLICATE artifact id cannot shadow a violation.
+#
+# This is not hypothetical. This repo really does define six ids twice —
+# RENDER-REQ-001..006 appear in BOTH artifacts/requirements.yaml and
+# safety/stpa/rendering-analysis.yaml, both of which are in rivet's scope
+# (rivet.yaml lists `artifacts` and the whole `safety/stpa` directory). The
+# copies have drifted: RENDER-REQ-003 is `implemented` in one and `partial` in
+# the other, and RENDER-REQ-006 diverges the opposite way. rivet v0.4.3 — the
+# version pinned in the required CI gate — validates all of that green.
+#
+# So the checker must iterate over RECORDS, not build a `{id: record}` dict. An
+# id-keyed dict would silently keep just one copy, and whichever copy lost would
+# stop being checked. Here the violating copy comes FIRST and a compliant copy of
+# the SAME id comes second, so a last-write-wins dict resolves to `proposed` and
+# the check would wrongly exit 0.
+artifacts:
+  - id: FIXTURE-HUMAN-SCOPED-SHADOWED
+    type: requirement
+    title: Violating copy, listed first (must still be reported)
+    description: >
+      A human-scoped artifact recorded `verified`. It is followed by a second
+      definition of the same id at a compliant status, exactly as the real
+      RENDER-REQ-* pairs shadow each other across two in-scope files.
+    status: verified
+    tags: [human-scoped, fixture]
+
+  - id: FIXTURE-HUMAN-SCOPED-SHADOWED
+    type: requirement
+    title: Compliant copy of the same id, listed second (must not mask the first)
+    description: >
+      Same id, compliant status. If the checker deduplicated by id with
+      last-write-wins, this record would replace the violation above and the
+      guardrail would report success.
+    status: proposed
+    tags: [human-scoped, fixture]

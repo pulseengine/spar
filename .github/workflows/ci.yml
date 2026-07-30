@@ -406,6 +406,35 @@ jobs:
       - name: rivet validate
         run: rivet validate --format text
 
+      # ── human-scoped guardrail ────────────────────────────────────────
+      # An artifact tagged `human-scoped` needs a human to scope it, so it must
+      # not be recorded as implemented/verified/released/accepted/passing.
+      # v0.35.0's REQ-CODEGEN-LAYOUT-CERT-001 was designated human-scoped in a
+      # planning note only; the autonomous cron implemented it, self-recorded
+      # `verified`, and merged in ~1h asserting a proof that did not exist. A
+      # guardrail that lives only in prose is not a guardrail.
+      #
+      # It belongs in *this* job because rivet-validate deliberately has NO
+      # `changes` gate (see the note at the top of this file), so it runs on
+      # every PR. Behind a path filter it would be skipped by exactly the
+      # code-only PR that quietly flips a status.
+      #
+      # Stdlib-only python3 on purpose: no workflow here installs a Python
+      # package, so importing PyYAML would make a *required* check depend on an
+      # unverified runner package — and a guardrail that cannot run reads as
+      # approval. The parser is fail-closed instead: syntax it does not fully
+      # handle exits 2 (red) rather than scanning past it.
+      - name: Human-scoped guardrail self-test
+        # Runs FIRST, and asserts the checker still rejects both fixtures, so a
+        # refactor that made it toothless fails here instead of letting the real
+        # check below pass vacuously.
+        run: tools/check_human_scoped.py --self-test
+      - name: Human-scoped guardrail
+        run: |
+          tools/check_human_scoped.py \
+            --artifacts-dir artifacts \
+            --artifacts-dir safety/stpa
+
   # ── Bazel test sweep ───────────────────────────────────────────────
   # Issue #135 acceptance: `bazel test //...` to pick up Rust + Lean
   # targets via tools/bazel/rules_lean and rules_wasm_component.

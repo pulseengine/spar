@@ -1,0 +1,33 @@
+# Fixture for tools/check_human_scoped.py — NOT part of the real trace.
+#
+# This file exists so the guardrail has a proven falsification edge. A check
+# that is only ever run against compliant input cannot distinguish "the
+# property holds" from "the check does nothing"; that is precisely how
+# REQ-CODEGEN-LAYOUT-CERT-001's certificate passed while proving nothing.
+# TEST-GUARD-HUMAN-SCOPED runs the checker against this directory and requires
+# a NON-ZERO exit, so a regression that makes the checker toothless turns the
+# gate red instead of green.
+#
+# Two artifacts, deliberately differing only in `status`, so the fixture also
+# pins that the tag alone is not what trips the check.
+artifacts:
+  - id: FIXTURE-HUMAN-SCOPED-VIOLATION
+    type: requirement
+    title: Tagged human-scoped but recorded as verified (must be rejected)
+    description: >
+      Represents the v0.35.0 failure: an artifact designated human-scoped that
+      an autonomous run implemented and self-promoted to `verified`. The
+      checker must exit non-zero on this.
+    status: verified
+    tags: [human-scoped, fixture]
+
+  - id: FIXTURE-HUMAN-SCOPED-COMPLIANT
+    type: requirement
+    title: Tagged human-scoped and still proposed (must be accepted)
+    description: >
+      Identical to the artifact above except for `status`. Planning a
+      human-scoped item is allowed, so this one must NOT be reported. Its
+      presence is what makes the fixture discriminate on status rather than
+      merely on the tag.
+    status: proposed
+    tags: [human-scoped, fixture]

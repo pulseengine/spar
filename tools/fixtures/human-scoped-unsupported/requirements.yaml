@@ -1,0 +1,24 @@
+# Fixture for tools/check_human_scoped.py — NOT part of the real trace.
+#
+# Proves the FAIL-CLOSED branch actually fires. The parser handles only inline
+# `tags: [a, b]` (the sole form the real artifacts use). The tempting shortcut is
+# to treat any `tags:` line it cannot read as "this artifact has no tags" — which
+# would silently EXEMPT the artifact below and report success, the exact vacuity
+# that let REQ-CODEGEN-LAYOUT-CERT-001 through.
+#
+# So block-form `tags:` must exit 2 (INCONCLUSIVE), not 0. Without this fixture
+# that branch would be an untested claim in a check whose whole purpose is to
+# distrust untested claims.
+#
+# Note this artifact is ALSO a would-be violation (human-scoped + verified): if
+# the fail-closed guard were removed, the parser would miss the tag entirely and
+# exit 0 rather than even catching it as a violation. That is what makes 2-vs-0
+# the meaningful assertion here rather than 2-vs-1.
+artifacts:
+  - id: FIXTURE-HUMAN-SCOPED-BLOCK-TAGS
+    type: requirement
+    title: Tagged human-scoped via a block sequence the parser cannot read
+    status: verified
+    tags:
+      - human-scoped
+      - fixture
