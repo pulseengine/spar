@@ -4705,10 +4705,18 @@ artifacts:
     title: A gate shall prove it measured something before it reports a pass
     description: >
       A check that reports success shall be able to demonstrate that it read a
-      measurement. Specifically, for the mutation-testing ratchet: absence of a
-      report shall fail; a report that caught nothing shall fail; and the count
-      the gate scores shall be cross-checked against an independent recording of
-      the same count, with disagreement failing.
+      measurement, and that the measurement covered everything the check's name
+      claims. Two obligations, one per instance found so far.
+
+      (a) THE MUTATION-TESTING RATCHET. Absence of a report shall fail; a report
+      that caught nothing shall fail; and the count the gate scores shall be
+      cross-checked against an independent recording of the same count, with
+      disagreement failing.
+
+      (b) THE FORMATTING SCOPE. The formatting gate shall discover the set of
+      workspaces in the repository rather than inheriting cargo's default scope,
+      shall fail when that set is smaller than a declared floor, and shall print
+      the number of workspaces it examined on every path — including success.
 
       WHY: `Mutation Testing` is a required status check that runs for roughly
       three hours, and from 563eb8c (2026-03-22) until #381 it never once read
@@ -4770,16 +4778,63 @@ artifacts:
       exactly what a ratchet exists to prevent. #382 tracks walking it to zero.
       Lower this number; do not raise it.
 
+      SECOND INSTANCE: SCOPE NARROWER THAN THE NAME (#383). Auditing the other
+      17 required contexts for the same property found `Format` green on main
+      over unformatted tracked Rust. `cargo fmt --all` means "all members of
+      THIS workspace", not "all crates in the repo", and this repo has four
+      workspaces — the 23-crate root plus fuzz/, codegen-exec-oracle/ and
+      codegen-kiln-oracle/, each carrying its own `[workspace]` table, none of
+      which the root's `--all` ever opens. Executed on the same tree:
+      `cargo fmt --all -- --check` exits 0 while
+      `cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check` exits 1 with
+      13 diff lines, against fuzz/fuzz_targets/fuzz_codegen_roundtrip.rs:32.
+      Two gates, one repository, opposite verdicts.
+
+      This is #381's property arriving by a different mechanism. #381's error
+      path produced the ideal reading; here there is no error path at all — the
+      narrow answer is simply byte-identical to the broad one, because cargo
+      prints nothing on success and 23-of-26 crates clean looks exactly like
+      26-of-26 clean. So the fix is not a corrected path but a mandated output:
+      tools/check_fmt_workspaces.py prints "N workspace(s) checked, M formatted"
+      on every path. A count is not producible by a broken scan.
+
+      DISCOVERY WITH A FLOOR, not a list. Four hard-coded manifests would fix
+      today's bug and re-open it the day someone adds a fifth workspace, so the
+      set is walked for `[workspace]` tables and floored at 4 — the floor being
+      what makes a discovery failure loud instead of green. The prune list is
+      load-bearing rather than cosmetic: `target/` fills with vendored crates.io
+      sources, many of which ship their own `[workspace]` table, so a naive walk
+      finds dozens, sails past the floor, and asks cargo to format other
+      people's build cache — a bug that PASSES, which is why it is a self-test
+      row and not a comment. The same 10-case table carries the #383 regression
+      itself (root clean + fuzz/ dirty must exit 1), and distinguishes
+      `[workspace.package]` from `[workspace]`, since counting inheriting
+      members would inflate the total past the floor and disarm it.
+
+      THREE-VALUED EXIT, as in check_msrv.py: 0 formatted, 1 violation, 2 could
+      not measure (cargo absent, root unreadable, discovery empty). Collapsing
+      "could not measure" into 0 is the shape that let #381 run four months.
+
       WHAT THIS DOES NOT CLAIM. It does not claim spar-analysis is well tested —
       210 survivors out of 1608 mutants is the opposite of that claim, and the
-      number is only visible now because the gate started working. It also does
-      not generalise: the property "an operation that can report nothing-happened
-      must render that differently from it-worked" is stated here, but nothing
-      mechanically enforces it across the other required contexts. There is no
-      checker that finds the next one. The working detectors are reading a job's
-      own uploaded ARTIFACT rather than its log, and diffing any gate-printed
-      number against an independent measurement of the same quantity — both
-      review practices, not tools.
+      number is only visible now because the gate started working. Nor does it
+      claim the repo is now formatted by policy rather than by accident: `Clippy`
+      has the identical `--workspace` scope gap and is not fixed here, so the
+      three nested crates remain unlinted.
+
+      Above all it does not claim the property is enforced generally. #386
+      audits all 18 required contexts against "can this report success without
+      having measured the thing its name claims?" and finds 11 with a path to
+      green; this requirement now covers two of them. Both were found by a human
+      question, not by a checker, and there is still no checker that finds the
+      next one — the recurring shapes (scope narrower than the name, the error
+      path being the permissive path, absence rendering as success, a gate with
+      no configured failure mode) are review vocabulary, not tooling. What did
+      generalise is the convention rather than the detection: put the logic in a
+      script with a `--self-test` decision table, run the self-test as a step
+      BEFORE the real check, carry the historical regression as a table row, and
+      print a positive count of what was examined. That is transferable to the
+      remaining nine; running it against them is #386's checklist, not this.
     status: implemented
     release: v0.36.0
-    tags: [process, guardrail, ci, tooling, mutation-testing]
+    tags: [process, guardrail, ci, tooling, mutation-testing, formatting]

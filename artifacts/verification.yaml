@@ -4183,6 +4183,75 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-GATE-EVIDENCE-001
 
+  - id: TEST-GUARD-FMT-WORKSPACES
+    type: feature
+    title: The format gate fails on a dirty nested workspace and on a discovery that came up short
+    description: >
+      Verifies obligation (b) of REQ-GUARD-GATE-EVIDENCE-001 through the 10-case
+      decision table in tools/check_fmt_workspaces.py --self-test, which runs as
+      its own CI step BEFORE the gate it protects.
+
+      THE LOAD-BEARING CASE is "REGRESSION #383: a dirty NON-ROOT workspace fails
+      the gate" — a four-workspace tree where the root is clean and fuzz/ is
+      dirty. It must exit 1 and print "4 workspace(s) checked, 3 formatted".
+      That is the live state of main, on which `cargo fmt --all -- --check`
+      exits 0. The case is a fixture rather than prose because the two gates
+      disagree about the same tree, and only executing both shows it.
+
+      TWO PRUNE CASES GUARD A BUG THAT PASSES. A vendored `[workspace]` under
+      target/, and one under a nested fuzz/target/, must not be discovered.
+      Without the prune list a walk on any machine that has built once finds
+      dozens of crates.io manifests, clears the floor comfortably, and hands
+      cargo other people's cached sources to format — green, and wrong. The
+      second case exists separately because it fails if pruning is applied only
+      at the top level rather than at every depth.
+
+      THE FLOOR IS TESTED IN BOTH DIRECTIONS: a tree with three workspaces exits
+      1 (a workspace that vanishes from discovery is silently exempt, which is
+      #383 returning by a different route), and a tree with none exits 2 — an
+      empty scan must not render as "everything is formatted". A member crate
+      with no `[workspace]` table, and one carrying `[workspace.package]`, are
+      both excluded, since counting inheriting members would inflate the total
+      past the floor and disarm it. Cargo being absent (OSError from the runner)
+      exits 2, not 0.
+
+      MEASURED AGAINST THE REAL TREE, not only fixtures. On main's version of
+      fuzz/fuzz_targets/fuzz_codegen_roundtrip.rs the checker exits 1 with
+      "4 workspace(s) checked, 3 formatted" and reproduces the 13-line rustfmt
+      diff; with the file reformatted it exits 0 with "4 workspace(s) checked,
+      4 formatted". The four discovered manifests are the root, fuzz/,
+      codegen-exec-oracle/ and codegen-kiln-oracle/.
+
+      REACHABILITY is unconditional, and stronger than the mutation checker's.
+      The `fmt` job declares no `needs` and no `if`, so unlike `clippy`, `test`
+      and `mutants` — all three gated on `needs.changes.outputs.code == 'true'` —
+      it runs on every pull request including documentation-only ones. Both
+      steps therefore execute on every PR, which is also why the runner-class
+      assumption below is exercised immediately rather than eventually.
+
+      HONEST CEILING: the decision table fakes the cargo runner, so it verifies
+      discovery, the floor, pruning and reporting — NOT the argument vector
+      handed to cargo. That is covered only by the real-tree run above, which is
+      a manual measurement rather than a CI assertion. It does not cover
+      `Clippy`, which has the identical `--workspace` scope gap and is untouched
+      here. And it does not establish that python3 exists on the `light` runner
+      class the fmt job runs on; the sibling guardrails have been observed on
+      rust-cpu and lean-mem hosts only. The failure mode is fail-closed — exit
+      127 turns the required check red — so the PR that lands this is the
+      measurement, and if it 127s the job moves to rust-cpu.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_fmt_workspaces.py --self-test
+        - run: tools/check_fmt_workspaces.py
+    status: implemented
+    tags: [process, guardrail, ci, tooling, formatting, v0360]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-001
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-001
+
   - id: TEST-NC-BUS-PAYLOAD
     type: feature
     title: Bus bandwidth reports unmeasurable connections instead of scoring them zero

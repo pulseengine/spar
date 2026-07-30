@@ -98,7 +98,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      # `cargo fmt --all` means "all members of THIS workspace", not "all
+      # crates in the repo". fuzz/, codegen-exec-oracle/ and
+      # codegen-kiln-oracle/ each carry their own `[workspace]` table, so the
+      # root's --all never opened them — and this required check reported green
+      # on main over an unformatted fuzz_codegen_roundtrip.rs (#383). A gate
+      # that prints nothing on success cannot distinguish "checked everything"
+      # from "checked a subset"; the replacement always prints the count.
+      #
+      # Self-test first, as with the other guardrails: the decision table
+      # carries the #383 regression itself (root clean + fuzz/ dirty must exit
+      # 1), so the gate proves it can still fail before it may pass.
+      - name: Format guardrail self-test
+        run: tools/check_fmt_workspaces.py --self-test
+      - name: Format (every workspace in the repo)
+        # Discovers the workspace set rather than listing it, and floors the
+        # count at 4. A hard-coded list would fix today's bug and re-open it
+        # the day someone adds a fifth workspace.
+        run: tools/check_fmt_workspaces.py
 
   clippy:
     name: Clippy
