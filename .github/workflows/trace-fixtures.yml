@@ -265,9 +265,43 @@ jobs:
               # fix; the build product is unreachable from the host by
               # construction. So the image is copied ACROSS the mount here,
               # while the store it lives in still exists.
+              # ON FAILURE, NAME THE CULPRIT BEFORE THE CONTAINER EVAPORATES.
+              #
+              # Run 30575158798 died with `home directory /homeless-shelter
+              # exists; please remove it to assure purity of builds without
+              # sandboxing`. Nix throws that when a build STARTS, so the error
+              # names the derivation that TRIPPED over the directory, never the
+              # one that created it. Identifying the creator took reading
+              # timestamps against the build graph.
+              #
+              # Whatever a builder dropped in there is a fingerprint of the tool
+              # that wrote it (a .cmake/packages entry, a .cargo, a .npm). One
+              # listing turns that inference into a reading. It has to happen
+              # here: the container is --rm with its own store, so a later step
+              # has nothing left to look at.
+              #
+              # rc is captured from the command, NOT from inside an `if !` block
+              # -- there $? is the status of the negation, which SUCCEEDED, so
+              # the failure path would exit 0 and read as a pass. set -e permits
+              # this form because the assignment is the right side of a || list.
+              rc=0
               nix build --no-update-lock-file \
                 .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
-                --out-link /tmp/result
+                --out-link /tmp/result || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "--- nix build exited ${rc}; impure-HOME diagnostic ---" >&2
+                if [ -e /homeless-shelter ]; then
+                  echo "/homeless-shelter EXISTS. Its contents identify which" >&2
+                  echo "derivation wrote to HOME; give that one a preConfigure" >&2
+                  echo "HOME redirect in flake.nix, as gen-fixtures has." >&2
+                  find /homeless-shelter -maxdepth 4 >&2 || \
+                    echo "(listing failed; the path is there regardless)" >&2
+                else
+                  echo "/homeless-shelter is absent, so this is NOT the impure-" >&2
+                  echo "HOME failure -- read the build log above instead." >&2
+                fi
+                exit "${rc}"
+              fi
               cp --no-preserve=mode,ownership \
                 /tmp/result/nixos.qcow2 /spar/tools/fixture-vm/nixos.qcow2
             '
