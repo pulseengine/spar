@@ -121,7 +121,11 @@ artifacts:
     description: >
       Trace connections through the hierarchy resolving across, up,
       and down patterns to produce end-to-end connection instances.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      The unimplemented residue is deliberately not itemized here — see
+      REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [instance, as5506-ch14]
 
   - id: REQ-INST-004
@@ -226,7 +230,11 @@ artifacts:
       Enforce AADL naming rules, category restrictions, direction rules,
       connection rules, flow rules, binding rules, mode rules, and
       subcomponent rules. Target 50+ rules.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      How many rules are actually enforced against the 50+ target is
+      deliberately not asserted here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [analysis, legality]
 
   - id: REQ-ANALYSIS-008
@@ -309,7 +317,7 @@ artifacts:
     description: >
       Import cargo metadata to generate virtual AADL packages
       representing Rust crate architecture.
-    status: planned
+    status: proposed
     tags: [transform, rust]
 
   - id: REQ-TRANSFORM-003
@@ -318,7 +326,7 @@ artifacts:
     description: >
       Read WAC composition files and generate AADL system
       implementations with subcomponents and connections.
-    status: planned
+    status: proposed
     tags: [transform, wac]
 
   - id: REQ-TRANSFORM-004
@@ -327,7 +335,7 @@ artifacts:
     description: >
       Map wRPC transports (NATS, TCP, QUIC) to AADL bus components
       with deployment bindings.
-    status: planned
+    status: proposed
     tags: [transform, wrpc]
 
   - id: REQ-TRANSFORM-005
@@ -336,7 +344,7 @@ artifacts:
     description: >
       Map WASI P3 async functions, streams, and futures to AADL
       thread components with scheduling properties.
-    status: planned
+    status: proposed
     tags: [transform, wasi-p3]
 
   # ── STPA Analysis Coverage Records (STPA-REQ-022) ────────────────
@@ -428,7 +436,11 @@ artifacts:
     description: >
       modal.rs computes SOMs. Scheduling and latency analyses evaluate
       per-SOM when modal property associations exist.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      Which Ch.12 obligations remain open is deliberately not asserted
+      here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     links:
       - type: satisfies
         target: REQ-INST-004
@@ -466,7 +478,7 @@ artifacts:
       Not yet covered: Ch.7 (prototypes — parsed but not analyzed).
       Ch.6 type extensions now resolved via extends chain walking (v0.5.0).
       Property expression evaluation now covered by text fallback parser (v0.5.0).
-    status: partial
+    status: approved
     links:
       - type: satisfies
         target: REQ-MODEL-005
@@ -639,7 +651,7 @@ artifacts:
       Detect architectural conflicts in three-way merges where concurrent
       changes affect the same structural elements (components, connections,
       bindings) or produce incompatible analysis results.
-    status: planned
+    status: proposed
     tags: [diff, merge, v040]
     fields:
       release: v0.23.0
@@ -668,7 +680,7 @@ artifacts:
       category == thread).property(Period)) to select and filter instance
       model elements. Supports predicate filtering, property extraction,
       and aggregation.
-    status: planned
+    status: proposed
     tags: [query, instance, v040]
     fields:
       release: v0.23.0
@@ -719,7 +731,7 @@ artifacts:
       subsystems to hardware zones (topology + bandwidth + safety). Layer 3
       (Global) — optimize across all zones (E2E latency, safety decomposition,
       cost). Local solutions compose into globally valid configurations.
-    status: planned
+    status: proposed
     tags: [solver, optimization, v040]
     fields:
       release: v0.23.0
@@ -732,7 +744,7 @@ artifacts:
       machine-checkable certificate proving it is globally optimal (for
       exact methods) or within a bounded optimality gap (for heuristics).
       Uses dual bounds from MILP or exhaustive search proofs from CP-SAT.
-    status: planned
+    status: proposed
     tags: [solver, verification, v040]
     fields:
       release: v0.23.0
@@ -745,7 +757,7 @@ artifacts:
       maximize safety margins), compute the Pareto front of non-dominated
       solutions. Present to the engineer for interactive selection. Support
       both exact Pareto (small problems) and approximate (NSGA-II for large).
-    status: planned
+    status: proposed
     tags: [solver, optimization, v040]
     fields:
       release: v0.23.0
@@ -770,7 +782,7 @@ artifacts:
       freedom from interference is ensured (spatial via MMU, temporal via
       scheduling, communication via controlled interfaces). Supports ISO 26262
       ASIL, DO-178C DAL, and IEC 61508 SIL.
-    status: planned
+    status: proposed
     tags: [solver, safety, v040]
     fields:
       release: v0.23.0
@@ -783,7 +795,7 @@ artifacts:
       with security-level properties. Validate that cross-zone connections
       have appropriate protection (encryption, authentication). Account for
       security overhead (TLS latency, MAC computation) in timing analysis.
-    status: planned
+    status: proposed
     tags: [solver, security, v040]
     fields:
       release: v0.23.0
@@ -991,7 +1003,7 @@ artifacts:
       margins. Cheddar and Ellidiss MARZHIN offer this — spar has static
       RMA/RTA but no temporal visualization. Output as SVG/HTML with
       interactive zoom.
-    status: planned
+    status: proposed
     tags: [visualization, scheduling, competitive-gap, v040]
     fields:
       release: v0.23.0
@@ -1005,7 +1017,7 @@ artifacts:
       interfaces, secure boot chain verification, trust boundary validation.
       Ellidiss has a security rules checker; OSATE has none. Maps to
       IEC 62443 zones/conduits and ISO 21434 threat analysis.
-    status: planned
+    status: proposed
     tags: [security, competitive-gap, v040]
     links:
       - type: traces-to
@@ -1019,7 +1031,7 @@ artifacts:
       claims: hierarchical claim decomposition, evidence linking, and
       reusable claim libraries. Currently spar verify has flat assertions;
       Resolute supports claim trees with sub-claims and computed evidence.
-    status: planned
+    status: proposed
     tags: [verification, competitive-gap, v040]
     fields:
       release: v0.23.0
@@ -1033,7 +1045,7 @@ artifacts:
       to AADL source via rowan CST. Currently spar renders read-only
       diagrams. OSATE graphical editor and Ellidiss STOOD both support
       bidirectional editing.
-    status: planned
+    status: proposed
     tags: [rendering, editing, competitive-gap, v050]
 
   # ── Interoperability Requirements (v0.5.0+) ────────────────────────
@@ -1072,7 +1084,7 @@ artifacts:
       Import OMG ReqIF XML into rivet artifacts. Bridges enterprise ALM
       tools (DOORS, Jama, Polarion) with spar's architecture verification.
       Requirements flow into rivet, trace to AADL components via spar verify.
-    status: planned
+    status: proposed
     tags: [interop, requirements, v040]
     fields:
       release: v0.23.0
@@ -1085,7 +1097,7 @@ artifacts:
       implementations, Functional Chains → end-to-end flows, Components →
       AADL components. Lighter than the N7 Space Capella-to-TASTE bridge
       (no Eclipse dependency).
-    status: planned
+    status: proposed
     tags: [interop, capella, bridge, v050]
 
   - id: REQ-INTEROP-004
@@ -1096,7 +1108,7 @@ artifacts:
       → process/thread bindings, Service Instance Manifests → connections,
       Machine Manifests → processor configurations. Enables spar analysis
       on existing AUTOSAR models without manual AADL modeling.
-    status: planned
+    status: proposed
     tags: [interop, autosar, bridge, v050]
 
   # ── IRQ-aware RTA (Track A, v0.7.0) ────────────────────────────────
@@ -4666,3 +4678,61 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
+
+  - id: REQ-GUARD-STATUS-VOCAB-001
+    type: requirement
+    title: "`status:` shall be a member of the schema's allowed set"
+    description: >
+      Every artifact's `status:` shall be one of the nine values the active
+      schema allows (draft, proposed, approved, implemented, verified, released,
+      accepted, deprecated, rejected). spar had 276 that were not: `passing`,
+      `planned`, `not-implemented` and `partial` — a private vocabulary that
+      read as meaningful and validated as nothing.
+
+      WHY IT MATTERS: `passing` was the largest group (177). It is a verification
+      VERDICT living in a lifecycle field, and a hand-edited YAML file cannot
+      honestly assert that a test passes — only that the measure exists. The
+      status plane records where an artifact sits in its lifecycle; it is not
+      a place to record the result of a run nobody re-derives.
+
+      THE MAPPING, and what it costs: passing -> implemented, planned ->
+      proposed, not-implemented -> proposed, partial -> approved. Only the last
+      is lossy. `partial` sits strictly between `approved` and `implemented`,
+      and the vocabulary has no such rung, so `approved` is chosen as the
+      CONSERVATIVE FLOOR — the strongest claim that is certainly true —
+      rather than `implemented`, which would overstate. The eight affected
+      requirements each say so in their own description. Two of them
+      (RENDER-REQ-003, COVERAGE-GAPS) already itemized their residue and were
+      left alone; the other five state that the residue is NOT itemized. That
+      wording is deliberate: an explicit "not measured" is falsifiable, whereas
+      a plausible invented figure ("32 of 50 rules") is not, and inventing one
+      is the precise failure #294 was reopened for.
+
+      THE GUARD IS NOT NEW CODE. rivet already ships `status-allowed-values` at
+      ERROR severity, and `rivet validate` is already a required check, so the
+      regression is mechanically blocked from the moment this lands. Writing a
+      bespoke checker here would have added a second, weaker oracle next to a
+      working one. This is the opposite of REQ-GUARD-RELEASE-PLANE-001, which
+      needed a tool precisely because rivet was BLIND to the defect.
+
+      TWO HOLES REMAIN OPEN, and neither is closed by this requirement:
+      (1) six `status:` values in safety/stpa/architecture.yaml sit inside the
+      `fields:` extension bag, where rivet cannot see them — the #370 defect one
+      field over, on `status:` instead of `release:`; (2) safety/requirements.yaml
+      holds 21 more, and rivet never loads that file at all because it is not
+      under any path in rivet.yaml's `sources:`. Both are invisible to the guard
+      above, which is exactly why they are named here rather than silently
+      absorbed into the 276.
+
+      RECONCILIATION (measured, not asserted): 303 raw `status:` text matches
+      across 9 committed files, minus 21 in the unloaded file, minus 6 in the
+      fields bag, equals the 276 errors rivet reports. The three planes agree.
+      NOTE ON THE MISSING LINK: this artifact deliberately carries no
+      `traces-to: REQ-GUARD-RELEASE-PLANE-001`, even though that is its natural
+      sibling. That artifact arrives in a different unmerged PR, and a `links:`
+      target is resolved at validate time — so the link would make this branch's
+      oracle pass or fail depending on which PR merges first. Add it once both
+      have landed; a flaky gate is not a traceability improvement.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, traceability, rivet, tooling]

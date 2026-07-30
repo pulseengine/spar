@@ -17,7 +17,7 @@ artifacts:
     description: >
       Verifies that parsing AADL with an annex library produces a
       LoweringDiagnostic containing "annex" with Warning severity.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/item_tree/lower.rs
@@ -35,7 +35,7 @@ artifacts:
       Verifies that parsing a clean AADL package with a system type
       produces no "unhandled" warnings. This validates that the
       explicit no-op arms correctly cover all non-semantic SyntaxKinds.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/item_tree/lower.rs
@@ -52,7 +52,7 @@ artifacts:
     description: >
       Verifies that a complete AADL package with types, implementations,
       features, and subcomponents produces zero lowering diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/item_tree/lower.rs
@@ -75,7 +75,7 @@ artifacts:
     description: >
       Verifies that an integer expression validates successfully against
       an AadlInteger property type definition.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -92,7 +92,7 @@ artifacts:
     description: >
       Verifies that a string expression against an integer type produces
       a type mismatch diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -109,7 +109,7 @@ artifacts:
     description: >
       Verifies that an enumeration value not in the declared variant
       list produces a diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -125,7 +125,7 @@ artifacts:
     title: Case-insensitive enum matching
     description: >
       Verifies that enumeration matching is case-insensitive per AADL spec.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -142,7 +142,7 @@ artifacts:
     description: >
       Verifies that list elements are individually checked against the
       list element type, and mismatched elements produce diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -159,7 +159,7 @@ artifacts:
     description: >
       Verifies that opaque (unparsed) property values do not produce
       false positive type mismatch diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -176,7 +176,7 @@ artifacts:
     description: >
       Verifies boolean expressions match AadlBoolean and mismatch
       AadlString with appropriate diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -193,7 +193,7 @@ artifacts:
     description: >
       Verifies that range min/max expressions are checked against the
       inner type, and mismatched bounds produce diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -210,7 +210,7 @@ artifacts:
     description: >
       Verifies that record field expressions are checked against the
       corresponding field type in the RecordType definition.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -227,7 +227,7 @@ artifacts:
     description: >
       Verifies that UnitValue delegates type checking to its inner
       expression.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -244,7 +244,7 @@ artifacts:
     description: >
       Verifies that classifier values match Classifier types and
       reference values match Reference types.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -261,7 +261,7 @@ artifacts:
     description: >
       Verifies that computed values and type references skip validation
       (cannot be checked statically).
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_check.rs
@@ -279,7 +279,7 @@ artifacts:
       Verifies that when two imported packages both export a classifier
       with the same unqualified name, resolution produces an "ambiguous"
       warning listing the candidate packages.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/resolver.rs
@@ -296,7 +296,7 @@ artifacts:
     description: >
       Verifies that fully qualified references (Pkg::Type) do not
       produce ambiguity warnings.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/resolver.rs
@@ -313,7 +313,7 @@ artifacts:
     description: >
       Verifies that references resolved within the same package do not
       produce ambiguity warnings even when imports have matching names.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/resolver.rs
@@ -335,7 +335,7 @@ artifacts:
       Verifies that a model with mutual containment (A.Impl contains
       B, B.Impl contains A) produces a diagnostic containing "circular"
       or "cycle".
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -352,7 +352,7 @@ artifacts:
     description: >
       Verifies that SystemInstance::instantiate produces a circular
       containment diagnostic when given a model with cycles.
-    status: passing
+    status: implemented
     fields:
       method: integration-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -369,7 +369,7 @@ artifacts:
     description: >
       Verifies that a linear (non-circular) hierarchy does not produce
       spurious circular containment diagnostics.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -386,7 +386,7 @@ artifacts:
     description: >
       Verifies that an array with dimension 0 produces a diagnostic
       and the function returns 1 as fallback.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -403,7 +403,7 @@ artifacts:
     description: >
       Verifies that a valid positive array dimension produces no
       diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -420,7 +420,7 @@ artifacts:
     description: >
       Indirectly verifies that the Builder max_depth is 100 by testing
       that instantiation of deep hierarchies succeeds.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/instance.rs
@@ -441,7 +441,7 @@ artifacts:
     description: >
       Verifies that has_modes() returns false when the instance has
       no system operation modes.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/modal.rs
@@ -458,7 +458,7 @@ artifacts:
     description: >
       Verifies that has_modes() returns true and mode_names() returns
       the correct list when the instance has SOMs.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/modal.rs
@@ -475,7 +475,7 @@ artifacts:
     description: >
       Verifies that SchedulingAnalysis emits an Info diagnostic
       mentioning "system operation mode" when the instance has SOMs.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -492,7 +492,7 @@ artifacts:
     description: >
       Verifies that scheduling analysis does not emit the SOM awareness
       diagnostic when the instance has no system operation modes.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -515,7 +515,7 @@ artifacts:
       Intentionally_Unconnected does not produce a connectivity warning.
       Tests cover single feature, "all" variant, parenthesized list,
       and case-insensitive matching.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/connectivity.rs
@@ -533,7 +533,7 @@ artifacts:
       Regression guard verifying that ports without the
       Intentionally_Unconnected property still produce connectivity
       warnings.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/connectivity.rs
@@ -550,7 +550,7 @@ artifacts:
     description: >
       Verifies that AnalysisRunner::register_all() registers exactly
       21 analysis passes and that the count matches expectations.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/lib.rs
@@ -569,7 +569,7 @@ artifacts:
       ms, sec, min, hr) against AS5506 Appendix A values. Includes
       forward/reverse conversions, adjacent ratio verification, and
       raw factor validation.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_value.rs
@@ -587,7 +587,7 @@ artifacts:
       Tests validate size unit conversions (bits, Bytes, KByte, MByte,
       GByte, TByte) with factor verification (8x for bits/Bytes, 1024x
       for powers).
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_value.rs
@@ -604,7 +604,7 @@ artifacts:
     description: >
       Verifies that unit names are matched case-insensitively (e.g.,
       "MS", "Ms", "ms" all work).
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir-def/src/property_value.rs
@@ -622,7 +622,7 @@ artifacts:
       Verifies that shared property accessors (get_timing_property,
       get_execution_time, get_size_property, get_processor_binding,
       extract_reference_target) parse property values correctly.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/property_accessors.rs
@@ -640,7 +640,7 @@ artifacts:
       Verifies that scheduling, latency, resource_budget, arinc653,
       binding_check, and binding_rules all import from
       property_accessors instead of defining private helpers.
-    status: passing
+    status: implemented
     fields:
       method: code-review
       evidence: >
@@ -659,7 +659,7 @@ artifacts:
       24 tests serialize each spar-hir public type to JSON, deserialize
       back, and assert structural equality. Covers all 16 serializable
       types plus all enum variants.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir/src/lib.rs
@@ -677,7 +677,7 @@ artifacts:
       Verifies that a complex InstanceNode tree (system > process >
       thread) with features, connections, array indices, and diagnostics
       survives JSON serialization round-trip.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-hir/src/lib.rs
@@ -699,7 +699,7 @@ artifacts:
       Verifies that when processor utilization exceeds the RMA bound
       but remains below 100%, the scheduling analysis emits an info
       diagnostic suggesting EDF scheduling as an alternative.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -714,7 +714,7 @@ artifacts:
     description: >
       Verifies that when utilization is within the RMA bound, no
       RMA/EDF cross-check diagnostic is emitted (not needed).
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -729,7 +729,7 @@ artifacts:
     description: >
       Verifies that a +10% perturbation that crosses a schedulability
       bound produces a warning about thin timing margins.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -744,7 +744,7 @@ artifacts:
     description: >
       Verifies that systems with comfortable timing margins do not
       produce sensitivity warnings.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -759,7 +759,7 @@ artifacts:
     description: >
       Verifies that a thread with Period but no Deadline emits an
       info diagnostic about implicit deadline equaling period.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -774,7 +774,7 @@ artifacts:
     description: >
       Verifies that a thread with both Period and Deadline does not
       emit the implicit-deadline info diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -789,7 +789,7 @@ artifacts:
     description: >
       Verifies that Compute_Execution_Time with min > max (e.g.,
       "5 ms .. 1 ms") produces an error diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -804,7 +804,7 @@ artifacts:
     description: >
       Verifies that worst-case execution time greater than period
       produces an error diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -819,7 +819,7 @@ artifacts:
     description: >
       Regression guard verifying that a valid range (min < max < period)
       does not produce execution time range errors.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -835,7 +835,7 @@ artifacts:
       Verifies that an end-to-end flow crossing processor boundaries
       without a Transmission_Time or Inter_Processor_Overhead property
       emits an info diagnostic about underestimated latency.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/latency.rs
@@ -850,7 +850,7 @@ artifacts:
     description: >
       Verifies that flows on the same processor do not trigger the
       inter-processor communication overhead advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/latency.rs
@@ -865,7 +865,7 @@ artifacts:
     description: >
       Verifies that setting Transmission_Time on the flow owner
       suppresses the inter-processor overhead advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/latency.rs
@@ -880,7 +880,7 @@ artifacts:
     description: >
       Verifies that processor utilization above 80% triggers a clock
       drift advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -895,7 +895,7 @@ artifacts:
     description: >
       Verifies that processor utilization below 80% does not trigger
       the clock drift advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -910,7 +910,7 @@ artifacts:
     description: >
       Verifies that threads without Context_Switch_Time or
       Interrupt_Overhead trigger an advisory diagnostic.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -925,7 +925,7 @@ artifacts:
     description: >
       Verifies that setting Context_Switch_Time suppresses the
       interrupt overhead advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -941,7 +941,7 @@ artifacts:
       Verifies that multiple threads on the same processor without
       Priority or Concurrency_Control_Protocol trigger a priority
       inversion advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -956,7 +956,7 @@ artifacts:
     description: >
       Verifies that setting Priority on threads suppresses the
       priority inversion advisory.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/scheduling.rs
@@ -972,7 +972,7 @@ artifacts:
       Verifies get_execution_time_range returns correct (min, max)
       pairs for both range format ("1 ms .. 5 ms") and single
       values ("3 ms").
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-analysis/src/property_accessors.rs
@@ -992,7 +992,7 @@ artifacts:
       All tests in the spar workspace pass after batch 3 implementation
       (timing and scheduling safety requirements).
       cargo clippy --workspace reports no warnings.
-    status: passing
+    status: implemented
     fields:
       method: integration-test
       command: cargo test --workspace
@@ -1056,7 +1056,7 @@ artifacts:
       port defs, connections, attributes, states, constraints, and
       specialization, then compares the produced AADL ItemTree against
       expected output.
-    status: passing
+    status: implemented
     fields:
       method: integration-test
       test-location: crates/spar-sysml2/tests/
@@ -1076,7 +1076,7 @@ artifacts:
       item_def, enum_def, interface_def, requirement_def, constraint_def,
       calc_def, allocation_def, connection_usage) produces the expected
       AADL construct with correct category and structure.
-    status: passing
+    status: implemented
     fields:
       method: unit-test
       test-location: crates/spar-sysml2/src/lower.rs
@@ -1094,7 +1094,7 @@ artifacts:
       Will verify that unrecognized SysML v2 SyntaxKind variants
       produce a warning diagnostic instead of being silently dropped.
       Blocked on STPA-REQ-032 implementation.
-    status: planned
+    status: proposed
     fields:
       method: unit-test
       test-location: crates/spar-sysml2/src/lower.rs
@@ -1113,7 +1113,7 @@ artifacts:
       classified as process/thread (not system), and that subcomponent
       categories are propagated from referenced type definitions.
       Blocked on STPA-REQ-033 and STPA-REQ-034 implementation.
-    status: planned
+    status: proposed
     fields:
       method: unit-test
       test-location: crates/spar-sysml2/src/lower.rs
@@ -1134,7 +1134,7 @@ artifacts:
       produce typed PropertyExpr values (not Opaque), enabling downstream
       scheduling and timing analysis.
       Blocked on STPA-REQ-035 implementation.
-    status: planned
+    status: proposed
     fields:
       method: unit-test
       test-location: crates/spar-sysml2/src/lower.rs
@@ -1156,7 +1156,7 @@ artifacts:
       Will verify that verus_verify and lean_verify rules fail with
       a clear error when the tool binary is not found.
       Blocked on STPA-REQ-037 implementation.
-    status: planned
+    status: proposed
     fields:
       method: integration-test
       test-location: tools/bazel/rules_verus/defs.bzl
@@ -1174,7 +1174,7 @@ artifacts:
       Will verify that workspace_gen.rs produces verus_verify and/or
       lean_verify targets in per-crate BUILD.bazel files.
       Blocked on STPA-REQ-038 implementation.
-    status: planned
+    status: proposed
     fields:
       method: unit-test
       test-location: crates/spar-codegen/src/workspace_gen.rs
@@ -1192,7 +1192,7 @@ artifacts:
       Will verify that verus_verify and lean_verify rules validate
       proof log content and reject empty or error-only logs.
       Blocked on STPA-REQ-039 implementation.
-    status: planned
+    status: proposed
     fields:
       method: integration-test
       test-location: tools/bazel/rules_verus/defs.bzl
