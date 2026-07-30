@@ -311,6 +311,11 @@ jobs:
     # The full-workspace exhaustive run lives in mutants-weekly.yml; this
     # gating job stays narrow (spar-analysis) with a survivor ratchet.
     runs-on: [self-hosted, linux, x64, lean-mem]
+    # The only run of this job to reach `success` in the last 25 CI runs took
+    # 182.3 minutes; the other 16 were cancelled by a later push. With no
+    # timeout it inherits GitHub's 6-hour default, so a wedged run holds a
+    # lean-mem runner for a shift. 240 gives the measured duration ~30% headroom.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -320,23 +325,34 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run cargo-mutants on spar-analysis
+        # `|| true` because cargo-mutants exits non-zero whenever ANY mutant
+        # survives and the ratchet below tolerates a bounded number. That makes
+        # this step incapable of reporting failure — so the next step has to
+        # prove the run happened rather than infer it from a missing file.
         run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib || true
+      # Runs FIRST, for the same reason as the other guardrail self-tests: the
+      # decision table includes the #381 regression itself (outcome files at the
+      # shallow path must FAIL, not read as zero survivors), so a refactor that
+      # reintroduced the misread would fail here rather than pass vacuously
+      # below. This gate spent four months unable to fail; it now has to prove
+      # it still can before it is allowed to judge anything.
+      - name: Mutants-report guardrail self-test
+        run: tools/check_mutants_report.py --self-test
       - name: Check surviving mutants
-        run: |
-          MISSED=$(grep -c '^MISSED' mutants-out/caught.txt 2>/dev/null || echo 0)
-          if [ -f mutants-out/missed.txt ]; then
-            MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
-          fi
-          echo "Surviving mutants: $MISSED"
-          # Ratchet gate: fail if more mutants survive than the threshold.
-          # Lower this number as tests improve. Target: 0.
-          MAX_MISSED=142
-          if [ "$MISSED" -gt "$MAX_MISSED" ]; then
-            echo "::error::$MISSED mutant(s) survived (threshold: $MAX_MISSED) — add tests to kill them"
-            cat mutants-out/missed.txt 2>/dev/null | head -30
-            exit 1
-          fi
-          echo "Mutant survivors ($MISSED) within threshold ($MAX_MISSED). Target: 0."
+        # The logic lives in tools/check_mutants_report.py rather than inline
+        # here because inline shell in a workflow is only testable by pushing —
+        # which is precisely how the original misread survived from 563eb8c
+        # (2026-03-22) to #381 without anyone able to run it against a report.
+        # The script's docstring carries the mechanism and the evidence.
+        #
+        # 210 is the measured survivor count on main @ cd4d429 (run
+        # 30563879100). The previous 142 was a real hand-measurement — recorded
+        # in 5d6d98a, "down from 220" — but was never enforced, so raising it
+        # relaxes nothing that was ever in force; it is the first value this
+        # gate has actually checked against. The 142 → 210 drift over four
+        # blind months is exactly what a ratchet exists to prevent. Walking it
+        # back down is #382. Lower this number; do not raise it.
+        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4

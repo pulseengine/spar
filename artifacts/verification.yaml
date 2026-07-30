@@ -4127,6 +4127,62 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-HUMAN-SCOPED-001
 
+  - id: TEST-GUARD-GATE-EVIDENCE
+    type: feature
+    title: The mutation gate fails on absence, on a report that measured nothing, and on self-disagreement
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-001 through the 19-case decision table in
+      tools/check_mutants_report.py --self-test, which runs as its own CI step
+      BEFORE the gate it protects.
+
+      THE LOAD-BEARING CASE is "REGRESSION #381: outcome files ONLY at the
+      shallow path" — a fixture with a full, valid set of outcome files placed
+      where the old gate LOOKED rather than where cargo-mutants writes them. It
+      must exit 1. Against the shipped implementation before this change, that
+      same fixture exits 0 and reports zero survivors, which is why the case is
+      written as a fixture rather than as prose.
+
+      The table also covers: no output directory at all (a crashed or OOM'd run,
+      which is a real state because the run step ends in `|| true` and the job is
+      on lean-mem precisely because it is RAM-hungry); an empty output directory;
+      a report with 0 caught (the suite never ran, which also scores zero
+      survivors); the impossible 0-caught-and-0-unviable report; missed.txt and
+      caught.txt individually removed; survivors exactly at and one over the
+      threshold; and four `outcomes.json` cross-check cases — agreeing,
+      disagreeing, unparseable, and absent. Absent passes but says "counts NOT
+      cross-checked" out loud rather than passing silently, because losing the
+      cross-check is losing the only detector that would have caught #381.
+
+      Four further cases assert on the weekly summary's RENDERED MARKDOWN rather
+      than an exit code: for an advisory report that never gates, the text is the
+      entire product, so "renders no table when there is no report" and "the
+      shallow layout must not render 0/0/0/0" are the properties that matter.
+
+      MEASURED AGAINST THE REAL ARTIFACT, not only fixtures: run 30563879100's
+      uploaded report (15 MB, downloaded) scores 210 missed / 603 caught / 793
+      unviable / 2 timeout with the counts agreeing with outcomes.json; exit 0 at
+      the 210 threshold, exit 1 at 209, and exit 1 at 142 — the threshold that was
+      nominally in force for four months while the same report scored green.
+
+      HONEST CEILING: this verifies the checker's decision table, and that the
+      checker is reachable — a PR touching tools/*.py is classified `code` by the
+      change filter, so the self-test runs. It does NOT verify that cargo-mutants
+      itself measured the workspace correctly, and it cannot verify the gate's
+      behaviour on a real three-hour CI run until one completes; the first such
+      run is the PR that lands this.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_mutants_report.py --self-test
+        - run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210
+    status: implemented
+    tags: [process, guardrail, ci, tooling, mutation-testing, v0360]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-001
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-001
+
   - id: TEST-NC-BUS-PAYLOAD
     type: feature
     title: Bus bandwidth reports unmeasurable connections instead of scoring them zero
