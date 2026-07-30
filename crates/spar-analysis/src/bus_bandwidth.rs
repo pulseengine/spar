@@ -10,8 +10,8 @@
 //! 1. Find connections whose owning component has `Actual_Connection_Binding`
 //!    pointing to this bus.
 //! 2. For each bound connection, compute bandwidth demand:
-//!    - `Data_Size` of the data type being transferred (from the source port's
-//!      classifier or the source component's `Data_Size` property).
+//!    - `Data_Size` of the data type being transferred, read from the source
+//!      component's own `Data_Size` property (or a child thread's).
 //!    - `Period` of the source thread (message rate = 1 / Period).
 //!    - demand = Data_Size / Period (bits per picosecond, converted to bps).
 //! 3. Sum all demands on the bus.
@@ -20,6 +20,23 @@
 //! 5. Error if demand > capacity.
 //! 6. Warning if utilization > 80%.
 //! 7. Info with utilization summary.
+//!
+//! # Known limitation: payload size is not read from the port's data classifier
+//!
+//! Step 2 consults only the *source component's* `Data_Size`. It does NOT
+//! resolve the port's `data` classifier, even though that is the AADL-native
+//! place to put payload size and the one spar's own WIT codegen requires
+//! ([`spar_hir_def::resolver::GlobalScope::resolve_data_shape`] is currently
+//! consumed by codegen alone). A model that types its ports properly therefore
+//! has no findable `Data_Size` here.
+//!
+//! Until that gap is closed, such connections are reported as **unaccounted**
+//! rather than scored as zero demand, and every utilization figure computed
+//! over an incomplete set is labelled a lower bound. Silently treating "size
+//! unknown" as "uses no bandwidth" let a saturated bus pass with no diagnostic
+//! at all — this analysis is now honest about what it could not measure
+//! (REQ-NC-BUS-PAYLOAD-001). Deriving the size from the classifier is the
+//! successor requirement; it needs the resolver scope in the analysis path.
 
 use rustc_hash::FxHashMap;
 
@@ -110,6 +127,8 @@ impl BusBandwidthAnalysis {
             // Find all connections bound to this bus and compute demands.
             let mut total_demand_bps: f64 = 0.0;
             let mut bound_connections: Vec<(String, f64)> = Vec::new();
+            // Bound to this bus but contributing nothing, with the reason.
+            let mut unaccounted: Vec<(String, Unaccounted)> = Vec::new();
 
             // Walk all components looking for Actual_Connection_Binding referencing this bus.
             for (comp_idx, _comp) in instance.all_components() {
@@ -159,12 +178,37 @@ impl BusBandwidthAnalysis {
                         continue;
                     }
 
-                    let demand = compute_connection_demand(instance, src_sub_idx, &bus_map);
-                    if demand > 0.0 {
-                        bound_connections.push((conn.name.as_str().to_string(), demand));
-                        total_demand_bps += demand;
+                    match compute_connection_demand(instance, src_sub_idx, &bus_map) {
+                        ConnectionDemand::Known(demand) => {
+                            bound_connections.push((conn.name.as_str().to_string(), demand));
+                            total_demand_bps += demand;
+                        }
+                        ConnectionDemand::Unknown(why) => {
+                            unaccounted.push((conn.name.as_str().to_string(), why));
+                        }
                     }
                 }
+            }
+
+            // A connection bound to this bus whose demand could not be computed
+            // is a hole in the aggregate, and the aggregate is what the verdict
+            // below rests on. Report it — including when it is the *only* thing
+            // we found, which is precisely the case that used to pass in
+            // silence (REQ-NC-BUS-PAYLOAD-001).
+            if !unaccounted.is_empty() {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "bus '{}' demand is INCOMPLETE: {} of {} bound connections contributed \
+                         no demand ({}); the reported utilization is a lower bound, not a verdict",
+                        bus_comp.name,
+                        unaccounted.len(),
+                        unaccounted.len() + bound_connections.len(),
+                        summarize_unaccounted(&unaccounted),
+                    ),
+                    path: bus_path.clone(),
+                    analysis: self.name().to_string(),
+                });
             }
 
             if bound_connections.is_empty() {
@@ -172,18 +216,29 @@ impl BusBandwidthAnalysis {
             }
 
             let utilization = total_demand_bps / capacity_bps * 100.0;
+            // Appended to every verdict below so the number is never read as
+            // complete when it isn't.
+            let completeness = if unaccounted.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", LOWER BOUND: {} connections unaccounted",
+                    unaccounted.len()
+                )
+            };
 
             if total_demand_bps > capacity_bps {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Error,
                     message: format!(
                         "bus '{}' bandwidth exceeded: {:.1} bps demand vs {:.1} bps capacity \
-                         ({:.1}% utilization, {} bound connections)",
+                         ({:.1}% utilization, {} bound connections{})",
                         bus_comp.name,
                         total_demand_bps,
                         capacity_bps,
                         utilization,
                         bound_connections.len(),
+                        completeness,
                     ),
                     path: bus_path.clone(),
                     analysis: self.name().to_string(),
@@ -193,12 +248,13 @@ impl BusBandwidthAnalysis {
                     severity: Severity::Warning,
                     message: format!(
                         "bus '{}' bandwidth utilization is high: {:.1} bps demand vs {:.1} bps capacity \
-                         ({:.1}% utilization, {} bound connections)",
+                         ({:.1}% utilization, {} bound connections{})",
                         bus_comp.name,
                         total_demand_bps,
                         capacity_bps,
                         utilization,
                         bound_connections.len(),
+                        completeness,
                     ),
                     path: bus_path.clone(),
                     analysis: self.name().to_string(),
@@ -207,12 +263,13 @@ impl BusBandwidthAnalysis {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Info,
                     message: format!(
-                        "bus '{}' bandwidth utilization: {:.1} bps of {:.1} bps ({:.1}%, {} bound connections)",
+                        "bus '{}' bandwidth utilization: {:.1} bps of {:.1} bps ({:.1}%, {} bound connections{})",
                         bus_comp.name,
                         total_demand_bps,
                         capacity_bps,
                         utilization,
                         bound_connections.len(),
+                        completeness,
                     ),
                     path: bus_path,
                     analysis: self.name().to_string(),
@@ -222,6 +279,51 @@ impl BusBandwidthAnalysis {
 
         diags
     }
+}
+
+/// How many connection names to name explicitly before eliding the rest.
+/// A bus can carry many connections; the point of the message is to make the
+/// gap actionable, not to reproduce the model.
+const MAX_NAMED_CONNECTIONS: usize = 3;
+
+/// Render the unaccounted connections grouped by reason, e.g.
+/// `2 with undeterminable payload size: c1, c2; 1 with undeterminable source
+/// period: c3`. Reasons appear in a fixed order so the message is stable
+/// across runs (diagnostics are compared in tests and in CI output).
+fn summarize_unaccounted(unaccounted: &[(String, Unaccounted)]) -> String {
+    let mut parts = Vec::new();
+    for why in [
+        Unaccounted::PayloadSize,
+        Unaccounted::SourcePeriod,
+        Unaccounted::UnresolvedSource,
+    ] {
+        let names: Vec<&str> = unaccounted
+            .iter()
+            .filter(|(_, w)| *w == why)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        let shown = names
+            .iter()
+            .take(MAX_NAMED_CONNECTIONS)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let elided = names.len().saturating_sub(MAX_NAMED_CONNECTIONS);
+        let tail = if elided > 0 {
+            format!(", +{elided} more")
+        } else {
+            String::new()
+        };
+        parts.push(format!(
+            "{} with {}: {shown}{tail}",
+            names.len(),
+            why.reason()
+        ));
+    }
+    parts.join("; ")
 }
 
 /// Extract a data rate value in bps from a typed [`PropertyExpr`].
@@ -312,40 +414,83 @@ fn get_bandwidth_capacity(props: &spar_hir_def::properties::PropertyMap) -> Opti
     None
 }
 
+/// Why a bus-bound connection contributed nothing to the demand sum.
+///
+/// Each variant is a *gap in the input model*, not a zero-bandwidth
+/// connection — the distinction the aggregate verdict depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unaccounted {
+    /// The connection's source subcomponent did not resolve.
+    UnresolvedSource,
+    /// No `Data_Size` was findable for the payload (REQ-NC-BUS-PAYLOAD-001):
+    /// notably, a port typed with a `data` classifier that carries the size
+    /// is NOT consulted — see [`get_data_size_for_component`].
+    PayloadSize,
+    /// No `Period` was findable for the source, so the message rate is unknown.
+    SourcePeriod,
+}
+
+impl Unaccounted {
+    /// Plural noun phrase used when grouping connections by reason.
+    fn reason(self) -> &'static str {
+        match self {
+            Unaccounted::UnresolvedSource => "unresolved source subcomponent",
+            Unaccounted::PayloadSize => "undeterminable payload size",
+            Unaccounted::SourcePeriod => "undeterminable source period",
+        }
+    }
+}
+
+/// The bandwidth demand of a single connection, or why it could not be computed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ConnectionDemand {
+    /// Both payload size and message rate resolved, in bits per second.
+    Known(f64),
+    /// Bound to the bus, but its demand is unknown — it must NOT be silently
+    /// treated as zero, or the aggregate becomes an unsound lower bound
+    /// presented as a verdict.
+    Unknown(Unaccounted),
+}
+
 /// Compute the bandwidth demand of a single connection in bits per second.
 ///
 /// demand = Data_Size (bits) / Period (seconds)
 ///
 /// Where Data_Size comes from the source component's data type properties,
 /// and Period comes from the source thread's timing properties.
+///
+/// Returns [`ConnectionDemand::Unknown`] rather than `0.0` when either input is
+/// missing: a connection whose payload size is unknown is not a connection that
+/// uses no bandwidth, and conflating the two makes a saturated bus pass clean
+/// (REQ-NC-BUS-PAYLOAD-001).
 fn compute_connection_demand(
     instance: &SystemInstance,
     src_sub_idx: Option<ComponentInstanceIdx>,
     _bus_map: &FxHashMap<String, ComponentInstanceIdx>,
-) -> f64 {
+) -> ConnectionDemand {
     let src_idx = match src_sub_idx {
         Some(idx) => idx,
-        None => return 0.0,
+        None => return ConnectionDemand::Unknown(Unaccounted::UnresolvedSource),
     };
 
     // Get data size from the source component (bits).
     // We look for Data_Size on the source or find a thread child.
     let data_size_bits = get_data_size_for_component(instance, src_idx);
     if data_size_bits == 0 {
-        return 0.0;
+        return ConnectionDemand::Unknown(Unaccounted::PayloadSize);
     }
 
     // Get Period from the source component (picoseconds).
     // Walk down to find a thread if the source is a process.
     let period_ps = get_period_for_component(instance, src_idx);
     if period_ps == 0 {
-        return 0.0;
+        return ConnectionDemand::Unknown(Unaccounted::SourcePeriod);
     }
 
     // demand = Data_Size (bits) / Period (seconds)
     // Period is in picoseconds, so Period_sec = period_ps / 1e12
     // demand_bps = data_size_bits / (period_ps / 1e12) = data_size_bits * 1e12 / period_ps
-    (data_size_bits as f64) * 1e12 / (period_ps as f64)
+    ConnectionDemand::Known((data_size_bits as f64) * 1e12 / (period_ps as f64))
 }
 
 /// Get Data_Size for a component in bits.
@@ -786,15 +931,106 @@ mod tests {
         let inst = b.build(root);
         let diags = BusBandwidthAnalysis.analyze(&inst);
 
-        // No demand computed, so no diagnostics for this bus.
+        // REQ-NC-BUS-PAYLOAD-001 — this test previously asserted SILENCE here
+        // ("missing Data_Size = no demand"), which is exactly the unsound
+        // reading: a connection whose payload size we cannot determine is not
+        // a connection that uses no bandwidth. A bus carrying only such
+        // connections used to produce no diagnostic at all, so a saturated bus
+        // passed clean. It must now say what it could not measure.
         let bus_diags: Vec<_> = diags
             .iter()
             .filter(|d| d.analysis == "bus_bandwidth")
             .collect();
+        assert_eq!(
+            bus_diags.len(),
+            1,
+            "expected exactly one incompleteness warning: {bus_diags:?}"
+        );
+        assert_eq!(bus_diags[0].severity, Severity::Warning);
         assert!(
-            bus_diags.is_empty(),
-            "missing Data_Size = no demand: {:?}",
-            bus_diags
+            bus_diags[0].message.contains("INCOMPLETE")
+                && bus_diags[0].message.contains("undeterminable payload size")
+                && bus_diags[0].message.contains("c1"),
+            "warning must name the gap and the connection: {}",
+            bus_diags[0].message
+        );
+        // And it must NOT claim a utilization verdict off an empty sum.
+        assert!(
+            !bus_diags[0].message.contains("utilization:"),
+            "no verdict may be reported when nothing was measured: {}",
+            bus_diags[0].message
+        );
+    }
+
+    /// REQ-NC-BUS-PAYLOAD-001 — a bus with SOME measurable and SOME
+    /// unmeasurable connections must report the utilization as a lower bound,
+    /// not as a complete verdict. This is the case that silently under-reports
+    /// on real models: one connection carries a `Data_Size` property, the
+    /// other types its payload with a data classifier the analysis cannot see.
+    #[test]
+    fn partial_demand_is_labelled_a_lower_bound() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let bus1 = b.add_component("bus1", ComponentCategory::Bus, Some(root));
+
+        // Sender A: fully specified -> contributes real demand.
+        let send_a = b.add_component("send_a", ComponentCategory::Process, Some(root));
+        let thread_a = b.add_component("thread_a", ComponentCategory::Thread, Some(send_a));
+        b.set_children(send_a, vec![thread_a]);
+        b.set_property(thread_a, "Memory_Properties", "Data_Size", "1 KByte");
+        b.set_property(thread_a, "Timing_Properties", "Period", "1 sec");
+
+        // Sender B: no findable Data_Size -> unaccounted, NOT zero.
+        let send_b = b.add_component("send_b", ComponentCategory::Process, Some(root));
+        let thread_b = b.add_component("thread_b", ComponentCategory::Thread, Some(send_b));
+        b.set_children(send_b, vec![thread_b]);
+        b.set_property(thread_b, "Timing_Properties", "Period", "1 sec");
+
+        let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
+        b.set_children(root, vec![bus1, send_a, send_b, receiver]);
+
+        // Capacity comfortably above the *measured* demand (8192 bps), so the
+        // bus would otherwise report a clean sub-80% Info verdict.
+        b.set_property(bus1, "SEI", "Bandwidth", "1 Mbitsps");
+        b.add_connection("c_a", root, "send_a", "out_port", "receiver", "in_port");
+        b.add_connection("c_b", root, "send_b", "out_port", "receiver", "in_port");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (bus1)",
+        );
+
+        let inst = b.build(root);
+        let diags = BusBandwidthAnalysis.analyze(&inst);
+        let bus_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.analysis == "bus_bandwidth")
+            .collect();
+
+        let warning = bus_diags
+            .iter()
+            .find(|d| d.severity == Severity::Warning)
+            .unwrap_or_else(|| panic!("expected an incompleteness warning: {bus_diags:?}"));
+        assert!(
+            warning.message.contains("1 of 2 bound connections") && warning.message.contains("c_b"),
+            "warning must quantify the gap and name the connection: {}",
+            warning.message
+        );
+
+        // The utilization verdict is still emitted (we did measure something),
+        // but it must carry the lower-bound qualifier. Select it by severity:
+        // the warning above also contains the word "utilization".
+        let verdict = bus_diags
+            .iter()
+            .find(|d| d.severity == Severity::Info)
+            .unwrap_or_else(|| panic!("expected a utilization verdict: {bus_diags:?}"));
+        assert!(
+            verdict
+                .message
+                .contains("LOWER BOUND: 1 connections unaccounted"),
+            "a partial sum must not read as a complete verdict: {}",
+            verdict.message
         );
     }
 
@@ -824,14 +1060,28 @@ mod tests {
         let inst = b.build(root);
         let diags = BusBandwidthAnalysis.analyze(&inst);
 
+        // REQ-NC-BUS-PAYLOAD-001 — the Period dual of
+        // `missing_data_size_no_demand`: an unknown message rate is likewise
+        // not a zero message rate, and used to vanish from the aggregate in
+        // silence. It must be reported as unaccounted.
         let bus_diags: Vec<_> = diags
             .iter()
             .filter(|d| d.analysis == "bus_bandwidth")
             .collect();
+        assert_eq!(
+            bus_diags.len(),
+            1,
+            "expected exactly one incompleteness warning: {bus_diags:?}"
+        );
+        assert_eq!(bus_diags[0].severity, Severity::Warning);
         assert!(
-            bus_diags.is_empty(),
-            "missing Period = no demand: {:?}",
-            bus_diags
+            bus_diags[0].message.contains("INCOMPLETE")
+                && bus_diags[0]
+                    .message
+                    .contains("undeterminable source period")
+                && bus_diags[0].message.contains("c1"),
+            "warning must name the gap and the connection: {}",
+            bus_diags[0].message
         );
     }
 

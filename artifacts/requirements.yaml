@@ -4312,6 +4312,90 @@ artifacts:
     fields:
       release: v0.23.0
 
+  - id: REQ-NC-BUS-PAYLOAD-001
+    type: requirement
+    title: "Bus bandwidth shall report what it could not measure, not score it as zero"
+    description: >
+      The bus bandwidth analysis (`spar-analysis::bus_bandwidth`) shall
+      distinguish a connection that uses NO bandwidth from a connection whose
+      bandwidth it COULD NOT DETERMINE, and shall never present a utilization
+      figure computed over an incomplete connection set as a verdict.
+
+      DEFECT: `compute_connection_demand` returned `0.0` for three distinct
+      unmeasurable cases — unresolved source subcomponent, no findable
+      `Data_Size`, no findable `Period` — and the caller then dropped every
+      `demand == 0.0` connection from `bound_connections`. A bus on which NO
+      connection's demand could be computed therefore left `bound_connections`
+      empty, hit the `continue`, and emitted NO DIAGNOSTIC AT ALL. A saturated
+      bus passed clean. Where some connections did resolve, the reported
+      utilization silently omitted the rest and was still printed as a bare
+      percentage.
+
+      This is the same failure direction as REQ-TSN-SVC-MULTIWIN-001 and
+      REQ-CODEGEN-LAYOUT-CERT-001: an analysis that is OPTIMISTIC when its
+      input is incomplete. Silence is the worst possible rendering of "I do not
+      know", because it is indistinguishable from "I checked and it is fine".
+
+      ROOT CAUSE of the dominant case: payload size is read only from the
+      SOURCE COMPONENT's own `Data_Size` property. The port's `data` classifier
+      — the AADL-native place to put payload size, and the one spar's OWN WIT
+      codegen relies on via `resolve_data_shape` — is never consulted. A model
+      that types its ports properly has no findable `Data_Size` here at all.
+      Closing that gap is the successor REQ-NC-BUS-PAYLOAD-002; this
+      requirement makes the analysis HONEST about the gap first, because the
+      honesty fix is sound on its own and must not wait on the capability.
+
+      SHALL: (a) the demand of a single connection is `Known(bps)` or
+      `Unknown(reason)` — a type distinction, not a sentinel value, so the two
+      cannot be conflated by a caller; (b) any bus with at least one
+      unaccounted bound connection emits a `Warning` naming the count, the
+      total, and the reasons grouped, EVEN WHEN no connection resolved and the
+      analysis would otherwise say nothing; (c) every utilization verdict
+      (Error / Warning / Info) computed over an incomplete set carries an
+      explicit "LOWER BOUND: N connections unaccounted" suffix.
+
+      SCOPE: reporting honesty only. This requirement does NOT make any
+      currently-unmeasurable connection measurable, and deliberately does not
+      change a single computed bandwidth number. Where the input is complete
+      the output is byte-identical to before.
+    status: implemented
+    release: v0.35.0
+    tags: [network-calculus, bus, honesty, analysis, diagnostics, v0350]
+    links:
+      - type: traces-to
+        target: REQ-NC-BRIDGE-001
+
+  - id: REQ-NC-BUS-PAYLOAD-002
+    type: requirement
+    title: "Resolve bus payload size from the port's data classifier"
+    description: >
+      Successor to REQ-NC-BUS-PAYLOAD-001, which made the gap visible. The bus
+      bandwidth analysis shall determine payload size from the connection's
+      SOURCE PORT `data` classifier — resolving the classifier and reading its
+      `Data_Size` — falling back to the source component's own `Data_Size`
+      only when the port is untyped.
+
+      This is the AADL-native placement and the one spar already depends on
+      elsewhere: `spar_hir_def::resolver::GlobalScope::resolve_data_shape`
+      performs exactly this resolution today, but is consumed ONLY by codegen.
+      The blocker is plumbing, not semantics — the analysis path receives a
+      `SystemInstance` without the resolver scope needed to follow a classifier
+      reference, so wiring that through is the actual work.
+
+      GATE (executed, not prose): a fixture whose ports are typed with a `data`
+      classifier carrying `Data_Size`, and whose source components carry NO
+      `Data_Size` of their own, shall produce a complete utilization figure
+      with ZERO unaccounted connections — i.e. the REQ-NC-BUS-PAYLOAD-001
+      warning must be ABSENT on a model where it currently fires for every
+      connection. That absence, on a fixture that is red today, is the
+      acceptance criterion.
+    status: proposed
+    release: v0.37.0
+    tags: [network-calculus, bus, analysis, resolver, codegen]
+    links:
+      - type: traces-to
+        target: REQ-NC-BUS-PAYLOAD-001
+
   - id: REQ-TSN-SYNTH-MILP-001
     type: requirement
     title: "TSN schedule synthesis — MIP→VNS-GA scale handoff"

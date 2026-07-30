@@ -4072,3 +4072,47 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-INGEST-DBC-FLOWS-001
+
+  - id: TEST-NC-BUS-PAYLOAD
+    type: feature
+    title: Bus bandwidth reports unmeasurable connections instead of scoring them zero
+    description: >
+      Verifies REQ-NC-BUS-PAYLOAD-001 through two spar-analysis unit tests that
+      are red against the previous implementation.
+
+      (1) `missing_data_size_no_demand` — a bus whose ONLY bound connection has
+      no findable `Data_Size`. This test previously asserted SILENCE ("no
+      demand computed, so no diagnostics for this bus"); the bug was encoded in
+      the oracle itself, which is why it survived. It now asserts exactly one
+      `Warning`, that the message contains "INCOMPLETE", the reason
+      "undeterminable payload size" and the connection name `c1`, and — the
+      falsification edge — that the message does NOT contain "utilization:",
+      so no verdict may be reported when nothing was measured.
+
+      (2) `partial_demand_is_labelled_a_lower_bound` — two bound connections,
+      one fully specified (1 KByte / 1 sec = 8192 bps) and one with no findable
+      `Data_Size`, on a 1 Mbitsps bus. The measured demand alone is a clean
+      sub-80% figure, so the pre-fix code emitted a bare `Info` verdict that
+      read as complete. It now asserts a `Warning` quantifying "1 of 2 bound
+      connections" and naming `c_b`, AND that the `Info` verdict carries
+      "LOWER BOUND: 1 connections unaccounted".
+
+      The type change is what makes the property hold rather than the message
+      text: `compute_connection_demand` returns
+      `ConnectionDemand::{Known(f64), Unknown(Unaccounted)}` instead of `f64`,
+      so a caller can no longer conflate "uses no bandwidth" with "could not be
+      measured" by testing `demand > 0.0`. The remaining bus_bandwidth tests
+      are unchanged and still pass, which is the evidence for the requirement's
+      SCOPE clause: where the input is complete, no computed number moved.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-analysis --lib bus_bandwidth
+    status: passing
+    tags: [network-calculus, bus, honesty, analysis, oracle, v0350]
+    links:
+      - type: satisfies
+        target: REQ-NC-BUS-PAYLOAD-001
+
+      - type: verifies
+        target: REQ-NC-BUS-PAYLOAD-001
