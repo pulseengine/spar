@@ -68,26 +68,53 @@
     # rev lives in flake.lock.
     #
     # This pin is not only the guest OS — it is also the Rust toolchain that
-    # builds gen-fixtures below, and THAT is the binding constraint. Every one
-    # of spar's 23 crates inherits `edition = "2024"` from
-    # `[workspace.package]`, and edition 2024 was stabilised in Rust 1.85.
+    # builds gen-fixtures below, and THAT is the binding constraint.
+    #
+    # The constraint is NOT the workspace edition. It is
+    #
+    #     max(rust-version) over the entire RESOLVED DEPENDENCY CLOSURE
+    #
+    # which is an emergent property of Cargo.lock, not a property of this
+    # repo: the workspace declares no `rust-version` and carries no
+    # rust-toolchain.toml, so nothing here states the floor and nothing here
+    # pins it. Re-derive it, never retype it:
+    #
+    #     cargo metadata --format-version 1 --locked \
+    #       | jq -r '.packages[] | select(.rust_version) | .rust_version' \
+    #       | sort -V | tail -1
+    #
+    # Measured 2026-07-30: 152 of 235 packages declare `rust-version`;
+    # the max is 1.89 (smol_str 0.3.6), then 1.87.0 (wasip2, wit-bindgen).
     # Measured `rustc.version` per channel:
     #
-    #     nixos-24.05 → 1.77.2   ✗ cannot compile this workspace
-    #     nixos-24.11 → 1.82.0   ✗
-    #     nixos-25.05 → 1.86.0   ✓
+    #     nixos-24.05 → 1.77.2   ✗ edition 2024 not stabilised (needs 1.85)
+    #     nixos-24.11 → 1.82.0   ✗ likewise
+    #     nixos-25.05 → 1.86.0   ✗ clears the edition, FAILS the closure (1.89)
+    #     nixos-25.11 → 1.91.1   ✓ clears both
     #
-    # The flake was pinned to 24.05 and so could never build spar at all; the
-    # nightly died with "feature `edition2024` is required ... not stabilized
-    # in this version of Cargo (1.77.1)" the moment the earlier blockers
-    # stopped masking it (#362, #365).
+    # HOW THIS WENT WRONG, so it is not repeated: the pin was moved 24.05 →
+    # 25.05 against the edition floor alone, and 25.05 was recorded here as
+    # "✓ cannot compile → can compile". That was false. Edition 2024 needing
+    # ≥1.85 is a NECESSARY condition that was mistaken for THE condition, and
+    # because the probe genuinely ran and genuinely returned 1.86.0, the
+    # check felt like verification while silently scoping the claim to the
+    # one variable that had been thought of. Cargo caught it — inside the
+    # derivation, at build time, one CI dispatch later:
     #
-    # MAINTENANCE: bumping this channel is a Rust-toolchain bump. Before
-    # lowering it, check `nix eval --raw
-    # github:NixOS/nixpkgs/<channel>#legacyPackages.x86_64-linux.rustc.version`
-    # against the workspace edition — a too-old channel fails at build time,
-    # not at evaluation, so it survives every local check.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    #     error: rustc 1.86.0 is not supported by the following package:
+    #       smol_str@0.3.6 requires rustc 1.89
+    #
+    # MAINTENANCE: bumping this channel is a Rust-toolchain bump, and the
+    # floor it must clear MOVES ON EVERY `cargo update` — a dependency can
+    # raise the closure max without a single line of this repo changing.
+    # Nothing gates that today; it surfaces only as a red nightly here, which
+    # is why this comment carries the derivation command instead of a number
+    # to trust. Before changing this line, run the command above and compare
+    # against `nix eval --raw
+    # github:NixOS/nixpkgs/<channel>#legacyPackages.x86_64-linux.rustc.version`.
+    # Both a too-old channel and a raised closure floor fail at BUILD time,
+    # not at evaluation, so they survive every local check this flake permits.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 
   outputs = { self, nixpkgs }: let
