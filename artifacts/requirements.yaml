@@ -260,54 +260,19 @@ artifacts:
     tags: [integration, serde]
 
   # ── Rendering (STPA-derived) ──────────────────────────────────────────
-
-  - id: RENDER-REQ-001
-    type: requirement
-    title: Orthogonal edge routing
-    description: >
-      Edges must use orthogonal routing to minimize visual crossings.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-002
-    type: requirement
-    title: Port visibility with directional indicators
-    description: >
-      Ports must be visible with directional indicators and type coloring.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-003
-    type: requirement
-    title: Interactive HTML with zoom/pan/minimap/search
-    description: >
-      Interactive HTML output must support zoom, pan, minimap, and search.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-004
-    type: requirement
-    title: Deterministic layout
-    description: >
-      Layout must be deterministic — same model always produces same layout.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-005
-    type: requirement
-    title: Selection and group highlighting
-    description: >
-      Selection and group highlighting must be supported in interactive mode.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-006
-    type: requirement
-    title: Semantic zoom for overview levels
-    description: >
-      Semantic zoom must reduce clutter at overview levels.
-    status: partial
-    tags: [rendering, stpa]
+  #
+  # RENDER-REQ-001..006 are NOT defined here. They live in
+  # safety/stpa/rendering-analysis.yaml, which is the canonical copy: it
+  # carries the hazards/satisfies/verified-by trace links that make them
+  # part of the STPA V, and the stubs that used to sit here carried none.
+  #
+  # Both files defined all six ids until #360. rivet silently kept ONE and
+  # dropped the other with no diagnostic, and which one won was load order,
+  # not a decision. The stubs were stale in BOTH directions -- they claimed
+  # RENDER-REQ-003 `implemented` (it is `partial`: minimap/search are
+  # Phase 3b, still `reserved` in etch) and RENDER-REQ-006 `partial` (it is
+  # `implemented`: etch/src/html.rs emits svg.zoom-low / svg.zoom-overview
+  # behind a wheel handler). Do not re-add them here.
 
   - id: REQ-WASM-001
     type: requirement

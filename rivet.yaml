@@ -18,16 +18,16 @@ project:
 sources:
   - path: artifacts
     format: generic-yaml
+  # The directory scan below already loads every *.yaml under safety/stpa.
+  # Four of those files used to ALSO be listed individually, to force
+  # `format: generic-yaml` on them — which loaded each one twice and made
+  # every id in it collide with itself: 184 phantom "declared more than
+  # once" errors, one per id, with the same path on both sides of the
+  # message (#360). The explicit entries are removed; see the measurement
+  # in the PR for the artifact-set equivalence check that says the
+  # directory scan alone loses nothing.
   - path: safety/stpa
     format: stpa-yaml
-  - path: safety/stpa/requirements.yaml
-    format: generic-yaml
-  - path: safety/stpa/architecture.yaml
-    format: generic-yaml
-  - path: safety/stpa/validation.yaml
-    format: generic-yaml
-  - path: safety/stpa/solver-requirements.yaml
-    format: generic-yaml
 
 docs:
   - docs
