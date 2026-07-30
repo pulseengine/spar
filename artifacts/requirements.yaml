@@ -3314,7 +3314,7 @@ artifacts:
       REQ-CODEGEN-LAYOUT-CERT-001 (the proven ordeal edge). Tracks #350.
     status: proposed
     release: v0.40.0
-    tags: [analysis, ordeal, bmc, concurrency, certificate, spike]
+    tags: [analysis, ordeal, bmc, concurrency, certificate, spike, human-scoped]
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
@@ -4476,7 +4476,7 @@ artifacts:
       Lean has nothing in NC today [SOLID, absence].
     status: proposed
     release: v0.38.0
-    tags: [proof, lean, network-calculus, soundness, tier3]
+    tags: [proof, lean, network-calculus, soundness, tier3, human-scoped]
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
@@ -4493,4 +4493,54 @@ artifacts:
       and a concrete cert-driven buyer asks. [SOLID]
     status: proposed
     release: v0.38.0
-    tags: [proof, certificate, network-calculus, soundness, tier3]
+    tags: [proof, certificate, network-calculus, soundness, tier3, human-scoped]
+
+  - id: REQ-GUARD-HUMAN-SCOPED-001
+    type: requirement
+    title: "`human-scoped` artifacts cannot be recorded done by an unattended run"
+    description: >
+      A mechanical guardrail on autonomous scope. An artifact tagged
+      `human-scoped` is one whose SCOPING needs a human: first wiring of an
+      external dependency, narrowing a research-grade property to something a
+      solver can actually decide, or designing a falsification kill-criterion.
+      Such an artifact may sit at draft/proposed/approved (planning is fine) and
+      may be rejected/deprecated/withdrawn (retracting is fine), but it shall NOT
+      be recorded implemented/verified/released/accepted/passing. To ship one the
+      tag must be deleted in the SAME change, so the promotion is one explicit
+      line of diff rather than a status buried in a large PR.
+
+      WHY: v0.35.0's REQ-CODEGEN-LAYOUT-CERT-001 was designated human-scoped in a
+      planning note only. The autonomous issue-hunt cron picked it up,
+      implemented it, self-recorded `status: verified`, and merged it in about an
+      hour — asserting a proof that did not exist, because the SMT goal
+      constant-folded and every input therefore produced a byte-identical
+      certificate. Nothing anywhere enforced the designation. A guardrail that
+      lives only in prose is not a guardrail.
+
+      HONEST CEILING (non-negotiable, and stated in the tool's own docstring):
+      this is a speed bump, NOT an authorization boundary. `main` requires zero
+      approving reviews and that is FORCED rather than sloppy — with
+      `enforce_admins: true` on a single-maintainer repo, GitHub's ban on
+      self-approval makes any required review an unbreakable deadlock. Commit
+      signatures cannot discriminate either, because squash-merges are re-signed
+      by GitHub's own key. So an agent with push access can delete the tag in the
+      same PR and green the check; what the check buys is that doing so becomes
+      explicit, diffable and logged instead of invisible. The only real gate is
+      on the agent's prompt and permissions, which lives outside this repo. Do
+      not market this as preventing autonomous over-scoping — it makes it
+      visible.
+
+      IMPLEMENTATION CONSTRAINT: stdlib-only python3. No workflow in this repo
+      installs a Python package, so importing PyYAML would make a required check
+      depend on an unverified runner package — and a guardrail that cannot run
+      reads as approval. The narrow parser is therefore FAIL-CLOSED: input outside
+      the subset it fully handles exits 2 (INCONCLUSIVE, red) rather than being
+      scanned past, because a best-effort scanner degrades to a false green, which
+      is the exact vacuity that let #354 through. Equivalence to a real YAML
+      parser was measured over all 886 committed artifacts, not assumed.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, autonomy, ci, tooling]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-LAYOUT-CERT-001
