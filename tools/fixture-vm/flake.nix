@@ -64,10 +64,30 @@
   description = "NixOS KVM guest for spar trace-topology fixture generation";
 
   inputs = {
-    # Pin nixpkgs to a specific revision for reproducibility.
-    # nixos-24.05 is a stable release channel; update the rev + sha256
-    # when a newer release is needed.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    # Pin nixpkgs to a stable release channel for reproducibility; the exact
+    # rev lives in flake.lock.
+    #
+    # This pin is not only the guest OS — it is also the Rust toolchain that
+    # builds gen-fixtures below, and THAT is the binding constraint. Every one
+    # of spar's 23 crates inherits `edition = "2024"` from
+    # `[workspace.package]`, and edition 2024 was stabilised in Rust 1.85.
+    # Measured `rustc.version` per channel:
+    #
+    #     nixos-24.05 → 1.77.2   ✗ cannot compile this workspace
+    #     nixos-24.11 → 1.82.0   ✗
+    #     nixos-25.05 → 1.86.0   ✓
+    #
+    # The flake was pinned to 24.05 and so could never build spar at all; the
+    # nightly died with "feature `edition2024` is required ... not stabilized
+    # in this version of Cargo (1.77.1)" the moment the earlier blockers
+    # stopped masking it (#362, #365).
+    #
+    # MAINTENANCE: bumping this channel is a Rust-toolchain bump. Before
+    # lowering it, check `nix eval --raw
+    # github:NixOS/nixpkgs/<channel>#legacyPackages.x86_64-linux.rustc.version`
+    # against the workspace edition — a too-old channel fails at build time,
+    # not at evaluation, so it survives every local check.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
   };
 
   outputs = { self, nixpkgs }: let
@@ -118,6 +138,14 @@
         #
         #   nix-prefetch-git --url https://github.com/pulseengine/rivet.git \
         #     --rev <new-rev> --fetch-submodules
+        #
+        # A nixpkgs channel bump can invalidate it too, if `fetchgit`'s
+        # defaults change — and that failure appears only at build time, so it
+        # survives every local evaluation. Re-derive it after any bump by
+        # building with a deliberately wrong hash and reading the `got:` line;
+        # a build with the *correct* hash proves nothing when the path is
+        # already in the store, because a fixed-output derivation
+        # short-circuits. Verified stable across 24.05 → 25.05 this way.
         outputHashes = {
           "etch-0.2.0" = "sha256-x37urQw97R/ARqvlVpXpp3tJqbvztbOiUyAGNZItlA0=";
         };
