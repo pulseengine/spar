@@ -189,6 +189,42 @@
       # Disable tests (they require Linux netns — only valid inside the VM).
       doCheck = false;
 
+      # Keep this build from poisoning /homeless-shelter for every LATER build.
+      #
+      # Nix runs builders with HOME=/homeless-shelter, and when the sandbox is
+      # off it refuses to START any build if that path exists — an existing home
+      # directory would let builders read state from outside the derivation. The
+      # check lives in local-derivation-goal.cc behind `!useChroot`, so it is a
+      # direct consequence of the `sandbox = false` this container relies on
+      # (see NIX_CONF_EXTRA in .github/workflows/trace-fixtures.yml).
+      #
+      # Run 30575158798 died on exactly that, one derivation AFTER this one:
+      #
+      #   building '/nix/store/…-gen-fixtures-0.10.0.drv'...      20:11:21
+      #   error: home directory '/homeless-shelter' exists;       20:16:42
+      #   please remove it to assure purity of builds without sandboxing
+      #
+      # WHAT IS MEASURED vs INFERRED. Measured: the error fired 5m21s after this
+      # derivation started, with no other `building '…'` line in between, and it
+      # is thrown when a build STARTS — so the directory was created during this
+      # 5m21s window. Inferred: that `cmake` did it, via its user package
+      # registry at $HOME/.cmake/packages — cmake is on this build's PATH for
+      # highs-sys (see below) and is the usual culprit. The fix does not depend
+      # on that inference being right: redirecting HOME covers whichever tool in
+      # this derivation writes to it.
+      #
+      # A `rm -rf /homeless-shelter` in the workflow would NOT fix this. The
+      # directory is created mid-graph, so removing it before `nix build` leaves
+      # the failing window untouched. Enabling the sandbox would also fix it —
+      # and is arguably the right answer — but it is a larger change: it would
+      # make kvm-probe.nix's out-of-store `builder = "/bin/sh"` illegal, and
+      # whether nested user namespaces work under rootless podman here is
+      # untested. Deliberately not bundled into a run that is already testing
+      # two other fixes.
+      preConfigure = ''
+        export HOME="$TMPDIR"
+      '';
+
       # Build-time tools. `cmake` is here for a non-obvious reason: it is not
       # used by gen-fixtures, it is used by a build script five levels down.
       #
