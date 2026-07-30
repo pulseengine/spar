@@ -48,9 +48,19 @@ env:
   # 30572572863 they *did* differ (the build appended these; the probe appended
   # nothing), which is half of why the probe passed a build that then failed.
   #
-  # `sandbox = false` drops Nix's in-container build sandbox (not host root — the
-  # container is already rootless). Without it, sandboxed builds fail inside the
-  # already-containerised environment.
+  # Of the two settings below, exactly one is doing work. Verified against the
+  # image's own definition (NixOS/nix, docker.nix, `defaultNixConf`), which ships
+  # /etc/nix/nix.conf containing `sandbox = false` AND `build-users-group = nixbld`:
+  #
+  #   * `sandbox = false` is ALREADY the image default, so appending it changes
+  #     nothing today. It is kept explicit deliberately — NIX_IMAGE_DIGEST is a
+  #     pin we will bump, and a bump must not be able to silently flip a setting
+  #     this build depends on. It states an assumption rather than asserting a
+  #     change. (It drops Nix's in-container build sandbox, not host isolation —
+  #     the container is already the boundary.)
+  #   * `build-users-group =` (empty) is the line that actually fixes the build:
+  #     it OVERRIDES the image's `build-users-group = nixbld`. Later entries in
+  #     nix.conf win, which is why appending works.
   #
   # `build-users-group =` (empty) makes builds run as the container's own root
   # rather than dropping to a `nixbld` user, and it is what makes /dev/kvm
@@ -106,11 +116,12 @@ jobs:
       # arch from it. Verified: `podman run <image> nix --version` → 2.24.9.
       # Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
       #
-      # Note: "sandbox = false" in nix.conf drops Nix's in-container build
-      # sandbox (not host root — the container is already rootless).
-      # Without it, Nix's sandboxed builds fail inside the already-
-      # containerised environment.  --device /dev/kvm is required because
-      # the NixOS qcow2 builder boots a transient builder VM.
+      # Note: for what the nix.conf settings do — and which of them is actually
+      # load-bearing — see NIX_CONF_EXTRA in the workflow `env:` block. Do not
+      # restate it here; that comment is the single source, and this one said
+      # "sandbox = false" was required when it is in fact the image's own
+      # default.  --device /dev/kvm is required because the NixOS qcow2 builder
+      # boots a transient builder VM.
       #
       # --group-add keep-groups is required for the SAME reason and is not
       # implied by --device.  See the precondition step below for why.
