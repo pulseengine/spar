@@ -73,6 +73,30 @@ env:
     experimental-features = nix-command flakes
     sandbox = false
     build-users-group =
+  # Linux capabilities the container needs BEYOND podman's rootless default
+  # set. Hoisted for the third time for the same reason as NIX_IMAGE_DIGEST and
+  # NIX_CONF_EXTRA: the precondition probe must run under the same grant as the
+  # build it guards, or it proves nothing about the build.
+  #
+  # nixos-disk-image.drv boots a transient VM and shares the Nix store into it
+  # with virtiofsd. virtiofsd hands its child a fixed capability set via
+  # capng_apply(BOTH), and raising a capability that is not already permitted
+  # returns EPERM — reported as `can't apply the child capabilities: failed to
+  # sync capabilities with the kernel`, which is what killed run 30579194737.
+  # Its visible consequence sits three lines lower and reads like a different
+  # problem entirely: qemu reporting the socket virtiofsd never bound, as
+  # `-chardev socket,id=store,path=virtio-store.sock: Failed to connect to
+  # 'virtio-store.sock': Connection refused`.
+  #
+  # Only these two are granted: they are the two members of virtiofsd's
+  # required set that podman's rootless default omits. Which capabilities the
+  # build principal ACTUALLY holds is printed by the probe rather than assumed
+  # here — see build-principal-probe.nix for why it asserts only what this
+  # grants and prints the rest.
+  #
+  # These are confined to the rootless user namespace. They do not give the
+  # container anything on the host that the invoking user did not already have.
+  PODMAN_CAPS: "CAP_MKNOD,CAP_DAC_READ_SEARCH"
 
 jobs:
   generate-fixtures:
@@ -195,6 +219,7 @@ jobs:
           podman run --rm \
             --device /dev/kvm \
             --group-add keep-groups \
+            --cap-add "${PODMAN_CAPS}" \
             --security-opt label=disable \
             -e NIX_CONF_EXTRA \
             -v "${WORKSPACE}:/spar:Z" \
@@ -202,6 +227,21 @@ jobs:
             sh -c '
               set -eu
               echo "container process: $(id)"
+
+              # The capability mask of THIS container, printed next to the one
+              # the probe derivation prints for the BUILD principal below. The
+              # probe asserts against the builder, because the builder is what
+              # spawns virtiofsd; this line exists so the two can be compared.
+              # If the bits are set here but not there, the grant is being lost
+              # between podman and the builder, and --cap-add is not the fix.
+              #
+              # No apostrophes anywhere in this sh -c body: it is delimited by
+              # single quotes in the YAML above, so one apostrophe ends the
+              # string and the rest of the script becomes shell for the runner.
+              while read -r k v; do
+                case "$k" in CapEff:|CapBnd:) echo "container $k       $v" ;; esac
+              done < /proc/self/status
+
               ls -l /dev/kvm || {
                 echo "::error::/dev/kvm is not present in the container at all."
                 exit 1
@@ -215,11 +255,21 @@ jobs:
               echo "nix system-features   = $(nix config show system-features)"
 
               if nix build --no-link --print-build-logs \
-                   -f /spar/tools/fixture-vm/kvm-probe.nix; then
-                echo "ok: a Nix BUILD process opened /dev/kvm O_RDWR."
+                   -f /spar/tools/fixture-vm/build-principal-probe.nix; then
+                echo "ok: a Nix BUILD process holds the required capabilities"
+                echo "ok: and opened /dev/kvm O_RDWR."
               else
-                echo "::error::A Nix build process cannot open /dev/kvm, so the"
-                echo "::error::transient VM inside nixos-disk-image.drv cannot start."
+                echo "::error::A Nix build process cannot satisfy what"
+                echo "::error::nixos-disk-image.drv needs, so its transient VM"
+                echo "::error::cannot start. The probe log above says which of the"
+                echo "::error::two preconditions failed; read it before this list."
+                echo "::error::"
+                echo "::error::If capabilities are missing, virtiofsd cannot share"
+                echo "::error::the Nix store into the VM: it calls capng_apply for"
+                echo "::error::its child, gets EPERM, and exits, after which qemu"
+                echo "::error::reports the unbound socket as Connection refused."
+                echo "::error::Grant them in PODMAN_CAPS, and compare the two"
+                echo "::error::capability masks the probe printed."
                 echo "::error::"
                 echo "::error::If scheduling succeeded but the open failed, the build"
                 echo "::error::principal lost the supplementary group that reaches the"
@@ -243,6 +293,7 @@ jobs:
           podman run --rm \
             --device /dev/kvm \
             --group-add keep-groups \
+            --cap-add "${PODMAN_CAPS}" \
             --security-opt label=disable \
             -e NIX_CONF_EXTRA \
             -v "${WORKSPACE}:/spar:Z" \

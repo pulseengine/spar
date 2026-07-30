@@ -217,7 +217,8 @@
       # directory is created mid-graph, so removing it before `nix build` leaves
       # the failing window untouched. Enabling the sandbox would also fix it —
       # and is arguably the right answer — but it is a larger change: it would
-      # make kvm-probe.nix's out-of-store `builder = "/bin/sh"` illegal, and
+      # make build-principal-probe.nix's out-of-store `builder = "/bin/sh"`
+      # illegal, and
       # whether nested user namespaces work under rootless podman here is
       # untested. Deliberately not bundled into a run that is already testing
       # two other fixes.
