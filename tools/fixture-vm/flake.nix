@@ -31,9 +31,12 @@
 # On every boot a systemd oneshot service (`gen-fixtures.service`) runs
 # gen-fixtures /fixtures, where /fixtures is the virtio-9p mount that the
 # QEMU harness exports from the host.  After the service exits the system
-# powers off via ExecStartPost=systemctl poweroff.  The service is
-# wantedBy = ["multi-user.target"] so it runs at the end of normal boot
-# without a special target.
+# powers off via ExecStopPost=systemctl poweroff — ExecStop*Post*, not
+# ExecStart*Post*, because the latter is skipped when ExecStart fails and a
+# failing run then idles to the harness's 900s kill instead of reporting.
+# The service is wantedBy = ["multi-user.target"] so it runs at the end of
+# normal boot without a special target, and carries its own `path` (see the
+# service definition) because environment.systemPackages does not reach it.
 #
 # == Usage ==
 #
@@ -369,13 +372,18 @@
           # Minimal networking — not needed for the fixture run.
           networking.useDHCP = false;
 
-          # The fixture toolchain.
+          # The fixture toolchain, for an operator who logs in on ttyS0 to
+          # debug by hand. This list does NOT feed gen-fixtures.service —
+          # a systemd unit does not see /run/current-system/sw/bin. The
+          # service's own `path` below is what the generator actually runs
+          # against; keep the two in step.
           environment.systemPackages = [
             gen-fixtures
             pkgs.iproute2        # ip netns, ip link
             pkgs.lldpd           # lldpd, lldpctl
             pkgs.linuxptp        # ptp4l, pmc
             pkgs.tcpdump         # tcpdump
+            pkgs.iputils         # arping
             pkgs.tshark          # tshark (for CI verification step)
           ];
 
@@ -393,12 +401,59 @@
             wantedBy = [ "multi-user.target" ];
             after = [ "network.target" "local-fs.target" ];
 
+            # environment.systemPackages does NOT reach a systemd unit. It
+            # populates /run/current-system/sw/bin for interactive login
+            # shells; a unit gets NixOS's minimal default PATH (coreutils,
+            # findutils, gnugrep, gnused, systemd, util-linux) and nothing
+            # else. So listing iproute2 above put `ip` in the image while
+            # leaving it unreachable from the one process that calls it —
+            # run 30583284365 died on `could not spawn: No such file or
+            # directory` with iproute2 sitting in the closure the whole time.
+            #
+            # Every tool gen-fixtures spawns must appear here. They are also
+            # spawned through `ip netns exec`, which passes this same PATH
+            # down to the child, so one list covers both.
+            #
+            # This list was DERIVED from the source, not recalled: every
+            # `run_cmd` / `netns_exec` / `netns_capture` / `netns_spawn_bg`
+            # literal in crates/spar-trace-topology/src/bin/gen-fixtures.rs
+            # and src/fixtures/netns.rs. Writing it from memory produced a
+            # list missing `arping` — which is spawned behind `let _ =`, so
+            # its absence would have cost nothing visible and silently
+            # emptied the ARP traffic the PCAPNG fixture is supposed to hold.
+            # `arping` was missing from environment.systemPackages too, so it
+            # was not in the image at all; iputils is added there as well.
+            #
+            # arping comes from iputils, NOT pkgs.arping: the call site passes
+            # `-I <dev>`, which is iputils' flag. Habets' arping (pkgs.arping)
+            # spells the same option `-i` and would fail on the interface.
+            path = [
+              pkgs.iproute2        # ip, tc
+              pkgs.lldpd           # lldpd, lldpctl
+              pkgs.linuxptp        # ptp4l, pmc
+              pkgs.tcpdump         # tcpdump
+              pkgs.iputils         # arping
+            ];
+
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = false;
               ExecStart = "${gen-fixtures}/bin/gen-fixtures /fixtures";
-              # Power off after gen-fixtures exits (success or failure).
-              ExecStartPost = "${pkgs.systemd}/bin/systemctl poweroff --force";
+              # Power off after gen-fixtures exits — on BOTH paths.
+              #
+              # This was ExecStartPost, which systemd runs only when ExecStart
+              # SUCCEEDED. On failure the unit went to `failed`, nothing
+              # powered the guest off, and it idled at the login prompt until
+              # the harness killed it at 900s. A failing run therefore looked
+              # exactly like a hanging one, and cost fifteen minutes to say
+              # so. ExecStopPost runs on success and failure alike.
+              ExecStopPost = "${pkgs.systemd}/bin/systemctl poweroff --force";
+              # Bound the stop sequence itself. If the poweroff call ever
+              # wedges, systemd SIGKILLs at 60s rather than letting the guest
+              # drift to the harness's 900s watchdog. That watchdog stays as
+              # the backstop; it should just never again be the first thing
+              # that notices something went wrong.
+              TimeoutStopSec = 60;
               StandardOutput = "journal+console";
               StandardError = "journal+console";
             };
