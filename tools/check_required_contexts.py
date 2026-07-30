@@ -8,7 +8,18 @@ reconciles the two. Three ways they drift, each failing differently:
 
   1. A job is added to a PR-triggered workflow and nobody adds it to the
      required set. It runs, it goes red, and the PR merges anyway. The gate
-     looks full; it is one job short. (`osate-corpus` is in this state today.)
+     looks full; it is one job short.
+
+     `osate-corpus` has this symptom today — and this gate deliberately does
+     NOT fix it, which is worth stating rather than letting the reader assume
+     otherwise. `aadl-interop.yml` carries a workflow-level
+     `on.pull_request.paths:` filter, so the classifier buckets it
+     UNDELIVERABLE and rules that it must *not* be required (see 3 — requiring
+     it would deadlock every PR outside those paths). The gate reports PASS
+     with the symptom open. The remedy is a change to that workflow — always
+     run, filter with a job-level `if:` — after which this gate will demand
+     the context be required. Until someone makes it, `osate-corpus` is a job
+     that can go red while the PR merges, and nothing here flags it.
 
   2. A job carries `continue-on-error: true`. It reports SUCCESS whatever
      happened — pass, fail, or never really ran. Requiring it enforces nothing,
@@ -63,6 +74,27 @@ validates it against PyYAML on the real workflow corpus wherever PyYAML happens
 to be available, which is how the restriction is kept honest rather than
 assumed.
 
+That leaves a gap worth naming, because it is the one an audit found: in CI —
+the only place this gate is load-bearing — `--cross-check` does NOT run, for the
+same PyYAML reason. So the safety of the reader in CI cannot rest on agreeing
+with a reference parser; it has to rest on the reader refusing what it cannot
+represent. Four constructs previously read wrong and silently, and two of them
+*flipped a verdict* rather than merely losing information:
+
+  * `pull_request: {branches: [main], paths: [...]}` (flow mapping) — read as an
+    opaque string, so `paths` disappeared, the job was ruled GATEABLE, and the
+    gate ordered you to require a context that would never be delivered. The
+    gate handing you the exact deadlock it exists to prevent.
+  * a file indented with four spaces — every job invisible, zero jobs, zero
+    violations, PASS. Fail-OPEN, which the paragraph above claims cannot happen.
+  * a folded/literal block scalar as a job `name:` — the context name read as
+    `>-`.
+  * YAML anchors and aliases in a name.
+
+All four now raise (`_reject_unsupported` plus the empty-`jobs:` check) and each
+has a fixture. `--cross-check` remains the belt for local work; the refusals are
+the braces that actually ship.
+
 Usage:
   tools/check_required_contexts.py                 # reconcile workflows <-> committed list
   tools/check_required_contexts.py --self-test     # fixture cases; run this FIRST in CI
@@ -84,7 +116,11 @@ import re
 import subprocess
 import sys
 
-WORKFLOW_GLOB = ".github/workflows/*.yml"
+#: `*.y*ml`, not `*.yml`. GitHub Actions loads BOTH extensions from
+#: .github/workflows/, so a `sneaky.yaml` holding a gateable job is invisible to
+#: a `*.yml` glob — the gate reports PASS on a repo it never fully read. That is
+#: failure mode 1 with the gate's own blind spot supplying the silence.
+WORKFLOW_GLOB = ".github/workflows/*.y*ml"
 LIST_PATH = ".github/required-contexts.txt"
 PROTECTED_BRANCH = "main"
 
@@ -130,6 +166,41 @@ def _strip_comment(line: str) -> str:
     return "".join(out).rstrip()
 
 
+#: YAML constructs this reader cannot represent, at positions where misreading
+#: one changes a verdict. Each is legal YAML and legal Actions, so "nobody writes
+#: that here" is a property of today's files, not of the format — and the failure
+#: is silent in the dangerous direction. The flow mapping is the sharp one:
+#:
+#:     on:
+#:       pull_request: {branches: [main], paths: ["src/**"]}
+#:
+#: reads as the *string* "{branches: ...}", `classify_workflow` does
+#: `if not isinstance(pr, dict): pr = {}`, the paths filter evaporates, and the
+#: job is ruled GATEABLE. The gate then instructs you to require a context that
+#: will not be delivered — it hands you the exact deadlock it exists to prevent.
+#: Refusing to parse is the only safe answer; a reader that guesses here is worse
+#: than no reader.
+def _reject_unsupported(val, path: str, lineno: int, where: str) -> None:
+    if not isinstance(val, str):
+        return
+    v = val.strip()
+    if not v:
+        return
+    if v.startswith("{"):
+        kind = "a flow mapping"
+    elif v[0] in "&*":
+        kind = "a YAML anchor or alias"
+    elif v[0] in "|>":
+        kind = "a block scalar"
+    else:
+        return
+    raise WorkflowSyntaxError(
+        f"{path}:{lineno}: {where} is {kind} ({v!r}), which this restricted "
+        f"reader cannot represent. Rewrite it as block-style YAML. Guessing "
+        f"here can flip a job's classification and deadlock every PR."
+    )
+
+
 def _scalar(val: str):
     val = val.strip()
     if not val:
@@ -164,6 +235,7 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
     trigger = None          # current key under `on:`
     job = None              # current key under `jobs:`
     listing = None          # (container, key) currently accumulating `- items`
+    saw_jobs = False        # a `jobs:` key was seen at indent 0
 
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = _strip_comment(raw)
@@ -200,12 +272,17 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
             # so the trap the reference parser springs does not arise — but the
             # key still has to be matched in both spellings.
             section = "on" if key in ("on", "'on'", '"on"', "True", "true") else ("jobs" if key == "jobs" else None)
+            if section is not None:
+                _reject_unsupported(val, path, lineno, f"`{key}:`")
             if section == "on":
                 doc["on"] = {} if val is None else {t: {} for t in (val if isinstance(val, list) else [val])}
+            if section == "jobs":
+                saw_jobs = True
             trigger = job = None
             continue
 
         if indent == 2 and section == "on":
+            _reject_unsupported(val, path, lineno, f"`on.{key}:`")
             trigger = key
             doc["on"][key] = {} if val is None else val
             continue
@@ -213,6 +290,7 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
         if indent == 4 and section == "on" and trigger == "pull_request":
             if not isinstance(doc["on"].get("pull_request"), dict):
                 raise WorkflowSyntaxError(f"{path}:{lineno}: options under a non-mapping pull_request")
+            _reject_unsupported(val, path, lineno, f"`on.pull_request.{key}:`")
             if val is None:
                 doc["on"]["pull_request"][key] = []
                 listing = (doc["on"]["pull_request"], key, 6)
@@ -221,14 +299,31 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
             continue
 
         if indent == 2 and section == "jobs":
+            _reject_unsupported(val, path, lineno, f"`jobs.{key}:`")
             job = key
             doc["jobs"][key] = {}
             continue
 
         if indent == 4 and section == "jobs" and job is not None:
             if key in ("name", "continue-on-error"):
+                _reject_unsupported(val, path, lineno, f"`jobs.{job}.{key}:`")
                 doc["jobs"][job][key] = val
             continue
+
+    # A `jobs:` block that yielded nothing is not an empty workflow — it is a
+    # workflow this reader failed to see into, and the difference matters because
+    # the two render identically downstream: zero jobs means zero violations
+    # means PASS. That is fail-OPEN, and it is reachable without anything exotic
+    # — a file indented with four spaces puts every job id at indent 4, where the
+    # reader is not looking and the indent-2 fail-closed check never fires.
+    # Actions rejects a jobs-less workflow anyway, so this cannot false-alarm on
+    # a file that CI would actually run.
+    if saw_jobs and not doc["jobs"]:
+        raise WorkflowSyntaxError(
+            f"{path}: a `jobs:` block is present but no job was recognised at "
+            f"indent 2. This reader requires 2-space indentation; a workflow it "
+            f"cannot see into would silently report zero violations."
+        )
 
     return doc
 
@@ -320,7 +415,12 @@ def read_list(path: str) -> list[str]:
     out = []
     with open(path) as fh:
         for line in fh:
-            line = line.split("#", 1)[0].strip()
+            # Same comment rule as the workflow reader: `#` only opens a comment
+            # at line start or after whitespace. A naive split makes
+            # `--print > required-contexts.txt` a lossy round-trip for any
+            # context whose name contains `#` (`Test #1` -> `Test`), which the
+            # parser would then report as a stale entry AND a missing job.
+            line = _strip_comment(line).strip()
             if line:
                 out.append(line)
     return out
@@ -541,15 +641,57 @@ jobs:
     runs-on: ubuntu-latest
 """
 
-_JOB_IF_SCOPED = """
+_PATHS_IGNORE_SCOPED = """
+name: W
+on:
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+jobs:
+  a:
+    name: Alpha
+    runs-on: ubuntu-latest
+"""
+
+#: `pull_request` as a flow mapping. Valid YAML, valid Actions, and the reader
+#: sees the value as an opaque string — so the `paths` filter vanishes and the
+#: job is ruled GATEABLE. Must be refused, not guessed at.
+_FLOW_MAPPING = """
+name: W
+on:
+  pull_request: {branches: [main], paths: ["src/**"]}
+jobs:
+  a:
+    name: Alpha
+    runs-on: ubuntu-latest
+"""
+
+#: Four-space indentation throughout. Every job id lands at indent 4, where the
+#: reader is not looking — and the indent-2 fail-closed check never fires. Before
+#: the `saw_jobs` check this parsed to zero jobs and PASSed.
+_FOUR_SPACE = """
+name: W
+on:
+    pull_request:
+        branches: [main]
+jobs:
+    a:
+        name: Alpha
+        runs-on: ubuntu-latest
+"""
+
+#: A folded block scalar as a job name. The reader would take the literal `>-`
+#: as the context name and demand that be required, while the real context
+#: ("Folded Name") goes unrequired — failure mode 1, caused by the gate.
+_BLOCK_SCALAR_NAME = """
 name: W
 on:
   pull_request:
     branches: [main]
 jobs:
   a:
-    name: Alpha
-    if: needs.changes.outputs.code == 'true'
+    name: >-
+      Folded Name
     runs-on: ubuntu-latest
 """
 
@@ -628,11 +770,31 @@ SELF_TESTS = [
         "required' rule would get wrong",
     ),
     (
-        "job-level if: is required, and must be",
-        _JOB_IF_SCOPED, ["Alpha"], 0,
-        "the distinction the whole gate turns on: an if:-skipped job reports "
-        "\"skipped\", which SATISFIES a required context — so job-level "
-        "filtering is gateable where workflow-level filtering is not",
+        "paths-ignore-scoped workflow required",
+        _PATHS_IGNORE_SCOPED, ["Alpha"], 1,
+        "`paths-ignore` deadlocks identically to `paths`. Without this case the "
+        "paths-ignore branch survives every other fixture — deleting it reds "
+        "nothing, which is what a guard nothing exercises is worth",
+    ),
+    (
+        "flow-mapping pull_request refused",
+        _FLOW_MAPPING, ["Alpha"], 2,
+        "the reader cannot see a flow mapping's `paths`, so it would rule the "
+        "job GATEABLE and order you to require an undeliverable context — the "
+        "gate handing you the deadlock it exists to prevent. Refusal, not a guess",
+    ),
+    (
+        "four-space indentation refused",
+        _FOUR_SPACE, [], 2,
+        "fail-OPEN, the one direction that must not exist: jobs at indent 4 are "
+        "invisible, zero jobs means zero violations means PASS on a file the "
+        "reader never read",
+    ),
+    (
+        "block-scalar job name refused",
+        _BLOCK_SCALAR_NAME, ["Folded Name"], 2,
+        "a folded name reads as the literal '>-'; requiring that string leaves "
+        "the real context ungated",
     ),
     (
         "templated matrix name required",
@@ -655,7 +817,12 @@ def self_test() -> int:
         with tempfile.TemporaryDirectory() as tmp:
             wf_dir = os.path.join(tmp, "wf")
             os.makedirs(wf_dir)
-            with open(os.path.join(wf_dir, "w.yml"), "w") as fh:
+            # Deliberately `.yaml`, the extension the original `*.yml` glob could
+            # not see. Every fixture therefore also exercises discovery: narrow
+            # the glob back and all of them go red at once, loudly. `.yml` needs
+            # no fixture — all ten real workflows use it, so the live run covers
+            # that leg on every PR.
+            with open(os.path.join(wf_dir, "w.yaml"), "w") as fh:
                 fh.write(wf_text)
             list_path = os.path.join(tmp, "required.txt")
             with open(list_path, "w") as fh:
@@ -664,7 +831,16 @@ def self_test() -> int:
             import io
 
             buf = io.StringIO()
-            got = run_check(os.path.join(wf_dir, "*.yml"), list_path, out=buf)
+            # `.y*ml`, matching the real glob — a fixture written as `.yaml`
+            # must be discovered, since Actions loads both extensions.
+            try:
+                got = run_check(os.path.join(wf_dir, "*.y*ml"), list_path, out=buf)
+            except WorkflowSyntaxError as exc:
+                # 2 == "refused to guess", the fail-closed exit main() renders.
+                # Distinct from 1 (a real violation) on purpose: one says the
+                # gate found a problem, the other says the gate cannot see.
+                got = 2
+                print(f"refused: {exc}", file=buf)
 
         mark = "ok  " if got == want else "FAIL"
         if got != want:
@@ -676,10 +852,24 @@ def self_test() -> int:
             for line in buf.getvalue().splitlines():
                 print(f"       {line}")
 
+    # The fixtures above run against a glob this function builds, so they cannot
+    # see WORKFLOW_GLOB itself — narrowing that constant back to `*.yml` would
+    # leave every fixture green while the production run stopped reading half the
+    # directory. Assert on the constant directly.
+    if not fnmatch.fnmatch(".github/workflows/x.yaml", WORKFLOW_GLOB):
+        print(f"  FAIL WORKFLOW_GLOB does not match `.yaml`: {WORKFLOW_GLOB!r}")
+        print("       proves: Actions loads .yml AND .yaml; a glob that misses "
+              "one reports PASS on a directory it never fully read")
+        failures += 1
+    else:
+        print("  ok   WORKFLOW_GLOB matches both .yml and .yaml")
+        print("       proves: no workflow file is invisible to the scan by extension")
+
+    total = len(SELF_TESTS) + 1
     if failures:
-        print(f"\n{failures} of {len(SELF_TESTS)} self-test(s) FAILED.")
+        print(f"\n{failures} of {total} self-test(s) FAILED.")
         return 1
-    print(f"\n{len(SELF_TESTS)} self-test(s) passed.")
+    print(f"\n{total} self-test(s) passed.")
     return 0
 
 
