@@ -179,17 +179,42 @@ jobs:
               echo "sandbox = false" >> /etc/nix/nix.conf
               cd /spar/tools/fixture-vm
               # Build the qcow2 image against the committed flake.lock.
+              #
+              # The out-link goes to /tmp, NOT into the bind mount. A `result`
+              # symlink written to /spar would survive the container but point
+              # at /nix/store/…, and this container is `--rm` with its own
+              # store — nothing of that store exists on the host once the run
+              # ends. That is not a naming mismatch that a better glob would
+              # fix; the build product is unreachable from the host by
+              # construction. So the image is copied ACROSS the mount here,
+              # while the store it lives in still exists.
               nix build --no-update-lock-file \
                 .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
-                --out-link /spar/tools/fixture-vm/result
+                --out-link /tmp/result
+              cp --no-preserve=mode,ownership \
+                /tmp/result/nixos.qcow2 /spar/tools/fixture-vm/nixos.qcow2
             '
 
       - name: Locate qcow2
         id: qcow2
         run: |
-          QCOW2="$(readlink -f tools/fixture-vm/result/nixos.qcow2)"
+          QCOW2="${GITHUB_WORKSPACE}/tools/fixture-vm/nixos.qcow2"
+          # `cp` exiting 0 says a file arrived, not that a bootable image did.
+          # A qcow2 of a full NixOS system is hundreds of MB; anything under
+          # 64 MiB means the copy was truncated or the wrong path was built,
+          # and the next four steps would fail further from the cause.
+          if [ ! -f "${QCOW2}" ]; then
+            echo "::error::${QCOW2} does not exist — the copy out of the"
+            echo "::error::container store did not happen. Check the build step."
+            exit 1
+          fi
+          BYTES="$(stat -c %s "${QCOW2}")"
+          if [ "${BYTES}" -lt 67108864 ]; then
+            echo "::error::${QCOW2} is only ${BYTES} bytes; expected >= 64 MiB."
+            exit 1
+          fi
           echo "path=${QCOW2}" >> "$GITHUB_OUTPUT"
-          echo "fixture-vm: qcow2 = ${QCOW2}"
+          echo "fixture-vm: qcow2 = ${QCOW2} (${BYTES} bytes)"
           ls -lh "${QCOW2}"
 
       # ── 3. Build the fixture-vm Rust harness ─────────────────────────────
