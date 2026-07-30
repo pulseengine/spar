@@ -3242,7 +3242,7 @@ artifacts:
       codec. ASSUMED: the canonical-ABI alignment constants themselves. Scope:
       flat scalar records (1/2/4/8-byte fields); nested records/arrays are a
       successor increment (REQ-CODEGEN-LAYOUT-CERT-002, planned).
-    status: implemented
+    status: verified
     release: v0.35.0
     tags: [codegen, ordeal, certificate, layout, wit, v0350]
     links:
