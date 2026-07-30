@@ -26,10 +26,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - fuzz_aadl_parse
-          - fuzz_scheduler_solver
-          - fuzz_codegen_roundtrip
+        # `include` rather than a flat `target:` list because the input-length
+        # cap is a property of the individual harness, not of fuzzing here
+        # (#361). Only fuzz_scheduler_solver fails: across the last 97 runs
+        # the other two legs concluded `success` every time. They consume
+        # arbitrarily long AADL/WIT source text, so a shared -max_len would
+        # shrink the reachable input space of two HEALTHY fuzzers to fix a
+        # third — a silent regression paid for by an unrelated leg's bug.
+        include:
+          - target: fuzz_aadl_parse
+            extra_args: ""
+          # This cap is lossless, not a coverage trade. The harness opens with
+          # `input.tasks.len().min(8)` / `input.processors.len().min(4)`, and
+          # `Arbitrary` grows those Vecs to consume whatever buffer it is
+          # given — so every byte past the ~120 the capped domain can encode
+          # produces a `Task` that is allocated and then discarded unread.
+          # Capping removes allocation churn, not reachable states.
+          - target: fuzz_scheduler_solver
+            extra_args: "-max_len=128"
+          - target: fuzz_codegen_roundtrip
+            extra_args: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -56,10 +72,38 @@ jobs:
       - name: Run fuzz target for 1h
         env:
           TARGET: ${{ matrix.target }}
+          EXTRA_ARGS: ${{ matrix.extra_args }}
+          # This leg has OOMed on every nightly since at least 2026-04-25
+          # (#361). It is NOT a leak in the code under test — ASan's own
+          # accounting at the moment of death says so (run 30516991027):
+          #
+          #   used: 2056Mb; limit: 2048Mb
+          #   Live Heap:    27.7 MB in     8,340 chunks
+          #   quarantined: 155.7 MB in 2,104,213 chunks
+          #   total chunks:              4,345,508
+          #
+          # Live plus quarantined CONTENTS are 183 MB of 2056 MB. The missing
+          # ~1.87 GB is ASan's per-chunk bookkeeping over 4.3M chunks, so the
+          # two knobs below attack the two terms of that product:
+          #   * quarantine_size_mb (default 256) bounds the chunk COUNT — the
+          #     2.1M quarantined chunks are retained solely to catch
+          #     use-after-free, which is not the bug class this harness hunts.
+          #   * malloc_context_size (default 30) bounds the per-chunk COST;
+          #     each chunk stores alloc/free stack traces of that depth.
+          #
+          # 10 frames still names the allocation site, so crash triage keeps
+          # working. Do not cut this to 2 — it saves little and turns a report
+          # into an unactionable address.
+          ASAN_OPTIONS: malloc_context_size=10:quarantine_size_mb=64
         # `--target x86_64-unknown-linux-gnu` avoids the cargo-fuzz default
         # musl target whose statically-linked libc is incompatible with
         # AddressSanitizer. Same fix as the PR-time fuzz smoke (PR #142).
-        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$TARGET" -- -max_total_time=3600 -timeout=10
+        #
+        # $EXTRA_ARGS is deliberately unquoted: it is a workflow-authored flag
+        # list that must word-split. -rss_limit_mb raises libFuzzer's 2048 MB
+        # default, which the measures above should now keep us under; it is
+        # headroom, not the fix.
+        run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$TARGET" -- -max_total_time=3600 -timeout=10 -rss_limit_mb=4096 $EXTRA_ARGS
 
       - name: Upload corpus
         if: always()
