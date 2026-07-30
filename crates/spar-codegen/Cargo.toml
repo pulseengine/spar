@@ -13,8 +13,6 @@ la-arena.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
-# Certificate-checked byte-layout equivalence (REQ-CODEGEN-LAYOUT-CERT-001, #327).
-ordeal.workspace = true
 
 [dev-dependencies]
 spar-hir-def.workspace = true
