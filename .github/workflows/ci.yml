@@ -18,7 +18,67 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # ── Change detection ──────────────────────────────────────────────────
+  # A diff that only touches rivet artifacts, STPA files, or documentation
+  # cannot affect a proof, a mutant, a fuzz target, or a Miri run — but the
+  # heavy jobs still cost hours of self-hosted runner time on every such PR.
+  # This job classifies the diff once; the expensive jobs below consume it.
+  #
+  # The heavy jobs are SKIPPED, never removed: a job-level `if:` reports a
+  # `skipped` conclusion, which satisfies a required status check, so the
+  # branch-protection gate stays non-empty and intact. Filtering at the
+  # workflow level (`on: paths:`) would instead leave required checks
+  # permanently *pending* and block every merge — do not do that here.
+  #
+  # Fail-safe direction: anything unrecognised counts as code, so a new
+  # top-level path runs the full suite until it is deliberately allow-listed.
+  changes:
+    name: Detect changed paths
+    runs-on: [self-hosted, linux, x64, light]
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        name: Classify diff as code vs artifacts/docs
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Non-PR event (${{ github.event_name }}) -> full suite."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          changed=$(git diff --name-only "$base"...HEAD)
+          echo "Changed files:"
+          printf '%s\n' "$changed"
+          if [ -z "$changed" ]; then
+            echo "Empty diff -> full suite (fail-safe)."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Non-code allow-list: rivet artifacts, STPA files, docs, markdown.
+          # Any path outside it makes the WHOLE diff "code" — a PR that touches
+          # both artifacts and Rust must still run the full suite.
+          # Counted explicitly rather than relying on `grep -q` exit semantics,
+          # so the gate's decision is readable in the job log.
+          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|[^/]*\.md|.*/.*\.md)$'
+          n_code=$(printf '%s\n' "$changed" | grep -cvE "$allow" || true)
+          echo "code-ish files in diff: $n_code"
+          if [ "$n_code" -gt 0 ]; then
+            echo "-> code change: running the full suite."
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "-> artifacts/docs only: skipping the heavy jobs."
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ── Fast checks ───────────────────────────────────────────────────────
+  # fmt / audit / deny / rivet-validate deliberately have NO `changes` gate:
+  # they are cheap, and rivet-validate is precisely the check an
+  # artifacts-only PR needs to pass.
   fmt:
     name: Format
     runs-on: [self-hosted, linux, x64, light]
@@ -31,6 +91,8 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +105,8 @@ jobs:
   # ── Tests ─────────────────────────────────────────────────────────────
   test:
     name: Test
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +138,8 @@ jobs:
   # build). REQ-CODEGEN-WIT-RECORDS-001/002 (#319), REQ-CODEGEN-WIT-DATAPLANE-001.
   codegen-oracle:
     name: Codegen compile oracle
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +165,8 @@ jobs:
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
     name: Bench compile smoke
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +218,8 @@ jobs:
   # ── Code coverage ────────────────────────────────────────────────────
   coverage:
     name: Code Coverage
-    needs: [test]
+    needs: [changes, test]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -183,6 +252,8 @@ jobs:
   # ── Miri (undefined behavior, pointer provenance) ───────────────────
   miri:
     name: Miri
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     # lean-mem class — Miri allocates aggressively and benefits from the 24G
     # MemoryHigh ceiling on smithy lean-mem runners over the 12G rust-cpu cap.
     runs-on: [self-hosted, linux, x64, lean-mem]
@@ -208,6 +279,8 @@ jobs:
   # parser/scheduler invariants get exercised on every change.
   proptest:
     name: Proptest (extended)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
     steps:
       - uses: actions/checkout@v4
@@ -221,7 +294,8 @@ jobs:
   # ── Mutation testing ────────────────────────────────────────────────
   mutants:
     name: Mutation Testing
-    needs: [test]
+    needs: [changes, test]
+    if: needs.changes.outputs.code == 'true'
     # lean-mem — many parallel cargo invocations, RAM pressure under -j 4.
     # The full-workspace exhaustive run lives in mutants-weekly.yml; this
     # gating job stays narrow (spar-analysis) with a survivor ratchet.
@@ -264,7 +338,8 @@ jobs:
     name: Fuzz smoke (60s/target)
     runs-on: [self-hosted, linux, x64, rust-cpu]
     # Only run on PRs — pushes to main hit the nightly workflow instead.
-    if: github.event_name == 'pull_request'
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -288,6 +363,8 @@ jobs:
   # ── Supply chain verification ───────────────────────────────────────
   supply-chain:
     name: Supply Chain (cargo-vet)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, light]
     steps:
       - uses: actions/checkout@v4
@@ -341,6 +418,8 @@ jobs:
   # Time budget: cold cache ≤30 min, warm ≤5 min (per #135).
   bazel-test:
     name: Bazel test (//...)
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest until Bazel is installed on the smithy host.
     # Tracked as a follow-up: smithy/group_vars/all.yml could add a
     # bazel apt-installable. Until then, hosted handles this.
@@ -390,6 +469,8 @@ jobs:
   #   3. At that point, extend MAX_TASKS from 4 to 8 and re-tune unwinds.
   kani:
     name: Kani Bounded Model Checking
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest because kani-verifier bundles CBMC (~100 MB)
     # which we don't pre-install on smithy. Once smithy ships Kani as a
     # toolchain, switch to rust-cpu (the verification is RAM-modest but
