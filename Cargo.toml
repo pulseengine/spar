@@ -61,6 +61,10 @@ toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
+# ordeal — certificate-checked QF_BV SMT solver (the spar↔ordeal edge,
+# REQ-CODEGEN-LAYOUT-CERT-001 / #327). Default build has zero external deps
+# and is wasm-clean; pulls the in-workspace `ordeal-lrat` verified checker.
+ordeal = { git = "https://github.com/pulseengine/ordeal.git", tag = "v0.17.0" }
 spar-verify-macros = { path = "crates/spar-verify-macros" }
 spar-verify = { path = "crates/spar-verify" }
 quote = "1"
