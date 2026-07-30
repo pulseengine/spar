@@ -1,0 +1,24 @@
+# Fixture for tools/check_release_plane.py — NOT part of the real trace.
+#
+# Proves the FAIL-CLOSED branch actually fires. The parser handles the block
+# *sequence* artifact layout — `artifacts:` followed by `- id: …` entries — which
+# is the sole form the real files use. This file uses a mapping keyed by id
+# instead, which is also legal rivet-ish YAML and which the parser cannot read.
+#
+# The tempting shortcut is to treat an unreadable layout as "no artifacts here,
+# nothing to report" and exit 0. That is the exact vacuity this whole check
+# exists to prevent: a guardrail that cannot see its input reads as approval.
+#
+# Note the artifact below is ALSO a would-be violation — its `release:` is in the
+# `fields:` bag. So if the fail-closed guard were removed, the checker would not
+# fall back to catching it as a violation; it would find zero sequence entries,
+# report zero findings, and exit 0. That is what makes 2-vs-0 the meaningful
+# assertion here rather than 2-vs-1.
+artifacts:
+  REQ-FIXTURE-MAPPING-STYLE:
+    type: requirement
+    title: Artifact in a layout the parser does not handle
+    status: verified
+    fields:
+      category: fixture
+      release: v0.36.0

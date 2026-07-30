@@ -1,0 +1,38 @@
+# Fixture for tools/check_release_plane.py — NOT part of the real trace.
+#
+# The falsification edge. TEST-GUARD-RELEASE-PLANE runs the checker against
+# this directory and requires exit 1, so a regression that makes the checker
+# toothless turns the gate red instead of green.
+#
+# Two artifacts, deliberately differing ONLY in where `release:` sits. That is
+# what makes the fixture discriminate on the *plane* rather than on the mere
+# presence of a `release:` key — a checker that simply grepped for `release:`
+# would report both, and a checker that reported neither would also "pass" a
+# one-sided fixture. Requiring exactly one finding pins both edges at once.
+artifacts:
+  - id: FIXTURE-RELEASE-PLANE-NESTED
+    type: requirement
+    title: release recorded inside the fields bag (must be reported)
+    description: >
+      Represents the #370 failure: 59 of 85 release assignments were written
+      into the `fields:` extension bag, which is valid YAML and tolerated by
+      the schema but completely invisible to `rivet list --release`. Eleven
+      shipped releases reported zero artifacts as a result, rendering
+      identically to a genuinely empty release.
+    status: proposed
+    fields:
+      category: fixture
+      release: v0.23.0
+
+  - id: FIXTURE-RELEASE-PLANE-VISIBLE
+    type: requirement
+    title: release on the artifact's own key plane (must NOT be reported)
+    description: >
+      Identical to the artifact above except for the indentation of the
+      `release:` line. This is the correct placement — a sibling of `status:`,
+      which is where rivet's query surface reads it. Its presence here is what
+      forces the check to discriminate on plane rather than on the key.
+    status: proposed
+    release: v0.36.0
+    fields:
+      category: fixture

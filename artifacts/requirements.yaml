@@ -585,8 +585,7 @@ artifacts:
       survives lexing + lowering intact.
     status: verified
     tags: [parsing, lexer, literals, as5506, bug]
-    fields:
-      release: v0.31.0
+    release: v0.31.0
     links:
       - type: traces-to
         target: REQ-PARSER-001
@@ -626,8 +625,7 @@ artifacts:
       malformed input (that command remains a best-effort structural dump).
     status: verified
     tags: [parsing, lexer, literals, as5506, bug]
-    fields:
-      release: v0.32.0
+    release: v0.32.0
     links:
       - type: traces-to
         target: REQ-PARSER-001
@@ -676,8 +674,8 @@ artifacts:
       bindings) or produce incompatible analysis results.
     status: planned
     tags: [diff, merge, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -690,8 +688,8 @@ artifacts:
       elements as MCP resources over stdio JSON-RPC transport.
     status: implemented
     tags: [mcp, integration, v040]
+    release: v0.14.0
     fields:
-      release: v0.14.0
 
   # ── Query Language ───────────────────────────────────────────────────
 
@@ -705,8 +703,8 @@ artifacts:
       and aggregation.
     status: planned
     tags: [query, instance, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -756,9 +754,7 @@ artifacts:
       cost). Local solutions compose into globally valid configurations.
     status: planned
     tags: [solver, optimization, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-005
     type: requirement
     title: Optimality certificates for deployment solutions
@@ -769,9 +765,7 @@ artifacts:
       Uses dual bounds from MILP or exhaustive search proofs from CP-SAT.
     status: planned
     tags: [solver, verification, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-006
     type: requirement
     title: Multi-objective Pareto front computation
@@ -782,9 +776,7 @@ artifacts:
       both exact Pareto (small problems) and approximate (NSGA-II for large).
     status: planned
     tags: [solver, optimization, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-007
     type: requirement
     title: Source rewriting to apply deployment solutions
@@ -807,9 +799,7 @@ artifacts:
       ASIL, DO-178C DAL, and IEC 61508 SIL.
     status: planned
     tags: [solver, safety, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-009
     type: requirement
     title: Security zone and conduit validation
@@ -820,8 +810,8 @@ artifacts:
       security overhead (TLS latency, MAC computation) in timing analysis.
     status: planned
     tags: [solver, security, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -838,9 +828,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-TRANSFORM-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-WIT
     type: requirement
     title: Generate WIT interfaces from AADL processes
@@ -854,9 +842,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.13.0
-
+    release: v0.13.0
   - id: REQ-CODEGEN-RUST
     type: requirement
     title: Generate Rust crate skeletons from AADL
@@ -870,9 +856,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-BAZEL
     type: requirement
     title: Generate Bazel BUILD files for WASM + verification
@@ -887,9 +871,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-BUILD
     type: requirement
     title: Build-time AADL attribute verification
@@ -903,9 +885,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-TEST
     type: requirement
     title: Test-time contract + timing verification
@@ -919,9 +899,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-PROOF
     type: requirement
     title: Formal proof generation (Lean4 + Kani)
@@ -935,9 +913,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-RIVET
     type: requirement
     title: Generate rivet design docs + verification artifacts
@@ -951,9 +927,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-KANI-CODEGEN-001
     type: requirement
     title: Kani harnesses for generated-code AADL contract preservation
@@ -1028,9 +1002,7 @@ artifacts:
       interactive zoom.
     status: planned
     tags: [visualization, scheduling, competitive-gap, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SECURITY-001
     type: requirement
     title: Security rules analysis
@@ -1056,9 +1028,7 @@ artifacts:
       Resolute supports claim trees with sub-claims and computed evidence.
     status: planned
     tags: [verification, competitive-gap, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
     title: Bidirectional diagram editing
@@ -1109,9 +1079,7 @@ artifacts:
       Requirements flow into rivet, trace to AADL components via spar verify.
     status: planned
     tags: [interop, requirements, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-INTEROP-003
     type: requirement
     title: Capella/ARCADIA to AADL bridge
@@ -1655,9 +1623,7 @@ artifacts:
       Calculus for TSN; verified 2026-06-16 by independent falsification.]
     status: implemented
     tags: [network, tsn, wctt, network-calculus, soundness, tier1]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-TSN-003
     type: requirement
     title: 802.1Qav CBS credit-pool service curve
@@ -2491,9 +2457,7 @@ artifacts:
       lacked). A no-EMV2 / port-only model must still yield 0.
     status: proposed
     tags: [emv2, analysis, safety, binding, capability]
-    fields:
-      release: v0.24.0
-
+    release: v0.24.0
   - id: REQ-WRPC-BINDING-002
     type: requirement
     title: Honor per-connection Actual_Connection_Binding (applies to <conn>) in wrpc-binding
@@ -2517,9 +2481,7 @@ artifacts:
       reference forms the resolver can't yet follow. Tracks GitHub #281.
     status: implemented
     tags: [wrpc, binding, analysis, bug]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-WRPC-BINDING-003
     type: requirement
     title: Verify wrpc-binding Actual_Connection_Binding resolves to an actual bus
@@ -2795,8 +2757,7 @@ artifacts:
       into generate_wit. Follow-up recorded in #254/#255.
     status: implemented
     tags: [codegen, wit, interop]
-    fields:
-      release: v0.14.0
+    release: v0.14.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT
@@ -3415,8 +3376,7 @@ artifacts:
       runnable test/verification harness. Related to #319.
     status: proposed
     tags: [codegen, verify, workspace, bug]
-    fields:
-      release: v0.24.0
+    release: v0.24.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-002
@@ -3432,8 +3392,7 @@ artifacts:
       calculus. Tracks issue #261.
     status: implemented
     tags: [proofs, lean, scheduling]
-    fields:
-      release: v0.15.0
+    release: v0.15.0
     links:
       - type: traces-to
         target: REQ-ANALYSIS-002
@@ -3466,8 +3425,7 @@ artifacts:
       network-calculus export in DEC-TSN-OSS-001.
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -3616,9 +3574,7 @@ artifacts:
       sysml2 and REQ-INGEST-ARXML-001 remain peer front-ends.
     status: proposed
     tags: [ingest, sysml2, grammar]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-PLUGFEST-002
     type: requirement
     title: "Plug-fest Tier-B — OSATE-in-Docker adjudication oracle + AAXL2 round-trip"
@@ -3631,8 +3587,7 @@ artifacts:
       Tier-B of issue #246.
     status: proposed
     tags: [interop, plugfest, osate]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3656,8 +3611,7 @@ artifacts:
       REQ-PLUGFEST-005 under the Tier-B EMV2 oracle work. Issue #246.
     status: implemented
     tags: [parser, plugfest]
-    fields:
-      release: v0.16.0
+    release: v0.16.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3675,8 +3629,7 @@ artifacts:
       spar invents but OSATE rejects is a false win). Issue #246.
     status: proposed
     tags: [parser, plugfest, emv2]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3691,8 +3644,7 @@ artifacts:
       issue #246.
     status: proposed
     tags: [interop, plugfest, ocarina]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3712,8 +3664,7 @@ artifacts:
       engine.rs §"Deliberately deferred"). Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -3731,8 +3682,7 @@ artifacts:
       DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -3751,8 +3701,7 @@ artifacts:
       DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler, attestation]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -3782,9 +3731,7 @@ artifacts:
       ARXML ingest; license-clean, no XSD to bundle.
     status: implemented
     tags: [ingest, dbc, can, tier1]
-    fields:
-      release: v0.17.0
-
+    release: v0.17.0
   - id: REQ-INGEST-DBC-FLOWS-001
     type: requirement
     title: "DBC message flows as AADL ports + bus connections"
@@ -3813,9 +3760,7 @@ artifacts:
       instantiate with zero diagnostics).
     status: implemented
     tags: [ingest, dbc, can, flows, tier1]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-INGEST-ARXML-001
     type: requirement
     title: "ARXML (AUTOSAR) model ingest"
@@ -3831,9 +3776,7 @@ artifacts:
       carries enough for the target analysis.
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-TFA-001
     type: requirement
     title: "FP-TFA / TFA++ network-calculus bounds"
@@ -3845,9 +3788,7 @@ artifacts:
       and the kiln async-scheduler math. [SOLID — Bouillard 2021]
     status: implemented
     tags: [network-calculus, tfa, substrate, tier1]
-    fields:
-      release: v0.17.0
-
+    release: v0.17.0
   - id: REQ-NC-PLP-001
     type: requirement
     title: "PLP (polynomial-LP) network-calculus bounds — feed-forward"
@@ -3890,9 +3831,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-PLP-002
     type: requirement
     title: "PLP network-calculus bounds — generic / cyclic topology"
@@ -3918,9 +3857,7 @@ artifacts:
       arXiv:2010.09263; Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-PLP-CONVERGE-001
     type: requirement
     title: "PLP on converging sink-trees via topological relabel"
@@ -3955,9 +3892,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, converging, substrate, tier1]
-    fields:
-      release: v0.19.0
-
+    release: v0.19.0
   - id: REQ-NC-PLP-003
     type: requirement
     title: "PLP tightening to exact worst case (TFA-strengthened LP)"
@@ -3988,9 +3923,7 @@ artifacts:
       `oracles/panco/panco_bench.py`. [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, substrate, tier1]
-    fields:
-      release: v0.19.0
-
+    release: v0.19.0
   - id: REQ-NC-PLP-MIN-001
     type: requirement
     title: "Authoritative per-flow NC bound = min(PLP, TFA)"
@@ -4082,9 +4015,7 @@ artifacts:
       REQ-NC-PLP-001, extract_network_graph, wctt::collect_streams]
     status: implemented
     tags: [network-calculus, bridge, tsn, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-VALIDATION-001
     type: requirement
     title: "NC-bound cross-validation against panco reference"
@@ -4108,9 +4039,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263; Bouillard-Stea ValueTools 2012]
     status: implemented
     tags: [network-calculus, validation, oracle, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-CBS-AUDIT-001
     type: requirement
     title: "CBS/SP service-curve packetization audit"
@@ -4122,8 +4051,8 @@ artifacts:
       export leans on CBS curves (REQ-TSN-003). [SOLID]
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -4150,9 +4079,7 @@ artifacts:
       REQ-NC-PLP-CONVERGE-001 → REQ-NC-PLP-003. [SOLID]
     status: implemented
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-QBV-SPLIT-BASE-001
     type: requirement
     title: "802.1Qbv window-splitting synthesis baseline — even K-split, smallest feasible K"
@@ -4181,9 +4108,7 @@ artifacts:
       synthesis (table-stakes vs RTaW), NOT the PLP≪TFA wedge. [SOLID]
     status: implemented
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-TSN-SYNTH-QBV-GUARDBAND-001
     type: requirement
     title: "802.1Qbv guard-band-aware window-splitting (deployable GCL claim)"
@@ -4243,9 +4168,7 @@ artifacts:
       accepted ARXML→TSN+NC. [SOLID]
     status: proposed
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-TAS-COMPOSE-001
     type: requirement
     title: "Sound network-wide composition of per-port TAS residual service curves (the PLP≪TFA wedge loop)"
@@ -4287,9 +4210,7 @@ artifacts:
       never exercises (C). [BLOCKED — research-grade]
     status: proposed
     tags: [network-calculus, tsn, tas, composition, wedge, research-grade, blocked]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-SIM-FLOOR-001
     type: requirement
     title: "TAS-matched discrete-event simulation floor (oracle-kind-(a)) for gated-hop NC validation"
@@ -4309,9 +4230,7 @@ artifacts:
       it, the network-wide arm of REQ-TSN-SYNTH-MILP-001.
     status: proposed
     tags: [network-calculus, tsn, tas, simulation, oracle, substrate]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-BUS-PAYLOAD-001
     type: requirement
     title: "Bus bandwidth shall report what it could not measure, not score it as zero"
@@ -4416,9 +4335,7 @@ artifacts:
       clean baseline yet. [gated]
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
     title: "CQF synthesis baseline — single cycle-time, 2-buffer, literature-pinned delay bound"
@@ -4445,9 +4362,7 @@ artifacts:
       REQ-TSN-SYNTH-QBV-BASE-001 → REQ-TSN-SYNTH-QBV-001. [SOLID]
     status: implemented
     tags: [tsn, synthesis, cqf, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-CQF-BRIDGE-001
     type: requirement
     title: "AADL→CQF synthesis bridge — extract CqfFlow inputs from a SystemInstance and synthesize end-to-end"
@@ -4476,9 +4391,7 @@ artifacts:
       synthesize_cqf plus the existing spar-network property readers). [SOLID]
     status: implemented
     tags: [tsn, synthesis, cqf, bridge, aadl, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-CQF-001
     type: requirement
     title: "Multi-CQF / TCQF synthesis (heterogeneous cycles, injection planning, larger scale)"
@@ -4513,9 +4426,7 @@ artifacts:
       baseline. [RESEARCH-GRADE]
     status: proposed
     tags: [tsn, synthesis, cqf, tier2, research-grade]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-TSN-SYNTH-CQF-LONGLINK-001
     type: requirement
     title: "Multi-buffer single-cycle CQF for long links (B-buffer dead-time accommodation)"
@@ -4603,9 +4514,7 @@ artifacts:
       [SOLID — IEEE 802.1Qcw-2023 ieee802-dot1q-sched YANG]
     status: implemented
     tags: [tsn, export, yang, netconf, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-ONLINE-001
     type: requirement
     title: "Online / incremental TSN admission & reconfiguration"
@@ -4616,8 +4525,8 @@ artifacts:
       lacks entirely. Later-stage Tier 2. [SOLID relative]
     status: proposed
     tags: [tsn, synthesis, online, reconfiguration, tier2]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # --- Tier 3: internal soundness ratchet (parallel, never marketed) ---
 
@@ -4701,3 +4610,57 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
+
+  - id: REQ-GUARD-RELEASE-PLANE-001
+    type: requirement
+    title: "`release:` shall sit on the plane rivet's query surface reads"
+    description: >
+      rivet has two field planes. `release` is a CORE field, read by the CLI
+      query surface — `rivet list --release vX.Y` is the release-planning view.
+      Separately, each artifact may carry a `fields:` bag for schema-declared
+      custom keys (for `requirement` the declared set is baseline, category,
+      cited-source, priority, upstream-ref). Writing `release:` into the bag is
+      valid YAML, is tolerated by the schema, and is completely invisible to the
+      query. This requirement is that every `release:` assignment in this repo
+      sits on the artifact's own key plane, enforced mechanically.
+
+      WHY: 59 of 85 assignments were on the wrong plane (#370). `rivet list`
+      reported 26 artifacts carrying a release; ELEVEN shipped releases —
+      v0.13.0 through v0.21.0, plus v0.31.0 and v0.32.0 — returned zero
+      artifacts each. Release readiness in this project is defined as a query
+      ("what must we implement for vX.Y" = release: vX.Y AND status != verified),
+      and for eleven releases' worth of scope that query answered "nothing to
+      do". The failure renders identically to a genuinely empty release: the
+      recurring shape here is that an operation which can produce "nothing
+      happened" must render differently from one that worked.
+
+      WHY A GATE AND NOT A LINT: rivet already diagnosed this correctly. It
+      emitted `INFO: field 'release' is not defined in schema` once per
+      offending artifact — all 59, precise, naming the exact ids. They sat under
+      276 unrelated `ERROR:` lines from the status-vocabulary defect tracked as
+      #371. A correct diagnostic buried under an unrelated noise floor is not a
+      diagnostic. The remedy is therefore an exit code, not better prose.
+
+      IMPLEMENTATION CONSTRAINT: stdlib-only python3, fail-closed, for the same
+      reasons as REQ-GUARD-HUMAN-SCOPED-001. Two distinct fail-closed guards
+      exist ("no sequence entries" and "parsed zero artifacts") and each has its
+      own fixture. The checker parses rather than greps: `release:` inside a
+      `description: >` block scalar is prose at a deeper indent, so the obvious
+      `grep -nE '^ {6,}release: '` would red the build for an English sentence.
+
+      SELF-TEST CONSTRAINT: the self-test asserts the finding COUNTS, not merely
+      the process exit code. `exit 1` on the violation fixture is equally
+      consistent with a checker that reports every `release:` it sees — one that
+      does not discriminate on plane at all — so the exit code alone is too
+      coarse to carry the claim the tool's own output makes. Verified by
+      mutation: four independent mutations (drop plane discrimination, drop
+      block-scalar tracking, drop either fail-closed guard) each red the
+      self-test, and each fixture kills exactly one guard. The fourth fixture
+      exists BECAUSE a mutation survived the first draft — deleting the "parsed
+      zero artifacts" raise left all three original self-tests green.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, traceability]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-HUMAN-SCOPED-001
