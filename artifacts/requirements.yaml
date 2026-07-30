@@ -3256,7 +3256,7 @@ artifacts:
       produces it. The ordeal beachhead moves to REQ-PROOF-RTA-OVERFLOW-001,
       where bit-precise u64 wraparound is exactly such a property.
     status: rejected
-    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, v0350]
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, v0350, human-scoped]
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
@@ -3280,7 +3280,7 @@ artifacts:
       goal that a wrong encoder can actually falsify, and justified against
       plain interval arithmetic. Not planned.
     status: rejected
-    tags: [codegen, ordeal, certificate, layout, wit, withdrawn]
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, human-scoped]
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
@@ -3329,7 +3329,7 @@ artifacts:
       introduces a new multiplication cannot land silently.
     status: proposed
     release: v0.36.0
-    tags: [proofs, ordeal, certificate, rta, overflow, v0360]
+    tags: [proofs, ordeal, certificate, rta, overflow, v0360, human-scoped]
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-CODEGEN-001
