@@ -29,6 +29,17 @@ members = [
 [workspace.package]
 version = "0.35.0"
 edition = "2024"
+# The floor is NOT a free choice — it is the maximum `rust-version` over the
+# whole resolved dependency closure, which cargo enforces whether or not it is
+# written down here. Declaring it makes that number a reviewable repo fact
+# instead of an emergent property of Cargo.lock that moves on every
+# `cargo update` with no diff anywhere in this repo.
+#
+# Currently set by smol_str@0.3.6 (1.89); the next tier down is 1.87.0
+# (wit-bindgen, wasip3). Do not hand-edit this to match a local toolchain —
+# tools/check_msrv.py re-derives the closure maximum and fails if this is
+# below it.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/pulseengine/spar"
 

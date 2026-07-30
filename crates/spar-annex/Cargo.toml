@@ -2,6 +2,7 @@
 name = "spar-annex"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pluggable annex parser framework for AADL annexes (EMV2, BA, etc.)"
