@@ -275,12 +275,30 @@ fn run() -> Result<(), FixtureError> {
     eprintln!("gen-fixtures: tcpdump capturing ...");
 
     // 8. Start lldpd in GM and SW namespaces (-H 0 = immediate TX).
+    //
+    // Each instance gets its OWN control socket via `-u`. `ip netns exec`
+    // unshares the *network* namespace and nothing else, so all three
+    // instances share one mount namespace and would otherwise every one of
+    // them bind the compiled-in default, LLDPD_CTL_SOCKET =
+    // /var/run/lldpd.socket (lldpd.c:1764). One socket, several daemons,
+    // and an lldpctl that reaches whichever won — a result that would look
+    // like a successful capture of the wrong namespace.
+    let lldp_socket = |ns: &str| format!("/run/lldpd-{ns}.socket");
+
+    // Failure here is fatal. It used to warn and continue, which meant a
+    // dead lldpd was discovered three seconds later as an empty neighbour
+    // list — a plausible-looking LLDP result. If the daemon we are about to
+    // interrogate did not start, there is nothing to capture.
     for (ns, dev, sysname) in [
         (&ns_gm.name, veth_gm, "spar-grandmaster"),
         (&ns_sw.name, veth_sw_l, "spar-switch"),
     ] {
-        netns_exec(ns, "lldpd", &["-H", "0", "-I", dev, "-P", sysname])
-            .unwrap_or_else(|e| eprintln!("gen-fixtures: warning: lldpd ({ns}): {e}"));
+        let sock = lldp_socket(ns);
+        netns_exec(
+            ns,
+            "lldpd",
+            &["-H", "0", "-I", dev, "-P", sysname, "-u", &sock],
+        )?;
     }
     thread::sleep(Duration::from_secs(3));
 
@@ -301,7 +319,9 @@ fn run() -> Result<(), FixtureError> {
     // distinguishes ToolNotFound from CapabilityMissing, and re-wrapping would
     // collapse them back into one sentence — the exact regression the previous
     // commit split apart.
-    let lldp_raw = netns_capture(&ns_gm.name, "lldpctl", &["-f", "json"])?;
+    // `-u` must match the socket the GM instance was started on, above.
+    let gm_socket = lldp_socket(&ns_gm.name);
+    let lldp_raw = netns_capture(&ns_gm.name, "lldpctl", &["-u", &gm_socket, "-f", "json"])?;
     let lldp_parsed: serde_json::Value = serde_json::from_str(&lldp_raw).map_err(|e| {
         FixtureError::Transform(format!(
             "lldpctl -f json emitted unparseable JSON: {e}; first 400 bytes: {:?}",

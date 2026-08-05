@@ -387,6 +387,36 @@
             pkgs.tshark          # tshark (for CI verification step)
           ];
 
+          # lldpd refuses to start without its privilege-separation account.
+          # From its own source, src/daemon/lldpd.c:1798:
+          #
+          #   if ((user = getpwnam(PRIVSEP_USER)) == NULL)
+          #           fatalx("main", "no " PRIVSEP_USER " user for privilege
+          #                  separation, please create it");
+          #
+          # and the same for getgrnam(PRIVSEP_GROUP) three lines later. Both
+          # default to `_lldpd` (configure.ac:366-367); nixpkgs does not pass
+          # --with-privsep-user, so the defaults are what the binary carries.
+          #
+          # Having the package on PATH is therefore not enough — the accounts
+          # are a separate, invisible prerequisite. Run 30981864761 died here
+          # with `exit 1: stderr=""`: fatalx logs through syslog rather than
+          # stderr unless lldpd is given -d, so the daemon explained itself to
+          # a log nobody was reading and the caller saw an empty string.
+          #
+          # This is what services.lldpd would have created for us. We cannot
+          # use that module — it runs ONE lldpd in the root network namespace,
+          # and the generator needs one per netns — but the accounts it defines
+          # are exactly what the manual instances need, so they are lifted from
+          # it verbatim (nixos/modules/services/networking/lldpd.nix).
+          users.groups._lldpd = { };
+          users.users._lldpd = {
+            description = "lldpd privilege separation user";
+            group = "_lldpd";
+            home = "/run/lldpd";
+            isSystemUser = true;
+          };
+
           # Allow gen-fixtures to create network namespaces and configure
           # taprio without an explicit sudo step — the guest is already root.
           security.wrappers = {};

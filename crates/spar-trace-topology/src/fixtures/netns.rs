@@ -160,18 +160,59 @@ pub fn capture_stdout(program: &str, args: &[&str]) -> Result<String, FixtureErr
     })
 }
 
+/// How a namespaced command is named when it fails.
+///
+/// `ip netns exec` propagates the CHILD's exit status, so a non-zero result
+/// from one of these almost always belongs to `program`, not to `ip`. Labelling
+/// the error with the outer binary sent run 30981864761's report the wrong way:
+///
+///   gen-fixtures: warning: lldpd (ts-gm-…): command `ip` failed: exit 1
+///
+/// `ip` was fine. `lldpd` had exited 1 because its `_lldpd` privilege
+/// separation account did not exist. The sentence named the one program in it
+/// that was working — the same mistake, one wrapper further out, as the
+/// tool-absent/tool-refused conflation that `ToolNotFound` exists to prevent.
+fn netns_label(ns: &str, program: &str) -> String {
+    format!("{program} (via ip netns exec {ns})")
+}
+
 /// Run `ip netns exec <ns> <program> [args...]`.
 pub fn netns_exec(ns: &str, program: &str, args: &[&str]) -> Result<(), FixtureError> {
     let mut full_args = vec!["netns", "exec", ns, program];
     full_args.extend_from_slice(args);
-    run_cmd("ip", &full_args)
+    run_cmd_labelled("ip", &full_args, &netns_label(ns, program))
 }
 
 /// Run `ip netns exec <ns> <program> [args...]` and capture stdout.
 pub fn netns_capture(ns: &str, program: &str, args: &[&str]) -> Result<String, FixtureError> {
     let mut full_args = vec!["netns", "exec", ns, program];
     full_args.extend_from_slice(args);
-    capture_stdout("ip", &full_args)
+    capture_stdout_labelled("ip", &full_args, &netns_label(ns, program))
+}
+
+/// `run_cmd`, but failures are attributed to `label` rather than to `program`.
+///
+/// `program` is still what gets spawned — only the blame changes. A spawn
+/// ENOENT keeps naming `program`, because that genuinely IS the binary the
+/// kernel could not find; only a non-zero exit is re-attributed.
+fn run_cmd_labelled(program: &str, args: &[&str], label: &str) -> Result<(), FixtureError> {
+    let out = spawn(program, args)?;
+    check_output(label, out)
+}
+
+/// `capture_stdout`, attributing failures to `label`. See [`run_cmd_labelled`].
+fn capture_stdout_labelled(
+    program: &str,
+    args: &[&str],
+    label: &str,
+) -> Result<String, FixtureError> {
+    let out = spawn(program, args)?;
+    let stdout_bytes = out.stdout.clone();
+    check_output(label, out)?;
+    String::from_utf8(stdout_bytes).map_err(|e| FixtureError::Command {
+        program: label.to_string(),
+        detail: format!("stdout is not valid UTF-8: {e}"),
+    })
 }
 
 fn spawn(program: &str, args: &[&str]) -> Result<Output, FixtureError> {
@@ -218,6 +259,41 @@ fn check_output(program: &str, out: Output) -> Result<(), FixtureError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A namespaced command that fails must be blamed on the program that
+    /// failed, not on the `ip` wrapper that ran it.
+    ///
+    /// The regression this pins is run 30981864761, where lldpd exited 1
+    /// (missing `_lldpd` account) and the report read ``command `ip` failed``.
+    /// `ip netns exec` forwards the child's exit status, so the outer binary
+    /// is the least likely culprit and was the only one named.
+    ///
+    /// Asserting the label *contains the inner program name* is what makes
+    /// this a detector: reverting to `run_cmd("ip", …)` produces a message
+    /// naming only `ip`, and this fails.
+    #[test]
+    fn namespaced_failure_names_the_inner_program_not_ip() {
+        let label = netns_label("ts-gm-1", "lldpd");
+        assert!(
+            label.contains("lldpd"),
+            "label must name the failing program, got: {label}"
+        );
+        assert!(
+            label.starts_with("lldpd"),
+            "the failing program must lead the label, got: {label}"
+        );
+        // The wrapper is still reported, because *which* namespace it ran in
+        // is the other half of the diagnosis.
+        assert!(
+            label.contains("ts-gm-1"),
+            "label must name the namespace, got: {label}"
+        );
+        // And it must not read as though `ip` were the thing that failed.
+        assert!(
+            !label.starts_with("ip"),
+            "label must not blame the wrapper, got: {label}"
+        );
+    }
 
     /// The regression from run 30583284365: a tool that is *absent* and a
     /// tool that is *refused* must not reach the operator as the same
