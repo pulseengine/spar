@@ -57,12 +57,39 @@ entry:
         ├── missed.txt      210 lines
         ├── unviable.txt    793 lines
         ├── timeout.txt       2 lines
-        ├── outcomes.json   total_mutants 1608, missed 210, caught 603
+        ├── outcomes.json   total_mutants 1608, missed 210, caught 603,
+        │                   end_time null          <-- SEE BELOW
         ├── mutants.json
         ├── debug.log
         ├── lock.json
         ├── diff/
         └── log/
+
+The *shape* above is authoritative; its *numbers* are not, and the reason is
+the next defect in this same gate. That run did not finish. cargo-mutants had
+found 1737 mutants; 3h02m in, the per-worker temp trees it copies the source
+into were deleted underneath it —
+
+    ERROR Worker thread failed: ".../cargo-mutants-spar-2xA4rk.tmp/crates/
+    spar-analysis/src/weight_power.rs" does not exist, refusing to create it
+
+— four workers at once, on runner1, consistent with the runner's disk-pressure
+cleanup hook reaping `_tmp` during a live job. `|| true` swallowed the exit.
+So 1608 is how many mutants got tested, not how many exist, and 210 is the
+survivor count of the 92% that ran.
+
+That matters beyond bookkeeping: **a truncated run under-reports survivors**,
+so it fails safe in appearance and unsafe in fact — fewer survivors is a
+better score. The cross-check in `_cross_check` cannot see it either, because
+cargo-mutants writes `total_mutants` incrementally: 210+603+793+2 == 1608
+agrees with itself perfectly. The discriminator is `end_time`, which is null
+on the crashed run and populated on the completed one (30586785648: 1737
+tested, 292 missed).
+
+This script does NOT yet reject a truncated run — arming that against a job
+that demonstrably crashes on one runner would make a required context flap on
+infrastructure. The detector plus the runner fix are #389. Until then, treat
+any survivor count from a run without an `end_time` as a lower bound.
 
 Run `--self-test` to exercise the whole decision table against constructed
 fixtures, including a regression case that reproduces the original bug: a tree
@@ -332,7 +359,7 @@ def self_test() -> int:
 
     passed = failed = 0
 
-    def case(desc: str, want: int, build, max_missed: int = 210):
+    def case(desc: str, want: int, build, max_missed: int = 292):
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = build(tmp)
@@ -363,9 +390,9 @@ def self_test() -> int:
     case("valid report, 0 survivors", 0,
          lambda t: _fixture(t, missed=0, caught=100))
     case("survivors exactly at the threshold", 0,
-         lambda t: _fixture(t, missed=210, caught=603))
+         lambda t: _fixture(t, missed=292, caught=708))
     case("survivors one over the threshold", 1,
-         lambda t: _fixture(t, missed=211, caught=603))
+         lambda t: _fixture(t, missed=293, caught=708))
 
     # Absence that scores as perfection.
     case("report present but 0 caught (suite never ran)", 1,

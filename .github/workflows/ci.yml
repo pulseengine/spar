@@ -362,14 +362,33 @@ jobs:
         # (2026-03-22) to #381 without anyone able to run it against a report.
         # The script's docstring carries the mechanism and the evidence.
         #
-        # 210 is the measured survivor count on main @ cd4d429 (run
-        # 30563879100). The previous 142 was a real hand-measurement — recorded
-        # in 5d6d98a, "down from 220" — but was never enforced, so raising it
-        # relaxes nothing that was ever in force; it is the first value this
-        # gate has actually checked against. The 142 → 210 drift over four
-        # blind months is exactly what a ratchet exists to prevent. Walking it
-        # back down is #382. Lower this number; do not raise it.
-        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210
+        # 292 is the survivor count from the only run of this gate that has
+        # ever FINISHED: run 30586785648, "1737 mutants tested in 87m: 292
+        # missed, 708 caught, 735 unviable, 2 timeouts", outcomes.json carrying
+        # a populated end_time.
+        #
+        # It is not a relaxation of 210, because 210 was never a measurement of
+        # this codebase. Run 30563879100 died 3h02m in — cargo-mutants' worker
+        # temp trees were deleted underneath it ("does not exist, refusing to
+        # create it") — after testing 1608 of the 1737 mutants it had found.
+        # `|| true` swallowed the crash. Its artifact therefore records
+        # total_mutants 1608 and end_time null: a partial run, whose 210 is the
+        # survivor count of the 92% that ran. Both runs used cargo-mutants
+        # 27.1.0 against byte-identical spar-analysis/src, so 210 → 292 is
+        # entirely the 129 mutants the crashed run never reached.
+        #
+        # The earlier 142 (5d6d98a, "down from 220") was a real hand
+        # measurement, but the gate was misreading its report for the whole
+        # four months it stood, so no number here has yet been enforced
+        # against a complete run. 292 is the first.
+        #
+        # Lower this number as tests improve; target 0. Raise it only against a
+        # run whose outcomes.json has an end_time — a partial run reports FEWER
+        # survivors than the truth, so a threshold taken from one is a ceiling
+        # set below the floor. Nothing here yet fails a truncated run: that
+        # detector, and the runner disk-pressure fault behind it, are #389.
+        # Walking the number back down is #382.
+        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
