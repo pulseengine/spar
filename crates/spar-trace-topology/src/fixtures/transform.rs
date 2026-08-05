@@ -294,7 +294,7 @@ struct PmcRawSample {
 /// starting at [`TIMESTAMP_EPOCH_NS`] with step [`TIMESTAMP_STEP_NS`].
 /// This prevents noisy diffs while still preserving the relative ordering.
 ///
-/// The `sync_error_ns` value is taken as `abs(masterOffset)` from the pmc
+/// The `sync_error_ns` value is taken as `abs(master_offset)` from the pmc
 /// output.
 ///
 /// Output shape matches [`crate::ingest::GptpJsonPtpTimeSource`]:
@@ -338,28 +338,70 @@ pub fn pmc_to_gptp_json(
     Ok(json!({ "gptp": gptp_inner }))
 }
 
+/// The field `pmc` prints for the master offset of a TIME_STATUS_NP response.
+///
+/// Taken from linuxptp's own format string — `pmc.c`, `case MID_TIME_STATUS_NP`:
+///
+/// ```text
+/// fprintf(fp, "TIME_STATUS_NP "
+///         IFMT "master_offset              %" PRId64
+///         IFMT "ingress_time               %" PRId64
+///         ...
+/// ```
+///
+/// with `#define IFMT "\n\t\t"` (`pmc.c:42`), so each field is on its own line
+/// indented by two tabs. Verified against linuxptp **4.4**, the version the
+/// pinned nixos-25.11 channel builds into the fixture guest.
+///
+/// It is `master_offset`, snake_case. The string `masterOffset` appears
+/// NOWHERE in linuxptp 4.4 — it is a conflation of this field with the
+/// IEEE-1588 `offsetFromMaster`, which is a different quantity from a
+/// different dataset (CURRENT_DATA_SET / `nsm.c`) carried in TimeInterval
+/// units scaled by 65536. Parsing one as the other would be wrong by that
+/// factor even if the name matched.
+const PMC_MASTER_OFFSET_KEY: &str = "master_offset";
+
 /// Parse a single `pmc -u -b 0 'GET TIME_STATUS_NP'` text block.
 ///
 /// The relevant line has the form:
 /// ```text
-///     masterOffset              -42
+///         master_offset              -42
 /// ```
 /// We take the absolute value to satisfy the schema's requirement for
 /// non-negative `sync_error_ns`.
+///
+/// This deliberately accepts ONLY the spelling above. Tolerating the invented
+/// `masterOffset` as well would make the divergence between this parser and
+/// real `pmc` unobservable again — and that divergence is precisely what let
+/// `gen-fixtures` succeed only when `pmc` was missing (see
+/// `pmc_rejects_the_invented_camelcase_spelling`).
 fn parse_pmc_round(text: &str) -> Result<PmcRawSample, String> {
     for line in text.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("masterOffset") {
+        if let Some(rest) = trimmed.strip_prefix(PMC_MASTER_OFFSET_KEY) {
             let val_str = rest.trim();
             let val: i64 = val_str
                 .parse()
-                .map_err(|e| format!("cannot parse masterOffset {val_str:?}: {e}"))?;
+                .map_err(|e| format!("cannot parse {PMC_MASTER_OFFSET_KEY} {val_str:?}: {e}"))?;
             return Ok(PmcRawSample {
                 sync_error_ns: val.unsigned_abs(),
             });
         }
     }
-    Err("pmc output missing `masterOffset` line".to_string())
+    // Name the field we wanted AND show what we got. A pmc block is a dozen
+    // lines; quoting the field names present turns a failed VM dispatch into a
+    // report of the real format instead of a restatement of our assumption.
+    let seen: Vec<&str> = text
+        .lines()
+        // `split_whitespace` already skips leading whitespace and yields no
+        // empty items, so it handles pmc's two-tab indentation on its own.
+        .filter_map(|l| l.split_whitespace().next())
+        .take(12)
+        .collect();
+    Err(format!(
+        "pmc output missing `{PMC_MASTER_OFFSET_KEY}` line; line-leading tokens seen: [{}]",
+        seen.join(", ")
+    ))
 }
 
 // ── LLDP JSON reshaping ───────────────────────────────────────────────────
@@ -651,29 +693,86 @@ mod tests {
 
     // ── pmc → gPTP JSON ───────────────────────────────────────────────────
 
-    /// Realistic `pmc -u -b 0 'GET TIME_STATUS_NP'` output fragment.
-    /// Format from linuxptp 4.x.
-    const PMC_ROUND_1: &str = r#"
+    /// `pmc -u -b 0 'GET TIME_STATUS_NP'` output, transcribed from linuxptp's
+    /// own format string rather than recalled.
+    ///
+    /// `pmc.c`, `case MID_TIME_STATUS_NP`, with `#define IFMT "\n\t\t"`
+    /// (`pmc.c:42`) putting each field on its own double-tab-indented line, and
+    /// the response header from `pmc.c:200` (`"\t%s seq %hu %s "`). Clock
+    /// identities render as `%02x%02x%02x.%02x%02x.%02x%02x%02x` (`util.c:143`
+    /// `cid2str`) — dotted hex, not a colon-separated MAC. Checked against
+    /// linuxptp 4.4, the version in the pinned nixos-25.11 channel.
+    ///
+    /// The previous version of this constant carried BOTH spellings: a
+    /// realistic block ending in `master_offset -42`, and then two further
+    /// lines `masterOffset -42` / `ingress_time …` that appear in no `pmc`
+    /// output ever produced. The parser only ever read those appended lines.
+    /// The realistic part was decoration — which is why the fixture looked
+    /// convincing and proved nothing.
+    const PMC_ROUND_1: &str = "
 sending: GET TIME_STATUS_NP
-    7cfe90.fffe.000001-0 seq 0 RESPONSE MANAGEMENT TIME_STATUS_NP
-        master_offset              -42
-        ingress_time               1704067200100000000
-        cumulativeScaledRateOffset +0.000000000
-        scaledLastGmPhaseChange    0
-        gmTimeBaseIndicator        0
-        lastGmPhaseChange          0x0000'0000000000000000.0000
-        gmPresent                  true
-        gmIdentity                 00:1b:21:ff:fe:01:02:03
-    masterOffset              -42
-    ingress_time               1704067200100000000
-"#;
+\t7cfe90.fffe.000001-0 seq 0 RESPONSE MANAGEMENT TIME_STATUS_NP
+\t\tmaster_offset              -42
+\t\tingress_time               1704067200100000000
+\t\tcumulativeScaledRateOffset +0.000000000
+\t\tscaledLastGmPhaseChange    0
+\t\tgmTimeBaseIndicator        0
+\t\tlastGmPhaseChange          0x0000'0000000000000000.0000
+\t\tgmPresent                  true
+\t\tgmIdentity                 001b21.fffe.010203
+";
 
-    const PMC_ROUND_2: &str = r#"
+    const PMC_ROUND_2: &str = "
 sending: GET TIME_STATUS_NP
-    7cfe90.fffe.000001-0 seq 1 RESPONSE MANAGEMENT TIME_STATUS_NP
-    masterOffset              15
-    ingress_time               1704067200200000000
-"#;
+\t7cfe90.fffe.000001-0 seq 1 RESPONSE MANAGEMENT TIME_STATUS_NP
+\t\tmaster_offset              15
+\t\tingress_time               1704067200200000000
+\t\tcumulativeScaledRateOffset +0.000000000
+\t\tscaledLastGmPhaseChange    0
+\t\tgmTimeBaseIndicator        0
+\t\tlastGmPhaseChange          0x0000'0000000000000000.0000
+\t\tgmPresent                  true
+\t\tgmIdentity                 001b21.fffe.010203
+";
+
+    /// The spelling the parser used to require must now be REJECTED.
+    ///
+    /// This is the guard for the defect this fixture rewrite exists to close.
+    /// `masterOffset` is not a linuxptp field: it appears nowhere in 4.4, and
+    /// is a conflation of `master_offset` (TIME_STATUS_NP, nanoseconds) with
+    /// the IEEE-1588 `offsetFromMaster` (CURRENT_DATA_SET, TimeInterval units
+    /// scaled by 65536) — a different quantity, off by that factor.
+    ///
+    /// Why rejection rather than accepting both: `gen-fixtures` falls back to
+    /// a hand-written stub when `pmc` cannot be run, and that stub was written
+    /// in the invented spelling. Accepting both would restore the exact state
+    /// this fixes, where a stub parses and real output does not.
+    #[test]
+    fn pmc_rejects_the_invented_camelcase_spelling() {
+        let invented = "    masterOffset              0\n";
+        let err = pmc_to_gptp_json("eth0", None, 0, &[invented])
+            .expect_err("`masterOffset` is not a linuxptp field and must not parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("master_offset"),
+            "error must name the real field, got: {msg}"
+        );
+        assert!(
+            msg.contains("masterOffset"),
+            "error must echo the tokens it saw, got: {msg}"
+        );
+    }
+
+    /// The real linuxptp 4.4 line must parse. Together with the rejection test
+    /// above this is what makes the pair a detector: the two spellings now
+    /// produce different outcomes, so the suite can tell them apart.
+    #[test]
+    fn pmc_parses_the_real_linuxptp_spelling() {
+        let out = pmc_to_gptp_json("eth0", None, 0, &[PMC_ROUND_1]).unwrap();
+        let src =
+            GptpJsonPtpTimeSource::from_json_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        assert_eq!(src.ports()[0].samples[0].sync_error_ns, 42);
+    }
 
     #[test]
     fn pmc_parses_negative_master_offset_as_abs() {

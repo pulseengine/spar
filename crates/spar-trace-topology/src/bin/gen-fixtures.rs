@@ -285,14 +285,30 @@ fn run() -> Result<(), FixtureError> {
     thread::sleep(Duration::from_secs(3));
 
     // 9. Collect LLDP JSON.
-    let lldp_raw = netns_capture(&ns_gm.name, "lldpctl", &["-f", "json"]).unwrap_or_else(|e| {
-        eprintln!("gen-fixtures: warning: lldpctl failed ({e}); using empty neighbor list");
-        r#"{"lldp":{"interface":[]}}"#.to_string()
-    });
-    let lldp_value = serde_json::from_str::<serde_json::Value>(&lldp_raw)
-        .unwrap_or_else(|_| serde_json::json!({"lldp":{"interface":[]}}));
-    let lldp_value = validate_lldp_json(&serde_json::to_string(&lldp_value)?)
-        .unwrap_or_else(|_| serde_json::json!({"lldp":{"interface":[]}}));
+    // These used to be three stacked `unwrap_or_else` arms — capture failure,
+    // JSON parse failure and validation failure — each substituting the SAME
+    // empty neighbour list. So lldpd not running, lldpctl absent from the
+    // image, a changed output shape, and a rejected document all produced a
+    // byte-identical "successful" fixture, and the run went on to print
+    // `wrote …/lldp.json` and exit 0.
+    //
+    // This program's entire output is a set of fixtures asserted to be REAL
+    // captures from a real kernel. A fabricated one that is indistinguishable
+    // from a captured one does not degrade the artifact, it invalidates it —
+    // and silently, because an empty neighbour list is a perfectly plausible
+    // thing for LLDP to report. Every one of these is now fatal.
+    // The capture error propagates UNWRAPPED on purpose: netns_capture already
+    // distinguishes ToolNotFound from CapabilityMissing, and re-wrapping would
+    // collapse them back into one sentence — the exact regression the previous
+    // commit split apart.
+    let lldp_raw = netns_capture(&ns_gm.name, "lldpctl", &["-f", "json"])?;
+    let lldp_parsed: serde_json::Value = serde_json::from_str(&lldp_raw).map_err(|e| {
+        FixtureError::Transform(format!(
+            "lldpctl -f json emitted unparseable JSON: {e}; first 400 bytes: {:?}",
+            lldp_raw.chars().take(400).collect::<String>()
+        ))
+    })?;
+    let lldp_value = validate_lldp_json(&serde_json::to_string(&lldp_parsed)?)?;
     fs::write(&paths.lldp_json, serde_json::to_string_pretty(&lldp_value)?)?;
     eprintln!("gen-fixtures: wrote {}", paths.lldp_json.display());
 
@@ -332,11 +348,18 @@ fn run() -> Result<(), FixtureError> {
 
     let mut pmc_rounds: Vec<String> = Vec::with_capacity(3);
     for _ in 0..3 {
-        let round = netns_capture(&ns_gm.name, "pmc", &["-u", "-b", "0", "GET TIME_STATUS_NP"])
-            .unwrap_or_else(|e| {
-                eprintln!("gen-fixtures: warning: pmc failed ({e}); using stub");
-                "    masterOffset              0\n".to_string()
-            });
+        // The stub this replaces was `"    masterOffset              0\n"`,
+        // and it was load-bearing in the worst way. `masterOffset` is not a
+        // linuxptp field — real `pmc` prints `master_offset` — so the parser,
+        // written to the same invented spelling, could read the stub and NOT
+        // real output. That inverted the two paths: with pmc working the run
+        // failed, and with pmc absent it succeeded, writing a gPTP fixture
+        // reporting sync_error_ns 0 on every sample. Perfect clock sync,
+        // fabricated, on the success path.
+        //
+        // A capture that cannot be taken is not a measurement of zero error.
+        // Propagated unwrapped, same reason as the lldpctl capture above.
+        let round = netns_capture(&ns_gm.name, "pmc", &["-u", "-b", "0", "GET TIME_STATUS_NP"])?;
         pmc_rounds.push(round);
         thread::sleep(Duration::from_millis(500));
     }
