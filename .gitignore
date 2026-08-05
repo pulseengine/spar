@@ -36,3 +36,11 @@ __pycache__/
 
 # Agent-maintained durable session scratch — never commit.
 .pulseengine-session-notes.md
+
+# fixture-vm build products. The qcow2 is a full NixOS disk image (hundreds of
+# MB) that the trace-fixtures workflow copies out of the container's nix store;
+# `result` is nix's default out-link. Both are regenerable, and neither has ever
+# been ignored — which stayed harmless only because the build had never once got
+# far enough to produce either one.
+/tools/fixture-vm/nixos.qcow2
+/tools/fixture-vm/result

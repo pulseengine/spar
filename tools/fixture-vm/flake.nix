@@ -31,9 +31,12 @@
 # On every boot a systemd oneshot service (`gen-fixtures.service`) runs
 # gen-fixtures /fixtures, where /fixtures is the virtio-9p mount that the
 # QEMU harness exports from the host.  After the service exits the system
-# powers off via ExecStartPost=systemctl poweroff.  The service is
-# wantedBy = ["multi-user.target"] so it runs at the end of normal boot
-# without a special target.
+# powers off via ExecStopPost=systemctl poweroff — ExecStop*Post*, not
+# ExecStart*Post*, because the latter is skipped when ExecStart fails and a
+# failing run then idles to the harness's 900s kill instead of reporting.
+# The service is wantedBy = ["multi-user.target"] so it runs at the end of
+# normal boot without a special target, and carries its own `path` (see the
+# service definition) because environment.systemPackages does not reach it.
 #
 # == Usage ==
 #
@@ -64,10 +67,57 @@
   description = "NixOS KVM guest for spar trace-topology fixture generation";
 
   inputs = {
-    # Pin nixpkgs to a specific revision for reproducibility.
-    # nixos-24.05 is a stable release channel; update the rev + sha256
-    # when a newer release is needed.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    # Pin nixpkgs to a stable release channel for reproducibility; the exact
+    # rev lives in flake.lock.
+    #
+    # This pin is not only the guest OS — it is also the Rust toolchain that
+    # builds gen-fixtures below, and THAT is the binding constraint.
+    #
+    # The constraint is NOT the workspace edition. It is
+    #
+    #     max(rust-version) over the entire RESOLVED DEPENDENCY CLOSURE
+    #
+    # which is an emergent property of Cargo.lock, not a property of this
+    # repo: the workspace declares no `rust-version` and carries no
+    # rust-toolchain.toml, so nothing here states the floor and nothing here
+    # pins it. Re-derive it, never retype it:
+    #
+    #     cargo metadata --format-version 1 --locked \
+    #       | jq -r '.packages[] | select(.rust_version) | .rust_version' \
+    #       | sort -V | tail -1
+    #
+    # Measured 2026-07-30: 152 of 235 packages declare `rust-version`;
+    # the max is 1.89 (smol_str 0.3.6), then 1.87.0 (wasip2, wit-bindgen).
+    # Measured `rustc.version` per channel:
+    #
+    #     nixos-24.05 → 1.77.2   ✗ edition 2024 not stabilised (needs 1.85)
+    #     nixos-24.11 → 1.82.0   ✗ likewise
+    #     nixos-25.05 → 1.86.0   ✗ clears the edition, FAILS the closure (1.89)
+    #     nixos-25.11 → 1.91.1   ✓ clears both
+    #
+    # HOW THIS WENT WRONG, so it is not repeated: the pin was moved 24.05 →
+    # 25.05 against the edition floor alone, and 25.05 was recorded here as
+    # "✓ cannot compile → can compile". That was false. Edition 2024 needing
+    # ≥1.85 is a NECESSARY condition that was mistaken for THE condition, and
+    # because the probe genuinely ran and genuinely returned 1.86.0, the
+    # check felt like verification while silently scoping the claim to the
+    # one variable that had been thought of. Cargo caught it — inside the
+    # derivation, at build time, one CI dispatch later:
+    #
+    #     error: rustc 1.86.0 is not supported by the following package:
+    #       smol_str@0.3.6 requires rustc 1.89
+    #
+    # MAINTENANCE: bumping this channel is a Rust-toolchain bump, and the
+    # floor it must clear MOVES ON EVERY `cargo update` — a dependency can
+    # raise the closure max without a single line of this repo changing.
+    # Nothing gates that today; it surfaces only as a red nightly here, which
+    # is why this comment carries the derivation command instead of a number
+    # to trust. Before changing this line, run the command above and compare
+    # against `nix eval --raw
+    # github:NixOS/nixpkgs/<channel>#legacyPackages.x86_64-linux.rustc.version`.
+    # Both a too-old channel and a raised closure floor fail at BUILD time,
+    # not at evaluation, so they survive every local check this flake permits.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 
   outputs = { self, nixpkgs }: let
@@ -96,7 +146,40 @@
       # cargoLock.lockFile points to the workspace Cargo.lock.  Nix reads
       # this to reproduce the exact crate set without running `cargo fetch`
       # inside the sandbox.
-      cargoLock.lockFile = ../../Cargo.lock;
+      cargoLock = {
+        lockFile = ../../Cargo.lock;
+
+        # Registry crates carry their checksum in Cargo.lock; git dependencies
+        # do not, so Nix cannot vendor them without an explicit hash and fails
+        # evaluation with "No hash was found while vendoring the git
+        # dependency etch-0.2.0" (#365). The workspace has exactly one such
+        # dependency — `etch`, from pulseengine/rivet at the rev pinned in the
+        # root Cargo.toml. It is vendored even though gen-fixtures does not
+        # use it: importCargoLock vendors the whole lock file, not just the
+        # subtree that `cargoBuildFlags` selects.
+        #
+        # The value is the NAR hash of nixpkgs' `fetchgit` with its default
+        # arguments (fetchSubmodules = true, leaveDotGit = false), keyed by
+        # "<name>-<version>".
+        #
+        # MAINTENANCE: this hash pins the *rev*, so bumping the rivet rev in
+        # the root Cargo.toml invalidates it and this build fails with a
+        # fixed-output hash mismatch. Recompute with:
+        #
+        #   nix-prefetch-git --url https://github.com/pulseengine/rivet.git \
+        #     --rev <new-rev> --fetch-submodules
+        #
+        # A nixpkgs channel bump can invalidate it too, if `fetchgit`'s
+        # defaults change — and that failure appears only at build time, so it
+        # survives every local evaluation. Re-derive it after any bump by
+        # building with a deliberately wrong hash and reading the `got:` line;
+        # a build with the *correct* hash proves nothing when the path is
+        # already in the store, because a fixed-output derivation
+        # short-circuits. Verified stable across 24.05 → 25.05 this way.
+        outputHashes = {
+          "etch-0.2.0" = "sha256-x37urQw97R/ARqvlVpXpp3tJqbvztbOiUyAGNZItlA0=";
+        };
+      };
 
       # Build only the gen-fixtures binary from spar-trace-topology.
       cargoBuildFlags = [
@@ -109,10 +192,87 @@
       # Disable tests (they require Linux netns — only valid inside the VM).
       doCheck = false;
 
-      # Runtime toolchain executables that gen-fixtures invokes via PATH.
-      # These are linked into the build environment so the resulting binary
-      # can find them at runtime.
-      nativeBuildInputs = [ pkgs.pkg-config ];
+      # Keep this build from poisoning /homeless-shelter for every LATER build.
+      #
+      # Nix runs builders with HOME=/homeless-shelter, and when the sandbox is
+      # off it refuses to START any build if that path exists — an existing home
+      # directory would let builders read state from outside the derivation. The
+      # check lives in local-derivation-goal.cc behind `!useChroot`, so it is a
+      # direct consequence of the `sandbox = false` this container relies on
+      # (see NIX_CONF_EXTRA in .github/workflows/trace-fixtures.yml).
+      #
+      # Run 30575158798 died on exactly that, one derivation AFTER this one:
+      #
+      #   building '/nix/store/…-gen-fixtures-0.10.0.drv'...      20:11:21
+      #   error: home directory '/homeless-shelter' exists;       20:16:42
+      #   please remove it to assure purity of builds without sandboxing
+      #
+      # WHAT IS MEASURED vs INFERRED. Measured: the error fired 5m21s after this
+      # derivation started, with no other `building '…'` line in between, and it
+      # is thrown when a build STARTS — so the directory was created during this
+      # 5m21s window. Inferred: that `cmake` did it, via its user package
+      # registry at $HOME/.cmake/packages — cmake is on this build's PATH for
+      # highs-sys (see below) and is the usual culprit. The fix does not depend
+      # on that inference being right: redirecting HOME covers whichever tool in
+      # this derivation writes to it.
+      #
+      # A `rm -rf /homeless-shelter` in the workflow would NOT fix this. The
+      # directory is created mid-graph, so removing it before `nix build` leaves
+      # the failing window untouched. Enabling the sandbox would also fix it —
+      # and is arguably the right answer — but it is a larger change: it would
+      # make build-principal-probe.nix's out-of-store `builder = "/bin/sh"`
+      # illegal, and
+      # whether nested user namespaces work under rootless podman here is
+      # untested. Deliberately not bundled into a run that is already testing
+      # two other fixes.
+      preConfigure = ''
+        export HOME="$TMPDIR"
+      '';
+
+      # Build-time tools. `cmake` is here for a non-obvious reason: it is not
+      # used by gen-fixtures, it is used by a build script five levels down.
+      #
+      #   spar-trace-topology -> spar-network -> good_lp -> highs -> highs-sys
+      #
+      # highs-sys compiles the HiGHS C++ LP solver from vendored source via
+      # the `cmake` crate, and without cmake on PATH its build script panics
+      # with `failed to execute command: No such file or directory` /
+      # `is cmake not installed?`.
+      #
+      # Note this is NOT fixed by narrowing cargoBuildFlags. `--bin
+      # gen-fixtures` selects what gets LINKED; cargo still compiles the
+      # dependency graph of the whole `-p spar-trace-topology` package, and
+      # gen-fixtures never calls the solver. Same shape as the etch vendoring
+      # below: the lock file, not the binary, decides what must build.
+      #
+      # `dontUseCmakeConfigure` is load-bearing, not defensive. Putting cmake
+      # in nativeBuildInputs makes nixpkgs' cmake setup-hook install
+      # cmakeConfigurePhase as the package's configurePhase (setup-hook.sh:145
+      # guards on exactly this variable), which would try to cmake the Rust
+      # workspace root — it has no CMakeLists.txt. We want cmake on PATH for
+      # the build script and nothing else.
+      #
+      # `bindgenHook` is here for the SAME build script, found by reading the
+      # dependency graph rather than by waiting for the next red dispatch:
+      # highs-sys also build-depends on bindgen 0.71, which reaches libclang
+      # through clang-sys -> libloading, i.e. it dlopen()s libclang.so at
+      # build-script runtime. Nothing in the sandbox provides that, and the
+      # failure ("Unable to find libclang") would have surfaced only after the
+      # cmake fix cleared the way — the same one-blocker-at-a-time pattern that
+      # made this workflow take 60 red runs to diagnose. The hook exports
+      # LIBCLANG_PATH and BINDGEN_EXTRA_CLANG_ARGS; nothing else here sets them.
+      #
+      # This is a PREDICTION, not a verification. Reading the graph says the
+      # dependency exists; only an x86_64-linux build says the fix is
+      # sufficient. clang-sys and highs-sys are the only two -sys crates in the
+      # graph, so this should be the last of this species — "should be" doing
+      # real work in that sentence.
+      nativeBuildInputs = [
+        pkgs.cmake
+        pkgs.pkg-config
+        pkgs.rustPlatform.bindgenHook
+      ];
+      dontUseCmakeConfigure = true;
     };
 
   in {
@@ -122,7 +282,32 @@
       modules = [
         # ── Base NixOS configuration ──────────────────────────────────────
 
-        ({ config, pkgs, lib, ... }: {
+        ({ config, pkgs, lib, modulesPath, ... }: {
+          # Without this the initrd has no virtio drivers, so /dev/vda1 —
+          # the root device declared 40 lines below — never appears, and
+          # stage 1 dies with "Timed out waiting for device /dev/vda1".
+          #
+          # `nixpkgs.lib.nixosSystem` imports neither profiles/base.nix nor
+          # this profile; the virtio module set that every NixOS-under-QEMU
+          # user takes for granted arrives HERE and nowhere else. Measured on
+          # the config as it stood, `config.boot.initrd.availableKernelModules`
+          # was ahci / ata_piix / nvme / sd_mod / sr_mod / usbhid — IDE, SATA,
+          # NVMe and USB keyboards, and not one virtio_*.
+          #
+          # WHY IT SURVIVED SO LONG. Nothing cross-checks `fileSystems."/"`
+          # against the drivers the initrd can load, so the image evaluated,
+          # built and PARTLY booted: SeaBIOS and GRUB reach the disk through
+          # BIOS int 13h, which works for any controller, so run 30580839772
+          # got all the way to "<<< NixOS Stage 1 >>>" before failing. A disk
+          # that boots is not a disk the kernel can mount.
+          #
+          # It also carries 9p/9pnet_virtio, which the /fixtures share needs —
+          # and that mount is `nofail`, so without them gen-fixtures would
+          # have written its output into an ordinary directory inside the
+          # guest and the host would have collected nothing, with every step
+          # green. Two failure modes, one import.
+          imports = [ "${toString modulesPath}/profiles/qemu-guest.nix" ];
+
           # Pin the kernel to a recent stable version that includes
           # sch_taprio and CLOCK_TAI (present since Linux 4.18;
           # linuxPackages_latest tracks the latest stable).
@@ -131,12 +316,41 @@
           # Enable sch_taprio and CBS as kernel modules.
           boot.kernelModules = [ "sch_taprio" "sch_cbs" ];
 
+          # Put the kernel console on the serial port QEMU is actually
+          # reading. Without this the guest is silent from the moment the
+          # kernel starts, and every failure inside it looks identical.
+          #
+          # The harness runs `-nographic -serial mon:stdio` and inherits
+          # stdout, which is correct and was never the problem. The problem
+          # is that only *firmware* output survived it: under `-nographic`
+          # SeaBIOS redirects the BIOS text console onto the serial port,
+          # and GRUB draws via BIOS calls, so GRUB rode that redirect for
+          # free. Linux does not use BIOS calls — at handoff it switches to
+          # whatever `console=` names, which defaults to `tty0`, the VGA
+          # framebuffer `-nographic` has disconnected. So the kernel,
+          # systemd, and gen-fixtures all logged into a void.
+          #
+          # That is exactly what the log of run 30569595760 shows: SeaBIOS,
+          # iPXE and "Welcome to GRUB!", then 900 seconds of nothing and the
+          # harness timeout. The silence was not the guest hanging early; it
+          # was the last line we were able to see.
+          #
+          # Order is load-bearing. Every `console=` receives kernel messages,
+          # but the LAST one becomes /dev/console, which is what init and
+          # `serial-getty@ttyS0` attach to. ttyS0 must therefore come last.
+          boot.kernelParams = [ "console=tty0" "console=ttyS0,115200" ];
+
           # Boot directly from the qcow2's virtio disk (no PXE/UEFI menu).
           boot.loader.grub = {
             enable = true;
             device = "/dev/vda";
-            timeout = 0;
           };
+
+          # Not `boot.loader.grub.timeout`: nixpkgs renamed it to the
+          # bootloader-agnostic `boot.loader.timeout`, and the old spelling
+          # emits a rename warning on every evaluation. It still works, but
+          # the warning is noise in a log we want to read for real failures.
+          boot.loader.timeout = 0;
 
           # Filesystem: a single ext4 root on vda.
           fileSystems."/" = {
@@ -158,15 +372,56 @@
           # Minimal networking — not needed for the fixture run.
           networking.useDHCP = false;
 
-          # The fixture toolchain.
+          # The fixture toolchain, for an operator who logs in on ttyS0 to
+          # debug by hand. This list does NOT feed gen-fixtures.service —
+          # a systemd unit does not see /run/current-system/sw/bin. The
+          # service's own `path` below is what the generator actually runs
+          # against; keep the two in step.
           environment.systemPackages = [
             gen-fixtures
             pkgs.iproute2        # ip netns, ip link
             pkgs.lldpd           # lldpd, lldpctl
             pkgs.linuxptp        # ptp4l, pmc
             pkgs.tcpdump         # tcpdump
-            pkgs.tshark          # tshark (for CI verification step)
+            pkgs.iputils         # arping
+            # dumpcap writes the capture; tshark cross-checks it. Both come
+            # from wireshark-cli. tcpdump stays for ad-hoc debugging by hand,
+            # but it CANNOT produce the fixture: upstream tcpdump has no
+            # pcapng writer at all (tcpdump.c:608 documents `-P` as a macOS
+            # extension), so `-w` yields classic pcap regardless of what the
+            # file is named.
+            pkgs.wireshark-cli   # dumpcap, tshark, editcap
           ];
+
+          # lldpd refuses to start without its privilege-separation account.
+          # From its own source, src/daemon/lldpd.c:1798:
+          #
+          #   if ((user = getpwnam(PRIVSEP_USER)) == NULL)
+          #           fatalx("main", "no " PRIVSEP_USER " user for privilege
+          #                  separation, please create it");
+          #
+          # and the same for getgrnam(PRIVSEP_GROUP) three lines later. Both
+          # default to `_lldpd` (configure.ac:366-367); nixpkgs does not pass
+          # --with-privsep-user, so the defaults are what the binary carries.
+          #
+          # Having the package on PATH is therefore not enough — the accounts
+          # are a separate, invisible prerequisite. Run 30981864761 died here
+          # with `exit 1: stderr=""`: fatalx logs through syslog rather than
+          # stderr unless lldpd is given -d, so the daemon explained itself to
+          # a log nobody was reading and the caller saw an empty string.
+          #
+          # This is what services.lldpd would have created for us. We cannot
+          # use that module — it runs ONE lldpd in the root network namespace,
+          # and the generator needs one per netns — but the accounts it defines
+          # are exactly what the manual instances need, so they are lifted from
+          # it verbatim (nixos/modules/services/networking/lldpd.nix).
+          users.groups._lldpd = { };
+          users.users._lldpd = {
+            description = "lldpd privilege separation user";
+            group = "_lldpd";
+            home = "/run/lldpd";
+            isSystemUser = true;
+          };
 
           # Allow gen-fixtures to create network namespaces and configure
           # taprio without an explicit sudo step — the guest is already root.
@@ -182,12 +437,59 @@
             wantedBy = [ "multi-user.target" ];
             after = [ "network.target" "local-fs.target" ];
 
+            # environment.systemPackages does NOT reach a systemd unit. It
+            # populates /run/current-system/sw/bin for interactive login
+            # shells; a unit gets NixOS's minimal default PATH (coreutils,
+            # findutils, gnugrep, gnused, systemd, util-linux) and nothing
+            # else. So listing iproute2 above put `ip` in the image while
+            # leaving it unreachable from the one process that calls it —
+            # run 30583284365 died on `could not spawn: No such file or
+            # directory` with iproute2 sitting in the closure the whole time.
+            #
+            # Every tool gen-fixtures spawns must appear here. They are also
+            # spawned through `ip netns exec`, which passes this same PATH
+            # down to the child, so one list covers both.
+            #
+            # This list was DERIVED from the source, not recalled: every
+            # `run_cmd` / `netns_exec` / `netns_capture` / `netns_spawn_bg`
+            # literal in crates/spar-trace-topology/src/bin/gen-fixtures.rs
+            # and src/fixtures/netns.rs. Writing it from memory produced a
+            # list missing `arping` — which is spawned behind `let _ =`, so
+            # its absence would have cost nothing visible and silently
+            # emptied the ARP traffic the PCAPNG fixture is supposed to hold.
+            # `arping` was missing from environment.systemPackages too, so it
+            # was not in the image at all; iputils is added there as well.
+            #
+            # arping comes from iputils, NOT pkgs.arping: the call site passes
+            # `-I <dev>`, which is iputils' flag. Habets' arping (pkgs.arping)
+            # spells the same option `-i` and would fail on the interface.
+            path = [
+              pkgs.iproute2        # ip, tc
+              pkgs.lldpd           # lldpd, lldpctl
+              pkgs.linuxptp        # ptp4l, pmc
+              pkgs.wireshark-cli   # dumpcap (writes the pcapng), tshark
+              pkgs.iputils         # arping
+            ];
+
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = false;
               ExecStart = "${gen-fixtures}/bin/gen-fixtures /fixtures";
-              # Power off after gen-fixtures exits (success or failure).
-              ExecStartPost = "${pkgs.systemd}/bin/systemctl poweroff --force";
+              # Power off after gen-fixtures exits — on BOTH paths.
+              #
+              # This was ExecStartPost, which systemd runs only when ExecStart
+              # SUCCEEDED. On failure the unit went to `failed`, nothing
+              # powered the guest off, and it idled at the login prompt until
+              # the harness killed it at 900s. A failing run therefore looked
+              # exactly like a hanging one, and cost fifteen minutes to say
+              # so. ExecStopPost runs on success and failure alike.
+              ExecStopPost = "${pkgs.systemd}/bin/systemctl poweroff --force";
+              # Bound the stop sequence itself. If the poweroff call ever
+              # wedges, systemd SIGKILLs at 60s rather than letting the guest
+              # drift to the harness's 900s watchdog. That watchdog stays as
+              # the backstop; it should just never again be the first thing
+              # that notices something went wrong.
+              TimeoutStopSec = 60;
               StandardOutput = "journal+console";
               StandardError = "journal+console";
             };
@@ -199,6 +501,50 @@
           systemd.services."serial-getty@ttyS0".enable = true;
 
           system.stateVersion = "24.05";
+        })
+
+        # ── The qcow2 build product ───────────────────────────────────────
+        #
+        # `system.build.qcow2` is NOT a stock NixOS option — nothing in
+        # nixpkgs defines it. The header comment at the top of this file and
+        # the nightly workflow both build
+        # `…fixture-vm.config.system.build.qcow2`, but until this module
+        # existed that attribute appeared only in prose, so evaluation died
+        # with `error: attribute 'qcow2' missing` before a single byte was
+        # built (#365). nixos-generators defines its `qcow` format the same
+        # way: by importing nixpkgs' own make-disk-image.nix as a build
+        # product rather than depending on an option that doesn't exist.
+        ({ config, lib, pkgs, modulesPath, ... }: {
+          system.build.qcow2 =
+            import "${toString modulesPath}/../lib/make-disk-image.nix" {
+              inherit lib config pkgs;
+
+              # `format` is the only argument that names the output file:
+              # make-disk-image.nix computes `filename = "nixos." + ext`, so
+              # qcow2 yields `$out/nixos.qcow2` — the exact path the
+              # workflow's "Locate qcow2" step reads. The derivation `name`
+              # argument does NOT rename the image; don't reach for it.
+              format = "qcow2";
+
+              # Must agree with the base module above, which puts grub on
+              # /dev/vda and root on /dev/vda1. `legacy` is the one layout
+              # whose rootPartition is "1" — efi is "2", hybrid is "3" — so
+              # any other value here yields an image that partitions and
+              # builds cleanly and then cannot find its root at boot.
+              partitionTableType = "legacy";
+
+              # Defaults to true, which copies the whole nixpkgs tree into
+              # the image so nix-env/nix-build work inside the guest. This
+              # guest boots once, runs one oneshot service, and powers off;
+              # it never evaluates Nix. Skipping the channel costs nothing
+              # we use and saves several hundred MB plus the copy.
+              copyChannel = false;
+
+              # diskSize is left at its "auto" default, which sizes the
+              # image from the actual closure plus 512M. The guest writes
+              # its fixtures to /fixtures — a host-backed 9p share, not the
+              # disk — so there is no growth here to budget for.
+            };
         })
       ];
     };

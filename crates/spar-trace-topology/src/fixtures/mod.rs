@@ -28,6 +28,16 @@ pub enum FixtureError {
     Command { program: String, detail: String },
     /// JSON serialise/deserialise error.
     Json(serde_json::Error),
+    /// A required external tool is not on `PATH`.
+    ///
+    /// Deliberately distinct from [`Self::CapabilityMissing`]. The tool being
+    /// *absent* is a provisioning fault in the image we build; the tool being
+    /// *denied* is a privilege fault in the environment we run under. They
+    /// have different owners and different fixes, so they must not render as
+    /// the same sentence — collapsing them once cost a 15-minute CI cycle
+    /// that blamed the runner label for a missing `ip` in the guest's
+    /// systemd unit PATH.
+    ToolNotFound { program: String },
     /// A required capability (netns, taprio, …) is not available on
     /// this host.
     CapabilityMissing(String),
@@ -43,6 +53,12 @@ impl std::fmt::Display for FixtureError {
                 write!(f, "command `{program}` failed: {detail}")
             }
             Self::Json(e) => write!(f, "JSON error: {e}"),
+            Self::ToolNotFound { program } => write!(
+                f,
+                "tool `{program}` not found on PATH — this is the image, not \
+                 the privileges: check the guest's systemd unit `path` \
+                 (environment.systemPackages does NOT reach a unit)"
+            ),
             Self::CapabilityMissing(msg) => write!(f, "capability missing: {msg}"),
             Self::Transform(msg) => write!(f, "transform error: {msg}"),
         }

@@ -457,13 +457,38 @@ impl LldpJsonTopologySource {
             IngestError::MalformedLldpJson("missing top-level `lldp` key".to_string())
         })?;
 
-        // `interface` may be absent (no neighbors observed yet),
-        // a single object (older lldpd, single neighbor), or an
-        // array (multi-neighbor case, or modern lldpd always).
-        let interfaces: Vec<&serde_json::Value> = match lldp.get("interface") {
+        // `interface` is an OBJECT KEYED BY INTERFACE NAME, not a list of
+        // entries carrying a `name` field.
+        //
+        // This is not a version difference — the previous comment here guessed
+        // "a single object (older lldpd, single neighbor), or an array (modern
+        // lldpd always)" and that model is wrong. It is the output *variant*.
+        // `lldpctl -f json` post-processes its tree through
+        // `json_element_cleanup` (src/client/json_writer.c:244), which does two
+        // things and does them in every lldpd version that has the function:
+        //
+        //   * "If array with one element, steal the content" — single-element
+        //     arrays collapse into the element, so the container type depends
+        //     on how many neighbours there are.
+        //   * "if one key is `name`, use it's value as a key for a new object
+        //     stealing the existing one" — the `name` FIELD IS REMOVED and its
+        //     value becomes the key of the enclosing object.
+        //
+        // So under `-f json` the name is never a field, for one neighbour or
+        // twenty; asking for `.name` inside an entry asks for the one thing
+        // lldpd guarantees it deleted. `-f json0` skips the cleanup entirely
+        // (json_init(fh, 0), lldpcli.c:283) and keeps `name` — but it also
+        // leaves `lldp` itself an array, so `lldp.interface` would resolve to
+        // nothing and this parser would report zero neighbours without error.
+        // Both spellings are accepted below; neither is inferred.
+        let interfaces: Vec<(Option<&str>, &serde_json::Value)> = match lldp.get("interface") {
             None => Vec::new(),
-            Some(serde_json::Value::Array(arr)) => arr.iter().collect(),
-            Some(obj @ serde_json::Value::Object(_)) => vec![obj],
+            // json0 / unfolded: entries carry their own `name`.
+            Some(serde_json::Value::Array(arr)) => arr.iter().map(|v| (None, v)).collect(),
+            // json / folded: one entry per key, and the key IS the name.
+            Some(serde_json::Value::Object(map)) => {
+                map.iter().map(|(k, v)| (Some(k.as_str()), v)).collect()
+            }
             Some(other) => {
                 return Err(IngestError::MalformedLldpJson(format!(
                     "`lldp.interface` must be array or object, got {}",
@@ -473,8 +498,8 @@ impl LldpJsonTopologySource {
         };
 
         let mut neighbors = Vec::with_capacity(interfaces.len());
-        for iface in interfaces {
-            neighbors.push(parse_interface(iface)?);
+        for (name_from_key, iface) in interfaces {
+            neighbors.push(parse_interface(name_from_key, iface)?);
         }
         Ok(Self { neighbors })
     }
@@ -486,14 +511,29 @@ impl TopologySource for LldpJsonTopologySource {
     }
 }
 
-fn parse_interface(iface: &serde_json::Value) -> Result<LldpNeighbor, IngestError> {
-    let local_port = iface
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            IngestError::MalformedLldpJson("interface entry missing `name` string".to_string())
-        })?
-        .to_string();
+/// `name_from_key` is `Some` when the caller took this entry out of the folded
+/// `-f json` object, where the interface name is the key rather than a field.
+/// It is `None` for the unfolded `-f json0` array form, where the entry keeps
+/// its own `name`.
+fn parse_interface(
+    name_from_key: Option<&str>,
+    iface: &serde_json::Value,
+) -> Result<LldpNeighbor, IngestError> {
+    let local_port = match name_from_key {
+        Some(k) => k.to_string(),
+        None => iface
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                IngestError::MalformedLldpJson(
+                    "interface entry has no `name` string and was not keyed by name. \
+                     `lldpctl -f json` folds the name into the object key and deletes \
+                     the field; `-f json0` keeps the field. This entry is neither."
+                        .to_string(),
+                )
+            })?
+            .to_string(),
+    };
 
     // `chassis` is a dict whose single child key is the system-name
     // or MAC lldpd picked as a handle. Neither the key itself nor
@@ -1127,11 +1167,26 @@ mod tests {
     }
     "#;
 
+    /// The folded shape `lldpctl -f json` really emits: the interface name is
+    /// the KEY, and the `name` field is gone.
+    ///
+    /// The previous version of this constant had `"interface": {"name": "eth0",
+    /// …}` — an object carrying a `name` field, which lldpd cannot produce in
+    /// either format. `-f json` runs `json_element_cleanup`
+    /// (src/client/json_writer.c:244), which lifts a `name` value into the key
+    /// of the enclosing object and deletes the field; `-f json0` skips the
+    /// cleanup but then `interface` is an array, not an object.
+    ///
+    /// The tell was already in this fixture. `chassis` below is written
+    /// correctly as `{"switch-1": {...}}` — the same folding, one level down,
+    /// and `parse_interface` even documents it ("a dict whose single child key
+    /// is the system-name"). The rule was observed, described, and then not
+    /// applied to the interface itself.
     const CANONICAL_OBJECT_FORM: &str = r#"
     {
       "lldp": {
         "interface": {
-          "name": "eth0",
+          "eth0": {
           "via": "LLDP",
           "chassis": {
             "switch-1": {
@@ -1144,10 +1199,58 @@ mod tests {
             "id": {"type": "ifname", "value": "Gi0/3"},
             "descr": "Eth port 3"
           }
+          }
         }
       }
     }
     "#;
+
+    /// In the folded form the local port name comes from the KEY, because that
+    /// is the only place lldpd leaves it.
+    ///
+    /// This is the detector for what the old fixture hid: the parser read
+    /// `.name` from inside the entry, so real `-f json` output failed with
+    /// "interface entry missing `name` string" (run 30993592401) against a
+    /// 1345-byte file that had already passed the generator's own validation.
+    /// Asserting the name is *taken from the key* — not merely that parsing
+    /// succeeds — is what makes this unable to pass under the old reading.
+    #[test]
+    fn lldp_folded_form_takes_the_port_name_from_the_key() {
+        let src = LldpJsonTopologySource::from_json_str(CANONICAL_OBJECT_FORM).expect("parse");
+        assert_eq!(src.neighbors()[0].local_port, "eth0");
+    }
+
+    /// Two folded entries must yield two neighbours. `-f json` keys them side
+    /// by side in one object, so a reader that treats that object as a single
+    /// entry loses every neighbour but one — a wrong answer indistinguishable
+    /// from a small network.
+    #[test]
+    fn lldp_folded_form_with_two_interfaces_yields_two_neighbors() {
+        let two = r#"
+        {
+          "lldp": {
+            "interface": {
+              "eth0": {
+                "chassis": {"sw-1": {"id": {"type": "mac", "value": "aa:bb:cc:dd:ee:01"}}},
+                "port": {"id": {"type": "ifname", "value": "Gi0/3"}}
+              },
+              "eth1": {
+                "chassis": {"sw-2": {"id": {"type": "mac", "value": "aa:bb:cc:dd:ee:02"}}},
+                "port": {"id": {"type": "ifname", "value": "Gi0/4"}}
+              }
+            }
+          }
+        }
+        "#;
+        let src = LldpJsonTopologySource::from_json_str(two).expect("parse");
+        let mut ports: Vec<&str> = src
+            .neighbors()
+            .iter()
+            .map(|n| n.local_port.as_str())
+            .collect();
+        ports.sort_unstable();
+        assert_eq!(ports, vec!["eth0", "eth1"]);
+    }
 
     #[test]
     fn lldp_single_neighbor_array_form() {

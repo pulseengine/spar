@@ -35,6 +35,68 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
   FIXTURE_OUTPUT_DIR: fixture-output
+  # sha256 digest of docker.io/nixos/nix:2.24.9 — see the "Build NixOS
+  # fixture-vm qcow2" step for how to re-resolve it. Hoisted here so the
+  # kvm precondition probe and the build it guards cannot drift onto
+  # different images: a probe that greens a different image than the one
+  # built proves nothing about the build.
+  NIX_IMAGE_DIGEST: "sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
+  # Nix settings, shared verbatim by the KVM precondition probe and the build it
+  # guards. Hoisted here for the same reason NIX_IMAGE_DIGEST is: the probe and
+  # the build must not drift onto different configurations. A probe that greens a
+  # differently-configured Nix proves nothing about the build — and until run
+  # 30572572863 they *did* differ (the build appended these; the probe appended
+  # nothing), which is half of why the probe passed a build that then failed.
+  #
+  # Of the two settings below, exactly one is doing work. Verified against the
+  # image's own definition (NixOS/nix, docker.nix, `defaultNixConf`), which ships
+  # /etc/nix/nix.conf containing `sandbox = false` AND `build-users-group = nixbld`:
+  #
+  #   * `sandbox = false` is ALREADY the image default, so appending it changes
+  #     nothing today. It is kept explicit deliberately — NIX_IMAGE_DIGEST is a
+  #     pin we will bump, and a bump must not be able to silently flip a setting
+  #     this build depends on. It states an assumption rather than asserting a
+  #     change. (It drops Nix's in-container build sandbox, not host isolation —
+  #     the container is already the boundary.)
+  #   * `build-users-group =` (empty) is the line that actually fixes the build:
+  #     it OVERRIDES the image's `build-users-group = nixbld`. Later entries in
+  #     nix.conf win, which is why appending works.
+  #
+  # `build-users-group =` (empty) makes builds run as the container's own root
+  # rather than dropping to a `nixbld` user, and it is what makes /dev/kvm
+  # reachable AT BUILD TIME. /dev/kvm is mode 0660 owned by the host's root:kvm,
+  # neither of which is mapped into the rootless userns — so both render as
+  # 65534/nobody, and access is granted purely by the supplementary group that
+  # `--group-add keep-groups` carries in. Supplementary groups do not survive the
+  # switch to a nixbld build user. Root keeps them; nixbld does not.
+  NIX_CONF_EXTRA: |
+    experimental-features = nix-command flakes
+    sandbox = false
+    build-users-group =
+  # Linux capabilities the container needs BEYOND podman's rootless default
+  # set. Hoisted for the third time for the same reason as NIX_IMAGE_DIGEST and
+  # NIX_CONF_EXTRA: the precondition probe must run under the same grant as the
+  # build it guards, or it proves nothing about the build.
+  #
+  # nixos-disk-image.drv boots a transient VM and shares the Nix store into it
+  # with virtiofsd. virtiofsd hands its child a fixed capability set via
+  # capng_apply(BOTH), and raising a capability that is not already permitted
+  # returns EPERM — reported as `can't apply the child capabilities: failed to
+  # sync capabilities with the kernel`, which is what killed run 30579194737.
+  # Its visible consequence sits three lines lower and reads like a different
+  # problem entirely: qemu reporting the socket virtiofsd never bound, as
+  # `-chardev socket,id=store,path=virtio-store.sock: Failed to connect to
+  # 'virtio-store.sock': Connection refused`.
+  #
+  # Only these two are granted: they are the two members of virtiofsd's
+  # required set that podman's rootless default omits. Which capabilities the
+  # build principal ACTUALLY holds is printed by the probe rather than assumed
+  # here — see build-principal-probe.nix for why it asserts only what this
+  # grants and prints the rest.
+  #
+  # These are confined to the rootless user namespace. They do not give the
+  # container anything on the host that the invoking user did not already have.
+  PODMAN_CAPS: "CAP_MKNOD,CAP_DAC_READ_SEARCH"
 
 jobs:
   generate-fixtures:
@@ -45,6 +107,15 @@ jobs:
     # rootless userns setup is broken (newuidmap EPERM, runner8 on
     # 2026-05-23).
     runs-on: [self-hosted, linux, x64, podman]
+
+    # Without this the job inherits GitHub's 6-hour default. The inner QEMU
+    # harness has its own 900s guest watchdog, but everything outside it —
+    # the nix build of the qcow2, a wedged podman, a runner that loses its
+    # KVM device — is unbounded, and a self-hosted runner sitting idle for
+    # six hours blocks the whole fleet slot. Warm-cache runs finish in ~30
+    # min (30583284365: 21:27:49 -> 21:57:50); 180 leaves room for a cold
+    # rustc + nixpkgs build without leaving the failure mode open-ended.
+    timeout-minutes: 180
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
@@ -73,49 +144,248 @@ jobs:
       # different version.  Update the digest here when a newer Nix release
       # is needed.
       #
-      # sha256 digest of docker.io/nixos/nix:2.24.9 — the multi-arch INDEX
-      # manifest (manifest.list.v2), not a per-arch leaf; podman resolves
-      # the right arch from it. Verified: `podman run <image> nix --version`
-      # → 2.24.9.  Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
+      # NIX_IMAGE_DIGEST (workflow `env:`) is the multi-arch INDEX manifest
+      # (manifest.list.v2), not a per-arch leaf; podman resolves the right
+      # arch from it. Verified: `podman run <image> nix --version` → 2.24.9.
+      # Resolve with: podman manifest inspect docker.io/nixos/nix:2.24.9
       #
-      # Note: "sandbox = false" in nix.conf drops Nix's in-container build
-      # sandbox (not host root — the container is already rootless).
-      # Without it, Nix's sandboxed builds fail inside the already-
-      # containerised environment.  --device /dev/kvm is required because
-      # the NixOS qcow2 builder boots a transient builder VM.
+      # Note: for what the nix.conf settings do — and which of them is actually
+      # load-bearing — see NIX_CONF_EXTRA in the workflow `env:` block. Do not
+      # restate it here; that comment is the single source, and this one said
+      # "sandbox = false" was required when it is in fact the image's own
+      # default.  --device /dev/kvm is required because the NixOS qcow2 builder
+      # boots a transient builder VM.
+      #
+      # --group-add keep-groups is required for the SAME reason and is not
+      # implied by --device.  See the precondition step below for why.
       #
       # --no-update-lock-file makes `nix build` FAIL rather than re-resolve
       # if the committed lock is stale/incomplete — belt-and-suspenders with
       # the guard step above.
+
+      # ── 3a. Precondition: Nix must actually advertise the `kvm` feature ──
+      #
+      # `--device /dev/kvm` puts the node in the container; it does NOT make
+      # it usable.  /dev/kvm is `crw-rw---- root:kvm`, and **rootless podman
+      # drops the caller's supplementary groups by default** — so the
+      # in-container process is not in `kvm` and the node is present but
+      # unopenable.  The host runner user being in the `kvm` group (true on
+      # this fleet) does not carry into the user namespace without
+      # `--group-add keep-groups`.
+      #
+      # Nix adds `kvm` to its system-features only when
+      # access("/dev/kvm", R_OK|W_OK) succeeds (settings.cc,
+      # getDefaultSystemFeatures).  make-disk-image.nix builds through
+      # vmTools.runInLinuxVM, whose derivation carries
+      # `requiredSystemFeatures = [ "kvm" ]`.  Miss the group and the build
+      # dies with:
+      #
+      #   error: a 'x86_64-linux' with features {kvm} is required to build
+      #   '…-nixos-disk-image.drv', but I am a 'x86_64-linux' with features
+      #   {benchmark, big-parallel, nixos-test, uid-range}
+      #
+      # — a correct and precise diagnostic, emitted after ~5 minutes of
+      # compiling and buried under ~700 `building '/nix/store/…drv'` lines
+      # (run 30565973744).  This step asks the question in two seconds, at
+      # the top of the log, before anything is built.
+      #
+      # WHY THIS PROBE RUNS A BUILD INSTEAD OF READING A CONFIG VALUE.
+      #
+      # It used to assert on Nix's own computed `system-features`, defended in
+      # this comment as strictly better than a shell `[ -w /dev/kvm ]` test
+      # because "the feature set is what the build is actually matched against".
+      # That is true, and it is the wrong question. Run 30572572863 passed this
+      # probe and then failed the build it guards:
+      #
+      #   probe:  nix system-features = benchmark big-parallel kvm …   (green)
+      #   build:  qemu-system-x86_64: Could not access KVM kernel module:
+      #           Permission denied   →   falling back to tcg   →   SIGABRT
+      #
+      # Both readings were correct. `system-features` governs SCHEDULING —
+      # whether nixos-disk-image.drv may be PLACED on this machine — and Nix
+      # computes it in the parent process, uid 0, which carries the supplementary
+      # group `--group-add keep-groups` brought in. The build then ran its
+      # builder as a `nixbld` user, which carries no such group, and QEMU's
+      # open("/dev/kvm", O_RDWR) got EPERM. Different principal, different
+      # syscall. The more rigorous-looking probe measured the layer next to the
+      # one that broke; `[ -w /dev/kvm ]` would have been wrong the same way,
+      # because it too runs as the parent.
+      #
+      # So the probe now does the actual thing: a real derivation, carrying the
+      # real `requiredSystemFeatures = [ "kvm" ]`, whose builder performs the
+      # real open(O_RDWR). Same principal, same syscall, same Nix settings
+      # (NIX_CONF_EXTRA) as the build it guards. It needs no nixpkgs and no
+      # network, and it prints `id` from inside the builder — the one line whose
+      # absence made this cost twelve minutes and a 700-line log to see.
+      #
+      # Note that TCG is not a usable fallback: with KVM denied, QEMU fell back
+      # to software emulation and aborted on an assertion at -smp 32. There is no
+      # degraded mode to tolerate here, which is why this is a hard gate.
+      - name: Require /dev/kvm openable by a Nix BUILD process
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          podman run --rm \
+            --device /dev/kvm \
+            --group-add keep-groups \
+            --cap-add "${PODMAN_CAPS}" \
+            --security-opt label=disable \
+            -e NIX_CONF_EXTRA \
+            -v "${WORKSPACE}:/spar:Z" \
+            "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
+            sh -c '
+              set -eu
+              echo "container process: $(id)"
+
+              # The capability mask of THIS container, printed next to the one
+              # the probe derivation prints for the BUILD principal below. The
+              # probe asserts against the builder, because the builder is what
+              # spawns virtiofsd; this line exists so the two can be compared.
+              # If the bits are set here but not there, the grant is being lost
+              # between podman and the builder, and --cap-add is not the fix.
+              #
+              # No apostrophes anywhere in this sh -c body: it is delimited by
+              # single quotes in the YAML above, so one apostrophe ends the
+              # string and the rest of the script becomes shell for the runner.
+              while read -r k v; do
+                case "$k" in CapEff:|CapBnd:) echo "container $k       $v" ;; esac
+              done < /proc/self/status
+
+              ls -l /dev/kvm || {
+                echo "::error::/dev/kvm is not present in the container at all."
+                exit 1
+              }
+
+              # Identical settings to the build step — see NIX_CONF_EXTRA.
+              mkdir -p /etc/nix
+              printf "%s\n" "${NIX_CONF_EXTRA}" >> /etc/nix/nix.conf
+
+              echo "nix build-users-group = [$(nix config show build-users-group)]"
+              echo "nix system-features   = $(nix config show system-features)"
+
+              if nix build --no-link --print-build-logs \
+                   -f /spar/tools/fixture-vm/build-principal-probe.nix; then
+                echo "ok: a Nix BUILD process holds the required capabilities"
+                echo "ok: and opened /dev/kvm O_RDWR."
+              else
+                echo "::error::A Nix build process cannot satisfy what"
+                echo "::error::nixos-disk-image.drv needs, so its transient VM"
+                echo "::error::cannot start. The probe log above says which of the"
+                echo "::error::two preconditions failed; read it before this list."
+                echo "::error::"
+                echo "::error::If capabilities are missing, virtiofsd cannot share"
+                echo "::error::the Nix store into the VM: it calls capng_apply for"
+                echo "::error::its child, gets EPERM, and exits, after which qemu"
+                echo "::error::reports the unbound socket as Connection refused."
+                echo "::error::Grant them in PODMAN_CAPS, and compare the two"
+                echo "::error::capability masks the probe printed."
+                echo "::error::"
+                echo "::error::If scheduling succeeded but the open failed, the build"
+                echo "::error::principal lost the supplementary group that reaches the"
+                echo "::error::device: check that build-users-group is EMPTY above, so"
+                echo "::error::builds run as the container root that --group-add"
+                echo "::error::keep-groups actually granted."
+                echo "::error::"
+                echo "::error::If scheduling itself failed (a features{kvm} error), the"
+                echo "::error::container never got the group: --group-add keep-groups"
+                echo "::error::needs a crun-based runtime. Check podman info --format"
+                echo "::error::{{.Host.OCIRuntime.Name}} and that the runner user is in"
+                echo "::error::the kvm group on the host."
+                exit 1
+              fi
+            '
+
       - name: Build NixOS fixture-vm qcow2
         env:
           WORKSPACE: ${{ github.workspace }}
         run: |
-          DIGEST="sha256:fd7a5c67d396fe6bddeb9c10779d97541ab3a1b2a9d744df3754a99add4046f1"
           podman run --rm \
             --device /dev/kvm \
+            --group-add keep-groups \
+            --cap-add "${PODMAN_CAPS}" \
             --security-opt label=disable \
+            -e NIX_CONF_EXTRA \
             -v "${WORKSPACE}:/spar:Z" \
-            "docker.io/nixos/nix@${DIGEST}" \
+            "docker.io/nixos/nix@${NIX_IMAGE_DIGEST}" \
             sh -c '
               set -euo pipefail
-              # Enable flakes + nix-command.
+              # The SAME settings the precondition probe just proved out — see
+              # NIX_CONF_EXTRA. Writing them inline here instead is what let the
+              # probe and the build drift apart before run 30572572863.
               mkdir -p /etc/nix
-              echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
-              echo "sandbox = false" >> /etc/nix/nix.conf
+              printf "%s\n" "${NIX_CONF_EXTRA}" >> /etc/nix/nix.conf
               cd /spar/tools/fixture-vm
               # Build the qcow2 image against the committed flake.lock.
+              #
+              # The out-link goes to /tmp, NOT into the bind mount. A `result`
+              # symlink written to /spar would survive the container but point
+              # at /nix/store/…, and this container is `--rm` with its own
+              # store — nothing of that store exists on the host once the run
+              # ends. That is not a naming mismatch that a better glob would
+              # fix; the build product is unreachable from the host by
+              # construction. So the image is copied ACROSS the mount here,
+              # while the store it lives in still exists.
+              # ON FAILURE, NAME THE CULPRIT BEFORE THE CONTAINER EVAPORATES.
+              #
+              # Run 30575158798 died with `home directory /homeless-shelter
+              # exists; please remove it to assure purity of builds without
+              # sandboxing`. Nix throws that when a build STARTS, so the error
+              # names the derivation that TRIPPED over the directory, never the
+              # one that created it. Identifying the creator took reading
+              # timestamps against the build graph.
+              #
+              # Whatever a builder dropped in there is a fingerprint of the tool
+              # that wrote it (a .cmake/packages entry, a .cargo, a .npm). One
+              # listing turns that inference into a reading. It has to happen
+              # here: the container is --rm with its own store, so a later step
+              # has nothing left to look at.
+              #
+              # rc is captured from the command, NOT from inside an `if !` block
+              # -- there $? is the status of the negation, which SUCCEEDED, so
+              # the failure path would exit 0 and read as a pass. set -e permits
+              # this form because the assignment is the right side of a || list.
+              rc=0
               nix build --no-update-lock-file \
                 .#nixosConfigurations.fixture-vm.config.system.build.qcow2 \
-                --out-link /spar/tools/fixture-vm/result
+                --out-link /tmp/result || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "--- nix build exited ${rc}; impure-HOME diagnostic ---" >&2
+                if [ -e /homeless-shelter ]; then
+                  echo "/homeless-shelter EXISTS. Its contents identify which" >&2
+                  echo "derivation wrote to HOME; give that one a preConfigure" >&2
+                  echo "HOME redirect in flake.nix, as gen-fixtures has." >&2
+                  find /homeless-shelter -maxdepth 4 >&2 || \
+                    echo "(listing failed; the path is there regardless)" >&2
+                else
+                  echo "/homeless-shelter is absent, so this is NOT the impure-" >&2
+                  echo "HOME failure -- read the build log above instead." >&2
+                fi
+                exit "${rc}"
+              fi
+              cp --no-preserve=mode,ownership \
+                /tmp/result/nixos.qcow2 /spar/tools/fixture-vm/nixos.qcow2
             '
 
       - name: Locate qcow2
         id: qcow2
         run: |
-          QCOW2="$(readlink -f tools/fixture-vm/result/nixos.qcow2)"
+          QCOW2="${GITHUB_WORKSPACE}/tools/fixture-vm/nixos.qcow2"
+          # `cp` exiting 0 says a file arrived, not that a bootable image did.
+          # A qcow2 of a full NixOS system is hundreds of MB; anything under
+          # 64 MiB means the copy was truncated or the wrong path was built,
+          # and the next four steps would fail further from the cause.
+          if [ ! -f "${QCOW2}" ]; then
+            echo "::error::${QCOW2} does not exist — the copy out of the"
+            echo "::error::container store did not happen. Check the build step."
+            exit 1
+          fi
+          BYTES="$(stat -c %s "${QCOW2}")"
+          if [ "${BYTES}" -lt 67108864 ]; then
+            echo "::error::${QCOW2} is only ${BYTES} bytes; expected >= 64 MiB."
+            exit 1
+          fi
           echo "path=${QCOW2}" >> "$GITHUB_OUTPUT"
-          echo "fixture-vm: qcow2 = ${QCOW2}"
+          echo "fixture-vm: qcow2 = ${QCOW2} (${BYTES} bytes)"
           ls -lh "${QCOW2}"
 
       # ── 3. Build the fixture-vm Rust harness ─────────────────────────────
@@ -138,11 +408,31 @@ jobs:
             --output-dir "${FIXTURE_OUTPUT_DIR}"
 
       # ── 5. Verify: tshark -r capture.pcapng ──────────────────────────────
-      - name: Verify capture.pcapng with tshark
-        run: |
-          tshark -r "${FIXTURE_OUTPUT_DIR}/capture.pcapng" \
-            -q -z io,stat,0 2>&1 | tee /tmp/tshark-out.txt
-          # tshark exits non-zero if the file is corrupt or empty.
+      # The tshark cross-check that used to live here has MOVED INTO THE GUEST
+      # (gen-fixtures runs it immediately after writing the capture). It is not
+      # dropped — an independent reader agreeing with spar's own parser is worth
+      # more than either alone — it is relocated to the machine where tshark
+      # exists.
+      #
+      # As written here it could not fail, for two independent reasons, and run
+      # 30987112464 shows both at once: it printed `tshark: command not found`
+      # and the step went green.
+      #
+      #   1. `tshark … | tee /tmp/tshark-out.txt`. Under `bash -e` with no
+      #      `pipefail`, a pipeline's status is its LAST command's — `tee`,
+      #      which succeeds. tshark's 127 was discarded. Piping a verifier into
+      #      anything hides its exit code; the comment underneath even asserted
+      #      "tshark exits non-zero if the file is corrupt or empty", which was
+      #      true and irrelevant, because nothing was reading that status.
+      #   2. tshark was never installed on this runner. It sat in the GUEST
+      #      image's systemPackages, annotated "for CI verification step" — but
+      #      this step runs on the host, outside the VM. The tool and the check
+      #      were on different machines for as long as both existed.
+      #
+      # Two guards, both defeated, and the failure of each produced the ideal
+      # reading. Keeping it here would have meant installing wireshark-cli on a
+      # self-hosted runner or a podman round-trip per run, to re-check a file
+      # the guest can check in place with the binary it already ships.
 
       # ── 6. Round-trip: parse all four fixtures through ingest parsers ─────
       - name: Verify all four fixtures parse cleanly (ingest round-trip)
