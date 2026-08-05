@@ -522,8 +522,29 @@ fn netns_spawn_bg(
     full_args.extend_from_slice(args);
     std::process::Command::new("ip")
         .args(&full_args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        // Both streams used to be Stdio::null(). Not "piped and never read" —
+        // routed to /dev/null at the source, so every background tool this
+        // program starts was mute by construction, and there was nothing
+        // anywhere to read even in principle.
+        //
+        // Run 30988563439 is the bill for that: dumpcap exited 1 without
+        // producing a file, and the only thing the log could say was "exit
+        // status: 1". dumpcap explains itself on stderr in a sentence; that
+        // sentence was discarded, so diagnosing it needs another VM dispatch
+        // per hypothesis.
+        //
+        // These are inherited rather than piped because gen-fixtures runs as a
+        // systemd unit whose console is on ttyS0 and captured into the CI log
+        // (that serial console exists precisely so guest failures are legible).
+        // Piping would mean draining two streams from a process we deliberately
+        // leave running in the background — inheriting gets the same text to
+        // the same place with no plumbing and no risk of a full pipe buffer
+        // blocking the child.
+        //
+        // The capture data is unaffected: dumpcap and tcpdump write the capture
+        // via `-w`, never to stdout.
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| FixtureError::Command {
             program: program.to_string(),
