@@ -456,7 +456,7 @@ artifacts:
 
   - id: ARCH-MCP-001
     type: design-decision
-    status: planned
+    status: proposed
     title: MCP server as CLI command with stdio JSON-RPC transport
     description: >
       The MCP server is a new spar CLI subcommand (spar mcp) that
@@ -503,7 +503,7 @@ artifacts:
 
   - id: ARCH-QUERY-001
     type: design-decision
-    status: planned
+    status: proposed
     title: "Path-expression query language: components.where().property() pattern"
     description: >
       Query expressions use a method-chain syntax over the instance model:
@@ -527,7 +527,7 @@ artifacts:
 
   - id: ARCH-KNOWLEDGE-001
     type: design-decision
-    status: planned
+    status: proposed
     title: Instance model is the knowledge base; query layer on top
     description: >
       The spar instance model (SystemInstance with its arena-allocated
@@ -555,7 +555,7 @@ artifacts:
 
   - id: ARCH-SOLVER-001
     type: design-decision
-    status: planned
+    status: proposed
     title: "NDS-layered hierarchical solving"
     description: >
       Deployment optimization uses 4 hierarchical layers analogous to NDS
@@ -659,7 +659,7 @@ artifacts:
 
   - id: ARCH-SOLVER-006
     type: design-decision
-    status: planned
+    status: proposed
     title: "Dual solver strategy (WASM heuristic + native exact)"
     description: >
       Two solver tiers. Tier 1 (WASM): pure Rust heuristics (FFD/BFD

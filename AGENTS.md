@@ -150,6 +150,18 @@ section above):
 - **Lean proofs gate**: proofs live in `proofs/Proofs/` (Scheduling, Network).
   CI runs `lake build`; sorry-free is required for the verified-core modules
   (`RTA`, `RTAJittered`, `EDF`, `RMBound`).
+- **`human-scoped` artifacts**: an artifact carrying the `human-scoped` tag needs
+  a *human* to scope it — first wiring of an external dependency, narrowing a
+  research-grade property to something a solver can actually decide, or designing
+  a falsification kill-criterion. Such an artifact may sit at
+  `draft`/`proposed`/`approved` and may be `rejected`/`withdrawn`, but it must
+  **not** be recorded `implemented`/`verified`/`released`/`accepted`/`passing`.
+  To ship one, delete the tag **in the same change**, so the promotion is one
+  explicit line of diff instead of a status buried in a large PR.
+  `tools/check_human_scoped.py` enforces this in the `rivet-validate` job;
+  `--self-test` proves it still rejects its fixtures. Note the limitation stated
+  in that script: `main` requires zero approving reviews (forced, not sloppy — see
+  the docstring), so this is a speed bump, not an authorization boundary.
 - **Sample models**: `test-data/vehicle.aadl` + `test-data/sensor_lib.aadl` are
   the canonical pair used in docs and smoke tests.
 - **Quickstart**: see [`docs/quickstart.md`](docs/quickstart.md) for the

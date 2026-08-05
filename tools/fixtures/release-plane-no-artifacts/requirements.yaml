@@ -1,0 +1,35 @@
+# Fixture for tools/check_release_plane.py — NOT part of the real trace.
+#
+# Reaches the SECOND fail-closed guard. There are two, and they fire on
+# different inputs:
+#
+#   `no sequence entries found` — the file has no `- ` lines at all
+#                                 (see release-plane-unsupported)
+#   `parsed zero artifacts`     — the file HAS `- ` lines, the parser inferred
+#                                 an artifact plane from them, and then read
+#                                 zero artifacts at that plane  <- this fixture
+#
+# The second is reachable exactly when every `- ` line is inside a block scalar:
+# the artifact-plane indent is computed over raw lines (before block tracking),
+# but the parse loop correctly skips block bodies as prose. The result is a
+# self-inconsistent read — "I found a list, and there was no list" — which the
+# parser must refuse rather than resolve in its own favour.
+#
+# This fixture was added because a mutation test caught the gap: deleting the
+# `parsed zero artifacts` raise left all THREE original self-tests passing, so
+# the guard was an unexercised claim inside a checker whose entire purpose is
+# to distrust unexercised claims.
+#
+# Without the guard this file exits 0 with zero findings and zero visible
+# assignments. The `WARNING: ... asserted nothing` line does fire — and is not
+# enough: a warning on stderr does not fail a build. The exit code is the only
+# part CI reads, so the exit code is what has to differ.
+notes: >
+  Release plan for the next cycle. The following items are still open and
+  need a release assignment before the scope query is trustworthy:
+  - id: REQ-EXAMPLE-STILL-UNASSIGNED
+  - id: REQ-EXAMPLE-ALSO-UNASSIGNED
+  Neither line above is an artifact — both are prose inside this folded
+  scalar. A parser that treated them as records would invent two artifacts
+  that do not exist.
+release: v0.36.0

@@ -103,36 +103,25 @@ jobs:
 
       - name: Summarise to job summary
         if: always()
+        # Shares tools/check_mutants_report.py with the gating job in ci.yml so
+        # that "cargo-mutants nests its report under mutants.out/" is stated in
+        # exactly ONE place. Both this summary and that gate read the shallow
+        # path for four months (#381); here it rendered a table of 0/0/0/0,
+        # which is not merely wrong but impossible — zero caught AND zero
+        # unviable would mean cargo-mutants found nothing to test at all. It
+        # still looked like a plausible table. Two copies of a path is how one
+        # of them gets fixed and the other does not.
+        #
+        # Advisory: --summary-file never fails the job, it only refuses to
+        # render absence as zeros. `echo` the runner separately since the
+        # script has no business knowing about smithy classes.
         run: |
-          MISSED=0
-          [ -f mutants-out/missed.txt ] && MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
-          CAUGHT=0
-          [ -f mutants-out/caught.txt ] && CAUGHT=$(wc -l < mutants-out/caught.txt | tr -d ' ')
-          UNVIABLE=0
-          [ -f mutants-out/unviable.txt ] && UNVIABLE=$(wc -l < mutants-out/unviable.txt | tr -d ' ')
-          TIMEOUT=0
-          [ -f mutants-out/timeout.txt ] && TIMEOUT=$(wc -l < mutants-out/timeout.txt | tr -d ' ')
-          {
-            echo "## cargo-mutants weekly — ${{ steps.cfg.outputs.shard }}"
-            echo
-            echo "Runner: \`$(hostname)\` (${SMITHY_RUNNER_CLASS:-unknown class})"
-            echo
-            echo "| Outcome | Count |"
-            echo "|---------|------:|"
-            echo "| 🟥 Missed  (test suite did not catch) | $MISSED |"
-            echo "| 🟩 Caught  (test suite caught)        | $CAUGHT |"
-            echo "| ⏱  Timeout                           | $TIMEOUT |"
-            echo "| ⚪ Unviable (build failed)           | $UNVIABLE |"
-            echo
-            if [ "$MISSED" -gt 0 ] && [ -f mutants-out/missed.txt ]; then
-              echo "<details><summary>First 50 missed mutants</summary>"
-              echo
-              echo '```'
-              head -50 mutants-out/missed.txt
-              echo '```'
-              echo "</details>"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Runner: \`$(hostname)\` (${SMITHY_RUNNER_CLASS:-unknown class})" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          tools/check_mutants_report.py \
+            --output-dir mutants-out \
+            --shard "${{ steps.cfg.outputs.shard }}" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - name: Upload mutants report
         if: always()

@@ -10,9 +10,15 @@ tests/playwright/node_modules/
 tests/playwright/test-results/
 .playwright-mcp/
 dist/
-architecture.yaml
-requirements.yaml
-verification.yaml
+# Loose rivet scratch dropped in the repo ROOT (ee2c831: "dist/ and loose
+# yaml"). These MUST stay anchored with a leading `/`: unanchored, git matches
+# the basename at any depth, so `tools/fixtures/*/requirements.yaml` was
+# silently excluded — `git add <dir>` skips it and still exits 0. The tracked
+# artifacts/ and safety/stpa/ copies were unaffected only because gitignore
+# does not apply to already-tracked files.
+/architecture.yaml
+/requirements.yaml
+/verification.yaml
 
 # Stale dev artifacts — re-add explicitly if needed.
 /dashboard-render*.png
@@ -24,6 +30,9 @@ verification.yaml
 # cargo-mutants output — regenerable mutation-testing scratch.
 /mutants.out/
 /mutants.out.old/
+
+# Python bytecode cache from tools/*.py — regenerable.
+__pycache__/
 
 # Agent-maintained durable session scratch — never commit.
 .pulseengine-session-notes.md

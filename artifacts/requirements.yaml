@@ -121,7 +121,11 @@ artifacts:
     description: >
       Trace connections through the hierarchy resolving across, up,
       and down patterns to produce end-to-end connection instances.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      The unimplemented residue is deliberately not itemized here — see
+      REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [instance, as5506-ch14]
 
   - id: REQ-INST-004
@@ -226,7 +230,11 @@ artifacts:
       Enforce AADL naming rules, category restrictions, direction rules,
       connection rules, flow rules, binding rules, mode rules, and
       subcomponent rules. Target 50+ rules.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      How many rules are actually enforced against the 50+ target is
+      deliberately not asserted here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [analysis, legality]
 
   - id: REQ-ANALYSIS-008
@@ -260,54 +268,19 @@ artifacts:
     tags: [integration, serde]
 
   # ── Rendering (STPA-derived) ──────────────────────────────────────────
-
-  - id: RENDER-REQ-001
-    type: requirement
-    title: Orthogonal edge routing
-    description: >
-      Edges must use orthogonal routing to minimize visual crossings.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-002
-    type: requirement
-    title: Port visibility with directional indicators
-    description: >
-      Ports must be visible with directional indicators and type coloring.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-003
-    type: requirement
-    title: Interactive HTML with zoom/pan/minimap/search
-    description: >
-      Interactive HTML output must support zoom, pan, minimap, and search.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-004
-    type: requirement
-    title: Deterministic layout
-    description: >
-      Layout must be deterministic — same model always produces same layout.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-005
-    type: requirement
-    title: Selection and group highlighting
-    description: >
-      Selection and group highlighting must be supported in interactive mode.
-    status: implemented
-    tags: [rendering, stpa]
-
-  - id: RENDER-REQ-006
-    type: requirement
-    title: Semantic zoom for overview levels
-    description: >
-      Semantic zoom must reduce clutter at overview levels.
-    status: partial
-    tags: [rendering, stpa]
+  #
+  # RENDER-REQ-001..006 are NOT defined here. They live in
+  # safety/stpa/rendering-analysis.yaml, which is the canonical copy: it
+  # carries the hazards/satisfies/verified-by trace links that make them
+  # part of the STPA V, and the stubs that used to sit here carried none.
+  #
+  # Both files defined all six ids until #360. rivet silently kept ONE and
+  # dropped the other with no diagnostic, and which one won was load order,
+  # not a decision. The stubs were stale in BOTH directions -- they claimed
+  # RENDER-REQ-003 `implemented` (it is `partial`: minimap/search are
+  # Phase 3b, still `reserved` in etch) and RENDER-REQ-006 `partial` (it is
+  # `implemented`: etch/src/html.rs emits svg.zoom-low / svg.zoom-overview
+  # behind a wheel handler). Do not re-add them here.
 
   - id: REQ-WASM-001
     type: requirement
@@ -344,7 +317,7 @@ artifacts:
     description: >
       Import cargo metadata to generate virtual AADL packages
       representing Rust crate architecture.
-    status: planned
+    status: proposed
     tags: [transform, rust]
 
   - id: REQ-TRANSFORM-003
@@ -353,7 +326,7 @@ artifacts:
     description: >
       Read WAC composition files and generate AADL system
       implementations with subcomponents and connections.
-    status: planned
+    status: proposed
     tags: [transform, wac]
 
   - id: REQ-TRANSFORM-004
@@ -362,7 +335,7 @@ artifacts:
     description: >
       Map wRPC transports (NATS, TCP, QUIC) to AADL bus components
       with deployment bindings.
-    status: planned
+    status: proposed
     tags: [transform, wrpc]
 
   - id: REQ-TRANSFORM-005
@@ -371,7 +344,7 @@ artifacts:
     description: >
       Map WASI P3 async functions, streams, and futures to AADL
       thread components with scheduling properties.
-    status: planned
+    status: proposed
     tags: [transform, wasi-p3]
 
   # ── STPA Analysis Coverage Records (STPA-REQ-022) ────────────────
@@ -463,7 +436,11 @@ artifacts:
     description: >
       modal.rs computes SOMs. Scheduling and latency analyses evaluate
       per-SOM when modal property associations exist.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      Which Ch.12 obligations remain open is deliberately not asserted
+      here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     links:
       - type: satisfies
         target: REQ-INST-004
@@ -501,7 +478,7 @@ artifacts:
       Not yet covered: Ch.7 (prototypes — parsed but not analyzed).
       Ch.6 type extensions now resolved via extends chain walking (v0.5.0).
       Property expression evaluation now covered by text fallback parser (v0.5.0).
-    status: partial
+    status: approved
     links:
       - type: satisfies
         target: REQ-MODEL-005
@@ -585,8 +562,7 @@ artifacts:
       survives lexing + lowering intact.
     status: verified
     tags: [parsing, lexer, literals, as5506, bug]
-    fields:
-      release: v0.31.0
+    release: v0.31.0
     links:
       - type: traces-to
         target: REQ-PARSER-001
@@ -626,8 +602,7 @@ artifacts:
       malformed input (that command remains a best-effort structural dump).
     status: verified
     tags: [parsing, lexer, literals, as5506, bug]
-    fields:
-      release: v0.32.0
+    release: v0.32.0
     links:
       - type: traces-to
         target: REQ-PARSER-001
@@ -674,10 +649,10 @@ artifacts:
       Detect architectural conflicts in three-way merges where concurrent
       changes affect the same structural elements (components, connections,
       bindings) or produce incompatible analysis results.
-    status: planned
+    status: proposed
     tags: [diff, merge, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── MCP Server ───────────────────────────────────────────────────────
 
@@ -690,8 +665,8 @@ artifacts:
       elements as MCP resources over stdio JSON-RPC transport.
     status: implemented
     tags: [mcp, integration, v040]
+    release: v0.14.0
     fields:
-      release: v0.14.0
 
   # ── Query Language ───────────────────────────────────────────────────
 
@@ -703,10 +678,10 @@ artifacts:
       category == thread).property(Period)) to select and filter instance
       model elements. Supports predicate filtering, property extraction,
       and aggregation.
-    status: planned
+    status: proposed
     tags: [query, instance, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── Deployment Solver (v0.4.0+) ──────────────────────────────────────
 
@@ -754,11 +729,9 @@ artifacts:
       subsystems to hardware zones (topology + bandwidth + safety). Layer 3
       (Global) — optimize across all zones (E2E latency, safety decomposition,
       cost). Local solutions compose into globally valid configurations.
-    status: planned
+    status: proposed
     tags: [solver, optimization, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-005
     type: requirement
     title: Optimality certificates for deployment solutions
@@ -767,11 +740,9 @@ artifacts:
       machine-checkable certificate proving it is globally optimal (for
       exact methods) or within a bounded optimality gap (for heuristics).
       Uses dual bounds from MILP or exhaustive search proofs from CP-SAT.
-    status: planned
+    status: proposed
     tags: [solver, verification, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-006
     type: requirement
     title: Multi-objective Pareto front computation
@@ -780,11 +751,9 @@ artifacts:
       maximize safety margins), compute the Pareto front of non-dominated
       solutions. Present to the engineer for interactive selection. Support
       both exact Pareto (small problems) and approximate (NSGA-II for large).
-    status: planned
+    status: proposed
     tags: [solver, optimization, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-007
     type: requirement
     title: Source rewriting to apply deployment solutions
@@ -805,11 +774,9 @@ artifacts:
       freedom from interference is ensured (spatial via MMU, temporal via
       scheduling, communication via controlled interfaces). Supports ISO 26262
       ASIL, DO-178C DAL, and IEC 61508 SIL.
-    status: planned
+    status: proposed
     tags: [solver, safety, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SOLVER-009
     type: requirement
     title: Security zone and conduit validation
@@ -818,10 +785,10 @@ artifacts:
       with security-level properties. Validate that cross-zone connections
       have appropriate protection (encryption, authentication). Account for
       security overhead (TLS latency, MAC computation) in timing analysis.
-    status: planned
+    status: proposed
     tags: [solver, security, v040]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # ── Competitive Gap Requirements (v0.4.0+) ─────────────────────────
 
@@ -838,9 +805,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-TRANSFORM-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-WIT
     type: requirement
     title: Generate WIT interfaces from AADL processes
@@ -854,9 +819,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.13.0
-
+    release: v0.13.0
   - id: REQ-CODEGEN-RUST
     type: requirement
     title: Generate Rust crate skeletons from AADL
@@ -870,9 +833,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-BAZEL
     type: requirement
     title: Generate Bazel BUILD files for WASM + verification
@@ -887,9 +848,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-BUILD
     type: requirement
     title: Build-time AADL attribute verification
@@ -903,9 +862,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-TEST
     type: requirement
     title: Test-time contract + timing verification
@@ -919,9 +876,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-VERIFY-PROOF
     type: requirement
     title: Formal proof generation (Lean4 + Kani)
@@ -935,9 +890,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-CODEGEN-RIVET
     type: requirement
     title: Generate rivet design docs + verification artifacts
@@ -951,9 +904,7 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-CODEGEN-001
-    fields:
-      release: v0.14.0
-
+    release: v0.14.0
   - id: REQ-KANI-CODEGEN-001
     type: requirement
     title: Kani harnesses for generated-code AADL contract preservation
@@ -1026,11 +977,9 @@ artifacts:
       margins. Cheddar and Ellidiss MARZHIN offer this — spar has static
       RMA/RTA but no temporal visualization. Output as SVG/HTML with
       interactive zoom.
-    status: planned
+    status: proposed
     tags: [visualization, scheduling, competitive-gap, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-SECURITY-001
     type: requirement
     title: Security rules analysis
@@ -1040,7 +989,7 @@ artifacts:
       interfaces, secure boot chain verification, trust boundary validation.
       Ellidiss has a security rules checker; OSATE has none. Maps to
       IEC 62443 zones/conduits and ISO 21434 threat analysis.
-    status: planned
+    status: proposed
     tags: [security, competitive-gap, v040]
     links:
       - type: traces-to
@@ -1054,11 +1003,9 @@ artifacts:
       claims: hierarchical claim decomposition, evidence linking, and
       reusable claim libraries. Currently spar verify has flat assertions;
       Resolute supports claim trees with sub-claims and computed evidence.
-    status: planned
+    status: proposed
     tags: [verification, competitive-gap, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-BIDIRECTIONAL-001
     type: requirement
     title: Bidirectional diagram editing
@@ -1068,7 +1015,7 @@ artifacts:
       to AADL source via rowan CST. Currently spar renders read-only
       diagrams. OSATE graphical editor and Ellidiss STOOD both support
       bidirectional editing.
-    status: planned
+    status: proposed
     tags: [rendering, editing, competitive-gap, v050]
 
   # ── Interoperability Requirements (v0.5.0+) ────────────────────────
@@ -1107,11 +1054,9 @@ artifacts:
       Import OMG ReqIF XML into rivet artifacts. Bridges enterprise ALM
       tools (DOORS, Jama, Polarion) with spar's architecture verification.
       Requirements flow into rivet, trace to AADL components via spar verify.
-    status: planned
+    status: proposed
     tags: [interop, requirements, v040]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-INTEROP-003
     type: requirement
     title: Capella/ARCADIA to AADL bridge
@@ -1120,7 +1065,7 @@ artifacts:
       implementations, Functional Chains → end-to-end flows, Components →
       AADL components. Lighter than the N7 Space Capella-to-TASTE bridge
       (no Eclipse dependency).
-    status: planned
+    status: proposed
     tags: [interop, capella, bridge, v050]
 
   - id: REQ-INTEROP-004
@@ -1131,7 +1076,7 @@ artifacts:
       → process/thread bindings, Service Instance Manifests → connections,
       Machine Manifests → processor configurations. Enables spar analysis
       on existing AUTOSAR models without manual AADL modeling.
-    status: planned
+    status: proposed
     tags: [interop, autosar, bridge, v050]
 
   # ── IRQ-aware RTA (Track A, v0.7.0) ────────────────────────────────
@@ -1655,9 +1600,7 @@ artifacts:
       Calculus for TSN; verified 2026-06-16 by independent falsification.]
     status: implemented
     tags: [network, tsn, wctt, network-calculus, soundness, tier1]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-TSN-003
     type: requirement
     title: 802.1Qav CBS credit-pool service curve
@@ -2491,9 +2434,7 @@ artifacts:
       lacked). A no-EMV2 / port-only model must still yield 0.
     status: proposed
     tags: [emv2, analysis, safety, binding, capability]
-    fields:
-      release: v0.24.0
-
+    release: v0.24.0
   - id: REQ-WRPC-BINDING-002
     type: requirement
     title: Honor per-connection Actual_Connection_Binding (applies to <conn>) in wrpc-binding
@@ -2517,9 +2458,7 @@ artifacts:
       reference forms the resolver can't yet follow. Tracks GitHub #281.
     status: implemented
     tags: [wrpc, binding, analysis, bug]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-WRPC-BINDING-003
     type: requirement
     title: Verify wrpc-binding Actual_Connection_Binding resolves to an actual bus
@@ -2795,8 +2734,7 @@ artifacts:
       into generate_wit. Follow-up recorded in #254/#255.
     status: implemented
     tags: [codegen, wit, interop]
-    fields:
-      release: v0.14.0
+    release: v0.14.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT
@@ -3256,7 +3194,7 @@ artifacts:
       produces it. The ordeal beachhead moves to REQ-PROOF-RTA-OVERFLOW-001,
       where bit-precise u64 wraparound is exactly such a property.
     status: rejected
-    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, v0350]
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, v0350, human-scoped]
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-001
@@ -3280,7 +3218,7 @@ artifacts:
       goal that a wrong encoder can actually falsify, and justified against
       plain interval arithmetic. Not planned.
     status: rejected
-    tags: [codegen, ordeal, certificate, layout, wit, withdrawn]
+    tags: [codegen, ordeal, certificate, layout, wit, withdrawn, human-scoped]
     links:
       - type: traces-to
         target: REQ-CODEGEN-LAYOUT-CERT-001
@@ -3329,7 +3267,7 @@ artifacts:
       introduces a new multiplication cannot land silently.
     status: proposed
     release: v0.36.0
-    tags: [proofs, ordeal, certificate, rta, overflow, v0360]
+    tags: [proofs, ordeal, certificate, rta, overflow, v0360, human-scoped]
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-CODEGEN-001
@@ -3387,7 +3325,7 @@ artifacts:
       applies to this spike too.) Tracks #350.
     status: proposed
     release: v0.40.0
-    tags: [analysis, ordeal, bmc, concurrency, certificate, spike]
+    tags: [analysis, ordeal, bmc, concurrency, certificate, spike, human-scoped]
     links:
       - type: traces-to
         target: REQ-PROOF-RTA-OVERFLOW-001
@@ -3415,8 +3353,7 @@ artifacts:
       runnable test/verification harness. Related to #319.
     status: proposed
     tags: [codegen, verify, workspace, bug]
-    fields:
-      release: v0.24.0
+    release: v0.24.0
     links:
       - type: traces-to
         target: REQ-CODEGEN-WIT-RECORDS-002
@@ -3432,8 +3369,7 @@ artifacts:
       calculus. Tracks issue #261.
     status: implemented
     tags: [proofs, lean, scheduling]
-    fields:
-      release: v0.15.0
+    release: v0.15.0
     links:
       - type: traces-to
         target: REQ-ANALYSIS-002
@@ -3466,8 +3402,7 @@ artifacts:
       network-calculus export in DEC-TSN-OSS-001.
     status: proposed
     tags: [proofs, lean, scheduling, kiln, substrate]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PROOF-SCHED-001
@@ -3616,9 +3551,7 @@ artifacts:
       sysml2 and REQ-INGEST-ARXML-001 remain peer front-ends.
     status: proposed
     tags: [ingest, sysml2, grammar]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-PLUGFEST-002
     type: requirement
     title: "Plug-fest Tier-B — OSATE-in-Docker adjudication oracle + AAXL2 round-trip"
@@ -3631,8 +3564,7 @@ artifacts:
       Tier-B of issue #246.
     status: proposed
     tags: [interop, plugfest, osate]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3656,8 +3588,7 @@ artifacts:
       REQ-PLUGFEST-005 under the Tier-B EMV2 oracle work. Issue #246.
     status: implemented
     tags: [parser, plugfest]
-    fields:
-      release: v0.16.0
+    release: v0.16.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3675,8 +3606,7 @@ artifacts:
       spar invents but OSATE rejects is a false win). Issue #246.
     status: proposed
     tags: [parser, plugfest, emv2]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3691,8 +3621,7 @@ artifacts:
       issue #246.
     status: proposed
     tags: [interop, plugfest, ocarina]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001
@@ -3712,8 +3641,7 @@ artifacts:
       engine.rs §"Deliberately deferred"). Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-002
@@ -3731,8 +3659,7 @@ artifacts:
       DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-005
@@ -3751,8 +3678,7 @@ artifacts:
       DBC+FP-TFA TSN spine. Moved to v0.19.0.
     status: proposed
     tags: [trace-topology, reconciler, attestation]
-    fields:
-      release: v0.23.0
+    release: v0.23.0
     links:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
@@ -3782,9 +3708,7 @@ artifacts:
       ARXML ingest; license-clean, no XSD to bundle.
     status: implemented
     tags: [ingest, dbc, can, tier1]
-    fields:
-      release: v0.17.0
-
+    release: v0.17.0
   - id: REQ-INGEST-DBC-FLOWS-001
     type: requirement
     title: "DBC message flows as AADL ports + bus connections"
@@ -3813,9 +3737,7 @@ artifacts:
       instantiate with zero diagnostics).
     status: implemented
     tags: [ingest, dbc, can, flows, tier1]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-INGEST-ARXML-001
     type: requirement
     title: "ARXML (AUTOSAR) model ingest"
@@ -3831,9 +3753,7 @@ artifacts:
       carries enough for the target analysis.
     status: proposed
     tags: [ingest, arxml, autosar, tier1]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-TFA-001
     type: requirement
     title: "FP-TFA / TFA++ network-calculus bounds"
@@ -3845,9 +3765,7 @@ artifacts:
       and the kiln async-scheduler math. [SOLID — Bouillard 2021]
     status: implemented
     tags: [network-calculus, tfa, substrate, tier1]
-    fields:
-      release: v0.17.0
-
+    release: v0.17.0
   - id: REQ-NC-PLP-001
     type: requirement
     title: "PLP (polynomial-LP) network-calculus bounds — feed-forward"
@@ -3890,9 +3808,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-PLP-002
     type: requirement
     title: "PLP network-calculus bounds — generic / cyclic topology"
@@ -3918,9 +3834,7 @@ artifacts:
       arXiv:2010.09263; Tabatabaee/Bouillard/Le Boudec arXiv:2208.11400]
     status: proposed
     tags: [network-calculus, plp, cyclic, substrate, tier1]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-PLP-CONVERGE-001
     type: requirement
     title: "PLP on converging sink-trees via topological relabel"
@@ -3955,9 +3869,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, converging, substrate, tier1]
-    fields:
-      release: v0.19.0
-
+    release: v0.19.0
   - id: REQ-NC-PLP-003
     type: requirement
     title: "PLP tightening to exact worst case (TFA-strengthened LP)"
@@ -3988,9 +3900,7 @@ artifacts:
       `oracles/panco/panco_bench.py`. [SOLID — Bouillard arXiv:2010.09263]
     status: implemented
     tags: [network-calculus, plp, substrate, tier1]
-    fields:
-      release: v0.19.0
-
+    release: v0.19.0
   - id: REQ-NC-PLP-MIN-001
     type: requirement
     title: "Authoritative per-flow NC bound = min(PLP, TFA)"
@@ -4082,9 +3992,7 @@ artifacts:
       REQ-NC-PLP-001, extract_network_graph, wctt::collect_streams]
     status: implemented
     tags: [network-calculus, bridge, tsn, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-VALIDATION-001
     type: requirement
     title: "NC-bound cross-validation against panco reference"
@@ -4108,9 +4016,7 @@ artifacts:
       [SOLID — Bouillard arXiv:2010.09263; Bouillard-Stea ValueTools 2012]
     status: implemented
     tags: [network-calculus, validation, oracle, substrate, tier1]
-    fields:
-      release: v0.18.0
-
+    release: v0.18.0
   - id: REQ-NC-CBS-AUDIT-001
     type: requirement
     title: "CBS/SP service-curve packetization audit"
@@ -4122,8 +4028,8 @@ artifacts:
       export leans on CBS curves (REQ-TSN-003). [SOLID]
     status: proposed
     tags: [network-calculus, cbs, qav, audit, tier1]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # --- Tier 2: the product bet (synthesis → export), kill-gated ---
 
@@ -4150,9 +4056,7 @@ artifacts:
       REQ-NC-PLP-CONVERGE-001 → REQ-NC-PLP-003. [SOLID]
     status: implemented
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-QBV-SPLIT-BASE-001
     type: requirement
     title: "802.1Qbv window-splitting synthesis baseline — even K-split, smallest feasible K"
@@ -4181,9 +4085,7 @@ artifacts:
       synthesis (table-stakes vs RTaW), NOT the PLP≪TFA wedge. [SOLID]
     status: implemented
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.21.0
-
+    release: v0.21.0
   - id: REQ-TSN-SYNTH-QBV-GUARDBAND-001
     type: requirement
     title: "802.1Qbv guard-band-aware window-splitting (deployable GCL claim)"
@@ -4243,9 +4145,7 @@ artifacts:
       accepted ARXML→TSN+NC. [SOLID]
     status: proposed
     tags: [tsn, synthesis, qbv, tier2]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-TAS-COMPOSE-001
     type: requirement
     title: "Sound network-wide composition of per-port TAS residual service curves (the PLP≪TFA wedge loop)"
@@ -4287,9 +4187,7 @@ artifacts:
       never exercises (C). [BLOCKED — research-grade]
     status: proposed
     tags: [network-calculus, tsn, tas, composition, wedge, research-grade, blocked]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-SIM-FLOOR-001
     type: requirement
     title: "TAS-matched discrete-event simulation floor (oracle-kind-(a)) for gated-hop NC validation"
@@ -4309,9 +4207,7 @@ artifacts:
       it, the network-wide arm of REQ-TSN-SYNTH-MILP-001.
     status: proposed
     tags: [network-calculus, tsn, tas, simulation, oracle, substrate]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-NC-BUS-PAYLOAD-001
     type: requirement
     title: "Bus bandwidth shall report what it could not measure, not score it as zero"
@@ -4416,9 +4312,7 @@ artifacts:
       clean baseline yet. [gated]
     status: proposed
     tags: [tsn, synthesis, milp, tier2]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-TSN-SYNTH-CQF-BASE-001
     type: requirement
     title: "CQF synthesis baseline — single cycle-time, 2-buffer, literature-pinned delay bound"
@@ -4445,9 +4339,7 @@ artifacts:
       REQ-TSN-SYNTH-QBV-BASE-001 → REQ-TSN-SYNTH-QBV-001. [SOLID]
     status: implemented
     tags: [tsn, synthesis, cqf, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-CQF-BRIDGE-001
     type: requirement
     title: "AADL→CQF synthesis bridge — extract CqfFlow inputs from a SystemInstance and synthesize end-to-end"
@@ -4476,9 +4368,7 @@ artifacts:
       synthesize_cqf plus the existing spar-network property readers). [SOLID]
     status: implemented
     tags: [tsn, synthesis, cqf, bridge, aadl, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-CQF-001
     type: requirement
     title: "Multi-CQF / TCQF synthesis (heterogeneous cycles, injection planning, larger scale)"
@@ -4513,9 +4403,7 @@ artifacts:
       baseline. [RESEARCH-GRADE]
     status: proposed
     tags: [tsn, synthesis, cqf, tier2, research-grade]
-    fields:
-      release: v0.23.0
-
+    release: v0.23.0
   - id: REQ-TSN-SYNTH-CQF-LONGLINK-001
     type: requirement
     title: "Multi-buffer single-cycle CQF for long links (B-buffer dead-time accommodation)"
@@ -4603,9 +4491,7 @@ artifacts:
       [SOLID — IEEE 802.1Qcw-2023 ieee802-dot1q-sched YANG]
     status: implemented
     tags: [tsn, export, yang, netconf, tier2]
-    fields:
-      release: v0.20.0
-
+    release: v0.20.0
   - id: REQ-TSN-SYNTH-ONLINE-001
     type: requirement
     title: "Online / incremental TSN admission & reconfiguration"
@@ -4616,8 +4502,8 @@ artifacts:
       lacks entirely. Later-stage Tier 2. [SOLID relative]
     status: proposed
     tags: [tsn, synthesis, online, reconfiguration, tier2]
+    release: v0.23.0
     fields:
-      release: v0.23.0
 
   # --- Tier 3: internal soundness ratchet (parallel, never marketed) ---
 
@@ -4633,7 +4519,7 @@ artifacts:
       Lean has nothing in NC today [SOLID, absence].
     status: proposed
     release: v0.38.0
-    tags: [proof, lean, network-calculus, soundness, tier3]
+    tags: [proof, lean, network-calculus, soundness, tier3, human-scoped]
 
   - id: REQ-PROOF-NC-CERT-001
     type: requirement
@@ -4650,4 +4536,310 @@ artifacts:
       and a concrete cert-driven buyer asks. [SOLID]
     status: proposed
     release: v0.38.0
-    tags: [proof, certificate, network-calculus, soundness, tier3]
+    tags: [proof, certificate, network-calculus, soundness, tier3, human-scoped]
+
+  - id: REQ-GUARD-HUMAN-SCOPED-001
+    type: requirement
+    title: "`human-scoped` artifacts cannot be recorded done by an unattended run"
+    description: >
+      A mechanical guardrail on autonomous scope. An artifact tagged
+      `human-scoped` is one whose SCOPING needs a human: first wiring of an
+      external dependency, narrowing a research-grade property to something a
+      solver can actually decide, or designing a falsification kill-criterion.
+      Such an artifact may sit at draft/proposed/approved (planning is fine) and
+      may be rejected/deprecated/withdrawn (retracting is fine), but it shall NOT
+      be recorded implemented/verified/released/accepted/passing. To ship one the
+      tag must be deleted in the SAME change, so the promotion is one explicit
+      line of diff rather than a status buried in a large PR.
+
+      WHY: v0.35.0's REQ-CODEGEN-LAYOUT-CERT-001 was designated human-scoped in a
+      planning note only. The autonomous issue-hunt cron picked it up,
+      implemented it, self-recorded `status: verified`, and merged it in about an
+      hour — asserting a proof that did not exist, because the SMT goal
+      constant-folded and every input therefore produced a byte-identical
+      certificate. Nothing anywhere enforced the designation. A guardrail that
+      lives only in prose is not a guardrail.
+
+      HONEST CEILING (non-negotiable, and stated in the tool's own docstring):
+      this is a speed bump, NOT an authorization boundary. `main` requires zero
+      approving reviews and that is FORCED rather than sloppy — with
+      `enforce_admins: true` on a single-maintainer repo, GitHub's ban on
+      self-approval makes any required review an unbreakable deadlock. Commit
+      signatures cannot discriminate either, because squash-merges are re-signed
+      by GitHub's own key. So an agent with push access can delete the tag in the
+      same PR and green the check; what the check buys is that doing so becomes
+      explicit, diffable and logged instead of invisible. The only real gate is
+      on the agent's prompt and permissions, which lives outside this repo. Do
+      not market this as preventing autonomous over-scoping — it makes it
+      visible.
+
+      IMPLEMENTATION CONSTRAINT: stdlib-only python3. No workflow in this repo
+      installs a Python package, so importing PyYAML would make a required check
+      depend on an unverified runner package — and a guardrail that cannot run
+      reads as approval. The narrow parser is therefore FAIL-CLOSED: input outside
+      the subset it fully handles exits 2 (INCONCLUSIVE, red) rather than being
+      scanned past, because a best-effort scanner degrades to a false green, which
+      is the exact vacuity that let #354 through. Equivalence to a real YAML
+      parser was measured over all 886 committed artifacts, not assumed.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, autonomy, ci, tooling]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-LAYOUT-CERT-001
+
+  - id: REQ-GUARD-RELEASE-PLANE-001
+    type: requirement
+    title: "`release:` shall sit on the plane rivet's query surface reads"
+    description: >
+      rivet has two field planes. `release` is a CORE field, read by the CLI
+      query surface — `rivet list --release vX.Y` is the release-planning view.
+      Separately, each artifact may carry a `fields:` bag for schema-declared
+      custom keys (for `requirement` the declared set is baseline, category,
+      cited-source, priority, upstream-ref). Writing `release:` into the bag is
+      valid YAML, is tolerated by the schema, and is completely invisible to the
+      query. This requirement is that every `release:` assignment in this repo
+      sits on the artifact's own key plane, enforced mechanically.
+
+      WHY: 59 of 85 assignments were on the wrong plane (#370). `rivet list`
+      reported 26 artifacts carrying a release; ELEVEN shipped releases —
+      v0.13.0 through v0.21.0, plus v0.31.0 and v0.32.0 — returned zero
+      artifacts each. Release readiness in this project is defined as a query
+      ("what must we implement for vX.Y" = release: vX.Y AND status != verified),
+      and for eleven releases' worth of scope that query answered "nothing to
+      do". The failure renders identically to a genuinely empty release: the
+      recurring shape here is that an operation which can produce "nothing
+      happened" must render differently from one that worked.
+
+      WHY A GATE AND NOT A LINT: rivet already diagnosed this correctly. It
+      emitted `INFO: field 'release' is not defined in schema` once per
+      offending artifact — all 59, precise, naming the exact ids. They sat under
+      276 unrelated `ERROR:` lines from the status-vocabulary defect tracked as
+      #371. A correct diagnostic buried under an unrelated noise floor is not a
+      diagnostic. The remedy is therefore an exit code, not better prose.
+
+      IMPLEMENTATION CONSTRAINT: stdlib-only python3, fail-closed, for the same
+      reasons as REQ-GUARD-HUMAN-SCOPED-001. Two distinct fail-closed guards
+      exist ("no sequence entries" and "parsed zero artifacts") and each has its
+      own fixture. The checker parses rather than greps: `release:` inside a
+      `description: >` block scalar is prose at a deeper indent, so the obvious
+      `grep -nE '^ {6,}release: '` would red the build for an English sentence.
+
+      SELF-TEST CONSTRAINT: the self-test asserts the finding COUNTS, not merely
+      the process exit code. `exit 1` on the violation fixture is equally
+      consistent with a checker that reports every `release:` it sees — one that
+      does not discriminate on plane at all — so the exit code alone is too
+      coarse to carry the claim the tool's own output makes. Verified by
+      mutation: four independent mutations (drop plane discrimination, drop
+      block-scalar tracking, drop either fail-closed guard) each red the
+      self-test, and each fixture kills exactly one guard. The fourth fixture
+      exists BECAUSE a mutation survived the first draft — deleting the "parsed
+      zero artifacts" raise left all three original self-tests green.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, traceability]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-HUMAN-SCOPED-001
+
+  - id: REQ-GUARD-STATUS-VOCAB-001
+    type: requirement
+    title: "`status:` shall be a member of the schema's allowed set"
+    description: >
+      Every artifact's `status:` shall be one of the nine values the active
+      schema allows (draft, proposed, approved, implemented, verified, released,
+      accepted, deprecated, rejected). spar had 276 that were not: `passing`,
+      `planned`, `not-implemented` and `partial` — a private vocabulary that
+      read as meaningful and validated as nothing.
+
+      WHY IT MATTERS: `passing` was the largest group (177). It is a verification
+      VERDICT living in a lifecycle field, and a hand-edited YAML file cannot
+      honestly assert that a test passes — only that the measure exists. The
+      status plane records where an artifact sits in its lifecycle; it is not
+      a place to record the result of a run nobody re-derives.
+
+      THE MAPPING, and what it costs: passing -> implemented, planned ->
+      proposed, not-implemented -> proposed, partial -> approved. Only the last
+      is lossy. `partial` sits strictly between `approved` and `implemented`,
+      and the vocabulary has no such rung, so `approved` is chosen as the
+      CONSERVATIVE FLOOR — the strongest claim that is certainly true —
+      rather than `implemented`, which would overstate. The eight affected
+      requirements each say so in their own description. Two of them
+      (RENDER-REQ-003, COVERAGE-GAPS) already itemized their residue and were
+      left alone; the other five state that the residue is NOT itemized. That
+      wording is deliberate: an explicit "not measured" is falsifiable, whereas
+      a plausible invented figure ("32 of 50 rules") is not, and inventing one
+      is the precise failure #294 was reopened for.
+
+      THE GUARD IS NOT NEW CODE. rivet already ships `status-allowed-values` at
+      ERROR severity, and `rivet validate` is already a required check, so the
+      regression is mechanically blocked from the moment this lands. Writing a
+      bespoke checker here would have added a second, weaker oracle next to a
+      working one. This is the opposite of REQ-GUARD-RELEASE-PLANE-001, which
+      needed a tool precisely because rivet was BLIND to the defect.
+
+      TWO HOLES REMAIN OPEN, and neither is closed by this requirement:
+      (1) six `status:` values in safety/stpa/architecture.yaml sit inside the
+      `fields:` extension bag, where rivet cannot see them — the #370 defect one
+      field over, on `status:` instead of `release:`; (2) safety/requirements.yaml
+      holds 21 more, and rivet never loads that file at all because it is not
+      under any path in rivet.yaml's `sources:`. Both are invisible to the guard
+      above, which is exactly why they are named here rather than silently
+      absorbed into the 276.
+
+      RECONCILIATION (measured, not asserted): 303 raw `status:` text matches
+      across 9 committed files, minus 21 in the unloaded file, minus 6 in the
+      fields bag, equals the 276 errors rivet reports. The three planes agree.
+      NOTE ON THE LINK BELOW, and why it arrived a commit late: the
+      `traces-to: REQ-GUARD-RELEASE-PLANE-001` was deliberately withheld while
+      these two requirements sat in separate unmerged PRs. A `links:` target is
+      resolved at validate time, so the link would have made each branch's
+      oracle pass or fail depending on which PR merged first — and a gate whose
+      verdict depends on merge order is not a traceability improvement. The
+      target landed on main in #373; the link is now present and resolves
+      against the same tree that validates it.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, traceability, rivet, tooling]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-RELEASE-PLANE-001
+
+  - id: REQ-GUARD-GATE-EVIDENCE-001
+    type: requirement
+    title: A gate shall prove it measured something before it reports a pass
+    description: >
+      A check that reports success shall be able to demonstrate that it read a
+      measurement, and that the measurement covered everything the check's name
+      claims. Two obligations, one per instance found so far.
+
+      (a) THE MUTATION-TESTING RATCHET. Absence of a report shall fail; a report
+      that caught nothing shall fail; and the count the gate scores shall be
+      cross-checked against an independent recording of the same count, with
+      disagreement failing.
+
+      (b) THE FORMATTING SCOPE. The formatting gate shall discover the set of
+      workspaces in the repository rather than inheriting cargo's default scope,
+      shall fail when that set is smaller than a declared floor, and shall print
+      the number of workspaces it examined on every path — including success.
+
+      WHY: `Mutation Testing` is a required status check that runs for roughly
+      three hours, and from 563eb8c (2026-03-22) until #381 it never once read
+      its own results. `cargo mutants --output DIR` creates `mutants.out` INSIDE
+      DIR, so the report lands at `mutants-out/mutants.out/`. The gate read
+      `mutants-out/missed.txt`, one level up — a path that has never existed.
+      `grep` failed into `|| echo 0`, the `-f` test was false, `0 -gt 142` was
+      false, exit 0. Four months of green on a check that was structurally
+      incapable of red.
+
+      THE PROPERTY THAT MADE IT INVISIBLE, and the reason this is a requirement
+      rather than a bug fix: the ERROR path produced the IDEAL reading. `|| true`,
+      `2>/dev/null` and `|| echo 0` convert "file not found" into `0`, and `0` is
+      the best possible score for survivor count. This gate did not fail silently;
+      it failed *flatteringly*. Any guard whose error path yields its ideal
+      reading is unfalsifiable by construction — no amount of watching it pass
+      distinguishes "clean" from "blind".
+
+      THE EVIDENCE (executed, not reasoned): run 30563879100 on main @ cd4d429 —
+      the one run of this job to reach `success` in its last 25 — uploads its
+      artifact with `path: mutants-out/`, so the artifact root IS a listing of
+      that directory, and it holds exactly one entry: `mutants.out/`. Inside:
+      210 missed, 603 caught, 793 unviable, 2 timeout, each `wc -l` agreeing with
+      `outcomes.json`. The old step body, extracted from origin/main with
+      `yaml.safe_load` rather than retyped and handed that exact directory,
+      prints "Surviving mutants: 0" and exits 0. It uploaded 210 survivors against
+      a threshold of 142 and reported green.
+
+      THE TELL WAS IN THE TREE. 5d6d98a, 58 minutes after the gate went hard:
+      "Current survivors: 142 (down from 220)." That measurement was real and
+      correct, and structurally impossible for CI to have produced, because CI
+      was printing 0. Someone measured by hand, wrote the number down, and
+      shipped a gate that could not see it. Two readings of one quantity sat in
+      the repository for four months and were never diffed. That diff is the only
+      detector that would have worked from day one — mutating the gate to a no-op
+      changes no observable behaviour, so no mutation test, coverage measure or
+      log review could have found it. It is now automated: the checker refuses to
+      score a report whose `.txt` line counts disagree with `outcomes.json`.
+
+      SINGLE SOURCE. `mutants-weekly.yml` had the same wrong path, where it
+      rendered `0 missed / 0 caught / 0 unviable / 0 timeout` — not merely wrong
+      but impossible, since zero caught AND zero unviable would mean cargo-mutants
+      found nothing to test at all. It still read as a plausible table. Both the
+      gate and the weekly summary now call tools/check_mutants_report.py, so the
+      nesting fact lives in one constant; two copies of a path is how one of them
+      gets fixed and the other does not.
+
+      THE LOGIC IS NOT IN THE WORKFLOW. Inline shell in a YAML file is only
+      testable by pushing, which is precisely how the misread survived four months
+      with nobody able to run it against a report. The checker ships a 19-case
+      decision table, and its self-test step runs BEFORE the real check, for the
+      same reason the sibling guardrails do — the table includes the #381
+      regression itself, so a refactor that reintroduced the shallow read fails
+      there instead of passing vacuously.
+
+      THE THRESHOLD. 142 was never enforced, so re-baselining to the measured 210
+      relaxes nothing that was ever in force; it is the first value this gate has
+      actually checked against. The 142 -> 210 drift over four blind months is
+      exactly what a ratchet exists to prevent. #382 tracks walking it to zero.
+      Lower this number; do not raise it.
+
+      SECOND INSTANCE: SCOPE NARROWER THAN THE NAME (#383). Auditing the other
+      17 required contexts for the same property found `Format` green on main
+      over unformatted tracked Rust. `cargo fmt --all` means "all members of
+      THIS workspace", not "all crates in the repo", and this repo has four
+      workspaces — the 23-crate root plus fuzz/, codegen-exec-oracle/ and
+      codegen-kiln-oracle/, each carrying its own `[workspace]` table, none of
+      which the root's `--all` ever opens. Executed on the same tree:
+      `cargo fmt --all -- --check` exits 0 while
+      `cargo fmt --manifest-path fuzz/Cargo.toml --all -- --check` exits 1 with
+      13 diff lines, against fuzz/fuzz_targets/fuzz_codegen_roundtrip.rs:32.
+      Two gates, one repository, opposite verdicts.
+
+      This is #381's property arriving by a different mechanism. #381's error
+      path produced the ideal reading; here there is no error path at all — the
+      narrow answer is simply byte-identical to the broad one, because cargo
+      prints nothing on success and 23-of-26 crates clean looks exactly like
+      26-of-26 clean. So the fix is not a corrected path but a mandated output:
+      tools/check_fmt_workspaces.py prints "N workspace(s) checked, M formatted"
+      on every path. A count is not producible by a broken scan.
+
+      DISCOVERY WITH A FLOOR, not a list. Four hard-coded manifests would fix
+      today's bug and re-open it the day someone adds a fifth workspace, so the
+      set is walked for `[workspace]` tables and floored at 4 — the floor being
+      what makes a discovery failure loud instead of green. The prune list is
+      load-bearing rather than cosmetic: `target/` fills with vendored crates.io
+      sources, many of which ship their own `[workspace]` table, so a naive walk
+      finds dozens, sails past the floor, and asks cargo to format other
+      people's build cache — a bug that PASSES, which is why it is a self-test
+      row and not a comment. The same 10-case table carries the #383 regression
+      itself (root clean + fuzz/ dirty must exit 1), and distinguishes
+      `[workspace.package]` from `[workspace]`, since counting inheriting
+      members would inflate the total past the floor and disarm it.
+
+      THREE-VALUED EXIT, as in check_msrv.py: 0 formatted, 1 violation, 2 could
+      not measure (cargo absent, root unreadable, discovery empty). Collapsing
+      "could not measure" into 0 is the shape that let #381 run four months.
+
+      WHAT THIS DOES NOT CLAIM. It does not claim spar-analysis is well tested —
+      210 survivors out of 1608 mutants is the opposite of that claim, and the
+      number is only visible now because the gate started working. Nor does it
+      claim the repo is now formatted by policy rather than by accident: `Clippy`
+      has the identical `--workspace` scope gap and is not fixed here, so the
+      three nested crates remain unlinted.
+
+      Above all it does not claim the property is enforced generally. #386
+      audits all 18 required contexts against "can this report success without
+      having measured the thing its name claims?" and finds 11 with a path to
+      green; this requirement now covers two of them. Both were found by a human
+      question, not by a checker, and there is still no checker that finds the
+      next one — the recurring shapes (scope narrower than the name, the error
+      path being the permissive path, absence rendering as success, a gate with
+      no configured failure mode) are review vocabulary, not tooling. What did
+      generalise is the convention rather than the detection: put the logic in a
+      script with a `--self-test` decision table, run the self-test as a step
+      BEFORE the real check, carry the historical regression as a table row, and
+      print a positive count of what was examined. That is transferable to the
+      remaining nine; running it against them is #386's checklist, not this.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, mutation-testing, formatting]

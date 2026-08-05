@@ -2,6 +2,7 @@
 name = "spar-variants"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Consumer-side adapter for rivet's variant context blob (v1) — filters spar HIR by binding rules"

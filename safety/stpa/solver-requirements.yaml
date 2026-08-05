@@ -25,7 +25,7 @@ artifacts:
       for LP relaxations), the final feasibility check must use
       conservative integer rounding (ceiling for utilization, floor
       for available time).
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, scheduling, numeric, stpa]
     traces-to: [CC-S1, CC-S20]
     mitigates: [H-S2, H-S12]
@@ -40,7 +40,7 @@ artifacts:
       When a single value is specified, it is treated as both best-case
       and worst-case. The RTA must emit a diagnostic if only a single
       value is provided, advising the engineer to specify a range.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, scheduling, stpa]
     traces-to: [CC-S1]
     mitigates: [H-S2]
@@ -55,7 +55,7 @@ artifacts:
       are not specified in the model, the RTA must emit a warning that
       overhead is not accounted for and that the schedulability result
       is optimistic.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, scheduling, overhead, stpa]
     traces-to: [CC-S1]
     mitigates: [H-S2]
@@ -70,7 +70,7 @@ artifacts:
       (whose thread sets have changed) and re-run RTA for each dirty
       processor before reporting feasibility. An integration test must
       verify that no populated processor is skipped.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, scheduling, completeness, stpa]
     traces-to: [CC-S2]
     mitigates: [H-S2]
@@ -85,7 +85,7 @@ artifacts:
       The quick utilization test may be used as a pre-filter to reject
       obviously infeasible allocations, but the full RTA must confirm
       feasibility before the allocation is committed.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, scheduling, incremental, stpa]
     traces-to: [CC-S2]
     mitigates: [H-S2, H-S9]
@@ -105,7 +105,7 @@ artifacts:
       processor they reside on, not once per process that accesses them.
       An integration test must verify resource sums against hand-calculated
       values for a reference model.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, allocation, resources, stpa]
     traces-to: [CC-S3]
     mitigates: [H-S10]
@@ -120,7 +120,7 @@ artifacts:
       as soft constraints. When an allocation violates an affinity
       constraint, the diagnostic must name the constraint, the component,
       and the conflicting binding.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, allocation, constraints, stpa]
     traces-to: [CC-S4]
     mitigates: [H-S3]
@@ -135,7 +135,7 @@ artifacts:
       different processors, different buses, and (when specified)
       different cabinets. The solver must detect redundancy annotations
       and apply anti-affinity automatically.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, allocation, redundancy, stpa]
     traces-to: [CC-S4]
     mitigates: [H-S3]
@@ -155,7 +155,7 @@ artifacts:
       utilization exceeds capacity, the assignment must be rejected.
       The bandwidth check must account for protocol overhead (framing,
       headers, retransmission).
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, bus-binding, bandwidth, stpa]
     traces-to: [CC-S5]
     mitigates: [H-S4]
@@ -170,7 +170,7 @@ artifacts:
       check). The virtual bus library must declare security properties.
       Connections without a matching secure protocol must produce an
       error diagnostic, not be silently assigned to an insecure protocol.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, bus-binding, security, stpa]
     traces-to: [CC-S6]
     mitigates: [H-S4]
@@ -186,7 +186,7 @@ artifacts:
       cross-processor connection must receive a bus binding. A
       completeness check must verify that no cross-processor connection
       is unbound after Layer 2 completes.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, bus-binding, completeness, stpa]
     traces-to: [CC-S7]
     mitigates: [H-S4]
@@ -201,7 +201,7 @@ artifacts:
       Nominal values may be used only for optimization objective
       evaluation (not for constraint satisfaction). Library entries
       without worst-case values must produce a warning diagnostic.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, bus-binding, protocol-library, stpa]
     traces-to: [CC-S19]
     mitigates: [H-S4]
@@ -221,7 +221,7 @@ artifacts:
       context-switch time, and queuing delay. Each segment must be
       individually reported in the latency breakdown. Missing segments
       must produce a diagnostic.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, e2e-latency, stpa]
     traces-to: [CC-S8]
     mitigates: [H-S1, H-S9]
@@ -237,7 +237,7 @@ artifacts:
       stop), (c) time and space partitioning is specified. If any
       containment mechanism is missing, the co-location must be rejected
       with an error diagnostic identifying the missing mechanism.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, mixed-criticality, containment, stpa]
     traces-to: [CC-S9]
     mitigates: [H-S3]
@@ -255,7 +255,7 @@ artifacts:
       schedulability. The global validation must use the composed
       solution (not individual layer results) and must report all
       violations, not just the first one found.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, global-validation, composition, stpa]
     traces-to: [CC-S10]
     mitigates: [H-S9]
@@ -272,7 +272,7 @@ artifacts:
       processes X and Y"). Full automated backtracking is desirable
       but manual-with-guidance is acceptable for the initial
       implementation.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, backtracking, global-validation, stpa]
     traces-to: [CC-S10]
     mitigates: [H-S9]
@@ -292,7 +292,7 @@ artifacts:
       by text search on the CST). When the path does not resolve to
       exactly one CST node, the rewriter must emit an error and skip
       the rewrite for that component.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, rewriter, targeting, stpa]
     traces-to: [CC-S11]
     mitigates: [H-S5]
@@ -308,7 +308,7 @@ artifacts:
       none exists. Before insertion, the rewriter must check whether the
       property already exists; if so, it must update the value in place
       rather than inserting a duplicate.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, rewriter, preservation, stpa]
     traces-to: [CC-S12]
     mitigates: [H-S5]
@@ -323,7 +323,7 @@ artifacts:
       back (original files restored) and an error diagnostic must
       identify which file has the syntax error and the approximate
       insertion location.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, rewriter, validation, stpa]
     traces-to: [CC-S13]
     mitigates: [H-S5]
@@ -338,7 +338,7 @@ artifacts:
       If any file cannot be written (permissions, disk error), no files
       must be modified. The rewriter should write to temporary files
       first, then rename all atomically.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, rewriter, atomicity, stpa]
     traces-to: [CC-S14]
     mitigates: [H-S5]
@@ -353,7 +353,7 @@ artifacts:
       as a workspace edit). The engineer must have the option to accept
       or reject the changes. No source modification without explicit
       engineer approval.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, rewriter, review, stpa]
     traces-to: [CC-S14]
     mitigates: [H-S5, H-S4]
@@ -374,7 +374,7 @@ artifacts:
       certificate must contain sufficient data for an independent
       verifier to reproduce the gap calculation without running the
       solver.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, certificate, verification, stpa]
     traces-to: [CC-S15]
     mitigates: [H-S6]
@@ -389,7 +389,7 @@ artifacts:
       solution satisfies all constraints by re-evaluating constraints
       against the reported binding, (c) flag any inconsistency. The
       verifier must be included in the CI test suite.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, certificate, independent-check, stpa]
     traces-to: [CC-S15]
     mitigates: [H-S6]
@@ -405,7 +405,7 @@ artifacts:
       results (certificate must include the infeasibility proof or
       state which constraint set is unsatisfiable). Solutions without
       certificates must not be reported to the user.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, certificate, completeness, stpa]
     traces-to: [CC-S16]
     mitigates: [H-S6]
@@ -420,7 +420,7 @@ artifacts:
       hash matches the solver's objective function hash. Mismatched
       objectives must produce an internal error, not a misleading
       certificate.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, certificate, consistency, stpa]
     traces-to: [CC-S15]
     mitigates: [H-S6]
@@ -439,7 +439,7 @@ artifacts:
       analysis must use the rewritten model (not the pre-solve model).
       Any analysis diagnostic at error severity must cause the solver to
       report failure, even if the solver's internal validation passed.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, validation, post-solve, stpa]
     traces-to: [CC-S17]
     mitigates: [H-S1, H-S8]
@@ -456,7 +456,7 @@ artifacts:
       rewritten property values (not stale pre-rewrite values) by
       checking that a solver-inserted binding property appears in the
       post-solve analysis output.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, validation, cache-coherence, stpa]
     traces-to: [CC-S17]
     mitigates: [H-S8]
@@ -478,7 +478,7 @@ artifacts:
       produce error diagnostics. The solver must refuse to run until
       all required properties are present or the engineer explicitly
       acknowledges the gaps.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, completeness, pre-solve, stpa]
     traces-to: [CC-S18]
     mitigates: [H-S11]
@@ -495,7 +495,7 @@ artifacts:
       must produce an explicit diagnostic. If the engineer provides an
       explicit default via a solver configuration flag, the solver must
       emit a warning listing all properties using the override default.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, completeness, defaults, stpa]
     traces-to: [CC-S18]
     mitigates: [H-S11]
@@ -515,7 +515,7 @@ artifacts:
       criterion (lexicographic ordering of component names). A CI test
       must run the solver 10 times on the same input and verify
       identical output.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, determinism, stpa]
     traces-to: [CC-S7]
     mitigates: [H-S7]
@@ -531,7 +531,7 @@ artifacts:
       utilization for each processor/bus/memory, and a hash of the
       input model. Re-running the solver with the same input hash
       must produce the same binding or report a divergence diagnostic.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, reproducibility, persistence, stpa]
     traces-to: [CC-S7]
     mitigates: [H-S7]
@@ -551,7 +551,7 @@ artifacts:
       check that declared properties (bandwidth, latency, frame size)
       are within the ranges specified by the referenced standard.
       Library entries without standard references must produce a warning.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, protocol-library, validation, stpa]
     traces-to: [CC-S19]
     mitigates: [H-S4]
@@ -567,7 +567,7 @@ artifacts:
       emit a warning identifying the sensitive flows and the margin.
       This accounts for virtual bus library inaccuracies and real-world
       protocol variability.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, sensitivity, protocol-library, stpa]
     traces-to: [CC-S19]
     mitigates: [H-S4]
@@ -586,7 +586,7 @@ artifacts:
       each layer, and what properties the virtual bus library must
       provide. This documentation must be updated when the constraint
       model changes and must be reviewable by safety engineers.
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, documentation, stpa]
     traces-to: [SC-S1]
     mitigates: [H-S1]
@@ -602,7 +602,7 @@ artifacts:
       pass/fail status, (e) the optimality certificate, (f) list of
       all diagnostics by severity. The report must be both human-readable
       (text) and machine-parseable (JSON).
-    status: not-implemented
+    status: proposed
     tags: [safety, solver, reporting, stpa]
     traces-to: [SC-S1]
     mitigates: [H-S1, H-S5, H-S6]

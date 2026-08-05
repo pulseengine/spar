@@ -2,6 +2,7 @@
 name = "spar-codegen"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Code generation from AADL instance models (Rust, WIT, Lean4, Kani, Bazel)"

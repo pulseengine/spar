@@ -64,7 +64,18 @@ jobs:
           # both artifacts and Rust must still run the full suite.
           # Counted explicitly rather than relying on `grep -q` exit semantics,
           # so the gate's decision is readable in the job log.
-          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|[^/]*\.md|.*/.*\.md)$'
+          #
+          # `rivet.yaml` is on the list (#379) because it is a rivet artifact by
+          # every other statement in this file — the header above says "rivet
+          # artifacts", and the rivet-validate job says it catches regressions
+          # "in artifacts/, safety/stpa/, and rivet.yaml" — but it lives at the
+          # repo root, so `artifacts/.*` never matched it and a rivet.yaml-only
+          # PR ran the entire heavy suite. Safe to skip those jobs for it:
+          # nothing that compiles reads the file (no .rs, no build script, no
+          # Cargo.toml references it; only AGENTS.md, docs/, this workflow, and
+          # artifacts themselves), and it stays gated regardless because
+          # rivet-validate has no `changes` gate at all.
+          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|rivet\.yaml|[^/]*\.md|.*/.*\.md)$'
           n_code=$(printf '%s\n' "$changed" | grep -cvE "$allow" || true)
           echo "code-ish files in diff: $n_code"
           if [ "$n_code" -gt 0 ]; then
@@ -87,7 +98,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      # `cargo fmt --all` means "all members of THIS workspace", not "all
+      # crates in the repo". fuzz/, codegen-exec-oracle/ and
+      # codegen-kiln-oracle/ each carry their own `[workspace]` table, so the
+      # root's --all never opened them — and this required check reported green
+      # on main over an unformatted fuzz_codegen_roundtrip.rs (#383). A gate
+      # that prints nothing on success cannot distinguish "checked everything"
+      # from "checked a subset"; the replacement always prints the count.
+      #
+      # Self-test first, as with the other guardrails: the decision table
+      # carries the #383 regression itself (root clean + fuzz/ dirty must exit
+      # 1), so the gate proves it can still fail before it may pass.
+      - name: Format guardrail self-test
+        run: tools/check_fmt_workspaces.py --self-test
+      - name: Format (every workspace in the repo)
+        # Discovers the workspace set rather than listing it, and floors the
+        # count at 4. A hard-coded list would fix today's bug and re-open it
+        # the day someone adds a fifth workspace.
+        run: tools/check_fmt_workspaces.py
 
   clippy:
     name: Clippy
@@ -300,6 +328,11 @@ jobs:
     # The full-workspace exhaustive run lives in mutants-weekly.yml; this
     # gating job stays narrow (spar-analysis) with a survivor ratchet.
     runs-on: [self-hosted, linux, x64, lean-mem]
+    # The only run of this job to reach `success` in the last 25 CI runs took
+    # 182.3 minutes; the other 16 were cancelled by a later push. With no
+    # timeout it inherits GitHub's 6-hour default, so a wedged run holds a
+    # lean-mem runner for a shift. 240 gives the measured duration ~30% headroom.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -309,23 +342,53 @@ jobs:
         with:
           tool: cargo-mutants
       - name: Run cargo-mutants on spar-analysis
+        # `|| true` because cargo-mutants exits non-zero whenever ANY mutant
+        # survives and the ratchet below tolerates a bounded number. That makes
+        # this step incapable of reporting failure — so the next step has to
+        # prove the run happened rather than infer it from a missing file.
         run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib || true
+      # Runs FIRST, for the same reason as the other guardrail self-tests: the
+      # decision table includes the #381 regression itself (outcome files at the
+      # shallow path must FAIL, not read as zero survivors), so a refactor that
+      # reintroduced the misread would fail here rather than pass vacuously
+      # below. This gate spent four months unable to fail; it now has to prove
+      # it still can before it is allowed to judge anything.
+      - name: Mutants-report guardrail self-test
+        run: tools/check_mutants_report.py --self-test
       - name: Check surviving mutants
-        run: |
-          MISSED=$(grep -c '^MISSED' mutants-out/caught.txt 2>/dev/null || echo 0)
-          if [ -f mutants-out/missed.txt ]; then
-            MISSED=$(wc -l < mutants-out/missed.txt | tr -d ' ')
-          fi
-          echo "Surviving mutants: $MISSED"
-          # Ratchet gate: fail if more mutants survive than the threshold.
-          # Lower this number as tests improve. Target: 0.
-          MAX_MISSED=142
-          if [ "$MISSED" -gt "$MAX_MISSED" ]; then
-            echo "::error::$MISSED mutant(s) survived (threshold: $MAX_MISSED) — add tests to kill them"
-            cat mutants-out/missed.txt 2>/dev/null | head -30
-            exit 1
-          fi
-          echo "Mutant survivors ($MISSED) within threshold ($MAX_MISSED). Target: 0."
+        # The logic lives in tools/check_mutants_report.py rather than inline
+        # here because inline shell in a workflow is only testable by pushing —
+        # which is precisely how the original misread survived from 563eb8c
+        # (2026-03-22) to #381 without anyone able to run it against a report.
+        # The script's docstring carries the mechanism and the evidence.
+        #
+        # 292 is the survivor count from the only run of this gate that has
+        # ever FINISHED: run 30586785648, "1737 mutants tested in 87m: 292
+        # missed, 708 caught, 735 unviable, 2 timeouts", outcomes.json carrying
+        # a populated end_time.
+        #
+        # It is not a relaxation of 210, because 210 was never a measurement of
+        # this codebase. Run 30563879100 died 3h02m in — cargo-mutants' worker
+        # temp trees were deleted underneath it ("does not exist, refusing to
+        # create it") — after testing 1608 of the 1737 mutants it had found.
+        # `|| true` swallowed the crash. Its artifact therefore records
+        # total_mutants 1608 and end_time null: a partial run, whose 210 is the
+        # survivor count of the 92% that ran. Both runs used cargo-mutants
+        # 27.1.0 against byte-identical spar-analysis/src, so 210 → 292 is
+        # entirely the 129 mutants the crashed run never reached.
+        #
+        # The earlier 142 (5d6d98a, "down from 220") was a real hand
+        # measurement, but the gate was misreading its report for the whole
+        # four months it stood, so no number here has yet been enforced
+        # against a complete run. 292 is the first.
+        #
+        # Lower this number as tests improve; target 0. Raise it only against a
+        # run whose outcomes.json has an end_time — a partial run reports FEWER
+        # survivors than the truth, so a threshold taken from one is a ceiling
+        # set below the floor. Nothing here yet fails a truncated run: that
+        # detector, and the runner disk-pressure fault behind it, are #389.
+        # Walking the number back down is #382.
+        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
@@ -406,6 +469,92 @@ jobs:
       - name: rivet validate
         run: rivet validate --format text
 
+      # ── human-scoped guardrail ────────────────────────────────────────
+      # An artifact tagged `human-scoped` needs a human to scope it, so it must
+      # not be recorded as implemented/verified/released/accepted/passing.
+      # v0.35.0's REQ-CODEGEN-LAYOUT-CERT-001 was designated human-scoped in a
+      # planning note only; the autonomous cron implemented it, self-recorded
+      # `verified`, and merged in ~1h asserting a proof that did not exist. A
+      # guardrail that lives only in prose is not a guardrail.
+      #
+      # It belongs in *this* job because rivet-validate deliberately has NO
+      # `changes` gate (see the note at the top of this file), so it runs on
+      # every PR. Behind a path filter it would be skipped by exactly the
+      # code-only PR that quietly flips a status.
+      #
+      # Stdlib-only python3 on purpose: no workflow here installs a Python
+      # package, so importing PyYAML would make a *required* check depend on an
+      # unverified runner package — and a guardrail that cannot run reads as
+      # approval. The parser is fail-closed instead: syntax it does not fully
+      # handle exits 2 (red) rather than scanning past it.
+      - name: Human-scoped guardrail self-test
+        # Runs FIRST, and asserts the checker still rejects both fixtures, so a
+        # refactor that made it toothless fails here instead of letting the real
+        # check below pass vacuously.
+        run: tools/check_human_scoped.py --self-test
+      - name: Human-scoped guardrail
+        run: |
+          tools/check_human_scoped.py \
+            --artifacts-dir artifacts \
+            --artifacts-dir safety/stpa
+
+      # ── release-plane guardrail (#370) ────────────────────────────────
+      # rivet has two field planes. `release` is a CORE field, read by the CLI
+      # query surface (`rivet list --release vX.Y`); separately each artifact
+      # may carry a `fields:` bag for schema-declared custom keys. Writing
+      # `release:` into the bag is valid YAML, is tolerated by the schema, and
+      # is completely invisible to the query.
+      #
+      # 59 of 85 assignments were on the wrong plane. Eleven shipped releases
+      # returned ZERO artifacts from `rivet list --release` — which renders
+      # identically to a genuinely empty release. Release readiness in this
+      # project is a query ("what must we implement for vX.Y"), and for eleven
+      # releases the query was answering "nothing to do".
+      #
+      # rivet DID diagnose it — `INFO: field 'release' is not defined in
+      # schema`, once per offending artifact, all 59 correct and precise. They
+      # sat under 276 unrelated `ERROR:` lines from #371. This is a gate rather
+      # than a lint because the diagnostic already existed and was unreadable.
+      #
+      # Same stdlib-only, fail-closed rationale as the pair above.
+      - name: Release-plane guardrail self-test
+        # Runs FIRST, same reason. Asserts the finding COUNTS, not just the
+        # exit code: `exit 1` on the violation fixture is equally consistent
+        # with a checker that reports every `release:` it sees — one that does
+        # not discriminate on plane at all. Mutation-tested: each of the four
+        # fixtures kills exactly one guard, and deleting any guard reds this.
+        run: tools/check_release_plane.py --self-test
+      - name: Release-plane guardrail
+        run: |
+          tools/check_release_plane.py \
+            --artifacts-dir artifacts \
+            --artifacts-dir safety/stpa
+
+      # Required-context drift (#372). Same stdlib-only, fail-closed rules as
+      # above, and here for the same reason: it must run on the PR that edits a
+      # workflow, and that PR need not touch anything a path filter selects.
+      #
+      # Deliberately steps of *this* job rather than a job of its own. A new job
+      # would itself be gateable, so it would have to be added to
+      # .github/required-contexts.txt — and syncing branch protection to match
+      # needs an admin token CI does not have. It would ship permanently red.
+      - name: Required-context guardrail self-test
+        run: tools/check_required_contexts.py --self-test
+      - name: Required-context guardrail
+        run: tools/check_required_contexts.py
+      # Closure MSRV drift (#369). Here rather than in a code-gated job for the
+      # same reason as above, and it matters more here than anywhere: the PR
+      # that raises the real floor is a `cargo update`, which touches only
+      # Cargo.lock. Behind `needs.changes.outputs.code` that is exactly the PR
+      # most likely to be filtered out.
+      #
+      # Cheap despite needing cargo: `cargo metadata` resolves, it does not
+      # compile, and this job already installs a toolchain for the rivet CLI.
+      - name: MSRV guardrail self-test
+        run: tools/check_msrv.py --self-test
+      - name: MSRV guardrail
+        run: tools/check_msrv.py
+
   # ── Bazel test sweep ───────────────────────────────────────────────
   # Issue #135 acceptance: `bazel test //...` to pick up Rust + Lean
   # targets via tools/bazel/rules_lean and rules_wasm_component.
@@ -417,7 +566,11 @@ jobs:
   #
   # Time budget: cold cache ≤30 min, warm ≤5 min (per #135).
   bazel-test:
-    name: Bazel test (//...)
+    # "(advisory)" is in the NAME, not just the comment above, because the name
+    # is the only thing a PR reader sees. `continue-on-error` makes the tick
+    # green whatever happened — without the marker the check-run renders a claim
+    # the run does not support. Enforced by tools/check_required_contexts.py.
+    name: Bazel test (//...) (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest until Bazel is installed on the smithy host.
@@ -468,7 +621,12 @@ jobs:
   #      continue-on-error to false and add to the required-checks list.
   #   3. At that point, extend MAX_TASKS from 4 to 8 and re-tune unwinds.
   kani:
-    name: Kani Bounded Model Checking
+    # "(advisory)" belongs in the name for as long as step 2 above is pending:
+    # `continue-on-error` greens the tick regardless, and "Kani Bounded Model
+    # Checking ✓" is exactly the claim a reader should not draw from that.
+    # Drop the marker in the same commit that flips continue-on-error to false
+    # and adds this to .github/required-contexts.txt — the gate will insist.
+    name: Kani Bounded Model Checking (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-latest because kani-verifier bundles CBMC (~100 MB)

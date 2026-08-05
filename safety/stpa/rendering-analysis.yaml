@@ -159,7 +159,7 @@ artifacts:
   - id: RENDER-REQ-003
     type: requirement
     title: Interactive HTML with zoom/pan/minimap/search
-    status: partial
+    status: approved
     description: >
       The interactive HTML output must support zoom, pan, a minimap
       for orientation in large models, and text search to locate
@@ -204,5 +204,4 @@ artifacts:
     hazards: [H-R3]
     satisfies: [ARCH-R4]
     verified-by: [VAL-R5]
-    fields:
-      release: v0.22.0
+    release: v0.22.0
