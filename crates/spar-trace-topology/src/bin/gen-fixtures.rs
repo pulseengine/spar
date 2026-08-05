@@ -18,7 +18,7 @@
 //!
 //! | File             | Source                                         |
 //! |------------------|------------------------------------------------|
-//! | `capture.pcapng` | `tcpdump` in the GM namespace                  |
+//! | `capture.pcapng` | `dumpcap` in the GM namespace (see note below)  |
 //! | `lldp.json`      | `lldpd -H 0` + `lldpctl -f json`               |
 //! | `qcc-yang.json`  | `tc -j qdisc show` transformed to Qcc YANG     |
 //! | `gptp.json`      | `ptp4l` + `pmc` poll transformed to gPTP JSON  |
@@ -260,8 +260,7 @@ fn run() -> Result<(), FixtureError> {
     fs::write(&paths.qcc_json, serde_json::to_string_pretty(&qcc_value)?)?;
     eprintln!("gen-fixtures: wrote {}", paths.qcc_json.display());
 
-    // 7. Start packet capture (background tcpdump, -c 50 frames, PCAPNG).
-    let pcapng_str = paths.pcapng.to_string_lossy().into_owned();
+    // 7. Start packet capture (background dumpcap, -c 50 frames, pcapng).
     // dumpcap, not tcpdump. The fixture is REQUIRED to be pcapng
     // (REQ-TRACE-INGEST-PCAPNG: "given a `.pcapng` file recorded …", and the
     // ingest is built on PcapNGReader), and upstream tcpdump cannot write
@@ -277,12 +276,51 @@ fn run() -> Result<(), FixtureError> {
     // exactly the kind of unstated assumption that produced this bug, so it is
     // stated. `-P` would select classic pcap; passing neither and trusting the
     // default is how the next person inherits this.
+    // dumpcap captures to guest-local tmpfs, NOT straight to /fixtures, and
+    // gen-fixtures copies the result across afterwards.
+    //
+    // /fixtures is a 9p share of a host directory (flake.nix: trans=virtio,
+    // version=9p2000.L), so it carries the HOST runner's uid and mode. The
+    // guest's root can write there only through CAP_DAC_OVERRIDE — and
+    // dumpcap drops every capability it holds, deliberately, the moment the
+    // capture device is open and before the output file is created:
+    //
+    //     /* If not using libcap: we now can now set euid/egid to ruid/rgid */
+    //     #ifndef HAVE_LIBCAP
+    //         relinquish_special_privs_perm();
+    //     #else
+    //         relinquish_all_capabilities();
+    //     #endif
+    //                                            — dumpcap.c:3355-3361
+    //
+    // So run 30991119966 got "Capturing on 'veth-gm'" and then "could not be
+    // opened: Permission denied" for the savefile. That is dumpcap doing its
+    // job — it is designed to hold privileges for as little as possible — and
+    // tcpdump only appeared to work here because it never drops capabilities.
+    //
+    // Capturing to /tmp sidesteps the whole question rather than tuning 9p
+    // uid/mode options that would have to stay aligned with whatever uid the
+    // runner happens to use.
+    let pcapng_local = "/tmp/capture.pcapng";
     let mut capture_child = netns_spawn_bg(
         &ns_gm.name,
         "dumpcap",
-        &["-i", veth_gm, "-w", &pcapng_str, "-n", "-c", "50"],
+        // `-F pcapng`, not `-n`: dumpcap 4.6 accepts `-n` but answers
+        // "'-n' is deprecated; use '-F pcapng' to set the output format".
+        // Still explicit rather than relying on the default, for the reason
+        // above.
+        &[
+            "-i",
+            veth_gm,
+            "-w",
+            pcapng_local,
+            "-F",
+            "pcapng",
+            "-c",
+            "50",
+        ],
     )?;
-    eprintln!("gen-fixtures: dumpcap capturing (pcapng) ...");
+    eprintln!("gen-fixtures: dumpcap capturing (pcapng) to {pcapng_local} ...");
 
     // 8. Start lldpd in GM and SW namespaces (-H 0 = immediate TX).
     //
@@ -401,7 +439,7 @@ fn run() -> Result<(), FixtureError> {
 
     // 12. Stop background processes and flush PCAPNG.
     //
-    // `-c 50` means tcpdump normally exits on its own, cleanly, once it has
+    // `-c 50` means dumpcap normally exits on its own, cleanly, once it has
     // its frames; try_wait tells us whether that happened so the log can say
     // which of the two it was. If it is still running we SIGKILL it, which is
     // survivable now only because `-U` above has already put every captured
@@ -420,7 +458,7 @@ fn run() -> Result<(), FixtureError> {
     thread::sleep(Duration::from_millis(500));
 
     // This line used to be `eprintln!("wrote {}")` and nothing else — a claim
-    // about a file the program had never looked at. tcpdump is the only
+    // about a file the program had never looked at. The capture is the only
     // fixture producer that is a separate process, so it is the only one whose
     // output can be absent while gen-fixtures reports success, and in run
     // 30984170834 that is exactly what happened: "wrote /fixtures/
@@ -428,19 +466,17 @@ fn run() -> Result<(), FixtureError> {
     // steps later was the first thing to notice.
     //
     // A "wrote" line should be a measurement, not an assertion.
-    let pcapng_bytes = fs::read(&paths.pcapng).map_err(|e| {
+    let pcapng_bytes = fs::read(pcapng_local).map_err(|e| {
         FixtureError::Transform(format!(
-            "dumpcap produced no readable file at {}: {e}",
-            paths.pcapng.display()
+            "dumpcap produced no readable file at {pcapng_local}: {e}"
         ))
     })?;
     if pcapng_bytes.is_empty() {
         return Err(FixtureError::Transform(format!(
-            "dumpcap wrote a zero-byte capture at {}. An empty capture is not \
-             a capture of no traffic — a Section Header Block is written before \
-             any packet arrives, so zero bytes means the writer never flushed \
-             or never started.",
-            paths.pcapng.display()
+            "dumpcap wrote a zero-byte capture at {pcapng_local}. An empty \
+             capture is not a capture of no traffic — a Section Header Block is \
+             written before any packet arrives, so zero bytes means the writer \
+             never flushed or never started."
         )));
     }
 
@@ -467,7 +503,7 @@ fn run() -> Result<(), FixtureError> {
              0xa1b2c3d4 (any byte order) means classic pcap — the capture tool \
              wrote the wrong format and the `.pcapng` suffix is not evidence of \
              anything.",
-            paths.pcapng.display(),
+            pcapng_local,
             head.join(" ")
         )));
     }
@@ -481,21 +517,48 @@ fn run() -> Result<(), FixtureError> {
     // This ran on the host runner until now, where tshark was not installed and
     // its exit code was being swallowed by a pipe into `tee`. It runs here
     // because here is where the binary is.
-    let tshark_out = capture_stdout("tshark", &["-r", &pcapng_str])?;
+    let tshark_out = capture_stdout("tshark", &["-r", pcapng_local])?;
     let frames = tshark_out.lines().filter(|l| !l.trim().is_empty()).count();
     if frames == 0 {
         return Err(FixtureError::Transform(format!(
-            "tshark read {} without error but found zero frames. tshark exits 0 \
-             on a valid capture containing no packets, so the frame count has to \
-             be checked separately from the exit status.",
+            "tshark read {pcapng_local} without error but found zero frames. \
+             tshark exits 0 on a valid capture containing no packets, so the \
+             frame count has to be checked separately from the exit status."
+        )));
+    }
+
+    // Now publish it to the 9p share. gen-fixtures still holds every capability
+    // it started with, so unlike dumpcap it can write here — the same way the
+    // other three fixtures get written.
+    fs::write(&paths.pcapng, &pcapng_bytes).map_err(|e| {
+        FixtureError::Transform(format!(
+            "captured {} bytes to {pcapng_local} but could not publish them to {}: {e}",
+            pcapng_bytes.len(),
             paths.pcapng.display()
+        ))
+    })?;
+
+    // Confirm the published copy, not the source. A copy is another operation
+    // that can silently do nothing, and `paths.pcapng` — not the tmpfs file —
+    // is what the harness and the ingest will read.
+    let published = fs::metadata(&paths.pcapng).map(|m| m.len()).map_err(|e| {
+        FixtureError::Transform(format!(
+            "published {} but cannot stat it: {e}",
+            paths.pcapng.display()
+        ))
+    })?;
+    if published != pcapng_bytes.len() as u64 {
+        return Err(FixtureError::Transform(format!(
+            "published {} is {published} bytes but the capture was {} — the copy \
+             to the 9p share was truncated.",
+            paths.pcapng.display(),
+            pcapng_bytes.len()
         )));
     }
 
     eprintln!(
-        "gen-fixtures: wrote {} ({} bytes, pcapng SHB verified, {frames} frames per tshark)",
-        paths.pcapng.display(),
-        pcapng_bytes.len()
+        "gen-fixtures: wrote {} ({published} bytes, pcapng SHB verified, {frames} frames per tshark)",
+        paths.pcapng.display()
     );
 
     // 13. Drop guards → ip netns del for each namespace.
