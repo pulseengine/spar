@@ -104,50 +104,107 @@ pub fn tc_qdisc_json_to_qcc(port_name: &str, tc_json: &str) -> Result<Value, Fix
     Ok(json!({ "interfaces": [iface] }))
 }
 
+/// Lists the keys of a JSON object for an error message, so a shape mismatch
+/// reports what was actually there instead of only what was missing.
+///
+/// A parser that says "key X is missing" tells you nothing you did not already
+/// know from the fact that it failed. The keys it *did* see are the evidence
+/// that identifies the real shape, and in a fixture generated inside a VM this
+/// is the only chance to capture them.
+fn describe_keys(value: Option<&Value>) -> String {
+    match value.and_then(Value::as_object) {
+        Some(map) => map
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", "),
+        None if value.is_some() => "<not a JSON object>".to_string(),
+        None => "<absent>".to_string(),
+    }
+}
+
+/// Pull the gate-control list out of one taprio qdisc of `tc -j qdisc show`.
+///
+/// The shape below is taken from iproute2's own printer, not from the man page
+/// and not from the kernel's netlink vocabulary — those are the *input* grammar
+/// (`tc ... sched-entry S ff 400000`) and they do not name the output keys.
+/// In `tc/q_taprio.c`, `print_sched_list` opens the array as
+///
+/// ```text
+/// open_json_array(PRINT_JSON, "schedule");
+/// ```
+///
+/// and each entry is `index` / `cmd` / `gatemask` / `interval` (`print_uint`,
+/// `print_string`, `print_0xhex`, `print_uint`). `tc/tc_qdisc.c` wraps every
+/// qdisc-specific block in `open_json_object("options")`, which is where the
+/// `options.` prefix comes from:
+///
+/// ```text
+/// { "kind": "taprio", "options": { "schedule": [
+///     { "index": 0, "cmd": "S", "gatemask": "0xff", "interval": 400000 }
+/// ]}}
+/// ```
+///
+/// Verified identical across iproute2 v4.20.0 (which introduced taprio), v5.10,
+/// v6.1 and v6.17 — the array has been named `schedule` for the tool's whole
+/// taprio history, so there is no older spelling to stay compatible with.
+/// v6.17 is what this repo's pinned nixos-25.11 channel builds into the guest.
+///
+/// `taprio_print_opt` prints the active (*oper*) schedule at `options.schedule`
+/// and, when a not-yet-active schedule is pending, a second copy nested under
+/// `options.admin`. A schedule installed with a base-time in the future is
+/// admin-only until that time arrives, so both are accepted — oper first,
+/// because when both exist the oper one is what the port is enforcing.
 fn extract_taprio_gcl(qdisc: &Value) -> Result<Vec<Value>, FixtureError> {
-    // `tc -j qdisc show` taprio output embeds sched-entry-list under options.
-    // Real `tc -j` output shape (iproute2 6.1):
-    //   { "kind": "taprio", "options": { "sched-entry-list": [
-    //       { "command": "S", "gatemask": "0x01", "interval": 500000 }
-    //   ]}}
-    let entries = qdisc
-        .get("options")
-        .and_then(|o| o.get("sched-entry-list"))
+    let options = qdisc.get("options");
+    let admin = options.and_then(|o| o.get("admin"));
+
+    let entries = options
+        .and_then(|o| o.get("schedule"))
+        .or_else(|| admin.and_then(|a| a.get("schedule")))
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            FixtureError::Transform(
-                "taprio qdisc missing options.sched-entry-list array".to_string(),
-            )
+            FixtureError::Transform(format!(
+                "taprio qdisc has neither options.schedule nor options.admin.schedule; \
+                 options keys: [{}]; options.admin keys: [{}]",
+                describe_keys(options),
+                describe_keys(admin),
+            ))
         })?;
 
     let mut gcl = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
-        // gatemask is a hex string like "0xff" or a number depending on kernel version.
+        // iproute2 prints gatemask via `print_0xhex`, which in JSON context
+        // snprintf's "%#llx" and emits it as a *string* — always, in every
+        // release. So the string arm is the real one, and note it is not
+        // zero-padded: mask 1 renders "0x1". The numeric arm below is
+        // defensive tolerance for a hypothetical other producer, not a shape
+        // any released `tc` emits; see `tc_gatemask_as_number_parsed`.
         let gate_states_value: u8 = match entry.get("gatemask") {
             Some(Value::String(s)) => {
                 let s = s.trim_start_matches("0x").trim_start_matches("0X");
                 u8::from_str_radix(s, 16).map_err(|e| {
                     FixtureError::Transform(format!(
-                        "sched-entry-list[{i}] gatemask {s:?} is not a hex u8: {e}"
+                        "schedule[{i}] gatemask {s:?} is not a hex u8: {e}"
                     ))
                 })?
             }
             Some(Value::Number(n)) => {
                 let v = n.as_u64().ok_or_else(|| {
                     FixtureError::Transform(format!(
-                        "sched-entry-list[{i}] gatemask is not a non-negative integer"
+                        "schedule[{i}] gatemask is not a non-negative integer"
                     ))
                 })?;
                 if v > u64::from(u8::MAX) {
                     return Err(FixtureError::Transform(format!(
-                        "sched-entry-list[{i}] gatemask {v} exceeds u8::MAX"
+                        "schedule[{i}] gatemask {v} exceeds u8::MAX"
                     )));
                 }
                 v as u8
             }
             _ => {
                 return Err(FixtureError::Transform(format!(
-                    "sched-entry-list[{i}] missing or non-string gatemask"
+                    "schedule[{i}] missing or non-string gatemask"
                 )));
             }
         };
@@ -157,7 +214,7 @@ fn extract_taprio_gcl(qdisc: &Value) -> Result<Vec<Value>, FixtureError> {
                 .get("interval")
                 .and_then(Value::as_u64)
                 .ok_or_else(|| {
-                    FixtureError::Transform(format!("sched-entry-list[{i}] missing `interval` u64"))
+                    FixtureError::Transform(format!("schedule[{i}] missing `interval` u64"))
                 })?;
 
         gcl.push(json!({
@@ -340,23 +397,48 @@ mod tests {
 
     // ── tc → Qcc YANG ──────────────────────────────────────────────────────
 
-    /// Realistic `tc -j qdisc show` output with one taprio and one cbs qdisc.
-    /// Values taken from iproute2 6.1 manual examples.
+    /// `tc -j qdisc show` output for the taprio + cbs pair that
+    /// `bin/gen-fixtures.rs` installs on the switch veth.
+    ///
+    /// Every key here is derived from iproute2's printer source (v6.17.0,
+    /// `tc/q_taprio.c` + `tc/q_cbs.c`, wrapped in `options` by
+    /// `tc/tc_qdisc.c:315`), NOT from the man page. That distinction is the
+    /// whole reason this constant is being rewritten: the previous version was
+    /// written from the *input* grammar and claimed in a comment to be "from
+    /// iproute2 6.1 manual examples". It used `sched-entry-list` (the netlink
+    /// attribute `TCA_TAPRIO_ATTR_SCHED_ENTRY_LIST`, lowercased) and `command`
+    /// (the man page's argument name), neither of which iproute2 has ever
+    /// emitted in JSON — checked against v4.20.0, v5.10, v6.1 and v6.17. The
+    /// parser was written to match that invented shape, so this test passed for
+    /// as long as it existed while the real readback in the VM could only fail.
+    ///
+    /// Note `"0x1"`, not `"0x01"`: gatemask goes through `print_0xhex`, which
+    /// formats with `%#llx` and does not zero-pad.
+    ///
+    /// Faithfulness is claimed for the structure and for the fields the
+    /// transform reads (`kind`, `options`, `schedule`, `gatemask`, `interval`,
+    /// `idleslope`). The surrounding cosmetic fields are representative.
     const TC_TAPRIO_CBS_JSON: &str = r#"[
         {
             "kind": "taprio",
             "handle": "100:",
             "parent": "root",
             "options": {
-                "num_tc": 4,
+                "tc": 4,
                 "map": [0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                "queues": [{ "count": 1, "offset": 0 }],
-                "base-time": 0,
+                "queues": [
+                    { "offset": 0, "count": 1 },
+                    { "offset": 1, "count": 1 },
+                    { "offset": 2, "count": 1 },
+                    { "offset": 3, "count": 1 }
+                ],
                 "clockid": "TAI",
                 "flags": "0x0",
-                "sched-entry-list": [
-                    { "command": "S", "gatemask": "0xff", "interval": 400000 },
-                    { "command": "S", "gatemask": "0x01", "interval": 100000 }
+                "base_time": 0,
+                "cycle_time": 500000,
+                "schedule": [
+                    { "index": 0, "cmd": "S", "gatemask": "0xff", "interval": 400000 },
+                    { "index": 1, "cmd": "S", "gatemask": "0x1", "interval": 100000 }
                 ]
             }
         },
@@ -423,13 +505,18 @@ mod tests {
         assert!(p.streams.is_none());
     }
 
+    /// iproute2 renders gatemask through `print_0xhex`, which in JSON context
+    /// always emits a string. The numeric arm of the parser is therefore
+    /// defensive, not a shape any released `tc` produces — this test pins that
+    /// tolerance so a future refactor does not drop it, but passing it is NOT
+    /// evidence about real `tc` output.
     #[test]
     fn tc_gatemask_as_number_parsed() {
         let tc_json = r#"[{
             "kind": "taprio",
             "options": {
-                "sched-entry-list": [
-                    { "command": "S", "gatemask": 255, "interval": 200000 }
+                "schedule": [
+                    { "index": 0, "cmd": "S", "gatemask": 255, "interval": 200000 }
                 ]
             }
         }]"#;
@@ -438,6 +525,128 @@ mod tests {
         let src = QccYangSwitchConfigSource::from_json_str(&json_str).unwrap();
         let gcl = src.ports()[0].gate_control_list.as_ref().unwrap();
         assert_eq!(gcl[0].gate_states_value, 0xff);
+    }
+
+    /// The shape this parser used to accept must now be REJECTED.
+    ///
+    /// This is the guard against the defect that produced this whole fix. The
+    /// old fixture and the old parser encoded the same invented shape, so they
+    /// agreed with each other and the test passed while the only real `tc` in
+    /// the project — the one in the fixture VM — could never satisfy it. Two
+    /// sides sharing one misconception is not a round trip.
+    ///
+    /// Pinning the *rejection* is what makes the accept-test mean something:
+    /// the two shapes now produce different outcomes, so the suite can tell
+    /// them apart. A parser lenient enough to take both would pass its accept
+    /// test either way and prove nothing about which one `tc` emits.
+    ///
+    /// Rejecting costs no compatibility: `sched-entry-list` has never appeared
+    /// in iproute2's JSON output in any release since taprio landed in v4.20.0.
+    #[test]
+    fn tc_rejects_the_netlink_attribute_shape() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "sched-entry-list": [
+                    { "command": "S", "gatemask": "0xff", "interval": 400000 }
+                ]
+            }
+        }]"#;
+        let err = tc_qdisc_json_to_qcc("swp1", tc_json)
+            .expect_err("the netlink-attribute spelling must not be accepted as tc output");
+
+        // And the message must carry the evidence: the keys actually present.
+        // Without this, a VM-side failure reports only what it wanted, which is
+        // exactly how the real shape stayed unknown through six dispatches.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sched-entry-list"),
+            "error must name the keys it saw, got: {msg}"
+        );
+    }
+
+    /// A schedule whose base-time has not yet arrived is reported by `tc` only
+    /// under `options.admin`; `options.schedule` carries the *oper* schedule and
+    /// is absent until the kernel promotes it. Reading back immediately after
+    /// configuring can land in that window.
+    #[test]
+    fn tc_taprio_admin_only_schedule_is_read() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "tc": 4,
+                "clockid": "TAI",
+                "admin": {
+                    "base_time": 9999999999,
+                    "cycle_time": 500000,
+                    "schedule": [
+                        { "index": 0, "cmd": "S", "gatemask": "0xff", "interval": 400000 }
+                    ]
+                }
+            }
+        }]"#;
+        let out = tc_qdisc_json_to_qcc("swp1", tc_json).unwrap();
+        let json_str = serde_json::to_string(&out).unwrap();
+        let src = QccYangSwitchConfigSource::from_json_str(&json_str).unwrap();
+        let gcl = src.ports()[0].gate_control_list.as_ref().unwrap();
+        assert_eq!(gcl.len(), 1);
+        assert_eq!(gcl[0].gate_states_value, 0xff);
+        assert_eq!(gcl[0].time_interval_value, 400_000);
+    }
+
+    /// When both are present the *oper* schedule wins: it is what the port is
+    /// enforcing right now, while `admin` is a pending replacement.
+    #[test]
+    fn tc_taprio_prefers_oper_schedule_over_admin() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "schedule": [
+                    { "index": 0, "cmd": "S", "gatemask": "0x0f", "interval": 111000 }
+                ],
+                "admin": {
+                    "schedule": [
+                        { "index": 0, "cmd": "S", "gatemask": "0xf0", "interval": 222000 }
+                    ]
+                }
+            }
+        }]"#;
+        let out = tc_qdisc_json_to_qcc("swp1", tc_json).unwrap();
+        let json_str = serde_json::to_string(&out).unwrap();
+        let src = QccYangSwitchConfigSource::from_json_str(&json_str).unwrap();
+        let gcl = src.ports()[0].gate_control_list.as_ref().unwrap();
+        assert_eq!(gcl.len(), 1);
+        assert_eq!(gcl[0].gate_states_value, 0x0f);
+        assert_eq!(gcl[0].time_interval_value, 111_000);
+    }
+
+    /// A shape mismatch must report the keys it *did* see.
+    ///
+    /// The failing dispatch said only "taprio qdisc missing
+    /// options.sched-entry-list array", which restates the assumption instead of
+    /// reporting the observation — the run therefore cost a full VM dispatch and
+    /// returned no information about the real shape. `describe_keys` exists so
+    /// the next unknown shape is identified by the run that hits it.
+    #[test]
+    fn taprio_shape_error_reports_observed_keys() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": { "tc": 4, "clockid": "TAI", "some-future-spelling": [] }
+        }]"#;
+        let msg = tc_qdisc_json_to_qcc("swp1", tc_json)
+            .expect_err("unknown schedule spelling must fail")
+            .to_string();
+
+        for expected in ["tc", "clockid", "some-future-spelling"] {
+            assert!(
+                msg.contains(expected),
+                "error must list observed key {expected:?}, got: {msg}"
+            );
+        }
+        assert!(
+            msg.contains("<absent>"),
+            "error must say options.admin was absent, got: {msg}"
+        );
     }
 
     // ── pmc → gPTP JSON ───────────────────────────────────────────────────
