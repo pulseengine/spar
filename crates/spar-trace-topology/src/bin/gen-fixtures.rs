@@ -267,7 +267,17 @@ fn run() -> Result<(), FixtureError> {
             veth_gm,
             "-w",
             &pcapng_str,
+            // `--immediate-mode` and `-U` are NOT the same knob, and only the
+            // second one was missing. `--immediate-mode` governs how quickly
+            // the KERNEL hands packets to libpcap; `-U` governs whether
+            // libpcap's dump writer flushes each packet to the FILE instead of
+            // accumulating a stdio buffer.
+            //
+            // Without `-U`, run 30984170834 produced a 0-byte capture: the
+            // teardown below calls Child::kill(), which is SIGKILL, and a
+            // SIGKILLed process does not flush stdio. The buffer went with it.
             "--immediate-mode",
+            "-U",
             "-c",
             "50",
         ],
@@ -390,12 +400,53 @@ fn run() -> Result<(), FixtureError> {
     eprintln!("gen-fixtures: wrote {}", paths.gptp_json.display());
 
     // 12. Stop background processes and flush PCAPNG.
-    let _ = capture_child.kill();
-    let _ = capture_child.wait();
+    //
+    // `-c 50` means tcpdump normally exits on its own, cleanly, once it has
+    // its frames; try_wait tells us whether that happened so the log can say
+    // which of the two it was. If it is still running we SIGKILL it, which is
+    // survivable now only because `-U` above has already put every captured
+    // packet on disk.
+    match capture_child.try_wait() {
+        Ok(Some(st)) => eprintln!("gen-fixtures: tcpdump exited on its own ({st})"),
+        Ok(None) => {
+            eprintln!("gen-fixtures: tcpdump still running (fewer than 50 frames); stopping it");
+            let _ = capture_child.kill();
+            let _ = capture_child.wait();
+        }
+        Err(e) => eprintln!("gen-fixtures: warning: cannot poll tcpdump: {e}"),
+    }
     let _ = ptp4l_child.kill();
     let _ = ptp4l_child.wait();
     thread::sleep(Duration::from_millis(500));
-    eprintln!("gen-fixtures: wrote {}", paths.pcapng.display());
+
+    // This line used to be `eprintln!("wrote {}")` and nothing else — a claim
+    // about a file the program had never looked at. tcpdump is the only
+    // fixture producer that is a separate process, so it is the only one whose
+    // output can be absent while gen-fixtures reports success, and in run
+    // 30984170834 that is exactly what happened: "wrote /fixtures/
+    // capture.pcapng" printed above a zero-byte file, and the harness three
+    // steps later was the first thing to notice.
+    //
+    // A "wrote" line should be a measurement, not an assertion.
+    let pcapng_len = fs::metadata(&paths.pcapng).map(|m| m.len()).map_err(|e| {
+        FixtureError::Transform(format!(
+            "tcpdump produced no file at {}: {e}",
+            paths.pcapng.display()
+        ))
+    })?;
+    if pcapng_len == 0 {
+        return Err(FixtureError::Transform(format!(
+            "tcpdump wrote a zero-byte capture at {}. An empty capture is not \
+             a capture of no traffic — libpcap writes a file header before any \
+             packet arrives, so zero bytes means the writer never flushed or \
+             never started.",
+            paths.pcapng.display()
+        )));
+    }
+    eprintln!(
+        "gen-fixtures: wrote {} ({pcapng_len} bytes)",
+        paths.pcapng.display()
+    );
 
     // 13. Drop guards → ip netns del for each namespace.
     drop(ns_ep);
