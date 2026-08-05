@@ -2,6 +2,7 @@
 name = "spar-mcp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "MCP server exposing spar's verification oracles (read-only) for AI agent integration"

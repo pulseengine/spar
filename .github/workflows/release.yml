@@ -46,6 +46,34 @@ jobs:
           fi
           echo "All versions match: $TAG_VERSION"
 
+  # ── Tag-point check (issue #366) ──────────────────────────────────────
+  #
+  # `check-versions` above cannot catch a tag placed BEHIND main: it measures
+  # the version *window* (Cargo.toml reads X.Y.Z from the bump commit until the
+  # next bump), and that window spans both the commits a tag included and the
+  # ones it silently left out. v0.31.0 missed a parser fix by 5m06s and v0.33.0
+  # excluded two commits — both with check-versions green.
+  #
+  # This job gates the PUBLISH, not the builds: it is wired into
+  # `create-release`'s `needs`, so a red verdict stops anything outward-facing
+  # while the maintainer still gets full build feedback to act on. The logic —
+  # and the four things it deliberately does not claim to catch — live in the
+  # script.
+  tag-point:
+    name: Verify tag point
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is load-bearing: the gate walks C..origin/main, and the
+      # default depth of 1 has no history to walk. fetch-tags makes the tag
+      # OBJECT (not just the commit) present, which is what carries the tagger
+      # date and the message the gate reads.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Check the tag does not silently exclude finished work
+        run: tools/ci/check-tag-point.sh
+
   # ── Cross-platform binary builds ──────────────────────────────────────
   build-binaries:
     name: Build ${{ matrix.target }}
@@ -401,7 +429,7 @@ jobs:
   # the compliance-report archive, both folded into SHA256SUMS.txt.
   create-release:
     name: Create GitHub Release
-    needs: [build-binaries, build-compliance, build-test-evidence, build-vsix, build-sbom, build-wasm]
+    needs: [tag-point, build-binaries, build-compliance, build-test-evidence, build-vsix, build-sbom, build-wasm]
     runs-on: ubuntu-latest
     # Restated at job-level: actions/attest-build-provenance + cosign
     # keyless OIDC need both `id-token: write` and `attestations: write`.

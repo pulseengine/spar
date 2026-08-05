@@ -458,7 +458,7 @@ artifacts:
       with explicit arms for known non-semantic kinds and a catch-all that
       emits a warning diagnostic "unhandled SysML v2 construct: {kind}".
       This mirrors the AADL lowering exhaustiveness (STPA-REQ-004).
-    status: not-implemented
+    status: proposed
     tags: [safety, sysml2, lowering, stpa]
     traces-to: [CC-15]
     mitigates: [H-7]
@@ -473,7 +473,7 @@ artifacts:
       it must not be classified as system. A test suite must cover all
       category inference paths with at least one test per SysML v2
       construct type (part def, action def, state def, etc.).
-    status: not-implemented
+    status: proposed
     tags: [safety, sysml2, category, stpa]
     traces-to: [CC-16]
     mitigates: [H-7, H-1]
@@ -487,7 +487,7 @@ artifacts:
       the referenced type definition's category, not hardcoded to
       ComponentCategory::System. When the referenced type is not
       available, a warning diagnostic must be emitted.
-    status: not-implemented
+    status: proposed
     tags: [safety, sysml2, category, stpa]
     traces-to: [CC-16]
     mitigates: [H-7, H-3]
@@ -501,7 +501,7 @@ artifacts:
       produce typed PropertyExpr values (IntegerLit/RealLit with unit
       annotation), not Opaque strings. Only expressions that genuinely
       cannot be parsed should use PropertyExpr::Opaque.
-    status: not-implemented
+    status: proposed
     tags: [safety, sysml2, properties, stpa]
     traces-to: [CC-17]
     mitigates: [H-7, H-6]
@@ -515,7 +515,12 @@ artifacts:
       AADL ItemTree has the correct category, features, subcomponents,
       connections, and property associations. A golden model test must
       verify end-to-end lowering of a non-trivial SysML v2 model.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      Tests exist, but which of the 14+ lowering rules each one covers
+      has not been mapped, so per-rule coverage is deliberately not
+      asserted here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [safety, sysml2, testing, stpa]
     traces-to: [CC-15, CC-16]
     mitigates: [H-7]
@@ -534,7 +539,7 @@ artifacts:
       the rule must fail with a clear error message, not produce a
       cached success artifact. The check must use `which` or equivalent
       and verify the tool version meets minimum requirements.
-    status: not-implemented
+    status: proposed
     tags: [safety, codegen, verification, bazel, stpa]
     traces-to: [CC-18]
     mitigates: [H-8]
@@ -548,7 +553,7 @@ artifacts:
       generating code that includes verification annotations. An
       integration test must verify that generated BUILD.bazel files
       contain at least one verification target per generated crate.
-    status: not-implemented
+    status: proposed
     tags: [safety, codegen, verification, bazel, stpa]
     traces-to: [CC-19]
     mitigates: [H-8]
@@ -563,7 +568,7 @@ artifacts:
       "verification results" summary line. The lean_verify rule must
       check that the log contains "All proofs verified." A log that
       contains only error messages must cause the rule to fail.
-    status: not-implemented
+    status: proposed
     tags: [safety, codegen, verification, bazel, stpa]
     traces-to: [CC-18]
     mitigates: [H-8]
@@ -601,7 +606,7 @@ artifacts:
       diagnostics and halt code generation. Default value substitution
       (the current 10ms/1ms fallback) must emit a warning diagnostic
       rather than proceeding silently.
-    status: not-implemented
+    status: proposed
     tags: [security, codegen, stpa-sec]
     traces-to: [CC-SEC-2]
     mitigates: [H-SEC-2]
@@ -616,7 +621,7 @@ artifacts:
       (via .., symlinks, or absolute paths), codegen must emit an error
       and skip that file. This check must occur after all path component
       construction, including process name and thread name interpolation.
-    status: not-implemented
+    status: proposed
     tags: [security, codegen, filesystem, stpa-sec]
     traces-to: [CC-SEC-3]
     mitigates: [H-SEC-6]
@@ -631,7 +636,12 @@ artifacts:
       SyntaxKind name, source offset, and parent context. A golden-file
       test must verify that all semantic SysML v2 constructs produce
       either a lowered AADL item or a diagnostic.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      Which half is outstanding — the diagnostic itself or the
+      golden-file test that would prove it exhaustive — is deliberately
+      not asserted here; see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [security, sysml2, lowering, stpa-sec]
     traces-to: [CC-SEC-4]
     mitigates: [H-SEC-3]
@@ -647,7 +657,7 @@ artifacts:
       workspace Cargo.toml. Process names must be checked against a
       reserved list of common crate names (serde, tokio, rand, etc.)
       and must be prefixed with "aadl_" if they collide.
-    status: not-implemented
+    status: proposed
     tags: [security, codegen, supply-chain, stpa-sec]
     traces-to: [CC-SEC-5]
     mitigates: [H-SEC-4]
@@ -664,7 +674,7 @@ artifacts:
       (e.g., verify_{name}_no_deadline_miss_base_case). The codegen
       must also generate a coverage_manifest.json listing each
       verification artifact and its scope.
-    status: not-implemented
+    status: proposed
     tags: [security, verification, stpa-sec]
     traces-to: [CC-SEC-6]
     mitigates: [H-SEC-5]
@@ -679,7 +689,7 @@ artifacts:
       paths must never be concatenated into shell command strings. If
       run_shell is unavoidable (e.g., for piping), all interpolated paths
       must be shell-quoted using shlex or equivalent escaping.
-    status: not-implemented
+    status: proposed
     tags: [security, build, bazel, stpa-sec]
     traces-to: [CC-SEC-7]
     mitigates: [H-SEC-1, H-SEC-4]
@@ -695,7 +705,7 @@ artifacts:
       current build invocation (via Bazel's action dependency graph,
       not filesystem timestamps). Content hashing of the core module
       should be logged for audit.
-    status: not-implemented
+    status: proposed
     tags: [security, build, wasm, stpa-sec]
     traces-to: [CC-SEC-8]
     mitigates: [H-SEC-1, H-SEC-2]
@@ -710,7 +720,7 @@ artifacts:
       100,000). When a limit is exceeded, codegen must emit an error
       diagnostic and halt. These limits must be configurable via CLI
       flags (--max-files, --max-output-size, --max-components).
-    status: not-implemented
+    status: proposed
     tags: [security, codegen, resource-limits, stpa-sec]
     traces-to: [SC-SEC-6]
     mitigates: [H-SEC-7]
@@ -725,7 +735,11 @@ artifacts:
       clippy). This test verifies that generated code is syntactically
       valid Rust. A second test must verify that generated WIT files
       pass wasm-tools component wit validation.
-    status: partial
+      Partially implemented: `partial` has no lifecycle equivalent, so
+      `approved` is the conservative floor, not an accurate position.
+      Which of the two tests is in place is deliberately not asserted
+      here — see REQ-GUARD-STATUS-VOCAB-001.
+    status: approved
     tags: [security, codegen, testing, stpa-sec]
     traces-to: [CC-SEC-1, CC-SEC-2]
     mitigates: [H-SEC-1, H-SEC-2]
@@ -740,7 +754,7 @@ artifacts:
       as system: no action/state usages found"). Engineers must be
       able to override the inference via a SysML v2 annotation or
       comment convention (e.g., `/* @aadl-category: thread */`).
-    status: not-implemented
+    status: proposed
     tags: [security, sysml2, lowering, stpa-sec]
     traces-to: [CC-SEC-4]
     mitigates: [H-SEC-3]
@@ -756,7 +770,7 @@ artifacts:
       proof uses default 10ms) must be reported as an error. This
       cross-reference should be implemented as a post-codegen
       validation step.
-    status: not-implemented
+    status: proposed
     tags: [security, verification, consistency, stpa-sec]
     traces-to: [CC-SEC-2, CC-SEC-6]
     mitigates: [H-SEC-2, H-SEC-5]

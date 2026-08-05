@@ -32,11 +32,7 @@ struct Knobs {
 
 fn build_seed_instance() -> (GlobalScope, SystemInstance) {
     let db = spar_hir_def::HirDefDatabase::default();
-    let sf = spar_base_db::SourceFile::new(
-        &db,
-        "fuzz.aadl".to_string(),
-        SEED_AADL.to_string(),
-    );
+    let sf = spar_base_db::SourceFile::new(&db, "fuzz.aadl".to_string(), SEED_AADL.to_string());
     let tree = spar_hir_def::file_item_tree(&db, sf);
     let scope = GlobalScope::from_trees(vec![tree]);
     let inst = SystemInstance::instantiate(
