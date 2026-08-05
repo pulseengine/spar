@@ -384,7 +384,13 @@
             pkgs.linuxptp        # ptp4l, pmc
             pkgs.tcpdump         # tcpdump
             pkgs.iputils         # arping
-            pkgs.tshark          # tshark (for CI verification step)
+            # dumpcap writes the capture; tshark cross-checks it. Both come
+            # from wireshark-cli. tcpdump stays for ad-hoc debugging by hand,
+            # but it CANNOT produce the fixture: upstream tcpdump has no
+            # pcapng writer at all (tcpdump.c:608 documents `-P` as a macOS
+            # extension), so `-w` yields classic pcap regardless of what the
+            # file is named.
+            pkgs.wireshark-cli   # dumpcap, tshark, editcap
           ];
 
           # lldpd refuses to start without its privilege-separation account.
@@ -461,7 +467,7 @@
               pkgs.iproute2        # ip, tc
               pkgs.lldpd           # lldpd, lldpctl
               pkgs.linuxptp        # ptp4l, pmc
-              pkgs.tcpdump         # tcpdump
+              pkgs.wireshark-cli   # dumpcap (writes the pcapng), tshark
               pkgs.iputils         # arping
             ];
 

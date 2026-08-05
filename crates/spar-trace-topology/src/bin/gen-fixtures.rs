@@ -46,7 +46,10 @@ use std::time::Duration;
 
 use spar_trace_topology::fixtures::{
     FixtureError, OutputPaths,
-    netns::{NetnsGuard, netns_capture, netns_exec, probe_netns_capability, run_cmd, run_id},
+    netns::{
+        NetnsGuard, capture_stdout, netns_capture, netns_exec, probe_netns_capability, run_cmd,
+        run_id,
+    },
     transform::{pmc_to_gptp_json, tc_qdisc_json_to_qcc, validate_lldp_json},
 };
 
@@ -259,30 +262,27 @@ fn run() -> Result<(), FixtureError> {
 
     // 7. Start packet capture (background tcpdump, -c 50 frames, PCAPNG).
     let pcapng_str = paths.pcapng.to_string_lossy().into_owned();
+    // dumpcap, not tcpdump. The fixture is REQUIRED to be pcapng
+    // (REQ-TRACE-INGEST-PCAPNG: "given a `.pcapng` file recorded …", and the
+    // ingest is built on PcapNGReader), and upstream tcpdump cannot write
+    // pcapng at all — `-w` goes through libpcap's pcap_dump, which emits the
+    // classic format. tcpdump's own source calls the pcapng flag a macOS
+    // extension (tcpdump.c:608). Run 30987112464 therefore produced a valid
+    // 4376-byte classic pcap named `capture.pcapng`, and the ingest rejected
+    // it with `HeaderNotRecognized`. The extension was the only thing
+    // asserting the format.
+    //
+    // `-n` selects pcapng explicitly. It is already dumpcap's default
+    // ("Save as pcapng by default", ui/capture_opts.c:103) but the default is
+    // exactly the kind of unstated assumption that produced this bug, so it is
+    // stated. `-P` would select classic pcap; passing neither and trusting the
+    // default is how the next person inherits this.
     let mut capture_child = netns_spawn_bg(
         &ns_gm.name,
-        "tcpdump",
-        &[
-            "-i",
-            veth_gm,
-            "-w",
-            &pcapng_str,
-            // `--immediate-mode` and `-U` are NOT the same knob, and only the
-            // second one was missing. `--immediate-mode` governs how quickly
-            // the KERNEL hands packets to libpcap; `-U` governs whether
-            // libpcap's dump writer flushes each packet to the FILE instead of
-            // accumulating a stdio buffer.
-            //
-            // Without `-U`, run 30984170834 produced a 0-byte capture: the
-            // teardown below calls Child::kill(), which is SIGKILL, and a
-            // SIGKILLed process does not flush stdio. The buffer went with it.
-            "--immediate-mode",
-            "-U",
-            "-c",
-            "50",
-        ],
+        "dumpcap",
+        &["-i", veth_gm, "-w", &pcapng_str, "-n", "-c", "50"],
     )?;
-    eprintln!("gen-fixtures: tcpdump capturing ...");
+    eprintln!("gen-fixtures: dumpcap capturing (pcapng) ...");
 
     // 8. Start lldpd in GM and SW namespaces (-H 0 = immediate TX).
     //
@@ -407,13 +407,13 @@ fn run() -> Result<(), FixtureError> {
     // survivable now only because `-U` above has already put every captured
     // packet on disk.
     match capture_child.try_wait() {
-        Ok(Some(st)) => eprintln!("gen-fixtures: tcpdump exited on its own ({st})"),
+        Ok(Some(st)) => eprintln!("gen-fixtures: dumpcap exited on its own ({st})"),
         Ok(None) => {
-            eprintln!("gen-fixtures: tcpdump still running (fewer than 50 frames); stopping it");
+            eprintln!("gen-fixtures: dumpcap still running (fewer than 50 frames); stopping it");
             let _ = capture_child.kill();
             let _ = capture_child.wait();
         }
-        Err(e) => eprintln!("gen-fixtures: warning: cannot poll tcpdump: {e}"),
+        Err(e) => eprintln!("gen-fixtures: warning: cannot poll dumpcap: {e}"),
     }
     let _ = ptp4l_child.kill();
     let _ = ptp4l_child.wait();
@@ -428,24 +428,74 @@ fn run() -> Result<(), FixtureError> {
     // steps later was the first thing to notice.
     //
     // A "wrote" line should be a measurement, not an assertion.
-    let pcapng_len = fs::metadata(&paths.pcapng).map(|m| m.len()).map_err(|e| {
+    let pcapng_bytes = fs::read(&paths.pcapng).map_err(|e| {
         FixtureError::Transform(format!(
-            "tcpdump produced no file at {}: {e}",
+            "dumpcap produced no readable file at {}: {e}",
             paths.pcapng.display()
         ))
     })?;
-    if pcapng_len == 0 {
+    if pcapng_bytes.is_empty() {
         return Err(FixtureError::Transform(format!(
-            "tcpdump wrote a zero-byte capture at {}. An empty capture is not \
-             a capture of no traffic — libpcap writes a file header before any \
-             packet arrives, so zero bytes means the writer never flushed or \
-             never started.",
+            "dumpcap wrote a zero-byte capture at {}. An empty capture is not \
+             a capture of no traffic — a Section Header Block is written before \
+             any packet arrives, so zero bytes means the writer never flushed \
+             or never started.",
             paths.pcapng.display()
         )));
     }
+
+    // Size was never the property we needed. Run 30987112464 wrote a perfectly
+    // good 4376-byte file and still failed, because the bytes were classic
+    // pcap and only the FILE EXTENSION claimed otherwise. Check the format we
+    // actually depend on.
+    //
+    // A pcapng stream opens with a Section Header Block, whose type field is
+    // 0x0A0D0D0A (wireshark wiretap/pcapng_module.h:26). It is byte-order
+    // independent by construction — that is the point of the value — so a
+    // single comparison covers both endiannesses. Classic pcap opens with
+    // 0xA1B2C3D4 (or its byte-swapped/nanosecond variants), which is what we
+    // were producing.
+    const PCAPNG_SHB: [u8; 4] = [0x0A, 0x0D, 0x0D, 0x0A];
+    if pcapng_bytes.len() < 4 || pcapng_bytes[..4] != PCAPNG_SHB {
+        let head: Vec<String> = pcapng_bytes
+            .iter()
+            .take(4)
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        return Err(FixtureError::Transform(format!(
+            "{} is not pcapng: expected a Section Header Block (0a0d0d0a), got [{}]. \
+             0xa1b2c3d4 (any byte order) means classic pcap — the capture tool \
+             wrote the wrong format and the `.pcapng` suffix is not evidence of \
+             anything.",
+            paths.pcapng.display(),
+            head.join(" ")
+        )));
+    }
+    // Cross-check with an INDEPENDENT reader before declaring the capture good.
+    //
+    // The SHB check above proves the first four bytes; it does not prove the
+    // file is a coherent pcapng that a real consumer can walk. tshark is a
+    // different implementation by different authors, so its agreement is
+    // evidence in a way that spar's parser agreeing with spar's writer is not.
+    //
+    // This ran on the host runner until now, where tshark was not installed and
+    // its exit code was being swallowed by a pipe into `tee`. It runs here
+    // because here is where the binary is.
+    let tshark_out = capture_stdout("tshark", &["-r", &pcapng_str])?;
+    let frames = tshark_out.lines().filter(|l| !l.trim().is_empty()).count();
+    if frames == 0 {
+        return Err(FixtureError::Transform(format!(
+            "tshark read {} without error but found zero frames. tshark exits 0 \
+             on a valid capture containing no packets, so the frame count has to \
+             be checked separately from the exit status.",
+            paths.pcapng.display()
+        )));
+    }
+
     eprintln!(
-        "gen-fixtures: wrote {} ({pcapng_len} bytes)",
-        paths.pcapng.display()
+        "gen-fixtures: wrote {} ({} bytes, pcapng SHB verified, {frames} frames per tshark)",
+        paths.pcapng.display(),
+        pcapng_bytes.len()
     );
 
     // 13. Drop guards → ip netns del for each namespace.

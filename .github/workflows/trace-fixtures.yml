@@ -408,11 +408,31 @@ jobs:
             --output-dir "${FIXTURE_OUTPUT_DIR}"
 
       # ── 5. Verify: tshark -r capture.pcapng ──────────────────────────────
-      - name: Verify capture.pcapng with tshark
-        run: |
-          tshark -r "${FIXTURE_OUTPUT_DIR}/capture.pcapng" \
-            -q -z io,stat,0 2>&1 | tee /tmp/tshark-out.txt
-          # tshark exits non-zero if the file is corrupt or empty.
+      # The tshark cross-check that used to live here has MOVED INTO THE GUEST
+      # (gen-fixtures runs it immediately after writing the capture). It is not
+      # dropped — an independent reader agreeing with spar's own parser is worth
+      # more than either alone — it is relocated to the machine where tshark
+      # exists.
+      #
+      # As written here it could not fail, for two independent reasons, and run
+      # 30987112464 shows both at once: it printed `tshark: command not found`
+      # and the step went green.
+      #
+      #   1. `tshark … | tee /tmp/tshark-out.txt`. Under `bash -e` with no
+      #      `pipefail`, a pipeline's status is its LAST command's — `tee`,
+      #      which succeeds. tshark's 127 was discarded. Piping a verifier into
+      #      anything hides its exit code; the comment underneath even asserted
+      #      "tshark exits non-zero if the file is corrupt or empty", which was
+      #      true and irrelevant, because nothing was reading that status.
+      #   2. tshark was never installed on this runner. It sat in the GUEST
+      #      image's systemPackages, annotated "for CI verification step" — but
+      #      this step runs on the host, outside the VM. The tool and the check
+      #      were on different machines for as long as both existed.
+      #
+      # Two guards, both defeated, and the failure of each produced the ideal
+      # reading. Keeping it here would have meant installing wireshark-cli on a
+      # self-hosted runner or a podman round-trip per run, to re-check a file
+      # the guest can check in place with the binary it already ships.
 
       # ── 6. Round-trip: parse all four fixtures through ingest parsers ─────
       - name: Verify all four fixtures parse cleanly (ingest round-trip)
