@@ -4127,6 +4127,61 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-HUMAN-SCOPED-001
 
+  - id: TEST-GUARD-RELEASE-PLANE
+    type: feature
+    title: Release-plane guardrail is proven able to fail before it is allowed to judge
+    description: >
+      Closes the right side of the V for REQ-GUARD-RELEASE-PLANE-001, which had
+      a working oracle in CI and no verification artifact pointing at it — the
+      implementation was gated, the TRACE was not, so a rivet query for the
+      requirement's evidence returned nothing.
+
+      `tools/check_release_plane.py --self-test` runs first (ci.yml:520-526) and
+      the gate itself second (ci.yml:527). Ordering is the point, and it is the
+      same ordering the mutants and fmt guardrails use: the self-test exercises
+      the decision table, including a fixture where `release:` sits on the plane
+      rivet does NOT read, so a refactor that stopped detecting the misplacement
+      fails on the fixture rather than passing vacuously over real artifacts.
+
+      NOT claimed: that the checker sees every way a `release:` can be
+      misplaced. #375 records a live gap — its FIELD constant matches a
+      top-level `release:` but not one nested in a `fields:` bag, and there are
+      six such cases in `safety/stpa/architecture.yaml`. That is scoped as its
+      own work, not silently folded in here.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
+
+  - id: TEST-GUARD-STATUS-VOCAB
+    type: feature
+    title: rivet validate is shown to REJECT an off-vocabulary status, not merely to accept a good one
+    description: >
+      Closes the right side of the V for REQ-GUARD-STATUS-VOCAB-001.
+
+      This requirement has no dedicated checker — unlike every other guardrail
+      in v0.36.0, there is no `tools/check_status_vocab.py`. Its only oracle is
+      `rivet validate (artifacts)`, a required context. That makes the usual
+      evidence ("the gate is green") worth nothing on its own: green is also
+      what a validator that ignores the `status` field would print, and #371
+      existed precisely because 276 off-vocabulary statuses sat in the tree
+      while that context was green — they were on `feature.status`, a plane the
+      validator's query surface did not reach.
+
+      So the evidence must be a MUTATION, not an observation. Inject a single
+      off-vocabulary `status:` (e.g. `passing`, one of the values #371 removed)
+      into a scratch copy of an artifact file, run the CI-pinned rivet against
+      it, and require a non-zero exit naming the offending value; then remove it
+      and require zero. Distinct inputs, distinct outputs. Asserting only the
+      second half is what four months of #381 looked like.
+
+      Pinned rivet, deliberately: the local toolchain is version-skewed against
+      the gate (local v0.15.0 reports a NO-GO with 440 errors where the CI-pinned
+      v0.4.3 is green), so a mutation checked against the wrong binary proves
+      nothing about the gate.
+    status: proposed
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
+
   - id: TEST-GUARD-GATE-EVIDENCE
     type: feature
     title: The mutation gate fails on absence, on a report that measured nothing, and on self-disagreement

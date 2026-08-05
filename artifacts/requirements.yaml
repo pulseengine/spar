@@ -3134,7 +3134,7 @@ artifacts:
       standard-property-backed base/size core first rather than over-claiming a
       register/binding convention that is not yet decided.
     status: proposed
-    release: v0.36.0
+    release: v0.37.0
     tags: [codegen, target-artifacts, hardware, wit]
     links:
       - type: traces-to
@@ -3266,7 +3266,7 @@ artifacts:
       the committed scheduling_verified.rs, so a regenerated recurrence that
       introduces a new multiplication cannot land silently.
     status: proposed
-    release: v0.36.0
+    release: v0.37.0
     tags: [proofs, ordeal, certificate, rta, overflow, v0360, human-scoped]
     links:
       - type: traces-to
@@ -4750,6 +4750,27 @@ artifacts:
       prints "Surviving mutants: 0" and exits 0. It uploaded 210 survivors against
       a threshold of 142 and reported green.
 
+      CORRECTION (2026-08-05), and it sharpens rather than weakens the case: run
+      30563879100 DID NOT FINISH. Its `outcomes.json` records `end_time: null`
+      and `total_mutants: 1608`, while the log shows cargo-mutants had found
+      1737 — it lost its per-worker source trees 3h02m in and `|| true` swallowed
+      the crash. So 210 is the survivor count of the 92% that ran, not of this
+      codebase; the completed run reports 292 (30586785648).
+
+      The phrase "each `wc -l` agreeing with `outcomes.json`" above is therefore
+      true and worth nothing. cargo-mutants writes `total_mutants` incrementally,
+      so a truncated report is INTERNALLY PERFECT — 210+603+793+2 == 1608 ==
+      total_mutants — and the cross-check obligation in (a), which is the right
+      detector for #381, is structurally blind to this. The discriminator is
+      `end_time`. That second blindness is tracked as #389 and is an obligation
+      of REQ-GUARD-GATE-EVIDENCE-002, not of this requirement: arming it against
+      a job that demonstrably crashes on one runner would make a required
+      context flap on infrastructure.
+
+      This correction is itself the requirement's own discipline applied to the
+      requirement: a number quoted as evidence, re-derived from the artifact
+      rather than re-read from the sentence that quoted it.
+
       THE TELL WAS IN THE TREE. 5d6d98a, 58 minutes after the gate went hard:
       "Current survivors: 142 (down from 220)." That measurement was real and
       correct, and structurally impossible for CI to have produced, because CI
@@ -4843,3 +4864,73 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, mutation-testing, formatting]
+
+  - id: REQ-GUARD-GATE-EVIDENCE-002
+    type: requirement
+    title: A gate shall prove its measurement was COMPLETE, not merely present
+    description: >
+      Successor to REQ-GUARD-GATE-EVIDENCE-001, which took the two instances
+      known when it was written and said so ("two obligations, one per instance
+      found so far"). Six more were found on 2026-08-05 while landing #387 and
+      #364, and they are one species: -001 makes a gate prove it READ a
+      measurement; none of these gates fail to read one. They read a measurement
+      that did not cover what the gate's name claims, and every one of them
+      renders that shortfall as its IDEAL value.
+
+      (c) A TEST FILTER THAT MATCHES NOTHING SHALL NOT PASS. `cargo test -p X --
+      <filter>` exits 0 when the filter selects no tests, printing "0 passed; 0
+      failed; N filtered out". `tools/run_verification.py` scores a step by
+      `returncode == 0`, so a filter naming a test that does not exist is
+      indistinguishable from one naming a test that passes. Seven verification
+      artifacts cite tests that have never existed (#388); five are VAL-R1..R5,
+      `status: implemented`, closing the V for six RENDER-REQ-* and four ARCH-R*.
+      The gate shall assert a non-zero selected-test count, and a step whose
+      filter selects nothing shall fail.
+
+      (d) A CRASHED RUN SHALL NOT SCORE. cargo-mutants writes `total_mutants`
+      incrementally, so a run killed part-way is internally self-consistent:
+      run 30563879100 records 210+603+793+2 == 1608 == total_mutants and agrees
+      with `outcomes.json` on every count, while the log shows it had found 1737
+      and lost its worker trees 3h02m in. -001's cross-check obligation cannot
+      see this. The discriminator is `outcomes.json: end_time`, null on a
+      truncated run. A truncated run UNDER-reports survivors, so it fails
+      flatteringly, and any threshold derived from one is a ceiling set below
+      the floor (#389). Blocked on the runner-side `_tmp` reaping that causes
+      it — arming the detector alone would make a required context flap on
+      infrastructure.
+
+      (e) A CHANGE FILTER SHALL NOT FAIL OPEN. `Detect changed paths` gates 11
+      of the 18 required contexts via `if: needs.changes.outputs.code == 'true'`.
+      A job skipped by job-level `if:` reports `skipped`, and `skipped` SATISFIES
+      a required context. So a filter that wrongly reports "no code changed"
+      silently converts eleven gates into eleven passes (#384).
+
+      (f) AN EXEMPTION MECHANISM SHALL NOT EXEMPT EVERYTHING. The Lean "fail on
+      sorry" gate enforces zero un-exempted obligations, and all twelve `sorry`s
+      are self-exempted, so the gate is satisfied by the thing it exists to
+      prevent (#385). The exemption list shall be a declared floor that shrinks,
+      and the gate shall print the exempted count on every path.
+
+      (g) A SCOPE SHALL BE DISCOVERED, NOT INHERITED — FOR EVERY TOOL, NOT ONE.
+      -001(b) fixed this for `cargo fmt`; `cargo clippy --all-targets` inherits
+      the same default and covers 1 of the repo's 4 workspaces (#383, Clippy
+      half). The workspace discovery in `tools/check_fmt_workspaces.py` is the
+      mechanism; the obligation is that every whole-repo tool uses it.
+
+      (h) A TARGET LIST SHALL BE ASSERTED AGAINST ITS DECLARATION. `fuzz-nightly`
+      names its three targets in three hand-written steps. A target removed from
+      the workflow, or added to `fuzz/Cargo.toml` and not to the workflow, leaves
+      the job green having fuzzed a strict subset. The set run shall be asserted
+      equal to the set declared.
+
+      THE COMMON SHAPE, stated once because it is the reason these are one
+      requirement and not six: an operation that can produce "nothing happened"
+      must render differently from "it worked". Absent report, unmatched filter,
+      unread directory, killed process, skipped job, self-granted exemption,
+      dropped target — each decays into the metric's best value. The detector is
+      always the same: distinct inputs must produce distinct outputs. A guard
+      whose ERROR path yields its IDEAL reading is unfalsifiable by construction,
+      and no amount of watching it pass distinguishes clean from blind.
+    status: proposed
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, human-scoped]
