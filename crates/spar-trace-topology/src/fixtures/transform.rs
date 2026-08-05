@@ -415,7 +415,10 @@ fn parse_pmc_round(text: &str) -> Result<PmcRawSample, String> {
 pub fn validate_lldp_json(lldp_raw: &str) -> Result<Value, FixtureError> {
     let v: Value = serde_json::from_str(lldp_raw)
         .map_err(|e| FixtureError::Transform(format!("lldp JSON parse error: {e}")))?;
-    // Validate top-level structure so errors surface here, not in ingest.
+
+    // Cheap structural check first, purely so the message can name the likely
+    // cause (lldpd not up, or no neighbour seen yet) rather than surfacing a
+    // parser error about a key that was never going to be there.
     v.get("lldp")
         .and_then(|l| l.get("interface"))
         .ok_or_else(|| {
@@ -425,6 +428,28 @@ pub fn validate_lldp_json(lldp_raw: &str) -> Result<Value, FixtureError> {
                     .to_string(),
             )
         })?;
+
+    // Then the check that matters: parse it with the REAL consumer.
+    //
+    // This function used to stop at the line above, and its own comment
+    // claimed the point was so "errors surface here, not in ingest". It could
+    // not do that — existence of `lldp.interface` is strictly weaker than what
+    // the ingest requires, so gen-fixtures declared the fixture good and the
+    // ingest rejected it two steps later (run 30993592401: "interface entry
+    // missing `name` string" against a 1345-byte file that had just passed
+    // validation).
+    //
+    // Two validators for one artifact is the defect. A producer-side check
+    // that is not the consumer's check is a second opinion about a question
+    // only the consumer gets to answer, and every gap between them is a
+    // fixture that passes here and fails there. So this now runs the ingest
+    // itself; there is exactly one definition of a valid lldp fixture.
+    crate::ingest::LldpJsonTopologySource::from_json_str(lldp_raw).map_err(|e| {
+        FixtureError::Transform(format!(
+            "lldpctl JSON does not parse through the ingest that consumes it: {e}"
+        ))
+    })?;
+
     Ok(v)
 }
 
