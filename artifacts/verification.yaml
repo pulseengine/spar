@@ -266,6 +266,7 @@ artifacts:
         target: STPA-REQ-001
 
   - id: TEST-STPA-PARSER-COVERAGE
+    status: proposed
     type: feature
     title: Parser production coverage tests (STPA-REQ-003)
     description: >
@@ -391,7 +392,7 @@ artifacts:
 
   - id: VAL-R1
     type: feature
-    status: implemented
+    status: proposed
     verifies: [RENDER-REQ-004]
     title: Layout determinism tests (RENDER-REQ-004)
     description: >
@@ -410,7 +411,7 @@ artifacts:
 
   - id: VAL-R2
     type: feature
-    status: implemented
+    status: proposed
     verifies: [RENDER-REQ-001]
     title: Orthogonal routing tests (RENDER-REQ-001)
     description: >
@@ -429,7 +430,7 @@ artifacts:
 
   - id: VAL-R3
     type: feature
-    status: implemented
+    status: proposed
     verifies: [RENDER-REQ-002]
     title: Port positioning tests (RENDER-REQ-002)
     description: >
@@ -448,7 +449,7 @@ artifacts:
 
   - id: VAL-R4
     type: feature
-    status: implemented
+    status: proposed
     verifies: [RENDER-REQ-003, RENDER-REQ-005]
     title: HTML interactive feature tests (RENDER-REQ-003, RENDER-REQ-005)
     description: >
@@ -469,7 +470,7 @@ artifacts:
 
   - id: VAL-R5
     type: feature
-    status: implemented
+    status: proposed
     verifies: [RENDER-REQ-006]
     title: Semantic zoom tests (RENDER-REQ-006)
     description: >
@@ -3135,7 +3136,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p spar-trace-topology --lib -- identity::tests
+        - run: cargo test -p spar-trace-topology --lib -- identity_unknown
     status: implemented
     tags: [trace-topology, properties, identity, ip, v0100]
     links:
@@ -4126,6 +4127,47 @@ artifacts:
         target: REQ-GUARD-HUMAN-SCOPED-001
       - type: verifies
         target: REQ-GUARD-HUMAN-SCOPED-001
+
+  - id: TEST-GUARD-VERIFICATION-FILTERS
+    type: feature
+    title: A verification step whose test filter selects nothing is proven to fail
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (c).
+
+      `tools/check_verification_filters.py --self-test` runs a 13-case decision
+      table before the gate is allowed to judge anything, including the #388
+      regression itself: a filter selecting no test, on an artifact claiming
+      `implemented`, must exit 1.
+
+      The case that makes it a detector rather than an assertion is the PAIR —
+      the identical step passes as `proposed` and fails as `implemented`.
+      Distinct inputs, distinct outputs. A checker that ignored status would
+      give the same verdict to both, and the accept-half alone would not notice.
+
+      A missing `status:` fails closed rather than being read as "not
+      claiming", which is the leniency that would otherwise reopen the hole:
+      TEST-STPA-PARSER-COVERAGE had no status at artifact indent and would have
+      been exempted by its own malformedness.
+
+      The decision procedure is libtest's, not an approximation: filters are
+      substring matches over the full test path, so the gate collects the
+      inventory once via `cargo test --workspace --all-targets -- --list` and
+      answers every filter in memory. An empty inventory exits 2 — a broken
+      scan is not the finding that all 79 filters are vacuous.
+
+      MEASURED on 2026-08-05 against 3147 test names: 8 filters selected
+      nothing. One (TEST-TRACE-TOPOLOGY-IP-IDENTITY, `identity::tests`) named a
+      module path that does not exist while six real tests sat under
+      `engine::tests::identity_unknown_*` — fixed. The other seven have no
+      candidate test anywhere in the workspace and are now `proposed`, which is
+      what they always were.
+
+      NOT claimed: that a selected test is the RIGHT test. A filter may select
+      something unrelated to the requirement. This is a lower bound on honesty,
+      not a proof of relevance.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
 
   - id: TEST-GUARD-RELEASE-PLANE
     type: feature

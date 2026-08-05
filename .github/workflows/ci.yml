@@ -524,6 +524,20 @@ jobs:
         # not discriminate on plane at all. Mutation-tested: each of the four
         # fixtures kills exactly one guard, and deleting any guard reds this.
         run: tools/check_release_plane.py --self-test
+      # REQ-GUARD-GATE-EVIDENCE-002 (c). Self-test first, same reason as
+      # every guardrail above it: the decision table includes the #388
+      # regression (a filter selecting nothing must FAIL) and the pair that
+      # makes it a detector rather than an assertion — the SAME step passes as
+      # `proposed` and fails as `implemented`. A checker that ignored status
+      # would pass one and not the other, so the pair pins the semantics.
+      - name: Verification-filter guardrail self-test
+        run: tools/check_verification_filters.py --self-test
+      # The gate needs a real test inventory, which needs a build. It reuses
+      # the `test` job's cache rather than building its own; if the inventory
+      # comes back empty it exits 2 (broken scan) instead of reporting that
+      # every filter is vacuous.
+      - name: Verification-filter guardrail
+        run: tools/check_verification_filters.py
       - name: Release-plane guardrail
         run: |
           tools/check_release_plane.py \
