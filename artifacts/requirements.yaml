@@ -3683,6 +3683,44 @@ artifacts:
       - type: traces-to
         target: REQ-TRACE-TOPOLOGY-008
 
+  - id: REQ-TRACE-TOPOLOGY-013
+    type: requirement
+    title: taprio GCL readback shall honour the sched-entry `cmd`
+    description: >
+      `extract_taprio_gcl` (crates/spar-trace-topology/src/fixtures/transform.rs)
+      shall read a taprio schedule entry as an 802.1Qbv gate-control-list entry
+      ONLY when its `cmd` is "S" (SetGates). iproute2's `entry_cmd_to_str`
+      (tc/q_taprio.c) emits `cmd` as exactly one of "S", "H" (Hold), "R"
+      (Release); "H"/"R" are 802.1Qbu/802.3br frame-preemption entries whose
+      gatemask is not a schedule state, and shall be dropped rather than folded
+      into the GCL. A schedule entry with no `cmd`, or with a `cmd` outside the
+      S/H/R set, shall be an error naming what was seen — absence must not read
+      as an assumed "S", on the same principle as the gatemask/interval arms and
+      the schedule-shape check already in that function.
+
+      PROVEN (executed oracle, spar-trace-topology lib tests):
+      `tc_taprio_skips_preemption_hold_release_entries` feeds an S/H/R/S schedule
+      and asserts the GCL is exactly the two "S" masks in order and that neither
+      preemption gatemask (0x0f, 0xf0) appears; `tc_taprio_missing_cmd_is_an_error`
+      and `tc_taprio_unknown_cmd_is_an_error` assert the two error paths.
+      Non-vacuity was checked by neutering each arm in turn and confirming the
+      matching test goes red, so the filter is falsifiable and not
+      constant-true. Closes #390.
+
+      ASSUMED / DEFERRED: the fixture VM (bin/gen-fixtures.rs) still installs
+      only `sched-entry S`, so the golden readback carries no preemption entry;
+      the preemption path is proven on the pure transform, not end-to-end
+      through the netns VM. A fixture that installs `sched-entry H` so the golden
+      Qcc YANG readback exercises the drop on real `tc` output is a heavier,
+      separate step (it changes generated fixtures and needs the VM) and is left
+      to a successor.
+    status: implemented
+    release: v0.37.0
+    tags: [trace-topology, ingest, qcc, taprio, tsn, qbv]
+    links:
+      - type: traces-to
+        target: REQ-TRACE-TOPOLOGY-005
+
   # ── TSN-competitor roadmap (DEC-TSN-OSS-001) ──────────────────────────
   # Three tiers, captured 2026-06-13 after maintainer sign-off. Tier 1 +
   # Tier 3 are the already-demanded OSS substrate (WCET, kiln async
