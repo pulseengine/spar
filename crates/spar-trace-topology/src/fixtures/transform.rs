@@ -174,6 +174,42 @@ fn extract_taprio_gcl(qdisc: &Value) -> Result<Vec<Value>, FixtureError> {
 
     let mut gcl = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
+        // iproute2's `entry_cmd_to_str` (tc/q_taprio.c) prints `cmd` as exactly
+        // one of three tokens: "S" (SetGates), "H" (Hold), "R" (Release). Only
+        // "S" entries are 802.1Qbv gate-control entries; "H"/"R" belong to
+        // 802.1Qbu/802.3br frame preemption and their gatemask is not a schedule
+        // state the Qcc `gate-control-list` should carry (issue #390), so they
+        // are dropped rather than folded in as if they were gate windows.
+        //
+        // A missing `cmd` is an error, not an assumed "S": on the same principle
+        // as the gatemask/interval arms below and the schedule-shape check
+        // above, absence must not read as the expected case. Every schedule
+        // entry real `tc` emits carries a `cmd`; a copy without one is a shape
+        // we do not recognise, not a SetGates we should infer.
+        match entry.get("cmd") {
+            Some(Value::String(cmd)) if cmd == "S" => {
+                // SetGates — the gate-control entry; fall through to extraction.
+            }
+            Some(Value::String(cmd)) if cmd == "H" || cmd == "R" => {
+                // Frame-preemption Hold/Release: a valid taprio entry, but not a
+                // gate-control entry. Skip it without touching `gcl`.
+                continue;
+            }
+            Some(Value::String(cmd)) => {
+                return Err(FixtureError::Transform(format!(
+                    "schedule[{i}] has unsupported sched-entry cmd {cmd:?}; \
+                     `tc` emits only \"S\" (SetGates), \"H\" (Hold), \"R\" (Release)"
+                )));
+            }
+            _ => {
+                return Err(FixtureError::Transform(format!(
+                    "schedule[{i}] missing or non-string `cmd`; every taprio \
+                     sched-entry from `tc` carries one of \"S\"/\"H\"/\"R\" and \
+                     absence is not read as \"S\""
+                )));
+            }
+        }
+
         // iproute2 prints gatemask via `print_0xhex`, which in JSON context
         // snprintf's "%#llx" and emits it as a *string* — always, in every
         // release. So the string arm is the real one, and note it is not
@@ -685,6 +721,111 @@ mod tests {
         assert_eq!(gcl.len(), 1);
         assert_eq!(gcl[0].gate_states_value, 0x0f);
         assert_eq!(gcl[0].time_interval_value, 111_000);
+    }
+
+    /// A frame-preemption entry (`cmd` "H"/"R") must NOT land in the GCL.
+    ///
+    /// This is the non-vacuity detector for the #390 fix. The schedule below is
+    /// S, H, R, S — the same shape a preemption-configured port reads back. Only
+    /// the two "S" entries are 802.1Qbv gate-control entries; the "H" and "R"
+    /// entries belong to 802.1Qbu/802.3br and their gatemasks (0x0f, 0xf0) are
+    /// not schedule states. If the `cmd` filter were removed, this port would
+    /// read back four GCL entries with 0x0f and 0xf0 folded in — so asserting
+    /// exactly the two "S" masks, in order, and NEITHER preemption mask, is what
+    /// makes the filter falsifiable: drop it and this test goes red.
+    ///
+    /// This is the "real test rather than an assertion about code that cannot
+    /// run" the issue asked for: `extract_taprio_gcl` is a pure function, so a
+    /// crafted `tc` readback exercises the preemption path directly, without a
+    /// VM. (Installing `sched-entry H` in the fixture VM so the golden readback
+    /// carries one is a heavier, separate step and is left to a successor.)
+    #[test]
+    fn tc_taprio_skips_preemption_hold_release_entries() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "schedule": [
+                    { "index": 0, "cmd": "S", "gatemask": "0xff", "interval": 400000 },
+                    { "index": 1, "cmd": "H", "gatemask": "0x0f", "interval": 5000 },
+                    { "index": 2, "cmd": "R", "gatemask": "0xf0", "interval": 5000 },
+                    { "index": 3, "cmd": "S", "gatemask": "0x01", "interval": 100000 }
+                ]
+            }
+        }]"#;
+        let out = tc_qdisc_json_to_qcc("swp1", tc_json).unwrap();
+        let json_str = serde_json::to_string(&out).unwrap();
+        let src = QccYangSwitchConfigSource::from_json_str(&json_str).unwrap();
+        let gcl = src.ports()[0].gate_control_list.as_ref().unwrap();
+
+        // Exactly the two SetGates entries survive, in schedule order.
+        assert_eq!(gcl.len(), 2, "only the two `S` entries are gate entries");
+        assert_eq!(gcl[0].gate_states_value, 0xff);
+        assert_eq!(gcl[0].time_interval_value, 400_000);
+        assert_eq!(gcl[1].gate_states_value, 0x01);
+        assert_eq!(gcl[1].time_interval_value, 100_000);
+
+        // The preemption gatemasks must appear nowhere in the GCL.
+        for entry in gcl {
+            assert_ne!(
+                entry.gate_states_value, 0x0f,
+                "the `H` gatemask leaked into the GCL"
+            );
+            assert_ne!(
+                entry.gate_states_value, 0xf0,
+                "the `R` gatemask leaked into the GCL"
+            );
+        }
+    }
+
+    /// A schedule entry with no `cmd` is a shape error, not an assumed "S".
+    ///
+    /// Real `tc` always prints `cmd`; a copy without one is unrecognised input.
+    /// Inferring "S" here is exactly the "absence reads as the expected case"
+    /// defect the rest of this module is written to avoid, so it must fail — and
+    /// the message must name `cmd` so the failing readback reports what was
+    /// missing rather than restating the assumption.
+    #[test]
+    fn tc_taprio_missing_cmd_is_an_error() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "schedule": [
+                    { "index": 0, "gatemask": "0xff", "interval": 400000 }
+                ]
+            }
+        }]"#;
+        let msg = tc_qdisc_json_to_qcc("swp1", tc_json)
+            .expect_err("a sched-entry with no `cmd` must not be assumed to be `S`")
+            .to_string();
+        assert!(
+            msg.contains("cmd"),
+            "error must name the missing `cmd` field, got: {msg}"
+        );
+    }
+
+    /// An unknown `cmd` token must fail, naming the token it did not recognise.
+    ///
+    /// Silently dropping (or worse, accepting) a `cmd` outside the S/H/R set
+    /// would let a future iproute2 vocabulary change pass unobserved — the same
+    /// class of blindness as reading H/R as gate entries. Naming the token makes
+    /// the next unknown shape identified by the run that hits it.
+    #[test]
+    fn tc_taprio_unknown_cmd_is_an_error() {
+        let tc_json = r#"[{
+            "kind": "taprio",
+            "options": {
+                "schedule": [
+                    { "index": 0, "cmd": "X", "gatemask": "0xff", "interval": 400000 }
+                ]
+            }
+        }]"#;
+        let msg = tc_qdisc_json_to_qcc("swp1", tc_json)
+            .expect_err("an unsupported sched-entry cmd must not be accepted")
+            .to_string();
+        assert!(
+            msg.contains("\"X\"") || msg.contains("cmd"),
+            "error must name the unsupported cmd token, got: {msg}"
+        );
     }
 
     /// A shape mismatch must report the keys it *did* see.
