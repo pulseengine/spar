@@ -4169,6 +4169,72 @@ artifacts:
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
 
+  - id: TEST-GUARD-CHANGED-PATHS
+    type: feature
+    title: The changed-path classifier cannot answer "no code" by failing
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (e). Closes #384.
+
+      `tools/classify_changed_paths.py --self-test` runs 25 cases and is the
+      FIRST step of the `changes` job in both `ci.yml` and `proofs.yml` — a
+      classifier whose own tests fail must not be trusted to decide which
+      required checks run.
+
+      Both original failure modes are regression cases, at the unit level and
+      end-to-end over a real `git diff`:
+
+      MECHANISM A — the allow-list was scoped by PREFIX. `safety/.*` and
+      `docs/.*` admitted any file under those trees, `.rs` and `.sh` included.
+      Every entry is now type-scoped, and `docs/research/forge-replication/`
+      (which already holds `run_trial.sh`, `tasks.json`, `descriptor.sexp` and
+      `descriptor.aadl`) is classified as code.
+
+      MECHANISM B — the error path failed OPEN. A `grep` failure left the count
+      empty, `[ "" -gt 0 ]` exited 2, `set -e` is inert inside an `if`, so bash
+      read that as false and emitted `code=false` with the step exiting 0. Five
+      induced failures — bad base sha, empty base sha, unwritable output,
+      missing arguments — now each assert non-zero AND that no verdict was
+      written.
+
+      The case that makes it a detector rather than an assertion is the
+      PROPERTY, not the cases: for every directory prefix in the allow-list,
+      no pattern may match `<prefix>/evil.rs`, `.sh`, `.toml`, `Makefile`. An
+      editor who re-broadens an entry back to prefix scope fails without anyone
+      having remembered to add a case for them.
+
+      MUTATION-TESTED 2026-08-06, 5 mutants, all caught, each by the test that
+      should catch it: unknown→non-code, `emit()` ignoring its argument,
+      restoring the #384 exception handler, re-broadening `safety/`, re-adding
+      `docs/.*`. The harness asserts each substitution changed the file before
+      drawing a conclusion — a mutation that silently fails to apply reports as
+      "not caught" and is worthless.
+
+      MEASURED on real history: commit 7db7f0e6 (two artifact YAMLs) still
+      emits `code=false`, so the fix tightened the classifier without making it
+      uselessly always-true; commit c8c0450e (8 files, 6 code) emits
+      `code=true`.
+
+      The script owns `$GITHUB_OUTPUT` and appends to it directly. That is its
+      only emission mode on purpose: `echo "code=$(script ...)"` would put
+      mechanism B back in the glue verbatim — script dies, `echo` succeeds,
+      `code=` lands empty, every `== 'true'` dependent skips, exit 0.
+
+      SAFETY ARGUMENT, and its dependency: exiting non-zero is safe only
+      because `Detect changed paths` and `Detect changed paths (proofs)` are
+      themselves required contexts (read from the branch-protection API, not
+      assumed) — a failing `changes` job otherwise skips its dependents, and
+      `skipped` satisfies a required context. If either is ever dropped from
+      the required set this design becomes unsafe; REQ-GUARD-GATE-EVIDENCE-001
+      and `check_required_contexts.py` are what keep that from happening
+      quietly.
+
+      NOT claimed: that skipping is correct for any particular file. This only
+      ensures a skip is caused by a match against a declared, type-scoped
+      pattern and never by a crash.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
+
   - id: TEST-GUARD-RELEASE-PLANE
     type: feature
     title: Release-plane guardrail is proven able to fail before it is allowed to judge
