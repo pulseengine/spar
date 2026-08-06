@@ -4128,6 +4128,56 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-HUMAN-SCOPED-001
 
+  - id: TEST-GUARD-LEAN-SORRY-FLOOR
+    type: feature
+    title: A `sorry` cannot exempt itself from the sorry gate by writing a comment
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (f). Closes #385.
+
+      `Fail on sorry (post-build gate)` is part of the required
+      `Lean proof typecheck (lake build)` context and permitted EVERY sorry in
+      the tree while printing `No sorrys in proofs/Proofs/ — gate green.` Its
+      pipeline excluded any sorry with a same-line `-- TODO`, and all 12 carry
+      `sorry -- TODO(v1.0.0)`: 12 in, 0 out, the `if` never fires.
+
+      HOW IT DRIFTED is the part worth keeping. The step's own comment read
+      "the five tracked sorrys do NOT carry a same-line comment; the TODO sits
+      on the prior line" — TRUE when written, and the exclusion was a
+      deliberate no-op against a form nobody used. The sorries then grew 5 to
+      12 and moved their TODO onto the same line. Nobody edited the guard; the
+      code drifted out from under its comment, and a no-op became universal.
+
+      The generalisable defect is not a careless filter: **a self-exemption
+      keyed on a pattern the exempted code itself controls cannot hold**, because
+      the proof author writes both the `sorry` and the `-- TODO` that excuses
+      it. The floor now lives in `proofs.yml`, which the proof does not edit in
+      the same commit.
+
+      PROVEN, 8-case self-test run before the gate judges anything. The
+      discriminating pair is the regression itself: `sorry -- TODO` COUNTS and
+      breaches a floor of 0, and the SAME file passes at a floor of 1 — so the
+      comment is signal for neither verdict. A checker that still honoured the
+      exemption passes the first and cannot fail it.
+
+      Ratchet direction is asserted too: a count BELOW the floor passes and
+      prints "lower --max-sorries to N", because a gate that failed on
+      improvement would be walked back rather than tightened. And an empty
+      scan exits 2 — zero-sorries-because-no-.lean-files-were-read is the exact
+      error-path-yields-ideal-reading shape this requirement is about.
+
+      MEASURED on ae27ff1: 11 .lean files scanned, 12 sorries (MinPlus.lean 4,
+      MinPlusPwa.lean 8), floor set to 12 so the gate is green and honest
+      rather than green and blind. Verified it can fail: at --max-sorries 11 it
+      exits 1 naming the breach.
+
+      NOT claimed: that the 12 remaining sorries are acceptable. The floor
+      records how many exist, not that they are fine — discharging them is
+      REQ-PROOF-NC-MINPLUS-001 (v0.38.0). This only stops the number rising
+      unnoticed, which is what it did between 5 and 12.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, lean, proofs]
+
   - id: TEST-GUARD-VERIFICATION-FILTERS
     type: feature
     title: A verification step whose test filter selects nothing is proven to fail
