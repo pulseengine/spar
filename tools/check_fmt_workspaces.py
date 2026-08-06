@@ -121,7 +121,29 @@ def _cargo_fmt(root, manifest):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
-def check(root, *, min_workspaces=MIN_WORKSPACES, runner=None, out=None):
+def check(
+    root,
+    *,
+    min_workspaces=MIN_WORKSPACES,
+    runner=None,
+    out=None,
+    tool="fmt",
+    verb="formatted",
+    fix_hint="cargo fmt --manifest-path {manifest} --all",
+):
+    """Discover every workspace, run `runner` in each, and always print the count.
+
+    `tool`/`verb`/`fix_hint` exist so the SAME discovery + floor + always-print-a-
+    count logic backs more than one gate. REQ-GUARD-GATE-EVIDENCE-002 (g) is
+    explicit that the obligation is "every whole-repo tool uses it, not just the
+    one that was caught" — clippy inherits `--workspace` exactly as `cargo fmt
+    --all` did, covering 1 of this repo's 4 workspaces (#383). Copying this
+    function for clippy would put the discovery in two places, which is the
+    drift that made #381 possible; injecting the wording keeps it in one.
+
+    Defaults reproduce the fmt wording verbatim, so existing callers and the
+    self-test below are unchanged by this parameterisation.
+    """
     out = out or sys.stdout
     runner = runner or _cargo_fmt
 
@@ -149,9 +171,9 @@ def check(root, *, min_workspaces=MIN_WORKSPACES, runner=None, out=None):
             file=sys.stderr,
         )
         print(
-            "::error::a workspace that vanishes from discovery is silently exempt "
-            "from formatting — that is #383. Lower --min-workspaces only when a "
-            "workspace was deliberately removed.",
+            f"::error::a workspace that vanishes from discovery is silently exempt "
+            f"from {tool} — that is #383. Lower --min-workspaces only when a "
+            f"workspace was deliberately removed.",
             file=sys.stderr,
         )
         return EXIT_VIOLATION
@@ -161,7 +183,7 @@ def check(root, *, min_workspaces=MIN_WORKSPACES, runner=None, out=None):
         try:
             code, output = runner(root, manifest)
         except OSError as exc:
-            print(f"::error::could not run cargo fmt for {manifest}: {exc}", file=sys.stderr)
+            print(f"::error::could not run cargo {tool} for {manifest}: {exc}", file=sys.stderr)
             return EXIT_CANNOT_CHECK
         if code == 0:
             print(f"  ok   {manifest}", file=out)
@@ -171,13 +193,17 @@ def check(root, *, min_workspaces=MIN_WORKSPACES, runner=None, out=None):
 
     # The positive count, always, on every path. This line is the fix.
     print(
-        f"{len(manifests)} workspace(s) checked, {len(manifests) - len(dirty)} formatted.",
+        f"{len(manifests)} workspace(s) checked, {len(manifests) - len(dirty)} {verb}.",
         file=out,
     )
 
     if dirty:
         for manifest, output in dirty:
-            print(f"::error::{manifest} is not formatted — run: cargo fmt --manifest-path {manifest} --all", file=sys.stderr)
+            print(
+                f"::error::{manifest} is not {verb} — run: "
+                + fix_hint.format(manifest=manifest),
+                file=sys.stderr,
+            )
             for line in output.splitlines()[:40]:
                 print(f"  | {line}", file=sys.stderr)
         return EXIT_VIOLATION
