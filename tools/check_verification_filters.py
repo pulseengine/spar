@@ -207,6 +207,21 @@ def collect_inventory(manifest_dir: Path, packages: set[str]) -> dict[str, set[s
             text=True,
         )
         if proc.returncode != 0:
+            # Two different failures, and they deserve different reports.
+            #
+            # "did not match any packages" means the artifact names a package
+            # that does not exist — a finding ABOUT that artifact. Omit it from
+            # the inventory so `check()` can name the affected artifacts and
+            # exit 2, rather than dying here with a traceback that names only
+            # the first one. (The live instance: four steps said
+            # `-p spar-cli`, but `crates/spar-cli/Cargo.toml` declares
+            # `name = "spar"` and no package `spar-cli` exists. The old flat
+            # inventory never ran `-p`, so it never noticed.)
+            #
+            # Anything else is a broken build, which invalidates every verdict,
+            # not one artifact's — that stays fatal.
+            if "did not match any packages" in proc.stderr:
+                continue
             raise RuntimeError(
                 f"cargo test -p {pkg} --list failed; cannot build a test "
                 f"inventory for it, so its filters cannot be judged. Refusing "
@@ -439,6 +454,12 @@ def self_test() -> int:
     # A package nobody could list is unjudgeable, which must not read as fine.
     case("a step naming an un-inventoried package is CANNOT-JUDGE, not a pass",
          2, Y_GOOD.replace("spar-wasm", "spar-ghost"), INV)
+    # ...and it names the artifact rather than dying, which is what turns a
+    # traceback into a finding. LIVE INSTANCE: four steps said `-p spar-cli`
+    # while `crates/spar-cli/Cargo.toml` declares `name = "spar"`.
+    case("...and it NAMES the artifact and package", 2,
+         Y_GOOD.replace("spar-wasm", "spar-ghost"), INV,
+         want_msg="no test inventory for package 'spar-ghost'")
     # Normal operation.
     case("filter selecting a real test passes", 0, Y_GOOD, INV)
     case("whole-package step is never vacuous", 0, Y_WHOLE, INV)

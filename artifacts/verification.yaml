@@ -128,7 +128,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p spar-cli
+        - run: cargo test -p spar
     links:
       - type: satisfies
         target: ARCH-CLI
@@ -696,7 +696,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p spar-cli -- verify
+        - run: cargo test -p spar -- verify
     links:
       - type: verifies
         target: REQ-VERIFY-001
@@ -715,7 +715,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p spar-cli -- diff
+        - run: cargo test -p spar -- diff
     links:
       - type: verifies
         target: REQ-DIFF-001
@@ -738,7 +738,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cargo test -p spar-cli -- mcp
+        - run: cargo test -p spar -- mcp
     links:
       - type: verifies
         target: REQ-MCP-001
