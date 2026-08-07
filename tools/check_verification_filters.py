@@ -228,16 +228,17 @@ def collect_inventory(manifest_dir: Path, packages: set[str]) -> dict[str, set[s
                 f"to report success.\n" + proc.stderr[-2000:]
             )
         names = {m.group("name") for m in _LIST_LINE.finditer(proc.stdout)}
+        # An empty list from a SUCCESSFUL cargo run is a truthful answer, not a
+        # broken scan: some packages genuinely have no tests (a proc-macro crate
+        # typically does not). Keeping the empty set is also the useful
+        # behaviour — any filter on such a package selects nothing, which is a
+        # real finding, and reporting it as one beats dying.
+        #
+        # A broken scan is still caught, twice over: a non-zero cargo exit is
+        # fatal above, and `check()` exits 2 if the union across all packages is
+        # empty.
         if not names:
-            # A package with no tests at all is possible, but a package named by
-            # a verification step and listing nothing is far more likely to be a
-            # broken invocation. Fail closed rather than judge every one of its
-            # filters vacuous (or, worse, non-vacuous against an empty pool).
-            raise RuntimeError(
-                f"cargo listed ZERO tests for package {pkg}, which a "
-                f"verification step claims to filter. That is a broken scan, "
-                f"not a finding about the filters."
-            )
+            print(f"note: package {pkg} lists zero tests", file=sys.stderr)
         inv[pkg] = names
     return inv
 
@@ -463,6 +464,19 @@ def self_test() -> int:
     # Normal operation.
     case("filter selecting a real test passes", 0, Y_GOOD, INV)
     case("whole-package step is never vacuous", 0, Y_WHOLE, INV)
+    # ...and it needs no inventory at all. `spar-parser` is deliberately absent
+    # from INV here: a whole-package step selects everything, so demanding an
+    # inventory for it is work nothing consumes. The live instance was
+    # `cargo test -p spar-verify-macros` — a proc-macro crate with zero tests
+    # that no filter asks about, which made the gate fatal on a package it did
+    # not need.
+    case("...and needs no inventory for its package", 0, Y_WHOLE,
+         {k: v for k, v in INV.items() if k != "spar-parser"})
+    # A package that genuinely has no tests is a truthful empty answer, and a
+    # filter on it selects nothing — a finding, not a crash.
+    case("a filter on a package with zero tests is vacuous, not fatal", 1,
+         Y_GOOD, {**INV, "spar-wasm": set()},
+         want_msg="selects no test in package spar-wasm")
     case("non-cargo step is counted, not judged", 0, Y_OTHER, INV)
     case("one good + one vacuous still fails", 1, Y_MIXED, INV)
     # Broken scan must not read as clean.
@@ -533,13 +547,16 @@ def main() -> int:
             return 2
         inv = {pkg: set(names) for pkg, names in raw.items()}
     else:
-        # Only the packages some step actually names — listing the rest would
-        # build crates nothing asks about.
-        packages = {
-            pkg
-            for _aid, _status, cmd in parse_steps(verification.read_text(encoding="utf-8"))
-            if (pkg := extract_filter(cmd)[0]) is not None
-        }
+        # Only packages named by a step that HAS a filter. A whole-package step
+        # (`cargo test -p X` with no `--`) selects everything and can never be
+        # vacuous, so building an inventory for it is work nothing consumes —
+        # and it made the gate fatal on `spar-verify-macros`, a proc-macro crate
+        # with no tests that no filter ever asks about.
+        packages = set()
+        for _aid, _status, cmd in parse_steps(verification.read_text(encoding="utf-8")):
+            pkg, filt = extract_filter(cmd)
+            if pkg is not None and filt is not None:
+                packages.add(pkg)
         inv = collect_inventory(Path(a.manifest_dir), packages)
     return check(verification, inv)
 
