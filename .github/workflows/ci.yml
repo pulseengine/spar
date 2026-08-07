@@ -41,50 +41,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Runs FIRST, for the same reason as the other guardrail self-tests: a
+      # classifier whose own tests fail must not be trusted to decide which
+      # required checks run.
+      - name: Changed-path classifier self-test
+        run: tools/classify_changed_paths.py --self-test
+
+      # The allow-list, the fail-closed behaviour and the rationale all live in
+      # tools/classify_changed_paths.py, which proofs.yml calls too — the two
+      # copies of this logic had already drifted (#379's `rivet.yaml` entry
+      # existed here and not there), which is why it is single-sourced now.
+      #
+      # This step is ONE command on purpose. The old body computed a count in a
+      # subshell and let `[ "$n_code" -gt 0 ]` decide; when grep failed for any
+      # reason the count was empty, the test exited 2, bash read that as false
+      # inside `if`, and the step emitted `code=false` and exited 0 — skipping
+      # 10 required checks (#384). The script therefore appends to
+      # $GITHUB_OUTPUT itself rather than returning a value for the shell to
+      # interpolate. Any `$(...)`, `||` or `-gt` reappearing in this step is
+      # that bug coming back.
+      #
+      # The two event values go through `env:` rather than being interpolated
+      # into the command text. Neither is attacker-controlled (`event_name` is a
+      # GitHub enum, `base.sha` a computed 40-hex sha), but `${{ }}` substitutes
+      # into the script *before* bash parses it, while an env var is only ever a
+      # value. Same reason the rest of this repo's workflows do it.
       - id: filter
         name: Classify diff as code vs artifacts/docs
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Non-PR event (${{ github.event_name }}) -> full suite."
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          base="${{ github.event.pull_request.base.sha }}"
-          changed=$(git diff --name-only "$base"...HEAD)
-          echo "Changed files:"
-          printf '%s\n' "$changed"
-          if [ -z "$changed" ]; then
-            echo "Empty diff -> full suite (fail-safe)."
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Non-code allow-list: rivet artifacts, STPA files, docs, markdown.
-          # Any path outside it makes the WHOLE diff "code" — a PR that touches
-          # both artifacts and Rust must still run the full suite.
-          # Counted explicitly rather than relying on `grep -q` exit semantics,
-          # so the gate's decision is readable in the job log.
-          #
-          # `rivet.yaml` is on the list (#379) because it is a rivet artifact by
-          # every other statement in this file — the header above says "rivet
-          # artifacts", and the rivet-validate job says it catches regressions
-          # "in artifacts/, safety/stpa/, and rivet.yaml" — but it lives at the
-          # repo root, so `artifacts/.*` never matched it and a rivet.yaml-only
-          # PR ran the entire heavy suite. Safe to skip those jobs for it:
-          # nothing that compiles reads the file (no .rs, no build script, no
-          # Cargo.toml references it; only AGENTS.md, docs/, this workflow, and
-          # artifacts themselves), and it stays gated regardless because
-          # rivet-validate has no `changes` gate at all.
-          allow='^(artifacts/.*\.ya?ml|safety/.*|docs/.*|rivet\.yaml|[^/]*\.md|.*/.*\.md)$'
-          n_code=$(printf '%s\n' "$changed" | grep -cvE "$allow" || true)
-          echo "code-ish files in diff: $n_code"
-          if [ "$n_code" -gt 0 ]; then
-            echo "-> code change: running the full suite."
-            echo "code=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "-> artifacts/docs only: skipping the heavy jobs."
-            echo "code=false" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: >-
+          tools/classify_changed_paths.py
+          --event-name "$EVENT_NAME"
+          --base-sha "$BASE_SHA"
+          --github-output "$GITHUB_OUTPUT"
 
   # ── Fast checks ───────────────────────────────────────────────────────
   # fmt / audit / deny / rivet-validate deliberately have NO `changes` gate:
