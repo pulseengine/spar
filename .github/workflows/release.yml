@@ -154,6 +154,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
 
@@ -176,6 +179,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: compliance-report
           path: ${{ steps.report.outputs.archive-path }}
 
@@ -238,6 +244,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: test-evidence
           path: spar-*-test-evidence.tar.gz
 
@@ -292,6 +301,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: wasm-bundle
           path: spar-wasm-browser-*.tar.gz
 
@@ -347,6 +359,9 @@ jobs:
         run: npx @vscode/vsce package --target ${{ matrix.target }} --no-dependencies
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: vsix-${{ matrix.target }}
           path: vscode-spar/*.vsix
 
@@ -408,6 +423,9 @@ jobs:
           ls -la sbom-out/
       - uses: actions/upload-artifact@v4
         with:
+          # An empty upload must not be silent: the release job gathers
+          # these with `find`, which exits 0 on no match (#402).
+          if-no-files-found: error
           name: sbom
           path: sbom-out/spar.cdx.json
 
@@ -454,9 +472,31 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           # tar.gz / zip / vsix flow through unchanged.
+          #
+          # `find ... -exec cp` exits 0 when it matches NOTHING. With every
+          # upstream upload-artifact left at the default `if-no-files-found:
+          # warn`, an empty or partial `artifacts/` therefore produced an empty
+          # `release-assets/` in silence — and the checksum, attest, cosign and
+          # `gh release create` steps below all succeed over nothing, publishing
+          # a SIGNED, ATTESTED release containing no binaries (#402).
+          #
+          # Count what was gathered and fail on a shortfall, which is the shape
+          # the SBOM block immediately below already uses. The floor is derived,
+          # not guessed: build-binaries has 5 matrix targets and build-vsix has
+          # 5, so a complete release carries at least 10 of these three
+          # extensions before the wasm/compliance/evidence bundles are counted.
+          # If a target is added to either matrix, raise this with it.
+          MIN_RELEASE_ASSETS=10
           find artifacts -type f \
             \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) \
             -exec cp {} release-assets/ \;
+          N_ASSETS="$(find release-assets -type f | wc -l | tr -d ' ')"
+          echo "release assets gathered: ${N_ASSETS} (floor ${MIN_RELEASE_ASSETS})"
+          if [ "$N_ASSETS" -lt "$MIN_RELEASE_ASSETS" ]; then
+            echo "::error::only ${N_ASSETS} release asset(s) gathered, expected at least ${MIN_RELEASE_ASSETS}. Refusing to sign and publish a short release. Downloaded artifacts/ contained:"
+            find artifacts -type f | head -40
+            exit 1
+          fi
           # Version-stamp the SBOM per the release-asset naming
           # standard: <tool>-X.Y.Z.cdx.json (bare version, no `v`).
           VERSION="${GH_REF#refs/tags/}"

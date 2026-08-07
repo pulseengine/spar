@@ -4986,8 +4986,32 @@ artifacts:
       classify_changed_paths.py, (f) #385 via check_lean_sorries.py, (g) #383's
       clippy half via check_clippy_workspaces.py, (h) via
       check_fuzz_targets.py. Each ships a self-test that runs BEFORE the gate it
-      guards is allowed to judge anything, and each was mutation-tested to show
-      its cases are load-bearing rather than merely green.
+      guards is allowed to judge anything.
+
+      A previous revision of this paragraph claimed "each was mutation-tested to
+      show its cases are load-bearing rather than merely green". That universal
+      was FALSE and is withdrawn (#405). Mutation results are recorded for two
+      of the six — (d) and (e) — and both were manual shell runs with no
+      committed harness, so they cannot be re-derived. An adversarial review
+      then falsified the universal directly: substituting
+      `filt` -> `filt.split('::')[-1]` in check_verification_filters.py leaves
+      13/13 green while changing vacuity semantics for the 16 of 60 filters that
+      contain `::`, and deleting the below-floor branch of check_lean_sorries.py
+      leaves 8/8 green.
+
+      The correlation is worth recording because it is the opposite of
+      reassuring: the two tools that CLAIMED mutation testing have the strongest
+      suites, and the two with live holes ((c)'s cross-package scope, #404;
+      (f)'s pattern width, #385) claimed nothing. The claim was reached for
+      where confidence was already high, which is where it adds least.
+
+      Mechanising it is #405 (`tools/check_self_test_potency.py`). Note what
+      that would and would not buy: mutation testing shows the cases PRESENT are
+      load-bearing; it cannot show the case set COVERS the hazard. Both live
+      holes prove it from the other side — one has a self-test case that affirms
+      the narrow behaviour as intended, the other has no case for the hole at
+      all, and a green potency run on either would be true and still miss the
+      defect.
 
       STATUS DELIBERATELY LEFT `proposed`. This artifact carries the
       `human-scoped` tag, so REQ-GUARD-HUMAN-SCOPED-001 forbids an agent
