@@ -43,10 +43,17 @@ names — which `cargo test -- --list` prints as
 
     module::tests::name: test
 
-The inventory is collected once per invocation and every filter is checked
-against it in memory. That keeps the check O(one build) rather than O(149
-cargo invocations), and makes the decision procedure identical to libtest's
-rather than an approximation of it.
+The inventory is collected PER PACKAGE — `cargo test -p X --all-targets --
+--list` for each package a step names — and each filter is checked against its
+own package's names in memory. The listings share one build, so this is still
+O(one build) rather than O(one invocation per step).
+
+Per package is not a refinement, it is the correctness condition. The first
+revision collected one flat workspace-wide list while parsing (and discarding)
+the `-p`, so it asked "does this substring occur ANYWHERE?" where
+`run_verification.py` runs "does it occur in package P?". #388's own executed
+proof case survived that: `cargo test -p spar-wasm -- topology` matches three
+tests, all of them in other crates (#404).
 
 A filter that selects nothing fails, naming the artifact, the step and the
 filter. A count is printed on every path, success included — for the same
@@ -175,26 +182,55 @@ def extract_filter(cmd: str) -> tuple[str | None, str | None]:
     return (pkg, None)
 
 
-def collect_inventory(manifest_dir: Path) -> set[str]:
-    """Every test name cargo knows about, via `cargo test -- --list`."""
-    proc = subprocess.run(
-        ["cargo", "test", "--workspace", "--all-targets", "--", "--list"],
-        cwd=manifest_dir,
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            "cargo test --list failed; cannot build a test inventory, so no "
-            "filter can be judged. Refusing to report success.\n"
-            + proc.stderr[-2000:]
+def collect_inventory(manifest_dir: Path, packages: set[str]) -> dict[str, set[str]]:
+    """{package: {test names}} — one listing PER PACKAGE.
+
+    The first revision collected a single flat, workspace-wide list. It also
+    parsed the `-p` out of each command and then never used it, so the gate
+    asked "does this substring occur anywhere in the workspace?" while
+    `run_verification.py` runs "does it occur in package P?" — strictly weaker,
+    and #388's own executed proof case survived it: `cargo test -p spar-wasm --
+    topology` matches three tests, all of them in spar-solver and spar-network
+    (#404).
+
+    Listing per package costs 10 invocations here, but they share one build, and
+    it is the same question the consumer asks. A gate that answers an easier
+    question than the thing it guards is the defect this whole requirement is
+    about.
+    """
+    inv: dict[str, set[str]] = {}
+    for pkg in sorted(packages):
+        proc = subprocess.run(
+            ["cargo", "test", "-p", pkg, "--all-targets", "--", "--list"],
+            cwd=manifest_dir,
+            capture_output=True,
+            text=True,
         )
-    return {m.group("name") for m in _LIST_LINE.finditer(proc.stdout)}
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"cargo test -p {pkg} --list failed; cannot build a test "
+                f"inventory for it, so its filters cannot be judged. Refusing "
+                f"to report success.\n" + proc.stderr[-2000:]
+            )
+        names = {m.group("name") for m in _LIST_LINE.finditer(proc.stdout)}
+        if not names:
+            # A package with no tests at all is possible, but a package named by
+            # a verification step and listing nothing is far more likely to be a
+            # broken invocation. Fail closed rather than judge every one of its
+            # filters vacuous (or, worse, non-vacuous against an empty pool).
+            raise RuntimeError(
+                f"cargo listed ZERO tests for package {pkg}, which a "
+                f"verification step claims to filter. That is a broken scan, "
+                f"not a finding about the filters."
+            )
+        inv[pkg] = names
+    return inv
 
 
-def check(yaml_path: Path, inventory: set[str], out=sys.stdout) -> int:
+def check(yaml_path: Path, inventory: dict[str, set[str]], out=sys.stdout) -> int:
     steps = parse_steps(yaml_path.read_text(encoding="utf-8"))
-    filtered: list[tuple[str, str, str, str]] = []
+    # (artifact id, status, command, filter, package)
+    filtered: list[tuple[str, str, str, str, str | None]] = []
     whole_pkg = 0
     other = 0
     for aid, status, cmd in steps:
@@ -204,13 +240,31 @@ def check(yaml_path: Path, inventory: set[str], out=sys.stdout) -> int:
         elif filt is None:
             whole_pkg += 1
         else:
-            filtered.append((aid, status, cmd, filt))
+            filtered.append((aid, status, cmd, filt, pkg))
 
+    # Each filter is judged against ITS OWN package's inventory, not the
+    # workspace's. `libtest` filters are substring matches over the test paths
+    # *of the binary being run*, and `cargo test -p X` runs only X's binaries —
+    # so a filter matching a test in another crate selects nothing here (#404).
+    # A step with no `-p` really does run everything, so it uses the union.
+    union: set[str] = set()
+    for names in inventory.values():
+        union |= names
+
+    def pool_for(pkg: str | None) -> set[str] | None:
+        return union if pkg is None else inventory.get(pkg)
+
+    unlistable = [e for e in filtered if pool_for(e[4]) is None]
     empty = [
-        (aid, status, cmd, filt)
-        for aid, status, cmd, filt in filtered
-        if not any(filt in name for name in inventory)
+        e for e in filtered
+        if (pool := pool_for(e[4])) is not None
+        and not any(e[3] in name for name in pool)
     ]
+    for aid, _status, _cmd, filt, pkg in unlistable:
+        # No inventory for the named package means the question could not be
+        # asked. "Could not judge" must not read as "fine".
+        print(f"::error::{aid}: no test inventory for package {pkg!r}, so its "
+              f"filter {filt!r} cannot be judged", file=out)
     # `<none>` is NOT lenient. An artifact whose status this reader cannot find
     # is unclassifiable, and an unclassifiable artifact with a filter that
     # selects nothing is exactly the case that must not pass quietly. Same
@@ -225,12 +279,14 @@ def check(yaml_path: Path, inventory: set[str], out=sys.stdout) -> int:
     print(f"  cargo test + filter:    {len(filtered)}", file=out)
     print(f"  cargo test, whole pkg:  {whole_pkg}", file=out)
     print(f"  not a cargo test:       {other}", file=out)
-    print(f"test names in inventory:  {len(inventory)}", file=out)
+    print(f"packages inventoried:     {len(inventory)}"
+          f"  ({', '.join(f'{p}={len(n)}' for p, n in sorted(inventory.items()))})", file=out)
+    print(f"test names, all packages: {len(union)}", file=out)
     print(f"filters selecting nothing: {len(empty)}", file=out)
     print(f"  claiming evidence (FAIL): {len(vacuous)}", file=out)
     print(f"  proposed/draft (ok):      {len(planned)}", file=out)
 
-    if not inventory:
+    if not union:
         print(
             "::error::the test inventory is empty, so every filter would look "
             "vacuous. That is a broken scan, not a finding.",
@@ -238,17 +294,29 @@ def check(yaml_path: Path, inventory: set[str], out=sys.stdout) -> int:
         )
         return 2
 
-    for aid, status, cmd, filt in planned:
+    # A step whose package could not be inventoried is unjudgeable, and
+    # unjudgeable must not read as fine. Errors were already printed above.
+    if unlistable:
+        print(f"\n{len(unlistable)} filtered step(s) name a package with no "
+              f"inventory — refusing to report success over an unasked question.",
+              file=out)
+        return 2
+
+    for aid, status, cmd, filt, pkg in planned:
         print(f"  note: {aid} ({status}) plans a test that does not exist yet: {filt!r}", file=out)
 
     if vacuous:
         print("", file=out)
-        for aid, status, cmd, filt in vacuous:
-            print(f"::error::{aid} (status={status}): filter {filt!r} selects no test", file=out)
+        for aid, status, cmd, filt, pkg in vacuous:
+            scope = f"package {pkg}" if pkg else "the workspace"
+            print(f"::error::{aid} (status={status}): filter {filt!r} selects no "
+                  f"test in {scope}", file=out)
             print(f"    step: {cmd}", file=out)
         print(
             "\nA filter that matches nothing exits 0. These steps have been "
-            "scored as passing without running anything.",
+            "scored as passing without running anything. Note the scope: a "
+            "filter matching a test in a DIFFERENT package still selects "
+            "nothing here, because `cargo test -p X` runs only X's binaries.",
             file=out,
         )
         return 1
@@ -267,23 +335,48 @@ def self_test() -> int:
 
     passed = failed = 0
 
-    def case(desc: str, want: int, yaml_text: str, inv: set[str]) -> None:
+    def case(desc: str, want: int, yaml_text: str, inv: dict[str, set[str]],
+             want_msg: str | None = None) -> None:
+        """`want_msg` pins the DIAGNOSIS as well as the exit code.
+
+        Several distinct broken inputs reach the same exit code by different
+        routes — an empty inventory and an un-inventoried package both exit 2 —
+        so asserting the code alone cannot say which check fired, and removing
+        either leaves the suite green. Pinning the message is what makes each
+        branch load-bearing.
+        """
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "v.yaml"
             p.write_text(yaml_text, encoding="utf-8")
             buf = io.StringIO()
             got = check(p, inv, out=buf)
-        if got == want:
-            passed += 1
-            print(f"  ok   {desc}")
-        else:
+        text = buf.getvalue()
+        if got != want:
             failed += 1
             print(f"  FAIL {desc}: got {got}, want {want}")
-            for line in buf.getvalue().splitlines()[:6]:
+            for line in text.splitlines()[:6]:
                 print(f"         {line}")
+        elif want_msg is not None and want_msg not in text:
+            failed += 1
+            print(f"  FAIL {desc}: exit {got} correct, but the diagnosis is "
+                  f"wrong — expected {want_msg!r}")
+            for line in text.splitlines()[:6]:
+                print(f"         {line}")
+        else:
+            passed += 1
+            print(f"  ok   {desc}")
 
-    INV = {"render::tests::render_basic_aadl", "graph::tests::test_graph_with_connections"}
+    # Inventories are PER PACKAGE, because that is the scope `cargo test -p X`
+    # actually searches. `spar-solver` deliberately owns a test whose name would
+    # match a spar-wasm filter — that is the #404 counterexample, and under the
+    # old flat inventory it made a vacuous filter look fine.
+    INV = {
+        "spar-wasm": {"render::tests::render_basic_aadl",
+                      "graph::tests::test_graph_with_connections"},
+        "spar-solver": {"tests::topology_is_deterministic"},
+        "spar-parser": {"parse::tests::basic"},
+    }
 
     Y_GOOD = """artifacts:
   - id: TEST-OK
@@ -325,13 +418,35 @@ def self_test() -> int:
     print("check_verification_filters self-test")
     # The bug itself.
     case("REGRESSION #388: filter selecting nothing must FAIL", 1, Y_BAD, INV)
+    # THE #404 COUNTEREXAMPLE. `topology` matches a real test — in spar-solver,
+    # not in the spar-wasm this step runs. Under the old flat workspace
+    # inventory this passed, which is how #388's own executed proof case stayed
+    # green after #388 was closed.
+    Y_CROSS = """artifacts:
+  - id: TEST-STPA-SVG-TOPOLOGY
+    status: implemented
+    fields:
+      steps:
+        - run: cargo test -p spar-wasm -- topology
+"""
+    case("REGRESSION #404: a filter matching another PACKAGE's test is vacuous",
+         1, Y_CROSS, INV)
+    # ...and the same filter is fine when the step names the package that owns
+    # the test. Distinct inputs, distinct outputs: a checker that ignored `-p`
+    # gives both the same verdict and cannot fail the first.
+    case("...and it PASSES when -p names the package that owns the test",
+         0, Y_CROSS.replace("spar-wasm", "spar-solver"), INV)
+    # A package nobody could list is unjudgeable, which must not read as fine.
+    case("a step naming an un-inventoried package is CANNOT-JUDGE, not a pass",
+         2, Y_GOOD.replace("spar-wasm", "spar-ghost"), INV)
     # Normal operation.
     case("filter selecting a real test passes", 0, Y_GOOD, INV)
     case("whole-package step is never vacuous", 0, Y_WHOLE, INV)
     case("non-cargo step is counted, not judged", 0, Y_OTHER, INV)
     case("one good + one vacuous still fails", 1, Y_MIXED, INV)
     # Broken scan must not read as clean.
-    case("empty inventory is a broken scan, not a pass", 2, Y_GOOD, set())
+    case("empty inventory is a broken scan, not a pass", 2, Y_GOOD, {},
+         want_msg="the test inventory is empty")
     # Status semantics: a plan is not a false claim.
     case("proposed artifact planning a future test PASSES", 0, Y_PLANNED, INV)
     case("NO status is unclassifiable, so it fails closed", 1,
@@ -341,6 +456,15 @@ def self_test() -> int:
     # Substring semantics, which is what libtest does.
     case("filter matching as a SUBSTRING passes", 0,
          Y_GOOD.replace("render_basic", "basic_aadl"), INV)
+    # A `::`-bearing filter, because 16 of the 60 real filters carry one and no
+    # case did. The discriminator: the FULL filter must be matched, not its last
+    # segment. Here `nonexistent::render_basic` selects nothing even though
+    # `render_basic` alone would — a checker that split on `::` and matched only
+    # the tail would pass this and could not fail it.
+    case("a `::` filter is matched WHOLE, not by its last segment", 1,
+         Y_GOOD.replace("render_basic", "nonexistent::render_basic"), INV)
+    case("...and a real module-path filter still passes", 0,
+         Y_GOOD.replace("render_basic", "render::tests::render_basic"), INV)
     case("near-miss substring still fails", 1,
          Y_GOOD.replace("render_basic", "render_basicX"), INV)
     # A QUOTED step is YAML syntax, not part of the filter. The first run of
@@ -375,11 +499,28 @@ def main() -> int:
     a = ap.parse_args()
     if a.self_test:
         return self_test()
+    verification = Path(a.verification)
     if a.inventory_json:
-        inv = set(json.loads(Path(a.inventory_json).read_text(encoding="utf-8")))
+        # {"pkg": ["name", ...]} — a flat array is no longer accepted, because a
+        # flat inventory is exactly the defect (#404): it cannot express which
+        # package owns a test, so every filter is judged against the wrong pool.
+        raw = json.loads(Path(a.inventory_json).read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            print("::error::--inventory-json must be an object mapping package "
+                  "-> [test names]. A flat list cannot say which package owns a "
+                  "test, which is the #404 defect.", file=sys.stderr)
+            return 2
+        inv = {pkg: set(names) for pkg, names in raw.items()}
     else:
-        inv = collect_inventory(Path(a.manifest_dir))
-    return check(Path(a.verification), inv)
+        # Only the packages some step actually names — listing the rest would
+        # build crates nothing asks about.
+        packages = {
+            pkg
+            for _aid, _status, cmd in parse_steps(verification.read_text(encoding="utf-8"))
+            if (pkg := extract_filter(cmd)[0]) is not None
+        }
+        inv = collect_inventory(Path(a.manifest_dir), packages)
+    return check(verification, inv)
 
 
 if __name__ == "__main__":

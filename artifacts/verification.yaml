@@ -318,6 +318,22 @@ artifacts:
       Eight tests verifying SVG graph output contains correct number of
       nodes and edges matching the instance model, with proper labels
       and connection endpoints.
+
+      DEMOTED to `proposed` 2026-08-07 (#404). The step below selects NO test
+      in spar-wasm: nothing in that package has `topology` in its name. It
+      looked non-vacuous only because the guardrail matched filters against a
+      flat workspace-wide inventory while discarding the `-p` it had parsed —
+      and `topology` does match three tests, all of them in spar-solver and
+      spar-network. This is #388's own executed proof case, which survived
+      #388's fix.
+
+      NOT repointed, deliberately. spar-wasm's nearest candidates are the FOUR
+      tests in `graph::tests`, and this artifact describes EIGHT covering
+      labels and connection endpoints — so the described evidence cannot be
+      located, and choosing a filter that merely selects something would assert
+      a relevance nobody has checked. A human should decide whether the eight
+      tests are to be written or the claim withdrawn.
+    status: proposed
     fields:
       method: automated-test
       steps:
