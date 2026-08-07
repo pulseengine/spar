@@ -42,8 +42,22 @@ THE REPLACEMENT
 
 A ratchet, the same shape as the mutants gate:
 
-* Count every bare `sorry`, with NO comment-based exemption. A `-- TODO` is a
-  note to humans, not a permit.
+* Count every unproven obligation, with NO comment-based exemption. A `-- TODO`
+  is a note to humans, not a permit.
+
+  "Obligation" is broader than the first revision of this gate allowed, and the
+  widening is #385's defect (b), fixed separately from its defect (a). That
+  revision matched only a bare `sorry` alone on its line, so `:= by sorry`,
+  `:= sorry`, `admit` and `axiom cheat : 7 = 8` all reported zero — the four
+  forms the issue had named explicitly. Worse, its self-test contained a case
+  ASSERTING that a non-bare occurrence does not count, which made the hole look
+  deliberate. All five forms (including `sorryAx`) now count, matched over
+  comment-stripped text so prose still does not.
+
+  MEASURED before widening, so this is not a latent red: the count is 12 either
+  way — the tree contains no inline `sorry`, no `admit`, no `axiom` and no
+  `sorryAx` today. The declared floor is unchanged; only the escape hatches are
+  closed.
 * Compare against `--max-sorries`, a floor declared in the workflow.
 * count > floor  -> FAIL. New sorries cannot be admitted by writing a comment.
 * count < floor  -> PASS, and say loudly that the floor should be lowered. That
@@ -70,19 +84,76 @@ import sys
 import tempfile
 from pathlib import Path
 
-# A bare `sorry` on its own line, with or without a trailing comment. The
-# trailing comment is CAPTURED, not excluded — that was the bug.
-_SORRY = re.compile(r"^[ \t]*sorry[ \t]*(--.*)?$")
+# Every way this tree can carry an unproven obligation.
+#
+# The first revision of this gate matched ONLY `^[ \t]*sorry[ \t]*(--.*)?$` — a
+# bare `sorry` alone on its line. That fixed #385's defect (a), the self-service
+# `-- TODO` exemption, and left its defect (b) untouched: the issue named
+# `:= by sorry`, `:= sorry`, `admit` and `axiom` explicitly, and all four exited
+# 0. The self-exemption had been replaced with a narrower one that was just as
+# self-service — an author could assert a falsehood via `axiom` and the declared
+# floor never moved.
+#
+# Detection runs over COMMENT-STRIPPED text, which is what lets the patterns be
+# word-bounded rather than line-anchored: `-- mentions sorry in prose` must not
+# count, and it no longer can, because the comment is gone before matching.
+#
+# `sorryAx` is counted separately and deliberately. It is Lean's underlying
+# escape term; `\bsorry\b` does not match inside it (word boundary), so without
+# its own entry it would be invisible. There are zero occurrences today, so
+# counting it costs nothing now and closes the hatch later.
+_OBLIGATIONS: list[tuple[str, re.Pattern[str]]] = [
+    ("sorry", re.compile(r"\bsorry\b")),
+    ("sorryAx", re.compile(r"\bsorryAx\b")),
+    ("admit", re.compile(r"\badmit\b")),
+    # An axiom asserts its statement without proof — `axiom cheat : 7 = 8` is
+    # strictly worse than a `sorry`, because nothing marks the proof as
+    # incomplete. Anchored at line start so `Classical.axiom_of_choice`-style
+    # references in expressions are not swept up.
+    ("axiom", re.compile(r"^[ \t]*axiom[ \t]+")),
+]
 
 
-def scan(root: Path) -> dict[str, list[tuple[int, str]]]:
-    """{relative path: [(line_no, line_text)]} for every bare sorry."""
-    found: dict[str, list[tuple[int, str]]] = {}
+def strip_comments(text: str) -> str:
+    """Blank out Lean comments, preserving line structure.
+
+    Handles nested `/- -/` blocks (Lean permits nesting) and `--` to
+    end-of-line. Newlines are preserved so reported line numbers stay true to
+    the original file.
+    """
+    out, i, depth = [], 0, 0
+    while i < len(text):
+        if text.startswith("/-", i):
+            depth += 1
+            out.append("  ")
+            i += 2
+            continue
+        if text.startswith("-/", i) and depth:
+            depth -= 1
+            out.append("  ")
+            i += 2
+            continue
+        if depth:
+            out.append("\n" if text[i] == "\n" else " ")
+            i += 1
+            continue
+        out.append(text[i])
+        i += 1
+    return "\n".join(re.sub(r"--.*$", "", ln) for ln in "".join(out).splitlines())
+
+
+def scan(root: Path) -> dict[str, list[tuple[int, str, str]]]:
+    """{path: [(line_no, kind, original_line_text)]} for every obligation."""
+    found: dict[str, list[tuple[int, str, str]]] = {}
     for path in sorted(root.rglob("*.lean")):
-        hits = []
-        for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            if _SORRY.match(line):
-                hits.append((n, line.strip()))
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        raw_lines = raw.splitlines()
+        hits: list[tuple[int, str, str]] = []
+        for n, line in enumerate(strip_comments(raw).splitlines(), 1):
+            for kind, rx in _OBLIGATIONS:
+                for _ in rx.finditer(line):
+                    original = raw_lines[n - 1].strip() if n <= len(raw_lines) else line.strip()
+                    hits.append((n, kind, original))
         if hits:
             found[str(path)] = hits
     return found
@@ -103,14 +174,23 @@ def check(root: Path, max_sorries: int, out=sys.stdout) -> int:
 
     found = scan(root)
     total = sum(len(v) for v in found.values())
+    by_kind: dict[str, int] = {}
+    for hits in found.values():
+        for _, kind, _text in hits:
+            by_kind[kind] = by_kind.get(kind, 0) + 1
 
     print("== lean-sorry guardrail ==", file=out)
     print(f".lean files scanned: {len(lean_files)}", file=out)
-    print(f"sorries found:       {total}   (declared floor: {max_sorries})", file=out)
+    print(f"obligations found:   {total}   (declared floor: {max_sorries})", file=out)
+    # Printed on every path, success included, and broken out by kind: the
+    # forms are not interchangeable, and a shift from `sorry` to `axiom` at a
+    # constant total would otherwise be invisible.
+    kinds = ", ".join(f"{k}={by_kind[k]}" for k, _ in _OBLIGATIONS if k in by_kind)
+    print(f"by kind:             {kinds or '(none)'}", file=out)
     for path, hits in found.items():
         print(f"  {len(hits):3}  {path}", file=out)
-        for n, text in hits:
-            print(f"       :{n}  {text}", file=out)
+        for n, kind, text in hits:
+            print(f"       :{n}  [{kind}] {text}", file=out)
 
     if total > max_sorries:
         print("", file=out)
@@ -133,7 +213,16 @@ def check(root: Path, max_sorries: int, out=sys.stdout) -> int:
 def self_test() -> int:
     passed = failed = 0
 
-    def case(desc: str, want: int, files: dict[str, str], floor: int) -> None:
+    def case(desc: str, want: int, files: dict[str, str], floor: int,
+             want_msg: str | None = None) -> None:
+        """`want_msg` pins the DIAGNOSIS, not just the exit code.
+
+        The ratchet notice and the per-kind breakdown are output-only: deleting
+        either changes no verdict, so an exit-code assertion cannot tell whether
+        they still work. An adversarial review found exactly that — removing the
+        below-floor branch left 8/8 green. Anything whose whole purpose is to
+        say something needs a case that reads what it said.
+        """
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -143,14 +232,21 @@ def self_test() -> int:
                 p.write_text(body, encoding="utf-8")
             buf = io.StringIO()
             got = check(root, floor, out=buf)
-        if got == want:
-            passed += 1
-            print(f"  ok   {desc}")
-        else:
+        text = buf.getvalue()
+        if got != want:
             failed += 1
             print(f"  FAIL {desc}: got {got}, want {want}")
-            for line in buf.getvalue().splitlines()[:6]:
+            for line in text.splitlines()[:6]:
                 print(f"         {line}")
+        elif want_msg is not None and want_msg not in text:
+            failed += 1
+            print(f"  FAIL {desc}: exit {got} correct, but the diagnosis is "
+                  f"wrong — expected {want_msg!r}")
+            for line in text.splitlines()[:6]:
+                print(f"         {line}")
+        else:
+            passed += 1
+            print(f"  ok   {desc}")
 
     PLAIN = "theorem t : True := by\n  sorry\n"
     TODO = "theorem t : True := by\n  sorry -- TODO(v1.0.0)\n"
@@ -168,15 +264,49 @@ def self_test() -> int:
     case("bare sorry at floor passes", 0, {"A.lean": PLAIN}, 1)
     # The ratchet direction: improving must never fail.
     case("below floor PASSES (ratchet may be tightened, not a failure)", 0,
-         {"A.lean": DONE}, 3)
+         {"A.lean": DONE}, 3,
+         want_msg="lower --max-sorries to 0")
     # Counting across files.
     case("counts across multiple files", 1,
          {"A.lean": PLAIN, "sub/B.lean": TODO}, 1)
     # Broken scans must not read as clean.
     case("no .lean files is a broken scan, not a clean tree", 2, {"README.md": "x"}, 0)
-    # A `sorry` inside a word or mid-expression is not a bare sorry.
-    case("`sorryAx` / inline text is not a bare sorry", 0,
-         {"A.lean": "def sorryAx := 1\n-- mentions sorry in prose\n"}, 0)
+    # ── #385 defect (b): the forms the first revision could not see ──
+    #
+    # The case that used to sit here read:
+    #
+    #     case("`sorryAx` / inline text is not a bare sorry", 0,
+    #          {"A.lean": "def sorryAx := 1\n-- mentions sorry in prose\n"}, 0)
+    #
+    # It PINNED THE HOLE SHUT rather than finding it — asserting as intended
+    # behaviour that a non-bare occurrence does not count, at a floor of 0. The
+    # issue had already enumerated four forms by name; none had a case, and all
+    # four exited 0. A test that affirms the gap is worse than no test, because
+    # it makes the gap look deliberate.
+    case("REGRESSION #385(b): inline `:= by sorry` COUNTS", 1,
+         {"A.lean": "theorem cheat : 1 = 2 := by sorry\n"}, 0)
+    case("REGRESSION #385(b): inline `:= sorry` COUNTS", 1,
+         {"A.lean": "theorem cheat : 1 = 2 := sorry\n"}, 0)
+    case("REGRESSION #385(b): `admit` COUNTS", 1,
+         {"A.lean": "theorem cheat : 1 = 2 := by\n  admit\n"}, 0)
+    case("REGRESSION #385(b): `axiom` COUNTS (asserts without proof)", 1,
+         {"A.lean": "axiom cheat : 7 = 8\n"}, 0,
+         want_msg="axiom=1")
+    case("REGRESSION #385(b): `sorryAx` COUNTS (the underlying escape term)", 1,
+         {"A.lean": "theorem cheat : 1 = 2 := sorryAx _ true\n"}, 0)
+
+    # ...and the legitimate half of the old case still holds: prose must not
+    # count. This is what makes the widening safe rather than merely stricter —
+    # detection runs over comment-stripped text, so the word in a comment is
+    # gone before any pattern is applied.
+    case("a `sorry` mentioned in a line comment does NOT count", 0,
+         {"A.lean": "theorem t : True := by\n  trivial  -- unlike sorry, this closes\n"}, 0)
+    case("a `sorry` inside a /- block comment -/ does NOT count", 0,
+         {"A.lean": "/- we could sorry this, or:\n   admit it -/\ntheorem t : True := by\n  trivial\n"}, 0)
+    case("a nested /- /- -/ -/ block is fully stripped", 0,
+         {"A.lean": "/- outer /- inner sorry -/ still comment -/\ntheorem t : True := by\n  trivial\n"}, 0)
+    case("an identifier merely CONTAINING sorry is not a bare sorry", 0,
+         {"A.lean": "def sorryless := 1\n"}, 0)
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
