@@ -4933,9 +4933,19 @@ artifacts:
       see this. The discriminator is `outcomes.json: end_time`, null on a
       truncated run. A truncated run UNDER-reports survivors, so it fails
       flatteringly, and any threshold derived from one is a ceiling set below
-      the floor (#389). Blocked on the runner-side `_tmp` reaping that causes
-      it — arming the detector alone would make a required context flap on
-      infrastructure.
+      the floor (#389). Was blocked on the runner-side `_tmp` reaping that
+      causes it — arming the detector alone would make a required context flap
+      on infrastructure. UNBLOCKED 2026-08-07: the cause was smithy's tmpfiles
+      policy sweeping `cargo-mutants-*.tmp` older than 2h, hourly, on the stated
+      assumption that "a job that's still running keeps mtime fresh" — false for
+      cargo-mutants, which copies each worker's source tree ONCE at start and
+      never touches it again, so mtime is frozen while the job is alive. Age
+      raised to 8h, above GitHub's 6h job ceiling, and the aggressive reclaim
+      moved into the post-job hook where the tmpdirs are abandoned by
+      construction (smithy PR #7, verified 12/12 rules and 12/12 hooks). The
+      detector is therefore armed. Residual coupling: 8h holds only while this
+      repo's `mutants` job stays under ~7h; it is currently
+      `timeout-minutes: 240`.
 
       (e) A CHANGE FILTER SHALL NOT FAIL OPEN. `Detect changed paths` gates 11
       of the 18 required contexts via `if: needs.changes.outputs.code == 'true'`.
@@ -4969,6 +4979,24 @@ artifacts:
       always the same: distinct inputs must produce distinct outputs. A guard
       whose ERROR path yields its IDEAL reading is unfalsifiable by construction,
       and no amount of watching it pass distinguishes clean from blind.
+
+      ALL SIX OBLIGATIONS HAVE LANDING IMPLEMENTATIONS as of 2026-08-07: (c)
+      #388 via check_verification_filters.py, (d) #389 via
+      check_mutants_report.py's end_time assertion, (e) #384 via
+      classify_changed_paths.py, (f) #385 via check_lean_sorries.py, (g) #383's
+      clippy half via check_clippy_workspaces.py, (h) via
+      check_fuzz_targets.py. Each ships a self-test that runs BEFORE the gate it
+      guards is allowed to judge anything, and each was mutation-tested to show
+      its cases are load-bearing rather than merely green.
+
+      STATUS DELIBERATELY LEFT `proposed`. This artifact carries the
+      `human-scoped` tag, so REQ-GUARD-HUMAN-SCOPED-001 forbids an agent
+      promoting it to a completed status — and that gate caught exactly that
+      attempt while this change was being prepared. Whether six implementations
+      constitute the requirement being MET is the judgement the tag reserves for
+      a human. Promoting it means dropping the `human-scoped` tag in the same
+      diff, so the decision is one explicit line rather than a status that
+      drifted upward on its own.
     status: proposed
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, human-scoped]
