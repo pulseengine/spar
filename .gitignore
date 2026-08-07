@@ -44,3 +44,12 @@ __pycache__/
 # far enough to produce either one.
 /tools/fixture-vm/nixos.qcow2
 /tools/fixture-vm/result
+
+# Nested-workspace build output. `/target` above is ROOT-ANCHORED, so it does
+# not cover the three sibling workspaces; before the clippy-scope guardrail
+# (REQ-GUARD-GATE-EVIDENCE-002 g) nothing routinely built in them, so the gap
+# never showed. It does now — running clippy repo-wide leaves untracked
+# `target/` in each, and untracked noise hides real changes.
+codegen-exec-oracle/target/
+codegen-kiln-oracle/target/
+fuzz/target/

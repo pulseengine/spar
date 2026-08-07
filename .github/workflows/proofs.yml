@@ -134,23 +134,36 @@ jobs:
       # Discharging the sorrys is a separate v0.10 PR. Once a sorry is
       # discharged, this step turns green automatically; no allowlist
       # to maintain.
+      # REQ-GUARD-GATE-EVIDENCE-002 (f), closes #385.
+      #
+      # The previous body was a two-stage grep that excluded any sorry
+      # carrying a same-line `-- TODO`. Its comment explained why that was
+      # safe: "the five tracked sorrys do NOT carry a same-line comment".
+      # That was true when written. The sorries then grew 5 -> 12 AND moved
+      # their TODO onto the same line, so an exclusion designed to be a no-op
+      # silently became universal — 12 in, 0 out, `if` never fires, and the
+      # step printed "No sorrys in proofs/Proofs/ — gate green."
+      #
+      # The gate was satisfied by exactly the thing it exists to prevent, and
+      # nobody edited it; the code drifted out from under its comment. The
+      # generalisable part: a self-exemption keyed on a pattern the exempted
+      # code itself controls cannot hold — the proof author writes both the
+      # `sorry` and the `-- TODO` that excuses it.
+      #
+      # Replaced by a declared ratchet. --max-sorries is the floor, and it is
+      # here (in the workflow) rather than in the proofs, so lowering it is a
+      # deliberate edit by someone other than the proof being exempted.
+      # 12 is the measured count on ae27ff1. LOWER IT as proofs land; the gate
+      # says so on every run where the real count is below the floor.
+      # Discharging these is REQ-PROOF-NC-MINPLUS-001 (v0.38.0).
+      - name: Lean-sorry guardrail self-test
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: tools/check_lean_sorries.py --self-test
       - name: Fail on sorry (post-build gate)
         if: always()
         working-directory: ${{ github.workspace }}
-        run: |
-          set -u
-          # Match bare `sorry` lines (any indent), excluding those with
-          # a same-line comment exemption (`-- TODO(...)` etc). The
-          # five tracked sorrys do NOT carry a same-line comment; the
-          # TODO sits on the prior line, so this gate flags all five.
-          if grep -rn -E '^[[:space:]]*sorry[[:space:]]*(--.*)?$' proofs/Proofs/ \
-              | grep -v -E 'sorry[[:space:]]*--[[:space:]]*TODO'; then
-            echo ""
-            echo "::error::Lean proofs tree contains unfinished proofs (sorry)."
-            echo "::error::See proofs/README.md 'Known sorrys' and COMPLIANCE.md v0.9.1 for the tracked list."
-            exit 1
-          fi
-          echo "No sorrys in proofs/Proofs/ — gate green."
+        run: tools/check_lean_sorries.py --max-sorries 12
 
       # Codegen freshness gate (REQ-PROOF-SCHED-CODEGEN-001, #321).
       #
