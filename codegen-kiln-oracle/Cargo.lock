@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.3",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "rowan",
  "salsa",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "spar-codegen"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "la-arena",
  "serde",
@@ -1013,7 +1013,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "la-arena",
  "rowan",
@@ -1028,7 +1028,7 @@ dependencies = [
 
 [[package]]
 name = "spar-network"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "good_lp",
  "spar-hir-def",
@@ -1036,14 +1036,14 @@ dependencies = [
 
 [[package]]
 name = "spar-parser"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "rowan",
 ]
 
 [[package]]
 name = "spar-syntax"
-version = "0.26.0"
+version = "0.35.0"
 dependencies = [
  "rowan",
  "spar-parser",

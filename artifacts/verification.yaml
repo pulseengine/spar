@@ -4178,6 +4178,80 @@ artifacts:
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, lean, proofs]
 
+  - id: TEST-GUARD-CLIPPY-SCOPE
+    type: feature
+    title: Clippy is proven to run in every workspace, not just cargo's default one
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (g) — the clippy half of #383.
+
+      `cargo clippy --workspace --all-targets` means "all members of THIS
+      workspace", so the `Clippy` required check linted 1 of the repo's 4
+      workspaces and reported green for the repo. The fmt half was fixed in
+      v0.36.0's predecessor work; clippy inherited the identical default and was
+      left, which is why the requirement is worded "every whole-repo tool uses
+      discovery, not just the one that was caught".
+
+      `tools/check_clippy_workspaces.py` REUSES `check_fmt_workspaces.discover`
+      and its `check()` rather than copying them — the wording is injected
+      (`tool`/`verb`/`fix_hint`) and the fmt defaults are unchanged, so the fmt
+      gate and its 10-case self-test are provably unaffected. Copying would have
+      put workspace discovery in two files, and a fact duplicated across two
+      copies that then disagree is exactly #381.
+
+      The self-test's discriminating pair is the runner's exit code: the SAME
+      four-workspace tree passes when the runner reports clean and FAILS when it
+      reports dirty. A wrapper that ignored its runner — the way to make this
+      gate vacuous — passes the first and fails the second. A third case pins
+      that a missing cargo is CANNOT_CHECK, not a pass.
+
+      MEASURED before wiring, so this is not a latent red: all four workspaces
+      (root, codegen-exec-oracle, codegen-kiln-oracle, fuzz) are already
+      clippy-clean under `-D warnings`. Live run prints
+      `4 workspace(s) checked, 4 lint-clean.`
+
+      NOT claimed: that the lint SET is adequate. This ensures the tool is
+      pointed at every workspace; a workspace with no `[lints]` configured
+      passes here and is still under-linted. Different obligation.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
+
+  - id: TEST-GUARD-FUZZ-TARGETS
+    type: feature
+    title: The fuzz targets run are proven equal to the fuzz targets declared
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (h).
+
+      `fuzz/Cargo.toml` declares harnesses as `[[bin]]`; `fuzz-nightly.yml` runs
+      them from a hand-written `matrix.include` (the `include` form is
+      deliberate — each target carries its own `extra_args`, and only
+      `fuzz_scheduler_solver` needs `-max_len=128`; a flat list would impose
+      that cap on two healthy fuzzers, #361). The cost is two separately
+      maintained lists that nothing compared.
+
+      Add a harness and forget the workflow, or delete a matrix entry, and the
+      nightly stays GREEN having fuzzed a strict subset — no error, no warning,
+      no smaller number anywhere in the log, because success is reported per leg
+      and nobody counts the legs. Nightly is also where this hides longest: it
+      is not on the PR gate, and `fuzz_scheduler_solver` was red 97/97 runs from
+      2026-04-25 before anyone looked. A silently ABSENT leg is strictly harder
+      to notice than a loudly failing one.
+
+      `tools/check_fuzz_targets.py` asserts set equality in BOTH directions,
+      because the two failures are different bugs: declared-but-not-run is a
+      harness never exercised; run-but-not-declared is a leg that cannot build
+      and fails looking like a toolchain problem. Either side coming back EMPTY
+      exits 2 — a parse that read nothing is a broken scan, not perfect
+      agreement about nothing, which is the specific way this check could have
+      been made vacuous.
+
+      7-case self-test including the regression itself; order-independence and
+      quoting are pinned so cosmetic edits to the matrix do not read as drift.
+      Live run: `All 3 declared fuzz targets are run.` Two file reads, no build.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, fuzzing]
+
   - id: TEST-GUARD-VERIFICATION-FILTERS
     type: feature
     title: A verification step whose test filter selects nothing is proven to fail
