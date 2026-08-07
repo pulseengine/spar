@@ -4359,6 +4359,63 @@ artifacts:
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
 
+  - id: TEST-GUARD-MUTANTS-TRUNCATION
+    type: feature
+    title: A cargo-mutants run that did not finish is proven not to score
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-002 (d). Closes #389.
+
+      A truncated cargo-mutants run is INTERNALLY CONSISTENT, which is why
+      -001's cross-check obligation could not see it. Run 30563879100 records
+      missed 210 + caught 603 + unviable 793 + timeout 2 == 1608 ==
+      `total_mutants`, every count agreeing with `outcomes.json`, while the log
+      shows cargo-mutants had found 1737 and lost its worker trees 3h02m in.
+      `total_mutants` is written incrementally, so the report is a truthful
+      account of the 92% that ran.
+
+      The failure is FLATTERING, which is what makes it dangerous: a truncated
+      run under-reports survivors, so 210 sits comfortably under the 292
+      threshold and the gate goes green. A threshold ratcheted down onto such a
+      number is a ceiling set below the floor.
+
+      `end_time` is the discriminator — null while running, populated on a clean
+      finish, and the one field that does not degrade gracefully under
+      truncation. Absence of `outcomes.json` is fatal here, stricter than
+      `_cross_check`'s tolerance, because "cannot prove it finished" must not
+      read as "finished".
+
+      The discriminating pair is the whole point: the SAME report, same counts,
+      same cross-check, same under-threshold verdict, differing only in
+      `end_time`, must produce different outcomes. Run 30563879100's exact
+      numbers are reproduced as a case, in both the truncated and completed
+      form.
+
+      MUTATION-TESTED 2026-08-07, 5 mutants, all caught. Two of them —
+      tolerating a missing `outcomes.json`, and accepting a missing `end_time`
+      KEY — initially SURVIVED, because each guard has a fallback that reaches
+      the same exit code by another path (a missing file raises on `json.load`;
+      a missing key reads as `None`). The verdict was over-determined, so the
+      cases could not tell which check fired. Fixed by pinning the DIAGNOSIS as
+      well as the exit code, which is the same principle the gate itself rests
+      on: distinct inputs must produce distinct outputs. Both are now caught by
+      "exit 1 correct, but the diagnosis is wrong".
+
+      ARMING THIS WAS DELIBERATELY DEFERRED until the cause was fixed, because a
+      detector for a live infrastructure fault turns a required context into a
+      coin-flip — the issue said so before either half was built. The cause was
+      smithy's tmpfiles policy sweeping `cargo-mutants-*.tmp` older than 2h,
+      hourly, on the assumption that a running job keeps mtime fresh. False for
+      cargo-mutants, which copies each worker's source tree once at start and
+      never touches it again. Age raised to 8h, above GitHub's 6h job ceiling;
+      aggressive reclaim moved to the post-job hook (smithy PR #7, verified
+      12/12 rules, 12/12 hooks).
+
+      NOT claimed: that the surviving-mutant threshold is right. This ensures
+      the number being compared came from a complete run.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling]
+
   - id: TEST-GUARD-RELEASE-PLANE
     type: feature
     title: Release-plane guardrail is proven able to fail before it is allowed to judge

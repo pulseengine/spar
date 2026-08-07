@@ -86,10 +86,27 @@ agrees with itself perfectly. The discriminator is `end_time`, which is null
 on the crashed run and populated on the completed one (30586785648: 1737
 tested, 292 missed).
 
-This script does NOT yet reject a truncated run — arming that against a job
-that demonstrably crashes on one runner would make a required context flap on
-infrastructure. The detector plus the runner fix are #389. Until then, treat
-any survivor count from a run without an `end_time` as a lower bound.
+This script now REJECTS a truncated run (REQ-GUARD-GATE-EVIDENCE-002 (d)).
+
+Arming it was deliberately blocked until the cause was fixed, because a
+detector for an infrastructure fault that still happens turns a required
+context into a coin-flip. The cause was found and fixed on 2026-08-07
+(smithy PR #7), and it is worth recording because the mechanism is not
+obvious: `/etc/tmpfiles.d/smithy-runner-tmp.conf` swept
+`cargo-mutants-*.tmp` files older than **2h**, hourly, resting on the stated
+assumption that "a job that's still running keeps mtime fresh". That is false
+for cargo-mutants specifically — it copies the source tree into each worker's
+temp dir **once**, at start, and never touches those files again, so their
+mtime is frozen while the job is very much alive. A 3h02m run aged past the
+threshold and the next sweep deleted its sources; the four workers dying
+"within one second of each other" was one sweep, not four faults. The age is
+now 8h, above GitHub's 6h job ceiling, so a sweep cannot reach a live job.
+
+Note the coupling this leaves behind: 8h protects any job under the 6h
+ceiling, and this repo's `mutants` job sets `timeout-minutes: 240`. Raising
+that past ~7h would re-open the hazard.
+
+So an `end_time: null` now means a genuine truncation, and is a hard failure.
 
 Run `--self-test` to exercise the whole decision table against constructed
 fixtures, including a regression case that reproduces the original bug: a tree
@@ -206,6 +223,68 @@ def _cross_check(rdir: str, counts: dict[str, int]) -> str:
     return "counts agree with outcomes.json"
 
 
+def _assert_completed(rdir: str) -> str:
+    """Refuse to score a run that did not finish. REQ-GUARD-GATE-EVIDENCE-002 (d).
+
+    A truncated cargo-mutants run is INTERNALLY CONSISTENT. Run 30563879100
+    records missed 210 + caught 603 + unviable 793 + timeout 2 == 1608 ==
+    `total_mutants`, and every one of those agrees with `outcomes.json` — while
+    the log shows cargo-mutants had found 1737 and lost its worker trees 3h02m
+    in. `_cross_check` cannot see this, because `total_mutants` is written
+    incrementally: the report is a truthful account of the 92% that ran.
+
+    The failure is flattering, which is what makes it dangerous: a truncated run
+    UNDER-reports survivors, so it scores BETTER than the truth. 210 survivors
+    sits comfortably under a 292 threshold and the gate goes green. Any
+    threshold ratcheted down using such a run is a ceiling set below the floor.
+
+    `end_time` is the discriminator — null while running, populated on a clean
+    finish. It is the one field that does not degrade gracefully under
+    truncation.
+
+    Absence of `outcomes.json` is fatal here, which is stricter than
+    `_cross_check` (it tolerates absence and says so). The distinction is
+    deliberate: losing the cross-check costs a detector, but losing `end_time`
+    means completion cannot be established at all — and "cannot prove it
+    finished" must not read as "finished". That is the exact shape this whole
+    requirement exists to close.
+    """
+    path = os.path.join(rdir, "outcomes.json")
+    if not os.path.isfile(path):
+        raise GateFailure(
+            f"{path} is absent, so there is no way to tell a completed run from "
+            f"one killed part-way. A truncated run under-reports survivors and "
+            f"scores better than the truth, so this cannot be waved through (#389)."
+        )
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise GateFailure(f"{path} is present but unreadable ({exc}) — completion cannot be established")
+
+    if "end_time" not in doc:
+        raise GateFailure(
+            f"{path} has no `end_time` field at all — this is not the schema "
+            f"this gate was written against, and completion cannot be "
+            f"established. Do not assume it finished."
+        )
+
+    end_time = doc.get("end_time")
+    if end_time is None:
+        total = doc.get("total_mutants")
+        raise GateFailure(
+            "`end_time` is null — cargo-mutants did not finish, so this report "
+            "covers only the mutants that ran"
+            + (f" ({total} of an unknown total)" if total is not None else "")
+            + ". A truncated run UNDER-reports survivors, so it fails "
+            "flatteringly: the score is better than the truth and the ratchet "
+            "would be tightened onto a number that is not the floor (#389). "
+            "Re-run it; do not lower the threshold to match."
+        )
+
+    return f"run completed ({end_time})"
+
+
 def check(output_dir: str, max_missed: int, out=None) -> int:
     """Return 0 if the run happened and stayed within the ratchet, else 1."""
     out = out or sys.stdout
@@ -214,6 +293,9 @@ def check(output_dir: str, max_missed: int, out=None) -> int:
     try:
         counts = _load_counts(rdir)
         note = _cross_check(rdir, counts)
+        # AFTER the cross-check on purpose: a report that disagrees with itself
+        # should be reported in those terms rather than as a truncation.
+        note = f"{note}; {_assert_completed(rdir)}"
     except GateFailure as exc:
         print(f"::error::{exc}", file=out)
         if os.path.isdir(output_dir):
@@ -335,11 +417,24 @@ def summarize(output_dir: str, shard: str, summary, out=None) -> int:
 # ── self-test ───────────────────────────────────────────────────────────────
 
 
+# Sentinel for the test fixture: remove a key rather than set it to null.
+_DROP = object()
+
+
 def _fixture(root: str, *, nested: bool = True, missed: int = 10, caught: int = 100,
-             unviable: int = 5, timeout: int = 0, outcomes: dict | None = None) -> str:
+             unviable: int = 5, timeout: int = 0, outcomes: dict | None = None,
+             write_outcomes: bool = True) -> str:
     """Build a mutants-out tree. `nested=False` reproduces the #381 misreading:
     the outcome files placed where the old gate LOOKED rather than where
-    cargo-mutants writes them."""
+    cargo-mutants writes them.
+
+    By default this writes a COMPLETE `outcomes.json` — counts consistent with
+    the .txt files and a populated `end_time` — because that is what a real
+    finished run looks like, and a fixture that omitted it would quietly make
+    every case a truncation case. `outcomes=` overrides individual fields (pass
+    `{"end_time": None}` for a truncated run); `write_outcomes=False` omits the
+    file entirely.
+    """
     out = os.path.join(root, "mutants-out")
     target = os.path.join(out, _REPORT_SUBDIR) if nested else out
     os.makedirs(target, exist_ok=True)
@@ -348,9 +443,22 @@ def _fixture(root: str, *, nested: bool = True, missed: int = 10, caught: int = 
         with open(os.path.join(target, name), "w", encoding="utf-8") as fh:
             for i in range(n):
                 fh.write(f"crates/spar-analysis/src/x.rs:{i}:1: replace f -> usize with 0\n")
-    if outcomes is not None:
+    if write_outcomes:
+        doc = {
+            "total_mutants": missed + caught + unviable + timeout,
+            "missed": missed,
+            "caught": caught,
+            "start_time": "2026-08-07T00:00:00.000Z",
+            "end_time": "2026-08-07T01:00:00.000Z",
+        }
+        if outcomes is not None:
+            doc.update(outcomes)
+            # `_DROP` removes a key outright, which is distinct from setting it
+            # to null — "the field is missing" and "the field says not-finished"
+            # are different reports and the gate must reject both.
+            doc = {k: v for k, v in doc.items() if v is not _DROP}
         with open(os.path.join(target, "outcomes.json"), "w", encoding="utf-8") as fh:
-            json.dump(outcomes, fh)
+            json.dump(doc, fh)
     return out
 
 
@@ -359,20 +467,38 @@ def self_test() -> int:
 
     passed = failed = 0
 
-    def case(desc: str, want: int, build, max_missed: int = 292):
+    def case(desc: str, want: int, build, max_missed: int = 292,
+             want_msg: str | None = None):
+        """`want_msg` pins the DIAGNOSIS, not just the verdict.
+
+        Three different broken reports — outcomes.json absent, `end_time` key
+        missing, `end_time` null — all exit 1, and each has a fallback path that
+        would also exit 1 if its own check were removed. Asserting only the exit
+        code therefore cannot tell whether the right check fired; mutating either
+        guard away leaves every exit code unchanged. Pinning the message is what
+        makes each branch load-bearing, and it is the same principle the rest of
+        this gate rests on: distinct inputs must produce distinct outputs.
+        """
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = build(tmp)
             buf = io.StringIO()
             got = check(out_dir, max_missed, out=buf)
-            if got == want:
-                passed += 1
-                print(f"  ok   {desc}")
-            else:
+            text = buf.getvalue()
+            if got != want:
                 failed += 1
                 print(f"  FAIL {desc}: got exit {got}, want {want}")
-                for line in buf.getvalue().splitlines()[:4]:
+                for line in text.splitlines()[:4]:
                     print(f"         {line}")
+            elif want_msg is not None and want_msg not in text:
+                failed += 1
+                print(f"  FAIL {desc}: exit {got} correct, but the diagnosis is "
+                      f"wrong — expected {want_msg!r}")
+                for line in text.splitlines()[:4]:
+                    print(f"         {line}")
+            else:
+                passed += 1
+                print(f"  ok   {desc}")
 
     print("check_mutants_report self-test")
 
@@ -416,8 +542,41 @@ def self_test() -> int:
     case("outcomes.json unparseable", 1,
          lambda t: (_fixture(t), open(os.path.join(t, "mutants-out", _REPORT_SUBDIR, "outcomes.json"),
                                       "w").write("{not json"), os.path.join(t, "mutants-out"))[2])
-    case("outcomes.json absent — passes, but says so", 0,
+    # ── truncation: REQ-GUARD-GATE-EVIDENCE-002 (d), #389 ──
+    # The discriminating PAIR. Identical counts, identical cross-check, and the
+    # survivor count is comfortably UNDER the threshold in both — only end_time
+    # differs. A gate that ignored end_time passes both and cannot fail the
+    # first, which is precisely the four months this job spent scoring crashed
+    # runs as good ones.
+    case("REGRESSION #389: end_time null (truncated) FAILS despite consistent counts", 1,
+         lambda t: _fixture(t, missed=10, caught=100, outcomes={"end_time": None}),
+         want_msg="`end_time` is null")
+    case("...and the SAME report PASSES with end_time populated", 0,
          lambda t: _fixture(t, missed=10, caught=100))
+
+    # Run 30563879100 exactly: 210+603+793+2 == 1608 == total_mutants, every
+    # count agreeing with outcomes.json, 210 well under the 292 threshold — and
+    # cargo-mutants had actually found 1737. Internally perfect, and wrong.
+    case("run 30563879100 reproduced: self-consistent, under threshold, truncated -> FAIL", 1,
+         lambda t: _fixture(t, missed=210, caught=603, unviable=793, timeout=2,
+                            outcomes={"total_mutants": 1608, "end_time": None}),
+         want_msg="1608 of an unknown total")
+    case("...the same run WITH end_time is scored normally", 0,
+         lambda t: _fixture(t, missed=210, caught=603, unviable=793, timeout=2,
+                            outcomes={"total_mutants": 1608}))
+
+    case("end_time key absent entirely (unexpected schema) FAILS", 1,
+         lambda t: _fixture(t, missed=10, caught=100,
+                            outcomes={"missed": 10, "caught": 100,
+                                      "total_mutants": 115, "end_time": _DROP}),
+         want_msg="no `end_time` field at all")
+
+    # Stricter than _cross_check's tolerance on purpose: without outcomes.json
+    # there is no way to distinguish a finished run from a killed one, and
+    # "cannot prove it finished" must not read as "finished".
+    case("outcomes.json absent — completion unprovable, so it FAILS", 1,
+         lambda t: _fixture(t, missed=10, caught=100, write_outcomes=False),
+         want_msg="is absent, so there is no way to tell")
 
     # ── the weekly summary path ──
     # It never gates, so its only failure mode is rendering a believable table
