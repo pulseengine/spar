@@ -385,8 +385,18 @@ jobs:
         # Lower this number as tests improve; target 0. Raise it only against a
         # run whose outcomes.json has an end_time — a partial run reports FEWER
         # survivors than the truth, so a threshold taken from one is a ceiling
-        # set below the floor. Nothing here yet fails a truncated run: that
-        # detector, and the runner disk-pressure fault behind it, are #389.
+        # set below the floor.
+        #
+        # That is now ENFORCED rather than advice: check_mutants_report.py
+        # rejects a report whose `end_time` is null, so a truncated run cannot
+        # be scored at all (#389, closed by #401). The runner-side cause was
+        # fixed the same day — and note it was NOT the disk-pressure hook this
+        # comment used to blame, which only runs BETWEEN jobs. It was a tmpfiles
+        # sweep reaping cargo-mutants' worker trees after 2h, resting on the
+        # false assumption that a live job keeps their mtime fresh; it does not,
+        # because cargo-mutants copies each tree once at start and never touches
+        # it again. The age is now 8h, above GitHub's 6h job ceiling — which
+        # holds only while this job's timeout-minutes stays under ~7h.
         # Walking the number back down is #382.
         run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292
       - name: Upload mutants report
