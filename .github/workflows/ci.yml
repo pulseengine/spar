@@ -548,12 +548,16 @@ jobs:
       # every filter is vacuous.
       - name: Verification-filter guardrail
         run: tools/check_verification_filters.py
-      # REQ-GUARD-GATE-EVIDENCE-002 (h). fuzz-nightly names its targets in a
-      # hand-written matrix `include` (each carries its own extra_args, #361),
-      # so the declared set and the run set are maintained separately and
-      # nothing compared them. A target dropped from either side leaves the
-      # nightly green having fuzzed a strict subset — no error, no warning, no
-      # smaller number in the log. Cheap: two file reads, no build.
+      # REQ-GUARD-GATE-EVIDENCE-002 (h) + REQ-GUARD-FUZZ-SMOKE-001 (#406). Two
+      # workflows run the fuzz harnesses from lists maintained apart from
+      # fuzz/Cargo.toml's `[[bin]]` declarations: fuzz-nightly's matrix `include`
+      # (each target carries its own extra_args, #361) and — the one that
+      # actually gates merges — THIS file's `fuzz-smoke` job, which hand-writes
+      # one `cargo fuzz run <target>` step per harness. The original tool audited
+      # only the ADVISORY nightly, so a target added to fuzz/Cargo.toml but not
+      # to fuzz-smoke left the REQUIRED context green having fuzzed a strict
+      # subset (#406). The tool now asserts the declaration against BOTH lists;
+      # `--ci-workflow` defaults to this file. Cheap: three file reads, no build.
       - name: Fuzz-target guardrail self-test
         run: tools/check_fuzz_targets.py --self-test
       - name: Fuzz-target guardrail
