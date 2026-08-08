@@ -4268,6 +4268,76 @@ artifacts:
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, fuzzing]
 
+  - id: TEST-GUARD-FUZZ-SMOKE
+    type: feature
+    title: The REQUIRED fuzz-smoke target list is proven equal to the fuzz targets declared
+    description: >
+      Verifies REQ-GUARD-FUZZ-SMOKE-001. Closes #406.
+
+      TEST-GUARD-FUZZ-TARGETS above audits the ADVISORY `fuzz-nightly.yml`
+      matrix. The list that actually blocks merges is `ci.yml`'s `fuzz-smoke`
+      job (`Fuzz smoke (60s/target)`, in `.github/required-contexts.txt`), which
+      hand-writes each harness as a `cargo +nightly fuzz run … <target>` step —
+      and it was compared against nothing. `tools/check_fuzz_targets.py` now
+      asserts the `[[bin]]` declaration against BOTH run-lists; `--ci-workflow`
+      defaults to `ci.yml` and the worst exit wins, so a broken scan is never
+      masked by a clean sibling.
+
+      The fuzz-smoke extractor cannot reuse the nightly's `- target:` regex — the
+      targets sit as the positional of a `cargo … fuzz run` command inside
+      `- run:` steps. It drops the `+toolchain` token, value-taking flags with
+      their argument (so the real `--target <triple>` is not read as a harness),
+      and the libfuzzer args after `--`. A step not resolving to exactly one
+      target positional exits 2 (broken scan), not a silent skip.
+
+      The extractor is SCOPED to the `fuzz-smoke:` job block and skips full-line
+      comments — because `fuzz run` also occurs in prose. An earlier whole-file
+      version matched the guard step's own explanatory comment
+      (`cargo … fuzz run … <target>`) in this same ci.yml, resolved it to
+      several tokens, and read the REQUIRED `Rivet validate (artifacts)` context
+      as a broken scan (exit 2) — the fix's own comment turning the gate it adds
+      red. The self-test's synthetic fixtures could not see that (they carry no
+      comment), so the suite carries a REAL-TREE row that runs the check against
+      the committed ci.yml and asserts exit 0; a poisoning comment fails it
+      loudly.
+
+      `tools/check_fuzz_targets.py --self-test` runs an 18-row decision table
+      before the gate judges anything. The fuzz-smoke rows include:
+
+        * the #406 acceptance criterion — a `[[bin]]` added to `fuzz/Cargo.toml`
+          but not to the fuzz-smoke job must exit 1. Its exit (1) differs from
+          the base row's (0) under a distinct input, which is the discrimination
+          the advisory-only tool lacked and the non-vacuity proof for this gate;
+        * the reverse — fuzz-smoke running a target not declared exits 1;
+        * a step with no `fuzz run` at all, and a step whose command leaves an
+          ambiguous positional, each exit 2 (broken scan), so the extractor
+          cannot pass by reading nothing;
+        * the `--flag=value` equals form is a single hyphen token, so it is a
+          flag and does not leak a positional.
+
+      The base row only passes because the `--target x86_64-unknown-linux-gnu`
+      triple is NOT counted as a third harness. Demonstrated live against the
+      real `ci.yml`: a fourth `[[bin]]` on the real `fuzz/Cargo.toml` makes the
+      fuzz-smoke check exit 1; the unmodified tree exits 0. Three file reads, no
+      build.
+
+      NOT claimed: that a listed target is actually fuzzed. Set equality is
+      declaration parity, not execution — a `continue-on-error`/`if: false` leg
+      still counts as "run". Distinct obligation, left to a successor.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_fuzz_targets.py --self-test
+        - run: tools/check_fuzz_targets.py
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, fuzzing, v0360]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-FUZZ-SMOKE-001
+      - type: verifies
+        target: REQ-GUARD-FUZZ-SMOKE-001
+
   - id: TEST-GUARD-VERIFICATION-FILTERS
     type: feature
     title: A verification step whose test filter selects nothing is proven to fail

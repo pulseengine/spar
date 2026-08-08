@@ -5024,3 +5024,72 @@ artifacts:
     status: proposed
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, human-scoped]
+
+  - id: REQ-GUARD-FUZZ-SMOKE-001
+    type: requirement
+    title: The fuzz-target guardrail shall audit the REQUIRED context, not only the advisory one
+    description: >
+      REQ-GUARD-GATE-EVIDENCE-002 (h) added `tools/check_fuzz_targets.py` to stop
+      the fuzz target list drifting from its `[[bin]]` declaration in
+      `fuzz/Cargo.toml`. It audited the wrong one of two lists (#406).
+
+      There are two run-lists, maintained apart from the declaration:
+
+        * `fuzz-nightly.yml`'s `matrix.include` — one entry per target. This is
+          the list the original tool compared (`--workflow` default). It is
+          ADVISORY: the job name is templated (`Fuzz ${{ matrix.target }}`),
+          which by `check_required_contexts.py`'s own rules can NEVER be a
+          required context.
+
+        * `ci.yml`'s `fuzz-smoke` job — the same three targets hand-written as
+          one `cargo +nightly fuzz run … <target>` step each. THIS is the list
+          that gates: `Fuzz smoke (60s/target)` is in
+          `.github/required-contexts.txt`. Nothing compared it to anything.
+
+      So the covered list was advisory and the uncovered list blocked merges.
+      Add a `[[bin]]` plus a nightly matrix entry but forget the `fuzz-smoke`
+      step, and the tool reported `All 4 declared fuzz targets are run` while the
+      REQUIRED gate fuzzed 3 of 4, green, forever. This is -002's own defect
+      shape one level up: the shortfall in the blocking gate rendered as the
+      ideal reading of a non-blocking one.
+
+      OBLIGATION. The declared `[[bin]]` set shall be asserted equal — both
+      directions — to the target set RUN by the required `fuzz-smoke` job, not
+      only to the advisory nightly matrix. Extending the nightly's `- target:`
+      regex to `ci.yml` does not work: the fuzz-smoke targets sit as the
+      positional of a `cargo … fuzz run` command inside `- run:` steps, so a
+      SECOND extractor is required. That extractor drops the `+toolchain` token,
+      value-taking flags with their argument (so the real `--target <triple>` is
+      never read as a harness), and the libfuzzer args after `--`; a step that
+      does not resolve to exactly one target positional is a broken scan
+      (exit 2), never a silently dropped leg. It is scoped to the `fuzz-smoke:`
+      job block and skips full-line comments — because `fuzz run` also appears in
+      prose, and a whole-file scan matched this file's own guard-step comment and
+      read the required gate as a broken scan.
+
+      ORACLE (executed, non-vacuous). `tools/check_fuzz_targets.py --self-test`
+      carries an 18-row decision table; the fuzz-smoke rows include the #406
+      acceptance criterion itself — a `[[bin]]` added to `fuzz/Cargo.toml` but
+      not to the `fuzz-smoke` job must exit 1. That row's exit (1) differs from
+      the base row's (0) on the same tool with a distinct input, which is the
+      discrimination the advisory-only tool lacked. A REAL-TREE row runs the
+      check against the committed `ci.yml` and asserts exit 0, so a `fuzz run`
+      string landing in a comment (the regression an earlier whole-file scan
+      shipped) fails the self-test rather than silently reading the gate as
+      broken. Demonstrated live against the real `ci.yml`: appending a fourth
+      `[[bin]]` to the real `fuzz/Cargo.toml` makes the fuzz-smoke check exit 1
+      (`fuzz_new_harness … NOT run by the fuzz-smoke job`), while the unmodified
+      tree exits 0.
+
+      PROVEN vs ASSUMED, stated precisely. PROVEN: the required gate now fails
+      when its executed target set diverges from the declaration, in either
+      direction, and fails closed on an unparsable step. NOT CLAIMED: that a
+      declared, listed target is actually FUZZED. Set equality proves
+      DECLARATION parity, not execution — a `fuzz-smoke` step carrying
+      `continue-on-error: true` or `if: false` still counts as "run" here. That
+      is a distinct obligation (execution evidence, not list parity) and is left
+      to a successor; this requirement closes the list-parity hole #406 names and
+      no more.
+    status: implemented
+    release: v0.36.0
+    tags: [process, guardrail, ci, tooling, fuzzing]
