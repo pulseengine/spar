@@ -36,6 +36,9 @@ jobs:
   changes:
     name: Detect changed paths (proofs)
     runs-on: ubuntu-latest
+    # Trivial classifier (observed <10s); gates the required Lean typecheck.
+    # Enforced by tools/check_job_timeouts.py (#398).
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
