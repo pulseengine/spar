@@ -225,10 +225,13 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
     checkable. What it reads:
 
         on.pull_request.{branches,paths,paths-ignore}   (indent 0/2/4)
-        jobs.<id>.{name,continue-on-error}              (indent 0/2/4)
+        jobs.<id>.{name,continue-on-error,timeout-minutes}  (indent 0/2/4)
 
     Everything deeper (steps, strategy, with:) is deliberately invisible — a
     step's `name:` sits at indent 8 and must not be mistaken for a job's.
+    (`timeout-minutes` is read here purely so a sibling gate —
+    check_job_timeouts.py — can reuse this reader; nothing in *this* gate looks
+    at it, which is why cross_check does not compare it.)
     """
     doc: dict = {"on": None, "jobs": {}}
     section = None          # None | "on" | "jobs"
@@ -305,7 +308,7 @@ def parse_workflow(text: str, path: str = "<str>") -> dict:
             continue
 
         if indent == 4 and section == "jobs" and job is not None:
-            if key in ("name", "continue-on-error"):
+            if key in ("name", "continue-on-error", "timeout-minutes"):
                 _reject_unsupported(val, path, lineno, f"`jobs.{job}.{key}:`")
                 doc["jobs"][job][key] = val
             continue

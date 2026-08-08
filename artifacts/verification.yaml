@@ -4725,3 +4725,65 @@ artifacts:
 
       - type: verifies
         target: REQ-NC-BUS-PAYLOAD-001
+
+  - id: TEST-GUARD-CONTEXT-TIMEOUT
+    type: feature
+    title: The job-timeout gate fails on an unbounded required job and is blind to advisory ones
+    description: >
+      Verifies REQ-GUARD-CONTEXT-TIMEOUT-001 through the decision table in
+      tools/check_job_timeouts.py --self-test, which runs as its own CI step
+      BEFORE the gate it protects, in the same rivet-validate job as the other
+      artifact guardrails.
+
+      THE LOAD-BEARING CASE is "gateable job with no timeout-minutes" -> exit 1.
+      That was the live state of 15 of the 18 required contexts before this
+      landed; on that same tree GitHub's PR UI shows every one of them as a green,
+      well-behaved check. The case is a fixture because the defect is invisible
+      until a job hangs, and only executing the gate against a job that lacks the
+      key demonstrates it.
+
+      NON-VACUITY IS TESTED BOTH WAYS AND ACROSS THE SCOPE BOUNDARY. A valid
+      timeout exits 0 and a missing one exits 1 on the same tool (distinct inputs,
+      distinct verdicts). Templated (`${{ }}`), zero, non-integer and `>= 360`
+      each exit 1 — a bound a reader cannot evaluate, or one no tighter than the
+      default it replaces, is not a bound — while `359` exits 0, so the upper
+      guard is satisfiable rather than merely restrictive. Two cases pin the
+      SCOPE: a continue-on-error (advisory) job and a path-scoped (undeliverable)
+      job, each with NO timeout, both exit 0, because neither can block a merge;
+      treating either as gateable would report a violation this gate does not own.
+
+      FAIL-CLOSED ON A BLIND SCAN, the recurring hazard in this family. Two
+      production-corpus assertions run against the real WORKFLOW_GLOB: a scan that
+      finds zero gateable jobs fails (on this repo there are 18, so zero means the
+      reader went blind, which must not render as PASS), and the glob must match
+      `.yaml` as well as `.yml` (Actions loads both; a glob that sees one reports
+      PASS on a directory it never fully read).
+
+      MEASURED AGAINST THE REAL TREE, not only fixtures. Before this change the
+      production run exited 1 naming all 15 unbounded required contexts; after
+      adding a `timeout-minutes` to each of the 15 it exits 0 with "18 gateable
+      job(s)". The reader is check_required_contexts.py's restricted parser
+      (extended only to capture `timeout-minutes`), still --cross-checked against
+      PyYAML on the real corpus, so the extension did not silently diverge.
+
+      HONEST CEILING. The table verifies the gate's own logic and its read of the
+      committed workflows; it does NOT verify that GitHub cancels a job at the
+      declared minute (runtime behaviour, not asserted), nor that the chosen
+      values are well-sized (a human judgement cited in the workflow comments),
+      nor that branch protection enforces exactly this set (the LIST-to-branch
+      -protection gap check_required_contexts.py states and this inherits). Like
+      its siblings it assumes python3 on the runner class; the failure mode is
+      fail-closed (a missing interpreter 127s the required step red), so the PR
+      that lands this is the measurement.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_job_timeouts.py --self-test
+        - run: tools/check_job_timeouts.py
+    status: implemented
+    tags: [process, guardrail, ci, tooling, v0370]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-CONTEXT-TIMEOUT-001
+      - type: verifies
+        target: REQ-GUARD-CONTEXT-TIMEOUT-001

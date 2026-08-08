@@ -35,6 +35,10 @@ jobs:
   changes:
     name: Detect changed paths
     runs-on: [self-hosted, linux, x64, light]
+    # Trivial classifier (observed <=15s), but it gates 10 of the other jobs, so
+    # a wedge here stalls the whole suite. 5m is a generous ceiling vs the 360m
+    # default. Enforced by tools/check_job_timeouts.py (#398).
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -84,6 +88,8 @@ jobs:
   fmt:
     name: Format
     runs-on: [self-hosted, linux, x64, light]
+    # fmt across every workspace (observed <=40s). Cap far under the 360m default.
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -113,6 +119,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # Workspace clippy (observed ~21m on a cold cache). 45m is ~2x that.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -136,6 +144,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # nextest across the workspace (observed ~7.5m). 30m absorbs a cold cache.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -169,6 +179,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # Generated-crate + wasmtime/kiln runtime oracles (observed ~27m cold). 60m ~2x.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -196,6 +208,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # Compile-only bench check (observed ~9m). 30m absorbs a cold cache.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -217,6 +231,9 @@ jobs:
     # Follow-up: drop sccache from ralf's profile before bumping the
     # toolchains-role version, then move this back to [self-hosted, light].
     runs-on: ubuntu-latest
+    # rustsec/audit-check hits the network advisory DB (observed ~3m). 15m for
+    # network variance.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
@@ -231,6 +248,8 @@ jobs:
     # newuidmap is setuid but NoNewPrivileges=true blocks the escalation
     # (newuidmap: write to uid_map failed: Operation not permitted).
     runs-on: [self-hosted, linux, x64, light]
+    # cargo-deny bans/licenses/sources (observed <=20s).
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -249,6 +268,8 @@ jobs:
     needs: [changes, test]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # llvm-cov across the workspace (observed ~8.5m). 30m absorbs a cold cache.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -285,6 +306,8 @@ jobs:
     # lean-mem class — Miri allocates aggressively and benefits from the 24G
     # MemoryHigh ceiling on smithy lean-mem runners over the 12G rust-cpu cap.
     runs-on: [self-hosted, linux, x64, lean-mem]
+    # Miri instance-model tests (observed ~2m; lean-mem contention can stretch it).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -310,6 +333,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # proptest at 10x cases (observed ~8m). 30m absorbs a cold cache.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -410,6 +435,9 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (60s/target)
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # 3 targets x 60s + cold ASan builds (observed ~5m on PRs; this job is
+    # PR-only). 30m ceiling.
+    timeout-minutes: 30
     # Only run on PRs — pushes to main hit the nightly workflow instead.
     needs: [changes]
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
@@ -439,6 +467,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: [self-hosted, linux, x64, light]
+    # cargo-vet supply-chain check (observed <=20s).
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -456,6 +486,9 @@ jobs:
   rivet-validate:
     name: Rivet validate (artifacts)
     runs-on: [self-hosted, linux, x64, rust-cpu]
+    # rivet validate + all artifact guardrail self-tests (observed ~21m cold,
+    # dominated by the verification-filter guardrail). 45m is ~2x.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -580,6 +613,15 @@ jobs:
         run: tools/check_required_contexts.py --self-test
       - name: Required-context guardrail
         run: tools/check_required_contexts.py
+      # Required-context timeouts (#398). Sibling of the guardrail above, reusing
+      # its restricted workflow reader: every job that backs a required context
+      # must declare a static timeout-minutes in (0, 360), so a wedged merge gate
+      # cancels instead of holding a runner (and, with strict=true, the queue) for
+      # the 6-hour default. Same steps-of-this-job rationale as above.
+      - name: Job-timeout guardrail self-test
+        run: tools/check_job_timeouts.py --self-test
+      - name: Job-timeout guardrail
+        run: tools/check_job_timeouts.py
       # Closure MSRV drift (#369). Here rather than in a code-gated job for the
       # same reason as above, and it matters more here than anywhere: the PR
       # that raises the real floor is a `cargo update`, which touches only

@@ -5093,3 +5093,68 @@ artifacts:
     status: verified
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, fuzzing]
+
+  - id: REQ-GUARD-CONTEXT-TIMEOUT-001
+    type: requirement
+    title: Every job backing a required context shall declare a bounded timeout-minutes
+    description: >
+      A required status check that hangs is not a wrong-green; it is an
+      indefinite block with no signal (#398). A wedged job leaves its context at
+      "Expected — waiting for status to be reported", which is byte-identical to
+      "still running", and a job with no `timeout-minutes` inherits GitHub's
+      360-minute default before anything cancels it. For up to six hours the PR is
+      unmergeable for a reason nobody can see, the job holds a self-hosted runner,
+      and — branch protection is `strict = true` — every other open PR queues
+      behind it. `Detect changed paths` is the sharpest case: it gates ten of the
+      other jobs, so wedging it stalls the entire suite.
+
+      Measured against the live required set when this landed, 15 of the 18
+      required contexts declared no `timeout-minutes`. That is not hypothetical —
+      it is the blast radius of the first hang, whenever it comes. This is the
+      same shape REQ-GUARD-GATE-EVIDENCE-002 names ("nothing happened" must render
+      differently from "it worked"), applied to the merge gate's own liveness.
+
+      OBLIGATION. Every GATEABLE job — PR-triggered against main, no path filter,
+      no continue-on-error, static name, i.e. exactly the set
+      `check_required_contexts.py` proves must be required — shall declare a
+      `timeout-minutes` that is a static integer strictly inside (0, 360). Missing
+      is the defect; a `${{ }}` template is not a static bound a reader can
+      evaluate; <= 0 is not a number of minutes; >= 360 is no tighter than the
+      default it replaces and buys nothing. The check does NOT assert the value is
+      well-sized ("a few multiples of p95") — that is a human judgement a gate
+      would only be guessing at; it draws the one line that is not a judgement
+      call: an unbounded (or uselessly-bounded) required job must not ship.
+
+      ORACLE (executed, non-vacuous). `tools/check_job_timeouts.py --self-test`
+      carries a 9-row decision table plus two production-corpus assertions. The
+      rows flip a verdict each way on the same tool: a gateable job with a valid
+      timeout exits 0, the same job with no timeout exits 1, and templated /
+      zero / non-integer / >=360 each exit 1 while `359` exits 0 (the upper bound
+      is satisfiable, not merely restrictive). Two rows prove SCOPE — an advisory
+      (continue-on-error) job and a path-scoped (undeliverable) job with no
+      timeout both exit 0, so the gate flags only jobs that can actually block a
+      merge. The corpus assertions fail closed: a scan that finds zero gateable
+      jobs, or a glob that misses `.yaml`, is a blind read, not a PASS.
+      Demonstrated live: against the tree before this change the check exited 1
+      naming all 15 unbounded contexts; against the tree after, it exits 0 with
+      "18 gateable job(s)". The reader is the SAME restricted parser as
+      `check_required_contexts.py` (extended only to capture `timeout-minutes`)
+      and stays `--cross-check`ed against PyYAML on the real corpus.
+
+      PROVEN vs ASSUMED, stated precisely. PROVEN: every job that backs a required
+      context now declares a static bound in (0, 360), and the gate fails closed
+      on a missing, templated, or degenerate bound and on a blind scan. ASSUMED,
+      not proven here: (1) that the numbers chosen are correctly sized — they are
+      a human judgement from the run history, cited per-job in the workflow
+      comments, not a machine-checked property; (2) that GitHub actually cancels a
+      job at its declared `timeout-minutes` — runtime behaviour this gate reads
+      the YAML for but does not exercise; (3) that the GATEABLE set equals the
+      enforced branch-protection set — `check_required_contexts.py` reconciles the
+      committed list to the workflows but cannot read branch protection without an
+      admin token, a gap it states and this REQ inherits. NOT CLAIMED: that
+      advisory jobs are bounded — a hung `continue-on-error` job still wastes a
+      runner, but it cannot wedge the merge gate, so it is out of scope here and
+      left to a successor.
+    status: implemented
+    release: v0.37.0
+    tags: [process, guardrail, ci, tooling, v0370]
