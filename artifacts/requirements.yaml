@@ -5090,6 +5090,6 @@ artifacts:
       is a distinct obligation (execution evidence, not list parity) and is left
       to a successor; this requirement closes the list-parity hole #406 names and
       no more.
-    status: implemented
+    status: verified
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, fuzzing]
