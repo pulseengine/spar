@@ -5293,6 +5293,6 @@ artifacts:
       advisory jobs are bounded — a hung `continue-on-error` job still wastes a
       runner, but it cannot wedge the merge gate, so it is out of scope here and
       left to a successor.
-    status: implemented
+    status: verified
     release: v0.37.0
     tags: [process, guardrail, ci, tooling, v0370]
