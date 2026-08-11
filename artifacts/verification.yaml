@@ -4193,6 +4193,16 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, lean, proofs]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_lean_sorries.py --self-test
+        - run: tools/check_lean_sorries.py --root proofs/Proofs --max-sorries 12
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-CLIPPY-SCOPE
     type: feature
@@ -4231,6 +4241,15 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_clippy_workspaces.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-FUZZ-TARGETS
     type: feature
@@ -4267,6 +4286,16 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, fuzzing]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_fuzz_targets.py --self-test
+        - run: tools/check_fuzz_targets.py
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-FUZZ-SMOKE
     type: feature
@@ -4378,6 +4407,15 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_verification_filters.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-CHANGED-PATHS
     type: feature
@@ -4444,6 +4482,15 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/classify_changed_paths.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-MUTANTS-TRUNCATION
     type: feature
@@ -4501,6 +4548,15 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_mutants_report.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-002
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-002
 
   - id: TEST-GUARD-RELEASE-PLANE
     type: feature
@@ -4526,6 +4582,16 @@ artifacts:
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_release_plane.py --self-test
+        - run: tools/check_release_plane.py
+    links:
+      - type: satisfies
+        target: REQ-GUARD-RELEASE-PLANE-001
+      - type: verifies
+        target: REQ-GUARD-RELEASE-PLANE-001
 
   - id: TEST-GUARD-STATUS-VOCAB
     type: feature
@@ -4725,6 +4791,49 @@ artifacts:
 
       - type: verifies
         target: REQ-NC-BUS-PAYLOAD-001
+
+  - id: TEST-GUARD-EVIDENCE-STEPS
+    type: feature
+    title: An artifact claiming evidence without a runnable step is proven to fail
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-003. Addresses #403.
+
+      The discriminating pair is the whole point: the SAME artifact, with the
+      SAME absent step, passes as `proposed` and fails as `implemented`. A
+      checker that ignored status gives both the same verdict and cannot fail
+      the first — and failing `proposed` would push authors to write the
+      artifact only after the test, inverting the order this methodology
+      depends on.
+
+      Absence wearing a costume is covered too: `steps: []` and a step carrying
+      a `description:` but no `run:` both count as no step, because the key
+      existing is not the same as something being runnable.
+
+      `safety/**/*.yaml` is scanned, not just `artifacts/` — 60 of the 85 live
+      offenders are STPA entries, so a checker reading only `artifacts/` would
+      report a third of the truth and look thorough doing it.
+
+      MEASURED at df4a64f: 85 of 239 feature artifacts claimed evidence with no
+      runnable step; 78 after this change backfills the seven `TEST-GUARD-*`
+      artifacts. Every step declared in that backfill was EXECUTED before being
+      committed — a step nobody ran is the same species of claim this
+      requirement exists to stop.
+
+      NOT claimed: that the 60 remaining STPA entries are acceptable. The floor
+      records how many exist, not that they are fine.
+    status: implemented
+    release: v0.37.0
+    tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_evidence_steps.py --self-test
+        - run: tools/check_evidence_steps.py --max-stepless 78
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-003
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-003
 
   - id: TEST-GUARD-CONTEXT-TIMEOUT
     type: feature

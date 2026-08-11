@@ -601,6 +601,23 @@ jobs:
             --artifacts-dir artifacts \
             --artifacts-dir safety/stpa
 
+      # REQ-GUARD-GATE-EVIDENCE-003 (#403). run_verification.py SKIPS an
+      # artifact with no `fields.steps[].run` and counts the skip toward exit 0,
+      # so `Verification Gate (rivet-driven)` — a REQUIRED context — goes green
+      # having executed nothing. Measured: 64 artifacts matched, 0 commands ran,
+      # exit 0. Its sibling `if not ids: return 1` already closed "the filter
+      # matched nothing"; "matched, and nothing ran" was left open.
+      #
+      # A ratchet rather than a hard fail: 85 claiming artifacts had no runnable
+      # step when this was written (60 of them STPA entries with `TBD`-class
+      # test names), and a gate that must be disabled to merge is a gate that
+      # gets disabled. The floor may not rise; lowering it is the ratchet
+      # walking down. Self-test first, as with every guardrail here.
+      - name: Evidence-step guardrail self-test
+        run: tools/check_evidence_steps.py --self-test
+      - name: Evidence-step guardrail
+        run: tools/check_evidence_steps.py --max-stepless 78
+
       # Required-context drift (#372). Same stdlib-only, fail-closed rules as
       # above, and here for the same reason: it must run on the PR that edits a
       # workflow, and that PR need not touch anything a path filter selects.
