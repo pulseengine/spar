@@ -24,7 +24,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 GATE="${HERE}/check-tag-point.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
-G=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=false)
+# `init.defaultBranch` is pinned rather than inherited. Cloning an EMPTY repo
+# takes its branch name from that setting, and the runner's is not `main` — so
+# the first version of this test pushed `main` from a repo whose branch was
+# `master` and died with "src refspec main does not match any". Inheriting an
+# environment default is the same mistake the gate under test made.
+G=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=false
+   -c init.defaultBranch=main)
 
 pass=0; fail=0
 say() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "  ok   $2"; else fail=$((fail+1)); echo "  FAIL $2"; fi; }
@@ -35,6 +41,7 @@ say() { if [ "$1" = ok ]; then pass=$((pass+1)); echo "  ok   $2"; else fail=$((
 cd "${TMP}/up"
 echo a > a; "${G[@]}" add a; "${G[@]}" commit --quiet -m "base"
 echo b > b; "${G[@]}" add b; "${G[@]}" commit --quiet -m "release bump"
+"${G[@]}" branch -M main   # belt-and-braces: never rely on the inherited name
 TAGGED="$("${G[@]}" rev-parse HEAD)"
 "${G[@]}" tag -a v1.0.0 -m "v1.0.0
 
