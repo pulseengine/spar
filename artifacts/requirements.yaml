@@ -5025,6 +5025,52 @@ artifacts:
     release: v0.36.0
     tags: [process, guardrail, ci, tooling, human-scoped]
 
+  - id: REQ-GUARD-GATE-EVIDENCE-003
+    type: requirement
+    title: An artifact that claims evidence shall carry a runnable step
+    description: >
+      Successor to REQ-GUARD-GATE-EVIDENCE-002. -002 took six gates that could
+      report success without measuring anything and made each of them fail
+      instead. A multi-persona review of that work then found the same shape one
+      level up, in the machinery that RUNS the gates rather than in any gate —
+      which is what this requirement is scoped to.
+
+      THE INSTANCE. `tools/run_verification.py` skips an artifact with no
+      `fields.steps[].run` and counts the skip toward exit 0. Executed against
+      the live plane: 64 artifacts matched the filter, zero commands ran, exit
+      0 — and `Verification Gate (rivet-driven)` is a REQUIRED context, so it
+      reported green having executed nothing.
+
+      The instructive detail is that half of it was already guarded.
+      `run_verification.py` has `if not ids: return 1`, closing "the filter
+      matched nothing". "The filter matched, and nothing ran" was left open one
+      line below. Recognising a defect class and applying it once is the common
+      case, not the rare one — the same happened with `cargo fmt --all` (#383),
+      the cloned changed-paths classifier (#384), and the five unguarded release
+      globs beside a correctly-guarded SBOM (#402).
+
+      -002 (c) cannot see this. It makes a test filter that selects nothing
+      fail; an artifact with NO filter contributes zero to every one of its
+      counters, so a step-less `implemented` artifact and an empty file produce
+      byte-identical output.
+
+      SHALL: an artifact whose status asserts evidence exists
+      (`implemented`/`verified`/`accepted`) shall carry at least one runnable
+      step, and the count of those that do not shall be a declared floor that
+      may not rise. 85 measured at df4a64f, 78 after the seven `TEST-GUARD-*`
+      artifacts were backfilled. The remaining 60 in
+      `safety/stpa/validation.yaml` carry `TBD`-class `test-name` values and
+      need triage rather than a step — a scope decision, recorded rather than
+      hidden.
+
+      NOT CLAIMED: that a present step is the right step, or that it passes.
+      Those are `check_verification_filters.py`'s and `run_verification.py`'s
+      questions. Three different questions, and each was independently able to
+      report success without asking its own.
+    status: proposed
+    release: v0.37.0
+    tags: [process, guardrail, ci, tooling, human-scoped]
+
   - id: REQ-GUARD-FUZZ-SMOKE-001
     type: requirement
     title: The fuzz-target guardrail shall audit the REQUIRED context, not only the advisory one
