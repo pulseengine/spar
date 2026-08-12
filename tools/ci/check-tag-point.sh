@@ -108,6 +108,27 @@ fi
 # The trigger is not exotic, it is the sloppier path: `git tag v0.36.0` instead
 # of `git tag -s v0.36.0`. The gate would disarm on exactly the mistake that
 # most needs gating. Repo policy is signed annotated tags regardless.
+# actions/checkout creates refs/tags/<TAG> pointing at github.sha, and for a TAG
+# PUSH github.sha is the PEELED COMMIT — so the local ref is LIGHTWEIGHT even when
+# the remote tag is annotated and signed. This gate then reports "lightweight tag"
+# about a correctly annotated one, which is a false accusation, and it made
+# exactly that accusation on its first real execution (v0.36.0).
+#
+# Reproduced: with refs/tags/v0.36.0 created the way checkout creates it,
+# `%(objecttype)` is `commit` and `%(taggerdate)` is empty, while `git ls-remote`
+# shows both refs/tags/v0.36.0 and refs/tags/v0.36.0^{} — i.e. annotated.
+#
+# So fetch the OBJECT before judging it, the same way this script already
+# declines to assume origin/main is present rather than reading whatever the
+# checkout happened to leave behind. If the fetch cannot run (no origin, or a
+# tag that exists only locally) that is said out loud and the local ref is
+# judged as-is — a genuinely lightweight tag still fails below.
+if git remote get-url origin >/dev/null 2>&1; then
+  if ! git fetch --force --quiet origin "+refs/tags/${TAG}:refs/tags/${TAG}" 2>/dev/null; then
+    echo "note: could not fetch ${TAG} from origin; judging the local ref as-is." >&2
+  fi
+fi
+
 OBJTYPE="$(git for-each-ref "refs/tags/${TAG}" --format='%(objecttype)')"
 if [ "${OBJTYPE}" != "tag" ]; then
   echo "::error::${TAG} is a lightweight tag (objecttype=${OBJTYPE:-missing})."
