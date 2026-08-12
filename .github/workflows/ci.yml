@@ -613,6 +613,14 @@ jobs:
       # test names), and a gate that must be disabled to merge is a gate that
       # gets disabled. The floor may not rise; lowering it is the ratchet
       # walking down. Self-test first, as with every guardrail here.
+      # The tag-point gate (#366) lives in release.yml, which only fires on a
+      # tag push — so it sat unexercised from the day it merged until v0.36.0,
+      # and its FIRST run was a false accusation that blocked the release. Its
+      # regression test runs HERE, on every PR, precisely because the gate
+      # itself cannot be.
+      - name: Tag-point gate regression test
+        run: tools/ci/test-tag-point.sh
+
       - name: Evidence-step guardrail self-test
         run: tools/check_evidence_steps.py --self-test
       - name: Evidence-step guardrail
