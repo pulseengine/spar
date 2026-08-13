@@ -27,6 +27,35 @@ struct AnalyzeJsonOutput {
     diagnostics: Vec<spar_analysis::AnalysisDiagnostic>,
 }
 
+/// Report an unresolvable `--root` and exit non-zero, listing what IS available.
+///
+/// #417: `Database::instantiate` used to return a fabricated root for any string,
+/// so this path printed `null` (or a plausible empty model) and exited 0. A typo'd
+/// root was indistinguishable from an empty system.
+fn die_unresolvable_root(root: &str, db: &spar_hir::Database) -> ! {
+    eprintln!("error: cannot instantiate root '{root}'");
+    eprintln!("       no component implementation with that qualified name was found");
+    let mut candidates: Vec<String> = Vec::new();
+    for pkg in db.packages() {
+        for imp in &pkg.component_impls {
+            candidates.push(format!("{}::{}", pkg.name, imp.name));
+        }
+    }
+    candidates.sort();
+    if candidates.is_empty() {
+        eprintln!("       the input declares no component implementations at all");
+    } else {
+        eprintln!("       available implementations ({}):", candidates.len());
+        for c in candidates.iter().take(25) {
+            eprintln!("         {c}");
+        }
+        if candidates.len() > 25 {
+            eprintln!("         … and {} more", candidates.len() - 25);
+        }
+    }
+    std::process::exit(2);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -472,14 +501,30 @@ fn cmd_instance(args: &[String]) {
         process::exit(1);
     });
 
+    // Resolve the root BEFORE choosing an output path (#417).
+    //
+    // Guarding only the JSON path was not enough: the human-readable path built
+    // its own GlobalScope and called SystemInstance::instantiate directly, so
+    // `spar instance --root Totally::Bogus.Impl` still printed
+    // "Instance model: Totally::Bogus. / 1 component instances" and exited 0.
+    // It warned on stderr, which is better than the JSON path's silence, but a
+    // caller checking the exit code still saw success. Fixing one path and not
+    // the other would have fixed the instance and left the class.
+    let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+    let hir_db = spar_hir::Database::from_aadl(&sources);
+    let Some(instance) = hir_db.instantiate(&root) else {
+        die_unresolvable_root(&root, &hir_db);
+    };
+
     // JSON output path: use spar-hir facade for clean serialization
     if format.as_deref() == Some("json") {
-        let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
-        let hir_db = spar_hir::Database::from_aadl(&sources);
-        let instance_tree = hir_db.instantiate(&root).map(|i| i.to_serializable());
-        println!("{}", serde_json::to_string_pretty(&instance_tree).unwrap());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&instance.to_serializable()).unwrap()
+        );
         return;
     }
+    drop(instance);
 
     // Parse root reference: Package::Type.Impl
     let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
@@ -673,7 +718,10 @@ fn cmd_analyze(args: &[String]) {
         // Build HIR database for package data
         let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
         let hir_db = spar_hir::Database::from_aadl(&sources);
-        let instance_tree = hir_db.instantiate(&root).map(|i| i.to_serializable());
+        let Some(instance) = hir_db.instantiate(&root) else {
+            die_unresolvable_root(&root, &hir_db);
+        };
+        let instance_tree = Some(instance.to_serializable());
         let output = AnalyzeJsonOutput {
             root: root.clone(),
             packages: hir_db.packages(),
