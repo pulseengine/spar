@@ -146,12 +146,39 @@ impl Database {
     pub fn instantiate(&self, qualified_name: &str) -> Option<Instance> {
         let (pkg_str, type_str, impl_str) = parse_qualified_name(qualified_name)?;
         let impl_name = impl_str?;
+        let package = Name::new(&pkg_str);
+        let type_name = Name::new(&type_str);
+        let impl_ = Name::new(&impl_name);
+
+        // Resolve the root classifier BEFORE instantiating.
+        //
+        // `SystemInstance::instantiate` cannot fail: it returns `Self`, and for an
+        // unresolved classifier the builder fabricates a `System` root, records
+        // "unresolved implementation: …" in `builder.diagnostics`
+        // (spar-hir-def/src/instance.rs:1479-1485), and carries on. Nothing
+        // downstream reads that diagnostic — `to_serializable` hardcodes an empty
+        // list — so `spar instance --root Totally::Bogus.Impl` printed a
+        // plausible empty model and exited 0 (#417).
+        //
+        // This restores the behaviour the doc comment above has always claimed.
+        // The check is deliberately here rather than in the builder: the builder
+        // legitimately fabricates placeholder nodes for unresolved SUBcomponents
+        // so that one bad reference does not discard the rest of the tree. It is
+        // only the ROOT whose absence makes the whole instance meaningless.
+        let root_ref =
+            ClassifierRef::implementation(Some(package.clone()), type_name.clone(), impl_.clone());
+        if !matches!(
+            self.scope.resolve_classifier(&package, &root_ref),
+            spar_hir_def::resolver::ResolvedClassifier::ComponentImpl { .. }
+        ) {
+            return None;
+        }
 
         let inst = spar_hir_def::instance::SystemInstance::instantiate(
             &self.scope,
-            &Name::new(&pkg_str),
-            &Name::new(&type_str),
-            &Name::new(&impl_name),
+            &package,
+            &type_name,
+            &impl_,
         );
         Some(Instance { inner: inst })
     }
@@ -1152,10 +1179,42 @@ mod tests {
             end X;
             "#,
         );
-        // The instantiation will run but produce 0 children since nothing resolves.
-        // It still returns Some because the function always creates a root.
+        // REGRESSION #417. This test previously asserted `is_some()`, with a
+        // comment explaining that "the function always creates a root" — pinning
+        // the defect as intended behaviour, under a name that says the opposite,
+        // and contradicting `instantiate`'s own doc comment ("Returns `None` if
+        // … the implementation is not found").
+        //
+        // What that cost: `spar instance --root Totally::Bogus.Impl` emitted a
+        // fabricated node with the requested package/type/impl echoed back, empty
+        // children, empty diagnostics, exit 0. A typo'd root produced a
+        // plausible empty model and every downstream analysis then found nothing
+        // wrong with it.
         let inst = db.instantiate("X::Missing.Impl");
-        assert!(inst.is_some());
+        assert!(
+            inst.is_none(),
+            "an unresolvable root must not instantiate; got a fabricated instance"
+        );
+    }
+
+    #[test]
+    fn instantiate_found_still_works() {
+        // The discriminating partner to `instantiate_not_found`. A checker that
+        // simply returned `None` always would satisfy that test and fail this
+        // one: distinct inputs, distinct outputs.
+        let db = make_db(
+            r#"
+            package X
+            public
+              system S
+              end S;
+              system implementation S.Impl
+              end S.Impl;
+            end X;
+            "#,
+        );
+        let inst = db.instantiate("X::S.Impl");
+        assert!(inst.is_some(), "a resolvable root must still instantiate");
     }
 
     #[test]
