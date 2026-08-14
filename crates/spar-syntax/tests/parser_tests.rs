@@ -257,11 +257,11 @@ public
   end S;
   system implementation S.i
     subcomponents
-      sub1 : process Pr;
+      sub1 : device Pr;
     connections
       c1 : bus access ba -> sub1.ba;
   end S.i;
-  process Pr
+  device Pr
     features
       ba : requires bus access;
   end Pr;
