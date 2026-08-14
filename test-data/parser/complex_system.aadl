@@ -44,7 +44,7 @@ public
     subcomponents
       primary : process Nav_Computer.impl;
       backup : process Nav_Computer.impl;
-      voter : thread Voter;
+      voter : process Voter_Process.impl;
     connections
       c1 : port sensor_input.nav_data -> primary.input;
       c2 : port sensor_input.nav_data -> backup.input;
@@ -103,6 +103,27 @@ public
       Dispatch_Protocol => Periodic;
       Period => 50 ms;
   end Voter;
+
+  -- AS5506B: a thread may be a subcomponent only of a process or a thread
+  -- group, never of a system. The voter was declared directly in FMC.dual,
+  -- which spar accepted and OSATE rejects (#420). It is deployed here as a
+  -- process whose features mirror the thread's, so the connections in
+  -- FMC.dual are unchanged.
+  process Voter_Process
+    features
+      in1 : in data port Navigation_Data.impl;
+      in2 : in data port Navigation_Data.impl;
+      result : out data port Navigation_Data.impl;
+  end Voter_Process;
+
+  process implementation Voter_Process.impl
+    subcomponents
+      voter_thread : thread Voter;
+    connections
+      vc1 : port in1 -> voter_thread.in1;
+      vc2 : port in2 -> voter_thread.in2;
+      vc3 : port voter_thread.result -> result;
+  end Voter_Process.impl;
 
   -- Top-level platform
   processor Avionics_Processor

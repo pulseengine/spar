@@ -77,6 +77,28 @@ Then update the TSV rows. Two rules, both learned by getting them wrong:
   `test-data/negative/` file as a positive control to prove the pipeline can
   still produce a diagnostic at all.
 
+## Re-deriving the subcomponent-category table
+
+`crates/spar-parser/src/grammar/categories.rs` encodes which component
+categories may contain which. That table is **measured, not transcribed**:
+
+```bash
+python3 tools/osate-conformance/headless/category-probe.py --generate /tmp/probe
+"$JAVA" -Xmx4g -jar "$LAUNCHER" -application spar.osate.headless.app \
+  -data /tmp/ws-probe -configuration "$ECLIPSE/configuration" -nosplash \
+  validate /tmp/probe > /tmp/probe-verdicts.txt
+python3 tools/osate-conformance/headless/category-probe.py --table /tmp/probe-verdicts.txt
+```
+
+196 pairs, currently **72 legal / 124 illegal**. `--table` refuses to emit a
+table from an incomplete run (missing verdicts would shrink the legal set,
+making spar too strict) and cross-checks against the vendored corpus, where any
+observed pair is legal by construction.
+
+Transcribing AS5506B by hand is the tempting alternative and the dangerous one:
+a slip in the *forbidding* direction makes spar reject valid AADL, which the
+agreement gate treats as an invariant, not a ratchet.
+
 ## What the Direction-B gate enforces
 
 ```text

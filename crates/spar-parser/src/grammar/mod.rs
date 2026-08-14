@@ -4,6 +4,7 @@
 //! Functions take a `&mut Parser` and build nodes via markers.
 
 mod annexes;
+mod categories;
 mod components;
 mod connections;
 mod features;

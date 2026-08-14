@@ -100,6 +100,7 @@ test-data/negative/missing_property_arrow.aadl	REJECT	REJECT	7
 test-data/negative/missing_property_set_is.aadl	REJECT	REJECT	1
 test-data/negative/missing_subcomponent_category.aadl	REJECT	REJECT	2
 test-data/negative/missing_with_semicolon.aadl	REJECT	REJECT	2
+test-data/negative/thread_in_system_impl.aadl	REJECT	REJECT	5
 test-data/negative/unclosed_property_block.aadl	REJECT	REJECT	2
 test-data/parser/all_categories.aadl	ACCEPT	ACCEPT	0
 test-data/parser/annex_test.aadl	ACCEPT	REJECT	7

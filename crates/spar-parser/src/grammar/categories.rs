@@ -1,0 +1,254 @@
+//! Which component categories may contain which, per AS5506B.
+//!
+//! # Provenance: this table was MEASURED, not recalled
+//!
+//! Every one of the 196 (container, subcomponent) pairs was put to OSATE
+//! 2.18.0 as a minimal probe package:
+//!
+//! ```text
+//! package P
+//! public
+//!   <container> Container
+//!   end Container;
+//!   <container> implementation Container.i
+//!     subcomponents
+//!       x : <sub>;
+//!   end Container.i;
+//! end P;
+//! ```
+//!
+//! 196/196 returned a verdict: **72 accepted, 124 rejected**. This table is
+//! exactly that result.
+//!
+//! It was then cross-checked the other way: all 28 distinct pairs occurring in
+//! the 548-file vendored OSATE corpus (1346 implementations) appear in the
+//! legal set here. That direction matters more than it looks — a table
+//! *stricter* than the standard would make spar reject valid AADL, which is
+//! the one failure direction `osate_agreement.rs` treats as an invariant
+//! rather than a ratchet. Deriving it from the oracle rather than from memory
+//! is what keeps that cell empty.
+//!
+//! # Why the parser and not a later stage
+//!
+//! Because that is where OSATE enforces it. Its Xtext grammar has per-category
+//! subcomponent rules (`ProcessSubcomponentType` and friends), so a thread
+//! inside a system implementation fails as `no viable alternative at input
+//! 'thread'` — a syntax error, not a validation one. Matching that placement
+//! keeps `spar parse` comparable to OSATE's parse, which is the comparison
+//! the agreement matrix is built on.
+//!
+//! Addresses #420 category 1. See `tools/osate-conformance/README.md` to
+//! regenerate the probe.
+
+use crate::syntax_kind::SyntaxKind;
+
+/// The 14 AADL component categories.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Category {
+    Abstract,
+    Bus,
+    Data,
+    Device,
+    Memory,
+    Process,
+    Processor,
+    Subprogram,
+    SubprogramGroup,
+    System,
+    Thread,
+    ThreadGroup,
+    VirtualBus,
+    VirtualProcessor,
+}
+
+impl Category {
+    /// As it appears in source, for diagnostics.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Category::Abstract => "abstract",
+            Category::Bus => "bus",
+            Category::Data => "data",
+            Category::Device => "device",
+            Category::Memory => "memory",
+            Category::Process => "process",
+            Category::Processor => "processor",
+            Category::Subprogram => "subprogram",
+            Category::SubprogramGroup => "subprogram group",
+            Category::System => "system",
+            Category::Thread => "thread",
+            Category::ThreadGroup => "thread group",
+            Category::VirtualBus => "virtual bus",
+            Category::VirtualProcessor => "virtual processor",
+        }
+    }
+}
+
+/// Read the category at the cursor WITHOUT consuming it.
+///
+/// Two categories are two tokens (`virtual bus`, `virtual processor`) and two
+/// more are optionally two (`thread group`, `subprogram group`), so a
+/// single-token peek would classify `thread group` as `thread` and reject
+/// `thread group` inside a process — a false rejection, the direction that
+/// must stay empty.
+pub(crate) fn peek(current: SyntaxKind, next: SyntaxKind) -> Option<Category> {
+    Some(match current {
+        SyntaxKind::ABSTRACT_KW => Category::Abstract,
+        SyntaxKind::BUS_KW => Category::Bus,
+        SyntaxKind::DATA_KW => Category::Data,
+        SyntaxKind::DEVICE_KW => Category::Device,
+        SyntaxKind::MEMORY_KW => Category::Memory,
+        SyntaxKind::PROCESS_KW => Category::Process,
+        SyntaxKind::PROCESSOR_KW => Category::Processor,
+        SyntaxKind::SYSTEM_KW => Category::System,
+        SyntaxKind::THREAD_KW if next == SyntaxKind::GROUP_KW => Category::ThreadGroup,
+        SyntaxKind::THREAD_KW => Category::Thread,
+        SyntaxKind::SUBPROGRAM_KW if next == SyntaxKind::GROUP_KW => Category::SubprogramGroup,
+        SyntaxKind::SUBPROGRAM_KW => Category::Subprogram,
+        SyntaxKind::VIRTUAL_KW if next == SyntaxKind::BUS_KW => Category::VirtualBus,
+        SyntaxKind::VIRTUAL_KW if next == SyntaxKind::PROCESSOR_KW => Category::VirtualProcessor,
+        _ => return None,
+    })
+}
+
+/// May `container` hold a subcomponent of category `sub`?
+///
+/// The 72 accepted pairs, verbatim from the OSATE probe.
+pub(crate) fn may_contain(container: Category, sub: Category) -> bool {
+    use Category::*;
+    let allowed: &[Category] = match container {
+        // `abstract` is the wildcard: it may contain every category.
+        Abstract => &[
+            Abstract,
+            Bus,
+            Data,
+            Device,
+            Memory,
+            Process,
+            Processor,
+            Subprogram,
+            SubprogramGroup,
+            System,
+            Thread,
+            ThreadGroup,
+            VirtualBus,
+            VirtualProcessor,
+        ],
+        Bus => &[Abstract, VirtualBus],
+        Data => &[Abstract, Data, Subprogram],
+        Device => &[Abstract, Bus, Data, VirtualBus],
+        Memory => &[Abstract, Bus, Memory, VirtualBus],
+        Process => &[
+            Abstract,
+            Data,
+            Subprogram,
+            SubprogramGroup,
+            Thread,
+            ThreadGroup,
+        ],
+        Processor => &[Abstract, Bus, Memory, VirtualBus, VirtualProcessor],
+        Subprogram => &[Abstract, Data, Subprogram],
+        SubprogramGroup => &[Abstract, Data, Subprogram, SubprogramGroup],
+        // Note the absences: NOT thread, NOT thread group. Threads live in a
+        // process. 0 occurrences across 666 system implementations in OSATE's
+        // corpus, and the probe rejects both.
+        System => &[
+            Abstract,
+            Bus,
+            Data,
+            Device,
+            Memory,
+            Process,
+            Processor,
+            Subprogram,
+            SubprogramGroup,
+            System,
+            VirtualBus,
+            VirtualProcessor,
+        ],
+        Thread => &[Abstract, Data, Subprogram, SubprogramGroup],
+        ThreadGroup => &[
+            Abstract,
+            Data,
+            Subprogram,
+            SubprogramGroup,
+            Thread,
+            ThreadGroup,
+        ],
+        VirtualBus => &[Abstract, VirtualBus],
+        VirtualProcessor => &[Abstract, VirtualBus, VirtualProcessor],
+    };
+    allowed.contains(&sub)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Category::*;
+    use super::*;
+
+    #[test]
+    fn the_table_has_exactly_the_72_pairs_osate_accepted() {
+        const ALL: [Category; 14] = [
+            Abstract,
+            Bus,
+            Data,
+            Device,
+            Memory,
+            Process,
+            Processor,
+            Subprogram,
+            SubprogramGroup,
+            System,
+            Thread,
+            ThreadGroup,
+            VirtualBus,
+            VirtualProcessor,
+        ];
+        let n = ALL
+            .iter()
+            .flat_map(|c| ALL.iter().map(move |s| (*c, *s)))
+            .filter(|(c, s)| may_contain(*c, *s))
+            .count();
+        // The probe returned 72 accepted of 196. A table drifting in either
+        // direction changes this count, and the too-strict direction is the
+        // one that breaks the agreement invariant.
+        assert_eq!(n, 72, "table must hold exactly the 72 OSATE-accepted pairs");
+    }
+
+    #[test]
+    fn a_thread_may_not_sit_directly_in_a_system() {
+        // The concrete #420 finding: test-data/parser/complex_system.aadl:47
+        // declares `voter : thread Voter;` inside `system implementation
+        // FMC.dual`, which spar accepted and OSATE refuses.
+        assert!(!may_contain(System, Thread));
+        assert!(!may_contain(System, ThreadGroup));
+        // The discriminating partner: the same thread inside a process is
+        // fine, so the rule is about the PAIR, not about threads.
+        assert!(may_contain(Process, Thread));
+        // ...and a system may still hold a process.
+        assert!(may_contain(System, Process));
+    }
+
+    #[test]
+    fn two_token_categories_are_not_truncated_to_their_first_token() {
+        // `thread group` inside a process is legal; `thread` inside a system
+        // is not. A peek reading only the first token conflates them and
+        // would reject valid AADL.
+        assert_eq!(
+            peek(SyntaxKind::THREAD_KW, SyntaxKind::GROUP_KW),
+            Some(ThreadGroup)
+        );
+        assert_eq!(peek(SyntaxKind::THREAD_KW, SyntaxKind::IDENT), Some(Thread));
+        assert_eq!(
+            peek(SyntaxKind::VIRTUAL_KW, SyntaxKind::PROCESSOR_KW),
+            Some(VirtualProcessor)
+        );
+        assert_eq!(
+            peek(SyntaxKind::VIRTUAL_KW, SyntaxKind::BUS_KW),
+            Some(VirtualBus)
+        );
+        // A processor may hold a VIRTUAL processor but not a plain one.
+        assert!(may_contain(Processor, VirtualProcessor));
+        assert!(!may_contain(Processor, Processor));
+        assert_eq!(peek(SyntaxKind::IDENT, SyntaxKind::IDENT), None);
+    }
+}
