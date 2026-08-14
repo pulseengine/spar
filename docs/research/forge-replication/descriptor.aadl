@@ -78,9 +78,13 @@ public
       c16 : port verify_macros.data_out -> verify.data_in;
       c17 : port hir.data_out         -> trace_topology.data_in;
       c18 : port mcp.data_out         -> cli.mcp_in;
-      c19 : port cli.data_in          -> Spar.cli_in;
-      c20 : port wasm.data_in         -> Spar.wasm_in;
-      c21 : port mcp.data_in          -> Spar.mcp_in;
+      -- Inbound from the enclosing system. An enclosing feature is named
+      -- bare: `Spar.cli_in` reads as a subcomponent named `Spar`, which does
+      -- not exist. The direction was also inverted -- these carry input INTO
+      -- the subcomponent, so the enclosing inbound port is the source.
+      c19 : port cli_in               -> cli.data_in;
+      c20 : port wasm_in              -> wasm.data_in;
+      c21 : port mcp_in               -> mcp.data_in;
   end Spar.v0_9_3;
 
   -- Stub system types (no implementations beyond marker subcomponents)
