@@ -61,6 +61,9 @@ fn is_implementation_ahead(p: &mut Parser) -> bool {
 /// ```
 fn component_type(p: &mut Parser) {
     let m = p.start();
+    // Feature legality depends on the containing category (#420), so capture
+    // it before the tokens are consumed.
+    let container = super::categories::peek(p.current(), p.nth(1));
     super::component_category(p);
     if p.at_name() {
         p.bump_any();
@@ -74,7 +77,7 @@ fn component_type(p: &mut Parser) {
     }
 
     // Sections (order-independent in practice, but the grammar defines an order)
-    component_type_sections(p);
+    component_type_sections(p, container);
 
     // end Name ;
     p.expect(SyntaxKind::END_KW);
@@ -190,7 +193,7 @@ impl SeenSections {
     }
 }
 
-fn component_type_sections(p: &mut Parser) {
+fn component_type_sections(p: &mut Parser, container: Option<super::categories::Category>) {
     let mut seen = SeenSections::default();
     loop {
         match p.current() {
@@ -200,7 +203,7 @@ fn component_type_sections(p: &mut Parser) {
             }
             SyntaxKind::FEATURES_KW => {
                 seen.check(p, SyntaxKind::FEATURES_KW, "features");
-                super::features::feature_section(p);
+                super::features::feature_section(p, container);
             }
             SyntaxKind::FLOWS_KW => {
                 seen.check(p, SyntaxKind::FLOWS_KW, "flows");
@@ -580,8 +583,11 @@ pub(crate) fn feature_group_type_decl(p: &mut Parser) {
     }
 
     // features section
+    //
+    // `None`: a feature group type has no containing component category, and
+    // a group is a reusable bundle, so no per-category rule applies here.
     if p.at(SyntaxKind::FEATURES_KW) {
-        super::features::feature_section(p);
+        super::features::feature_section(p, None);
     }
 
     // Optional inverse of

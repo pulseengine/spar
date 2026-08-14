@@ -214,6 +214,57 @@ pub(crate) fn may_contain(container: Category, sub: Category) -> bool {
     allowed.contains(&sub)
 }
 
+/// Feature kinds whose legality depends on the containing component category.
+///
+/// Only two are encoded, out of the 14 probed. That is deliberate: these are
+/// the two where a SECOND, independent signal agrees with OSATE. Rejecting a
+/// feature makes spar stricter, which is the direction that invents errors for
+/// users, so single-sourced rejections are not worth the risk yet.
+///
+/// | rule | corpus (3877 type declarations) | OSATE probe |
+/// |------|--------------------------------|-------------|
+/// | bus access | system 53, device 30, processor 18, memory 3, bus 3, abstract 1 — never on process/thread | process, thread, thread group, data, subprogram(-group) REJECT |
+/// | parameter | subprogram 59, nothing else | every category except subprogram REJECTS |
+///
+/// The corpus is data and the probe is code, so these are closer to
+/// independent than two runs of the same validator would be.
+///
+/// The other 12 probed feature kinds are measured but NOT encoded — see
+/// `tools/osate-conformance/README.md`. Encoding them needs either the AS5506
+/// text or a corroborating signal.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum FeatureKind {
+    /// `requires bus access` / `provides bus access`
+    BusAccess,
+    /// `in parameter` / `out parameter`
+    Parameter,
+}
+
+impl FeatureKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            FeatureKind::BusAccess => "bus access",
+            FeatureKind::Parameter => "parameter",
+        }
+    }
+}
+
+/// May a component of `container` declare a feature of this kind?
+pub(crate) fn may_have_feature(container: Category, kind: FeatureKind) -> bool {
+    use Category::*;
+    match kind {
+        // Bus access is a platform concern. Software categories bind to a
+        // processor; they do not touch a bus directly.
+        FeatureKind::BusAccess => matches!(
+            container,
+            Abstract | Bus | Device | Memory | Processor | System | VirtualBus | VirtualProcessor
+        ),
+        // Parameters are the subprogram call interface, and nothing else --
+        // not even `abstract`, which is otherwise the permissive wildcard.
+        FeatureKind::Parameter => matches!(container, Subprogram),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Category::*;
@@ -260,6 +311,28 @@ mod tests {
         assert!(may_contain(Process, Thread));
         // ...and a system may still hold a process.
         assert!(may_contain(System, Process));
+    }
+
+    #[test]
+    fn bus_access_is_a_platform_feature_and_parameters_are_subprogram_only() {
+        // #420: `requires bus access` on a process type. Both signals agree --
+        // the probe rejects it, and the 548-file corpus puts bus access on
+        // system/device/processor/memory/bus/abstract and never on a process.
+        assert!(!may_have_feature(Process, FeatureKind::BusAccess));
+        assert!(!may_have_feature(Thread, FeatureKind::BusAccess));
+        assert!(!may_have_feature(ThreadGroup, FeatureKind::BusAccess));
+        // The discriminating partners: the same feature on the platform side.
+        assert!(may_have_feature(System, FeatureKind::BusAccess));
+        assert!(may_have_feature(Device, FeatureKind::BusAccess));
+        assert!(may_have_feature(Processor, FeatureKind::BusAccess));
+
+        // Parameters: subprogram alone. Note `abstract` is NOT permitted here
+        // even though it is the wildcard for subcomponents -- so a rule
+        // written as "abstract allows everything" would be wrong.
+        assert!(may_have_feature(Subprogram, FeatureKind::Parameter));
+        assert!(!may_have_feature(Abstract, FeatureKind::Parameter));
+        assert!(!may_have_feature(Thread, FeatureKind::Parameter));
+        assert!(!may_have_feature(System, FeatureKind::Parameter));
     }
 
     #[test]

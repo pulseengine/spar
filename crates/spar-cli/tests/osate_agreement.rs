@@ -19,8 +19,8 @@
 //!
 //! ```text
 //!                    OSATE accepts   OSATE rejects
-//!   spar accepts          63              54        <- ratchet, may only fall
-//!   spar rejects           0              20        <- must be ADJUDICATED
+//!   spar accepts          65              53        <- ratchet, may only fall
+//!   spar rejects           0              21        <- must be ADJUDICATED
 //! ```
 //!
 //! **too-strict must be ADJUDICATED, and is 0 today.** spar rejecting AADL
@@ -66,9 +66,11 @@ const BASELINE: &str = concat!(
     "/../../test-data/interop/baseline/osate-first-party.tsv"
 );
 
-/// Models spar accepts that OSATE refuses. MEASURED 54 on OSATE 2.18.0.
-/// Lower this as #420's categories are fixed; it may never rise.
-const MAX_TOO_PERMISSIVE: usize = 54;
+/// Models spar accepts that OSATE refuses. 54 when first measured on OSATE
+/// 2.18.0; **53** after the bus-access feature rule (#420) let
+/// `connections_all.aadl` be corrected -- OSATE now accepts it with 0
+/// diagnostics. Lower this as more of #420 is fixed; it may never rise.
+const MAX_TOO_PERMISSIVE: usize = 53;
 
 /// Files where spar is stricter than OSATE **on purpose**.
 ///

@@ -81,6 +81,7 @@ test-data/codegen/dataplane.aadl	ACCEPT	ACCEPT	0
 test-data/codegen/state.aadl	ACCEPT	ACCEPT	0
 test-data/extends_inheritance.aadl	ACCEPT	ACCEPT	0
 test-data/move_oracle_demo.aadl	ACCEPT	REJECT	4
+test-data/negative/bus_access_on_process.aadl	REJECT	REJECT	3
 test-data/negative/invalid_connection_arrow.aadl	REJECT	REJECT	2
 test-data/negative/invalid_flow_kind.aadl	REJECT	REJECT	3
 test-data/negative/invalid_top_level.aadl	REJECT	REJECT	1
@@ -105,7 +106,7 @@ test-data/negative/unclosed_property_block.aadl	REJECT	REJECT	2
 test-data/parser/all_categories.aadl	ACCEPT	ACCEPT	0
 test-data/parser/annex_test.aadl	ACCEPT	REJECT	7
 test-data/parser/complex_system.aadl	ACCEPT	REJECT	7
-test-data/parser/connections_all.aadl	ACCEPT	REJECT	9
+test-data/parser/connections_all.aadl	ACCEPT	ACCEPT	0
 test-data/parser/empty_package.aadl	ACCEPT	ACCEPT	0
 test-data/parser/extends_test.aadl	ACCEPT	ACCEPT	0
 test-data/parser/feature_group_type.aadl	ACCEPT	ACCEPT	0

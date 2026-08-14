@@ -4,7 +4,7 @@ use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
 
 /// Parse `features ... ` section.
-pub(crate) fn feature_section(p: &mut Parser) {
+pub(crate) fn feature_section(p: &mut Parser, container: Option<super::categories::Category>) {
     let m = p.start();
     p.bump(SyntaxKind::FEATURES_KW);
     if p.at(SyntaxKind::NONE_KW) {
@@ -17,14 +17,17 @@ pub(crate) fn feature_section(p: &mut Parser) {
             || p.at(SyntaxKind::PROVIDES_KW)
             || p.at(SyntaxKind::REQUIRES_KW)
         {
-            feature(p);
+            feature(p, container);
         }
     }
     m.complete(p, SyntaxKind::FEATURE_SECTION);
 }
 
 /// Parse a single feature declaration.
-fn feature(p: &mut Parser) {
+fn feature(p: &mut Parser, container: Option<super::categories::Category>) {
+    if let Some(outer) = container {
+        check_feature_legality(p, outer);
+    }
     // Features can start with:
     // name : [direction] port_type ...
     // name : provides/requires access_type ...
@@ -331,5 +334,45 @@ fn eat_to_semicolon(p: &mut Parser) {
     }
     if p.at(SyntaxKind::SEMICOLON) {
         p.bump(SyntaxKind::SEMICOLON);
+    }
+}
+
+/// AS5506 restricts some feature kinds to particular component categories
+/// (#420). OSATE enforces these in its grammar, so a violation is a parse
+/// error there and here.
+///
+/// Looks ahead over the current declaration rather than restructuring
+/// `feature`, which handles a dozen shapes; the two kinds checked are
+/// identified by a keyword pair that cannot occur otherwise in a feature
+/// declaration.
+fn check_feature_legality(p: &mut Parser, outer: super::categories::Category) {
+    use super::categories::{FeatureKind, may_have_feature};
+
+    let mut kind = None;
+    // Bounded scan: stop at the semicolon that ends this declaration, so a
+    // later feature's keywords are never attributed to this one.
+    for i in 0..24 {
+        let k = p.nth(i);
+        if k == SyntaxKind::SEMICOLON || k == SyntaxKind::EOF {
+            break;
+        }
+        if k == SyntaxKind::BUS_KW && p.nth(i + 1) == SyntaxKind::ACCESS_KW {
+            kind = Some(FeatureKind::BusAccess);
+            break;
+        }
+        if k == SyntaxKind::PARAMETER_KW {
+            kind = Some(FeatureKind::Parameter);
+            break;
+        }
+    }
+
+    if let Some(kind) = kind {
+        if !may_have_feature(outer, kind) {
+            p.error(&format!(
+                "a `{}` feature is not allowed on a `{}`",
+                kind.as_str(),
+                outer.as_str()
+            ));
+        }
     }
 }
