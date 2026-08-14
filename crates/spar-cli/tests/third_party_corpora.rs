@@ -135,7 +135,10 @@ fn third_party_corpora_parse_without_regression() {
         regressions.join("\n  ")
     );
 
-    println!("{scanned} third-party models scanned, {} known gaps", gaps.len());
+    println!(
+        "{scanned} third-party models scanned, {} known gaps",
+        gaps.len()
+    );
 }
 
 /// The baseline must describe files that exist.
