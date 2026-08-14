@@ -49,27 +49,45 @@
 //! keeps `spar parse` comparable to OSATE's parse, which is the comparison
 //! the agreement matrix is built on.
 //!
-//! # UNADJUDICATED: where OSATE may be wrong
+//! # ADJUDICATED by a second implementation (Ocarina)
 //!
-//! These came back REJECT, and the AADL literature commonly describes them as
-//! permitted. They are encoded as OSATE reports them, because following the
-//! oracle we actually ran beats following a half-remembered table — but they
-//! are the first place to look if a user reports spar refusing a valid model,
-//! and they should be checked against the AS5506 text when someone has it:
+//! Two entries were flagged here as doubtful: `data` and `subprogram`
+//! containing `subprogram group`. Both are *rejections*, so encoding them
+//! makes spar stricter — the direction that produces false errors for users —
+//! and neither appears in the 548-file corpus, so that quarter was silent.
 //!
-//!   * `data` containing `subprogram group`
-//!   * `subprogram` containing `subprogram group`
+//! **Resolved.** Ocarina 9873d8b (OpenAADL, Ada, a codebase entirely separate
+//! from OSATE's Xtext grammar) rejects both as well. Two independent
+//! implementations agreeing that a construct is illegal is much better
+//! evidence than one, so these are no longer in doubt.
 //!
-//! Both are *rejections*, so encoding them makes spar stricter, which is the
-//! direction that can produce false errors for users. Neither appears in the
-//! 548-file corpus, so there is no evidence either way from that quarter. If
-//! the standard permits them, delete them from the illegal set — do not wait
-//! for OSATE to change.
+//! The flagship rule got the same treatment: `system` containing `thread` is
+//! rejected by spar, OSATE **and** Ocarina.
 //!
-//! Conversely `subprogram` containing `subprogram`, and `data` containing
-//! `data`, came back ACCEPT and are encoded as legal. If the standard forbids
-//! those, spar is currently too lenient there and the fix is ours to make,
-//! regardless of what OSATE does.
+//! # STILL UNADJUDICATED: six pairs where OSATE and Ocarina disagree
+//!
+//! Running all 196 probes through Ocarina gave 66 accept / 130 reject against
+//! OSATE's 72 / 124. Six pairs differ, and in every one OSATE is the *more
+//! permissive*:
+//!
+//! | container | subcomponent | OSATE | Ocarina |
+//! |---|---|---|---|
+//! | `device` | `data` | accept | reject |
+//! | `device` | `virtual bus` | accept | reject |
+//! | `memory` | `virtual bus` | accept | reject |
+//! | `subprogram` | `subprogram` | accept | reject |
+//! | `subprogram group` | `abstract` | accept | reject |
+//! | `subprogram group` | `data` | accept | reject |
+//!
+//! This table follows OSATE on all six, so spar is currently more permissive
+//! than Ocarina there. That is the *safe* direction — a permissive parser
+//! accepts a model the user can still open elsewhere; a strict one refuses
+//! work outright — so following the lenient side while unresolved is
+//! deliberate, not an oversight.
+//!
+//! Note `device` containing `data` occurs **4 times in the vendored 548-file
+//! corpus**, which is written for OSATE. So Ocarina rejects a construct real
+//! models use; resolving these needs the AS5506 text, not a third vote.
 //!
 //! Addresses #420 category 1. See `tools/osate-conformance/README.md` to
 //! regenerate the probe.
