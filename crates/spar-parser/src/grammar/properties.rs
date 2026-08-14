@@ -630,8 +630,21 @@ fn applies_to_category(p: &mut Parser) {
         if p.eat(GROUP_KW) {
             p.eat(TYPE_KW);
         }
+    } else if p.at(EVENT_KW) {
+        // `event port` / `event data port`. `data port` is handled below,
+        // because `data` is also a component category and is consumed there.
+        p.bump(EVENT_KW);
+        p.eat(DATA_KW);
+        p.expect(PORT_KW);
     } else if p.current().is_component_category_kw() {
         super::component_category(p);
+        // A category may be followed by a narrowing keyword:
+        //   `bus access`  -- the access feature, not the bus itself
+        //   `data port`   -- the port kind, not the data component
+        // Both were rejected until #420; OSATE accepts both.
+        if p.at(ACCESS_KW) || p.at(PORT_KW) {
+            p.bump_any();
+        }
         // A property owner may name the category, or specifically its type or
         // its implementation: `applies to (system, system implementation)`.
         //
@@ -649,7 +662,7 @@ fn applies_to_category(p: &mut Parser) {
         }
     } else if matches!(
         p.current(),
-        PORT_KW | FLOW_KW | MODE_KW | ACCESS_KW | PARAMETER_KW | CONNECTIONS_KW
+        PORT_KW | FLOW_KW | MODE_KW | ACCESS_KW | PARAMETER_KW | CONNECTIONS_KW | PACKAGE_KW
     ) {
         // Non-component-category property owners (AS5506 §11.3): a property
         // may also apply to ports, flows, modes, connections, access

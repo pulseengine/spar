@@ -21,4 +21,10 @@ property set Property_Owner_Forms is
   -- #420 rather than fixed here, since it is a separate change.
   NonCategory : aadlinteger applies to (port, flow, mode, connection);
   Everything  : aadlinteger applies to (all);
+
+  -- Owners found by AADLib (OpenAADL/Ocarina, BSD-3, 239 models), all
+  -- rejected by spar until #420 and all accepted by OSATE 2.18.0:
+  Pkg         : aadlinteger applies to (package);
+  PortKinds   : aadlinteger applies to (event data port, event port, data port);
+  BusAcc      : aadlinteger applies to (bus access, connection);
 end Property_Owner_Forms;
