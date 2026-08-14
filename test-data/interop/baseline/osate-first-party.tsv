@@ -115,6 +115,7 @@ test-data/parser/flows_test.aadl	ACCEPT	REJECT	11
 test-data/parser/modes_test.aadl	ACCEPT	ACCEPT	0
 test-data/parser/private_section.aadl	ACCEPT	ACCEPT	0
 test-data/parser/properties_test.aadl	ACCEPT	REJECT	8
+test-data/parser/property_owner_forms.aadl	ACCEPT	ACCEPT	0
 test-data/parser/property_set.aadl	ACCEPT	ACCEPT	0
 test-data/parser/property_set_enum_sequenced.aadl	ACCEPT	REJECT	1
 test-data/parser/property_set_inline_units.aadl	ACCEPT	ACCEPT	0

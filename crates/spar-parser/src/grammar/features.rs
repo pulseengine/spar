@@ -366,13 +366,13 @@ fn check_feature_legality(p: &mut Parser, outer: super::categories::Category) {
         }
     }
 
-    if let Some(kind) = kind {
-        if !may_have_feature(outer, kind) {
-            p.error(&format!(
-                "a `{}` feature is not allowed on a `{}`",
-                kind.as_str(),
-                outer.as_str()
-            ));
-        }
+    if let Some(kind) = kind
+        && !may_have_feature(outer, kind)
+    {
+        p.error(format!(
+            "a `{}` feature is not allowed on a `{}`",
+            kind.as_str(),
+            outer.as_str()
+        ));
     }
 }

@@ -372,14 +372,13 @@ fn subcomponent(p: &mut Parser, container: Option<super::categories::Category>) 
     // AS5506B restricts which categories may nest (#420). OSATE enforces this
     // in its grammar, so a violation is a parse error there and here.
     if let (Some(outer), Some(inner)) = (container, super::categories::peek(p.current(), p.nth(1)))
+        && !super::categories::may_contain(outer, inner)
     {
-        if !super::categories::may_contain(outer, inner) {
-            p.error(&format!(
-                "a `{}` subcomponent is not allowed in a `{}` implementation",
-                inner.as_str(),
-                outer.as_str()
-            ));
-        }
+        p.error(format!(
+            "a `{}` subcomponent is not allowed in a `{}` implementation",
+            inner.as_str(),
+            outer.as_str()
+        ));
     }
     super::component_category(p);
     // Optional classifier reference
