@@ -1,0 +1,159 @@
+//! Tier-A over corpora written by neither us nor the OSATE team (#421).
+//!
+//! `osate_corpus.rs` ratchets the 548 vendored OSATE examples. This ratchets
+//! four more, and the reason there are four is the whole point.
+//!
+//! # Why more than one corpus
+//!
+//! `applies to (system, system implementation)` was **rejected by spar and
+//! accepted by OSATE with 0 diagnostics** — a bug in the direction that makes
+//! spar unusable on a valid file. The 548-model OSATE corpus uses that
+//! construct in ZERO files. So do our own 120. No amount of parse-rate on
+//! either could have surfaced it; it took the Galois corpus, and once that
+//! opened the area, three more owner forms turned up in AADLib and one in
+//! VERDICT.
+//!
+//! **Two corpora agreeing on what they do not contain is a shared blind spot,
+//! not a signal.**
+//!
+//! # These are tests, not specifications
+//!
+//! Two AADLib files are rejected by spar AND by OSATE, both with grammar
+//! errors — Ocarina-specific syntax. A corpus is another opinion, not another
+//! authority. Its failures are recorded in the baseline without any claim that
+//! spar is wrong; see `osate_agreement.rs` for how divergence gets adjudicated.
+//!
+//! # On the numbers
+//!
+//! A parse-rate measures the corpus — its duplication, its style, its era — at
+//! least as much as the parser. VERDICT's original 14 failures were 14 copies
+//! of one file: one distinct gap. This test therefore ratchets a **set of
+//! paths**, not a percentage, so a corpus that duplicates a file cannot make
+//! the number move without a real change.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+const BASELINE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../test-data/interop/baseline/third-party-gaps.txt"
+);
+
+/// (directory, minimum models expected) — the floor guards against a corpus
+/// silently disappearing, which would make "no regressions" vacuously true.
+const CORPORA: &[(&str, usize)] = &[
+    ("test-data/interop/case-aadl", 50),
+    ("test-data/interop/aadlib", 230),
+    ("test-data/interop/fmw", 900),
+    ("test-data/interop/verdict", 130),
+];
+
+fn collect_aadl(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_aadl(&path, out);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("aadl") {
+            out.push(path);
+        }
+    }
+}
+
+fn known_gaps() -> BTreeSet<String> {
+    std::fs::read_to_string(BASELINE)
+        .unwrap_or_else(|e| panic!("cannot read {BASELINE}: {e}"))
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .map(|l| l.split('\t').next().unwrap_or(l).to_string())
+        .collect()
+}
+
+#[test]
+fn third_party_corpora_parse_without_regression() {
+    let root = PathBuf::from(REPO);
+    let gaps = known_gaps();
+
+    let mut regressions: Vec<String> = Vec::new();
+    let mut newly_passing: Vec<String> = Vec::new();
+    let mut scanned = 0usize;
+
+    for (dir, floor) in CORPORA {
+        let mut files = Vec::new();
+        collect_aadl(&root.join(dir), &mut files);
+
+        // Corpus-present guard. A vendored tree that vanished would produce
+        // zero failures and read as a clean run.
+        assert!(
+            files.len() >= *floor,
+            "{dir}: found {} models, expected at least {floor}. The corpus is \
+             missing or truncated, and an absent corpus cannot regress — see \
+             test-data/interop/PROVENANCE-THIRD-PARTY.md",
+            files.len()
+        );
+
+        files.sort();
+        for path in &files {
+            scanned += 1;
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let src = std::fs::read_to_string(path).unwrap_or_default();
+            let parsed = spar_syntax::parse(&src).ok();
+            match (parsed, gaps.contains(&rel)) {
+                (false, false) => regressions.push(rel),
+                (true, true) => newly_passing.push(rel),
+                _ => {}
+            }
+        }
+    }
+
+    // Progress is reported, not failed — but it must be re-blessed, or the
+    // baseline slowly becomes a list of things that no longer break.
+    if !newly_passing.is_empty() {
+        println!(
+            "{} file(s) now parse that the baseline lists as gaps — remove them \
+             from test-data/interop/baseline/third-party-gaps.txt to lock the \
+             win in:\n  {}",
+            newly_passing.len(),
+            newly_passing.join("\n  ")
+        );
+    }
+
+    assert!(
+        regressions.is_empty(),
+        "{} third-party model(s) stopped parsing and are not in the baseline. \
+         These corpora are written by other teams against other tools, so a new \
+         failure here is usually a real gap rather than a bad model — but check \
+         which before re-blessing:\n  {}",
+        regressions.len(),
+        regressions.join("\n  ")
+    );
+
+    println!("{scanned} third-party models scanned, {} known gaps", gaps.len());
+}
+
+/// The baseline must describe files that exist.
+///
+/// A stale entry is worse than a missing one: it silently excuses a path that
+/// is no longer there, and if a file with that name ever returns, its failure
+/// is pre-forgiven.
+#[test]
+fn every_baseline_entry_names_a_real_file() {
+    let root = PathBuf::from(REPO);
+    let missing: Vec<String> = known_gaps()
+        .into_iter()
+        .filter(|p| !root.join(p).is_file())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "{} baseline entries name files that do not exist — remove them:\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
+}

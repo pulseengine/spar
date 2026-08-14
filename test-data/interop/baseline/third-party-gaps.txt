@@ -1,0 +1,19 @@
+# Third-party corpus files spar currently fails to parse (#421).
+# A file NOT listed here that fails is a regression; the test says so.
+# Removing a line is progress -- re-bless to lock it in.
+#
+# path\tfirst-diagnostic
+test-data/interop/aadlib/examples/ping_spark/ping-local.aadl	expected END_KW
+test-data/interop/aadlib/examples/ping_spark/software.aadl	expected END_KW
+test-data/interop/aadlib/src/property_set/arp4761.aadl	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
+test-data/interop/aadlib/src/property_set/milstd882.aadl	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
+test-data/interop/aadlib/src/property_set/pok.aadl	expected R_PAREN
+test-data/interop/fmw/models/Pats_Initial/fooBarTypes.aadl	expected END_KW
+test-data/interop/fmw/models/Pats_Initial/tower_example_signals.aadl	expected END_KW
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/FC.aadl	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/GS.aadl	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/SW.aadl	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAS.aadl	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAV.aadl	expected `package` or `property set`
+test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/SW_Properties.aadl	expected END_KW
+test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/array.aadl	expected END_KW

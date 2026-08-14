@@ -1,0 +1,431 @@
+package CASE_Toy
+public
+	with Base_Types;
+	with Data_Model;
+	with CASE_Consolidated_Properties;
+	
+	data Position
+	end Position;
+
+	data implementation Position.impl
+		subcomponents
+			latitude: data Base_Types::Float;
+			longitude: data Base_Types::Float;
+	end Position.impl;
+
+	data SatelliteConstellation
+		properties
+			Data_Model::Data_Representation => Enum;
+			Data_Model::Enumerators => ("GPS", "Galileo");
+	end SatelliteConstellation;
+
+	data SatelliteSignals
+	end SatelliteSignals;
+
+	data implementation SatelliteSignals.impl
+		subcomponents
+			gps_sig: data Position.impl;
+			galileo_sig: data Position.impl;
+	end SatelliteSignals.impl;
+
+	data Status
+		properties
+			Data_Model::Data_Representation => Enum;
+			Data_Model::Enumerators => ("Confirmed", "Unconfirmed");
+	end Status;
+
+	data MAC
+	end MAC;
+	
+	-- The following MAC implementation is an "ideal" representation of
+	-- the information required to check message authentication.
+	-- This representation is enough to capture attacks in the design logic,
+	-- but not to capture low-level attacks against the authentication method
+	data implementation MAC.impl
+		subcomponents
+			x: data Base_Types::Float;
+			y: data Base_Types::Float;
+	end MAC.impl;
+
+	annex agree {**
+		-- HasHappened(x) is true iff x has been true at least once so far
+		node HasHappened(x: bool) returns (y: bool);
+		let
+  			y = x or (false -> pre(y)) ;
+		tel;
+		
+		-- The definition of this predicate is actually irrelevant
+		-- for analysis purposes. It is here only to overcome
+		-- a limitation of AGREE, namely, the lack of support
+		-- for uninterpreted predicates.
+		node IsBadLocation(p: Position.impl) returns (f: bool);
+		let
+			f = (25.0 <= p.latitude and p.latitude <= 50.0) and 
+			    (-130.0 <= p.longitude and p.longitude <= -60.0);
+		tel;
+		
+		-- The particular definition of this function is irrelevant for
+		-- for analysis purposes provided that it maps a position value
+		-- unequivocally to a mac value
+		node ComputeMAC(p: Position.impl) returns (mac: MAC.impl);
+		let
+			mac = MAC.impl { x = p.latitude/2.0; y = p.longitude/2.0 };
+		tel;
+		
+		node FirstTimeHolds(x: bool) returns (r: bool);
+		let
+			r = x -> not pre(HasHappened(x)) and x;	
+		tel;
+	**};
+	
+	system DeliveryManager
+		features
+			-- Inputs
+			constellation: in data port SatelliteConstellation;
+			satellite_sig: in data port SatelliteSignals;
+			imu_ref: in data port Position.impl;
+			delivery_location_in: in data port Position.impl;
+			init: in data port Base_Types::Boolean;
+			mac: in data port MAC.impl;
+			-- Outputs
+			imu_out: out event data port Position.impl;
+			gps_out: out event data port Position.impl;
+			delivery_location_out: out event data port Position.impl;
+	end DeliveryManager;
+
+	system DeliveryDriver
+		features
+			-- Inputs
+			delivery_location_in: in data port Position.impl;
+			init: in data port Base_Types::Boolean;
+			mac: in data port MAC.impl;
+			-- Outputs
+			delivery_location_out: out event data port Position.impl;
+			
+		annex agree {**
+			guarantee "delivery_location_out value":
+				FirstTimeHolds(init and mac=ComputeMAC(delivery_location_in)) = event(delivery_location_out);
+			
+			guarantee "delivery_location_out presence":
+				(event(delivery_location_out) => delivery_location_out = delivery_location_in);
+		**};
+	end DeliveryDriver;
+
+	system IMU
+		features
+			-- Inputs
+			imu_ref: in data port Position.impl;
+			init: in data port Base_Types::Boolean;
+			-- Outputs
+			imu_out: out event data port Position.impl;
+	end IMU;
+
+	system GPS
+		features
+			-- Inputs
+			constellation: in data port SatelliteConstellation;
+			satellite_sig: in data port SatelliteSignals;
+			init: in data port Base_Types::Boolean;
+			-- Outputs
+			gps_out: out event data port Position.impl;
+	end GPS;
+
+	system implementation DeliveryManager.Impl
+		subcomponents
+			dd: system DeliveryDriver
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::adversariallyTestedForTrojanOrLogicBomb => 7;
+				CASE_Consolidated_Properties::staticCodeAnalysis => 7;
+				CASE_Consolidated_Properties::inputValidation => 7;
+				CASE_Consolidated_Properties::memoryProtection => 7;
+				CASE_Consolidated_Properties::secureBoot => 7;
+			};
+			imu: system IMU
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::category => "IMU";
+				CASE_Consolidated_Properties::pedigree => Sourced;
+				CASE_Consolidated_Properties::supplyChainSecurity => 7;
+				CASE_Consolidated_Properties::tamperProtection => 7;
+			};
+			gps: system GPS
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::category => "GPS";
+				CASE_Consolidated_Properties::pedigree => Sourced;
+				CASE_Consolidated_Properties::supplyChainSecurity => 7;
+				CASE_Consolidated_Properties::tamperProtection => 7;
+			};
+		connections
+			i1: port delivery_location_in -> dd.delivery_location_in
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i2: port init -> dd.init
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			
+			i3: port imu_ref -> imu.imu_ref
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i4: port init -> imu.init
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i5: port constellation -> gps.constellation
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i6: port satellite_sig -> gps.satellite_sig
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i7: port init -> gps.init
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i8: port mac -> dd.mac
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			
+			o1: port dd.delivery_location_out -> delivery_location_out
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			o2: port imu.imu_out -> imu_out
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			o3: port gps.gps_out -> gps_out
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+	end DeliveryManager.Impl;
+
+	system SystemBus
+		features
+			-- Inputs
+			imu_in: in event data port Position.impl;
+			gps_in: in event data port Position.impl;
+			delivery_location_in: in event data port Position.impl;
+			-- Outputs
+			imu_out: out event data port Position.impl;
+			gps_out: out event data port Position.impl;
+			delivery_location_out: out event data port Position.impl;
+			
+		annex agree {**
+			guarantee "imu_out presence":
+				event(imu_out)=event(imu_in);
+				
+			guarantee "imu_out value":
+				(event(imu_out) => imu_out=imu_in);
+				
+			guarantee "gps_out presence":
+				event(gps_out)=event(gps_in);
+				
+			guarantee "gps_out value":	
+				(event(gps_out) => gps_out=gps_in);
+				
+			guarantee "delivery_location_out presence":
+				event(delivery_location_out)=event(delivery_location_in);
+			
+			guarantee "delivery_location_out value":	
+				(event(delivery_location_out) => delivery_location_out=delivery_location_in);
+		**};
+	end SystemBus;
+
+	system Controller
+		features
+			-- Inputs
+			imu_in: in event data port Position.impl;
+			gps_in: in event data port Position.impl;
+			delivery_location_in: in event data port Position.impl;
+			warning_flag: in data port Base_Types::Boolean;
+			-- Outputs
+			status: out data port Status;
+			delivery_location_out: out data port Position.impl;
+			
+		annex agree {**
+			eq valid_delivery_location_event: bool = event(delivery_location_in) and not warning_flag;
+				
+			guarantee "status value":
+				(status = enum(Status, Confirmed)) = HasHappened(valid_delivery_location_event);
+			
+			guarantee "delivery_location_out value (update)":	
+				FirstTimeHolds(valid_delivery_location_event) => delivery_location_out = delivery_location_in;
+			
+			guarantee "delivery_location_out value (fixed point)":
+				true -> (HasHappened(false -> pre(valid_delivery_location_event)) => delivery_location_out = pre(delivery_location_out));
+		**};
+	end Controller;
+
+	system PositionRuntimeMonitor
+		features
+			loc: in event data port Position.impl;
+			warning_flag: out data port Base_Types::Boolean;
+		annex agree {**
+			guarantee "warning_flag value":
+				warning_flag = (event(loc) and IsBadLocation(loc));
+		**};
+	end PositionRuntimeMonitor;
+
+	system UAVToySystem
+		features
+			-- Inputs
+			constellation: in data port SatelliteConstellation;
+			satellite_sig: in data port SatelliteSignals;
+			imu_ref: in data port Position.impl;
+			delivery_location_in: in data port Position.impl;
+			init: in data port Base_Types::Boolean;
+			mac: in data port MAC.impl;
+			-- Probe
+			status: out data port Status
+			{
+				CASE_Consolidated_Properties::probe => true;
+			};
+			delivery_location_out: out data port Position.impl
+			{
+				CASE_Consolidated_Properties::probe => true;
+			};
+			
+		annex agree {**
+			assume "delivery location is not a bad location":
+				init => not IsBadLocation(delivery_location_in);
+			
+			assume "initialization only happens once":
+				true -> (pre(HasHappened(init)) => not init);
+			
+			assume "mac value": mac = ComputeMAC(delivery_location_in);
+				
+			eq init_delivery_location: Position.impl =
+				if FirstTimeHolds(init) then delivery_location_in
+				else (delivery_location_in -> pre(init_delivery_location));
+				
+			guarantee "P1: UAV system delivers only if delivery location is the one provided in the initialization":
+				status = enum(Status, Confirmed) => delivery_location_out = init_delivery_location;
+			
+			guarantee "P2: UAV system does not deliver in a bad location":
+				not (status = enum(Status, Confirmed) and IsBadLocation(delivery_location_out));			
+		**};
+	end UAVToySystem;
+	
+	system implementation UAVToySystem.Impl
+		subcomponents
+			dm: system DeliveryManager.Impl
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::adversariallyTestedForTrojanOrLogicBomb => 7;
+				CASE_Consolidated_Properties::staticCodeAnalysis => 7;
+				CASE_Consolidated_Properties::inputValidation => 7;
+				CASE_Consolidated_Properties::memoryProtection => 7;
+				CASE_Consolidated_Properties::secureBoot => 7;
+			};
+			sbus: system SystemBus
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::pedigree => Sourced;
+				CASE_Consolidated_Properties::supplyChainSecurity => 7;
+				CASE_Consolidated_Properties::tamperProtection => 7;
+			};
+			contr: system Controller
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::pedigree => InternallyDeveloped;
+			};
+			rm: system PositionRuntimeMonitor
+			{
+				CASE_Consolidated_Properties::insideTrustedBoundary => true;
+				CASE_Consolidated_Properties::componentType => SwHwHybrid;
+				CASE_Consolidated_Properties::pedigree => InternallyDeveloped;
+			};
+		
+		connections
+			i1: port constellation -> dm.constellation
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i2: port satellite_sig -> dm.satellite_sig
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i3: port imu_ref -> dm.imu_ref
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i4: port delivery_location_in -> dm.delivery_location_in
+			{ 
+				CASE_Consolidated_Properties::connectionType => Untrusted;
+			};
+			i5: port init -> dm.init
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			i6: port mac -> dm.mac
+			{ 
+				CASE_Consolidated_Properties::deviceAuthentication => 7;
+				CASE_Consolidated_Properties::sessionAuthenticity => 7;
+			};
+			
+			c1: port dm.imu_out -> sbus.imu_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c2: port dm.gps_out -> sbus.gps_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c3: port dm.delivery_location_out -> sbus.delivery_location_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			
+			c4: port sbus.imu_out -> contr.imu_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c5: port sbus.gps_out -> contr.gps_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c6: port sbus.delivery_location_out -> contr.delivery_location_in
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c7: port sbus.delivery_location_out -> rm.loc
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			c8: port rm.warning_flag -> contr.warning_flag
+			{
+				CASE_Consolidated_Properties::connectionType => Trusted;
+			};
+			
+			p1: port contr.status -> status;
+			
+			p2: port contr.delivery_location_out -> delivery_location_out;
+			 
+	end UAVToySystem.Impl;
+
+end CASE_Toy;
