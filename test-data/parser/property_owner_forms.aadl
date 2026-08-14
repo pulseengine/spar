@@ -27,4 +27,9 @@ property set Property_Owner_Forms is
   Pkg         : aadlinteger applies to (package);
   PortKinds   : aadlinteger applies to (event data port, event port, data port);
   BusAcc      : aadlinteger applies to (bus access, connection);
+
+  -- Found by GE VERDICT (BSD-3, 132 models): `classifier` is a keyword in
+  -- spar's lexer and was rejected; `subcomponent` is not, so it slipped
+  -- through as an identifier. OSATE accepts both.
+  Meta        : aadlinteger applies to (classifier, subcomponent);
 end Property_Owner_Forms;

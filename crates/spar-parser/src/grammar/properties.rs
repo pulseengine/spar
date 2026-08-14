@@ -662,7 +662,14 @@ fn applies_to_category(p: &mut Parser) {
         }
     } else if matches!(
         p.current(),
-        PORT_KW | FLOW_KW | MODE_KW | ACCESS_KW | PARAMETER_KW | CONNECTIONS_KW | PACKAGE_KW
+        PORT_KW
+            | FLOW_KW
+            | MODE_KW
+            | ACCESS_KW
+            | PARAMETER_KW
+            | CONNECTIONS_KW
+            | PACKAGE_KW
+            | CLASSIFIER_KW
     ) {
         // Non-component-category property owners (AS5506 §11.3): a property
         // may also apply to ports, flows, modes, connections, access
