@@ -37,8 +37,13 @@
 //! Assert that the live spar column equals the committed spar column. A
 //! changed spar verdict is usually *progress* — we tighten the parser, a file
 //! moves from the too-permissive cell into agreement. Pinning the column would
-//! make every fix look like a regression. The counts are the claim; the
-//! committed spar column is there so a reviewer can see which file moved.
+//! make every fix look like a regression.
+//!
+//! The committed spar column is **advisory, not decorative**: it feeds the
+//! `moved` list, which the below-floor message uses to tell "spar got
+//! stricter" apart from "someone edited the OSATE column". Nothing verifies it
+//! is still accurate, so a hand-edited wrong value would report a phantom move
+//! on every run. Re-generate both columns together.
 //!
 //! Note also that the OSATE column came from OSATE's **full validation** while
 //! spar's comes from `parse`. Some of the 54 may be caught by later spar
@@ -61,6 +66,48 @@ struct Row {
     path: String,
     spar_committed: String,
     osate: String,
+}
+
+/// Which cell of the 2x2 a (spar, OSATE) verdict pair falls in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Cell {
+    Agree,
+    /// spar refuses what OSATE accepts — the invariant that must stay empty.
+    TooStrict,
+    /// spar accepts what OSATE refuses — the ratchet.
+    TooPermissive,
+}
+
+/// Split out of the sweep so it can be tested on SYNTHETIC pairs.
+///
+/// This is not decomposition for tidiness. Inline, the `TooStrict` arm was
+/// unreachable by any corpus-level mutation: real data has zero too-strict
+/// files, so deleting the arm let those pairs fall to the catch-all and the
+/// suite stayed green *even with a too-strict row injected into the baseline*.
+/// Verified — the arm was decorative. A guard for an empty cell cannot be
+/// exercised by data in which the cell is empty, so it must be tested
+/// directly. See `the_classifier_distinguishes_all_four_cells`.
+fn classify(spar: &str, osate: &str) -> Cell {
+    match (spar, osate) {
+        ("REJECT", "ACCEPT") => Cell::TooStrict,
+        ("ACCEPT", "REJECT") => Cell::TooPermissive,
+        _ => Cell::Agree,
+    }
+}
+
+#[test]
+fn the_classifier_distinguishes_all_four_cells() {
+    // All four are reachable here by construction, including the one the live
+    // corpus can never produce while spar stays correct.
+    assert_eq!(classify("ACCEPT", "ACCEPT"), Cell::Agree);
+    assert_eq!(classify("REJECT", "REJECT"), Cell::Agree);
+    assert_eq!(classify("REJECT", "ACCEPT"), Cell::TooStrict);
+    assert_eq!(classify("ACCEPT", "REJECT"), Cell::TooPermissive);
+
+    // The two failure cells must be distinct. A classifier collapsing them
+    // would satisfy "not Agree" on both and still misreport which direction
+    // spar diverged in — and the two have opposite remedies.
+    assert_ne!(classify("REJECT", "ACCEPT"), classify("ACCEPT", "REJECT"));
 }
 
 fn load_baseline() -> Vec<Row> {
@@ -133,10 +180,10 @@ fn spar_is_never_stricter_than_osate_and_permissiveness_only_falls() {
                 row.path, row.spar_committed, spar_live
             ));
         }
-        match (spar_live, row.osate.as_str()) {
-            ("REJECT", "ACCEPT") => too_strict.push(row.path.clone()),
-            ("ACCEPT", "REJECT") => too_permissive.push(row.path.clone()),
-            _ => {}
+        match classify(spar_live, &row.osate) {
+            Cell::TooStrict => too_strict.push(row.path.clone()),
+            Cell::TooPermissive => too_permissive.push(row.path.clone()),
+            Cell::Agree => {}
         }
     }
 
@@ -180,11 +227,28 @@ fn spar_is_never_stricter_than_osate_and_permissiveness_only_falls() {
     );
 
     if too_permissive.len() < MAX_TOO_PERMISSIVE {
+        // This branch fires on every future win, so it must say WHY the count
+        // fell. Two very different routes reach it: spar got stricter (the
+        // `moved` list is non-empty — re-bless the TSV too), or the baseline's
+        // OSATE column was edited (empty `moved` — check that was deliberate).
+        // Identical messages for both would leave the reader guessing.
+        let why = if moved.is_empty() {
+            "no spar verdict changed, so the OSATE column moved — confirm that \
+             re-blessing was intended"
+                .to_string()
+        } else {
+            format!(
+                "spar's verdict changed on {} file(s), so re-generate the \
+                 baseline's spar column as well:\n{}",
+                moved.len(),
+                moved.join("\n")
+            )
+        };
         panic!(
             "{} too-permissive models is BELOW the floor of \
              {MAX_TOO_PERMISSIVE}. Lower MAX_TOO_PERMISSIVE to {} so the \
              ground is held — a floor left above the real number silently \
-             re-admits what was just fixed.",
+             re-admits what was just fixed.\n{why}",
             too_permissive.len(),
             too_permissive.len()
         );
