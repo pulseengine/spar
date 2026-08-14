@@ -20,13 +20,21 @@
 //! ```text
 //!                    OSATE accepts   OSATE rejects
 //!   spar accepts          63              54        <- ratchet, may only fall
-//!   spar rejects           0              20        <- HARD ZERO
+//!   spar rejects           0              20        <- must be ADJUDICATED
 //! ```
 //!
-//! **too-strict must stay 0.** spar rejecting AADL that OSATE accepts means we
-//! refuse a model the reference implementation considers valid — the user
-//! cannot use spar at all on that file. There is no acceptable non-zero value,
-//! so this is an invariant rather than a ratchet.
+//! **too-strict must be ADJUDICATED, and is 0 today.** spar rejecting AADL
+//! that OSATE accepts usually means we refuse a model the reference
+//! implementation considers valid — the user cannot use spar at all on that
+//! file. But *usually* is not *always*: OSATE is a test, not the authority.
+//! The authority is AS5506, and an implementation can be lenient where the
+//! standard is not. So each such file must be classified — spar bug, or
+//! deliberate divergence recorded in `ADJUDICATED_STRICTER` with its clause —
+//! and what may never accumulate is the un-looked-at middle.
+//!
+//! That distinction is not pedantry. Encoding "agrees with OSATE" as the pass
+//! condition promotes one implementation to a specification, and then any bug
+//! OSATE has becomes a bug spar is required to reproduce.
 //!
 //! **too-permissive ratchets down from 54.** Each is a model we accept and
 //! OSATE refuses: the user's error arrives later, in another tool. Fixing one
@@ -62,6 +70,23 @@ const BASELINE: &str = concat!(
 /// Lower this as #420's categories are fixed; it may never rise.
 const MAX_TOO_PERMISSIVE: usize = 54;
 
+/// Files where spar is stricter than OSATE **on purpose**.
+///
+/// OSATE is a test, not the authority. The authority is AS5506; OSATE is the
+/// reference implementation and the best oracle we can run, but it is still an
+/// implementation and it can be lenient where the standard is not. When that
+/// happens the right answer is for spar to reject and for OSATE's acceptance
+/// to be recorded as a finding about OSATE — so this list exists, and each
+/// entry must carry the reason.
+///
+/// Empty today. It is deliberately not *forbidden* to be non-empty, because a
+/// gate that treats "disagrees with OSATE" as automatically wrong has quietly
+/// promoted one tool to a specification. What must stay empty is the
+/// UNADJUDICATED set: a divergence nobody has looked at.
+const ADJUDICATED_STRICTER: &[(&str, &str)] = &[
+    // ("path/to/model.aadl", "AS5506 §X.Y forbids this; OSATE accepts it — filed as <link>"),
+];
+
 struct Row {
     path: String,
     spar_committed: String,
@@ -72,7 +97,9 @@ struct Row {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Cell {
     Agree,
-    /// spar refuses what OSATE accepts — the invariant that must stay empty.
+    /// spar refuses what OSATE accepts. Usually a spar bug; occasionally a
+    /// place OSATE is lenient and spar follows the standard. Adjudicate,
+    /// do not assume.
     TooStrict,
     /// spar accepts what OSATE refuses — the ratchet.
     TooPermissive,
@@ -206,15 +233,49 @@ fn spar_is_never_stricter_than_osate_and_permissiveness_only_falls() {
         );
     }
 
-    // The invariant. Not a ratchet: there is no acceptable number of files we
-    // refuse that the reference implementation accepts.
+    // Divergence from OSATE is a QUESTION, not a verdict. Each one is either a
+    // spar bug (we refuse valid AADL — the user cannot open the file at all)
+    // or a place OSATE is lenient and we are right. What may never accumulate
+    // is the un-looked-at middle.
+    let unadjudicated: Vec<&String> = too_strict
+        .iter()
+        .filter(|p| {
+            !ADJUDICATED_STRICTER
+                .iter()
+                .any(|(known, _)| *known == p.as_str())
+        })
+        .collect();
     assert!(
-        too_strict.is_empty(),
-        "spar REJECTS {} file(s) that OSATE ACCEPTS. This is the one direction \
-         that must stay empty — a user cannot open these in spar at all, \
-         though they are valid AADL:\n  {}",
-        too_strict.len(),
-        too_strict.join("\n  ")
+        unadjudicated.is_empty(),
+        "spar REJECTS {} file(s) that OSATE ACCEPTS, and nobody has adjudicated \
+         them. Decide which it is:\n\
+         \x20 (a) spar is wrong — fix the parser; the user cannot open these at all;\n\
+         \x20 (b) OSATE is lenient and spar follows AS5506 — add the file to \
+         ADJUDICATED_STRICTER with the clause, and file the divergence against \
+         OSATE.\n\
+         Do not resolve it by assuming OSATE is right:\n  {}",
+        unadjudicated.len(),
+        unadjudicated
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
+
+    // Stale adjudications are their own hazard: an entry claiming a deliberate
+    // divergence that no longer diverges reads as ongoing justification for a
+    // decision that has already been reversed.
+    let stale: Vec<&str> = ADJUDICATED_STRICTER
+        .iter()
+        .map(|(p, _)| *p)
+        .filter(|p| !too_strict.iter().any(|t| t.as_str() == *p))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "{} ADJUDICATED_STRICTER entries no longer diverge from OSATE — remove \
+         them, or the list documents a disagreement that has ended:\n  {}",
+        stale.len(),
+        stale.join("\n  ")
     );
 
     assert!(

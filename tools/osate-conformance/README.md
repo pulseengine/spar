@@ -1,7 +1,25 @@
 # OSATE conformance
 
-Validates spar against OSATE 2.18.0 as the reference AADL implementation, in
-**both directions**:
+Cross-checks spar against OSATE 2.18.0 in **both directions**.
+
+> **OSATE is a test, not the authority.** The authority is SAE AS5506. OSATE is
+> the reference implementation and by far the most useful oracle we can
+> actually run, which is why everything here is measured against it — but it is
+> an implementation, and implementations have bugs. A disagreement is a
+> *question*, not a verdict: either spar is wrong, or OSATE is, and deciding
+> which requires the standard rather than a re-run.
+>
+> This matters concretely because it is easy to build the opposite in by
+> accident. If "agrees with OSATE" is the pass condition, every OSATE bug
+> becomes a bug spar is obliged to reproduce, and the gate will fail a correct
+> spar. So `osate_agreement.rs` treats spar-stricter-than-OSATE as something to
+> **adjudicate** (`ADJUDICATED_STRICTER`, with the clause) rather than
+> something forbidden, and `categories.rs` records which of its entries are
+> unverified against the standard text.
+>
+> Where possible, prefer two independent signals over one: the 548-file corpus
+> is data rather than code, so "the corpus never does X" and "the validator
+> rejects X" are closer to independent than two runs of the same validator.
 
 | direction | question | corpus | gate |
 |---|---|---|---|

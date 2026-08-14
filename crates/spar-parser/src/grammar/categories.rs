@@ -1,6 +1,18 @@
-//! Which component categories may contain which, per AS5506B.
+//! Which component categories may contain which.
 //!
-//! # Provenance: this table was MEASURED, not recalled
+//! # Provenance: OSATE 2.18.0 — a TEST, not the authority
+//!
+//! Read this header before trusting the table. It records **what one
+//! implementation does**, not what the standard says.
+//!
+//! The authority is AS5506; OSATE is the reference implementation and the most
+//! useful oracle available, but it is still an implementation and it can be
+//! wrong. Where the two would disagree, the standard wins and OSATE's verdict
+//! becomes a finding *about OSATE*. This table has NOT been checked against the
+//! AS5506 text — the document is paywalled and the freely available samples
+//! cover §9 (connections), not §4.5. So every entry below is properly read as
+//! "OSATE 2.18.0 accepts/rejects this", and the pairs listed under
+//! `UNADJUDICATED` are the ones where that gap plausibly matters.
 //!
 //! Every one of the 196 (container, subcomponent) pairs was put to OSATE
 //! 2.18.0 as a minimal probe package:
@@ -36,6 +48,28 @@
 //! 'thread'` — a syntax error, not a validation one. Matching that placement
 //! keeps `spar parse` comparable to OSATE's parse, which is the comparison
 //! the agreement matrix is built on.
+//!
+//! # UNADJUDICATED: where OSATE may be wrong
+//!
+//! These came back REJECT, and the AADL literature commonly describes them as
+//! permitted. They are encoded as OSATE reports them, because following the
+//! oracle we actually ran beats following a half-remembered table — but they
+//! are the first place to look if a user reports spar refusing a valid model,
+//! and they should be checked against the AS5506 text when someone has it:
+//!
+//!   * `data` containing `subprogram group`
+//!   * `subprogram` containing `subprogram group`
+//!
+//! Both are *rejections*, so encoding them makes spar stricter, which is the
+//! direction that can produce false errors for users. Neither appears in the
+//! 548-file corpus, so there is no evidence either way from that quarter. If
+//! the standard permits them, delete them from the illegal set — do not wait
+//! for OSATE to change.
+//!
+//! Conversely `subprogram` containing `subprogram`, and `data` containing
+//! `data`, came back ACCEPT and are encoded as legal. If the standard forbids
+//! those, spar is currently too lenient there and the fix is ours to make,
+//! regardless of what OSATE does.
 //!
 //! Addresses #420 category 1. See `tools/osate-conformance/README.md` to
 //! regenerate the probe.
