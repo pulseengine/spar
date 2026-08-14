@@ -95,6 +95,54 @@ Then update the TSV rows. Two rules, both learned by getting them wrong:
   `test-data/negative/` file as a positive control to prove the pipeline can
   still produce a diagnostic at all.
 
+## The second independent implementation: Ocarina
+
+OSATE is one implementation. **Ocarina** (OpenAADL / Telecom ParisTech, Ada) is
+another, sharing no code with OSATE's Xtext grammar, which is what lets a
+disagreement be adjudicated rather than assumed. `crates/spar-cli/tests/
+three_way_conformance.rs` gates against the two jointly.
+
+### Building it on macOS aarch64
+
+```bash
+# 1. Ada toolchain. nixpkgs has gnat but marks gprbuild BROKEN on
+#    aarch64-darwin, and it genuinely HANGS (measured: 0.10s of CPU in 104
+#    minutes with no child processes). Use Alire's PREBUILT toolchain instead.
+curl -sLO https://github.com/alire-project/alire/releases/download/v2.1.1/alr-2.1.1-bin-aarch64-macos.zip
+unzip -q alr-2.1.1-bin-aarch64-macos.zip
+./bin/alr -n toolchain --select gnat_native gprbuild   # gnat 16.1.0, gprbuild 26.0.0
+
+# 2. Ocarina itself, from a FRESH checkout.
+git clone --depth 1 https://github.com/OpenAADL/ocarina
+cd ocarina
+./support/reconfig && ./configure --prefix=<prefix> && make -j4 && make install
+```
+
+Two things that cost hours:
+
+* **Do not `git clean -fdx` the tree.** It removes `objects/` and `libs/`
+  directories git cannot track when empty, and later removes `mknodes`-
+  generated sources. The build then fails in ways that look like Ocarina's
+  problem and are not. Build from a fresh clone.
+* **`make` exits non-zero and that is fine.** The transfo/python components
+  fail on this platform; `make install` still produces a working `ocarina`.
+  Check for the BINARY, not the exit code.
+
+### Running it
+
+```bash
+ocarina -aadlv2 -f <file>     # exit 0 = accepted
+```
+
+**`-f` is load-bearing.** It supplies the predefined property sets; without it
+Ocarina falsely rejects six of our first-party files (37 accept vs 43). Same
+under-supplied-inputs trap as handing OSATE a single file instead of its
+directory.
+
+Regenerate `test-data/interop/baseline/three-way.tsv` by re-running both tools
+over the paths in `osate-first-party.tsv` — the three-way test asserts the two
+baselines cover the same corpus, so neither can drift ahead of the other.
+
 ## Re-deriving the subcomponent-category table
 
 `crates/spar-parser/src/grammar/categories.rs` encodes which component
