@@ -32,9 +32,9 @@
 //! 196/196 returned a verdict: **72 accepted, 124 rejected**. This table is
 //! exactly that result.
 //!
-//! It was then cross-checked the other way: all 28 distinct pairs occurring in
-//! the 548-file vendored OSATE corpus (1346 implementations) appear in the
-//! legal set here. That direction matters more than it looks — a table
+//! It was then cross-checked the other way: every distinct (container,
+//! subcomponent) pair occurring in the 548-file vendored OSATE corpus
+//! appears in the legal set here. That direction matters more than it looks — a table
 //! *stricter* than the standard would make spar reject valid AADL, which is
 //! the one failure direction `osate_agreement.rs` treats as an invariant
 //! rather than a ratchet. Deriving it from the oracle rather than from memory
@@ -201,7 +201,7 @@ pub(crate) fn may_contain(container: Category, sub: Category) -> bool {
         Subprogram => &[Abstract, Data, Subprogram],
         SubprogramGroup => &[Abstract, Data, Subprogram, SubprogramGroup],
         // Note the absences: NOT thread, NOT thread group. Threads live in a
-        // process. 0 occurrences across 666 system implementations in OSATE's
+        // process. Zero occurrences anywhere in OSATE's
         // corpus, and the probe rejects both.
         System => &[
             Abstract,
@@ -239,10 +239,10 @@ pub(crate) fn may_contain(container: Category, sub: Category) -> bool {
 /// feature makes spar stricter, which is the direction that invents errors for
 /// users, so single-sourced rejections are not worth the risk yet.
 ///
-/// | rule | corpus (3877 type declarations) | OSATE probe |
+/// | rule | corpus signal | OSATE probe |
 /// |------|--------------------------------|-------------|
-/// | bus access | system 53, device 30, processor 18, memory 3, bus 3, abstract 1 — never on process/thread | process, thread, thread group, data, subprogram(-group) REJECT |
-/// | parameter | subprogram 59, nothing else | every category except subprogram REJECTS |
+/// | bus access | appears on system, device, processor, memory, bus, abstract; **never** on process, thread, thread group | process, thread, thread group, data, subprogram(-group) REJECT |
+/// | parameter | appears on subprogram and **nothing else** | every category except subprogram REJECTS |
 ///
 /// The corpus is data and the probe is code, so these are closer to
 /// independent than two runs of the same validator would be.

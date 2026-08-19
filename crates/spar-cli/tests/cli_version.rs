@@ -14,11 +14,15 @@
 //!
 //! # Exit 2, not 1
 //!
-//! An unknown command now exits 2, matching ordeal. One failure, one exit code
-//! across the toolchain — and it separates "you typed something wrong" from
-//! "the analysis found a problem", which a CI script has to tell apart. spar
-//! already uses 2 for an unresolvable `--root` (#417), so usage errors are
-//! consistently 2.
+//! An unknown command now exits 2, matching ordeal — one failure, one exit
+//! code across the toolchain. spar also uses 2 for an unresolvable `--root`
+//! (#417).
+//!
+//! What is NOT true, and was claimed here before an audit caught it: that 2
+//! means "usage error" throughout the binary. `spar moves verify` returns 2
+//! for a FINDING and 1 for an argument error — the inverse convention, in the
+//! same executable. #422 asked for the top-level dispatcher to match the org
+//! baseline, and that is all this change does.
 //!
 //! # What the assertions actually pin
 //!
@@ -89,8 +93,7 @@ fn an_unknown_command_exits_two() {
     assert_eq!(
         code, 2,
         "an unknown command must exit 2, not 1 (#422): one failure, one exit \
-         code across the toolchain, and 2 distinguishes a usage error from an \
-         analysis finding"
+         code across the toolchain, matching ordeal"
     );
     assert!(
         stderr.contains("Unknown command"),

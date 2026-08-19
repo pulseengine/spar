@@ -3567,7 +3567,7 @@ artifacts:
       output byte-identical to the committed GUI-generated .aaxl2
       references) and used it for a DIFFERENT comparison — first-party
       legality, REQ-PLUGFEST-006. Neither of this requirement's two
-      deliverables was done: unadjudicated.txt still holds 15 entries, and
+      deliverables was done: unadjudicated.txt still holds 12 entries, and
       no AAXL2 round-trip instance-equivalence check exists. Recorded
       explicitly because "the oracle was built" is easy to mistake for
       "the requirement was met", and they are not the same claim.
@@ -3642,6 +3642,13 @@ artifacts:
       unadjudicated entries in the subcomponent-category table are
       rejected by Ocarina as well (doubt retired), and six new contested
       pairs surfaced, all with OSATE the more permissive.
+      DISCLOSURE: CI executes NEITHER tool. Both the OSATE and Ocarina
+      columns are committed references, like the .aaxl2 files; only
+      spar's column is re-derived live. The Ocarina column is
+      hand-maintained — the build recipe is in
+      tools/osate-conformance/README.md and is reproducible, but nothing
+      in the repo re-derives it, so its provenance rests on that recipe
+      rather than on a mechanism.
     status: implemented
     tags: [interop, plugfest, ocarina, v0370]
     release: v0.37.0
@@ -3661,8 +3668,9 @@ artifacts:
       (test-data/negative/** must be rejected, all others accepted), and
       spar's acceptance shall be graded against external tools rather than
       against its own past behaviour.
-      MEASURED at v0.37.0 over 120 first-party models: spar 100 accept /
-      20 reject, matching expectation exactly.
+      MEASURED at v0.37.0 over 120 first-party models: spar 98 accept /
+      22 reject, matching expectation exactly (22 = every file under
+      test-data/negative/).
       Found by this requirement, and findable no other way:
       docs/research/forge-replication/descriptor.aadl had NEVER parsed
       since #215 — no gate covered docs/ at all — and once fixed, OSATE
@@ -3696,7 +3704,7 @@ artifacts:
       crates/spar-cli/tests/third_party_corpora.rs ratchets a SET OF
       PATHS, not a percentage: VERDICT's original 14 failures were 14
       copies of one file, so a rate measures the corpus's duplication as
-      much as the parser. Currently 1335/1347 with 14 baseline entries.
+      much as the parser. Currently 1333/1347 with 14 baseline entries.
       Each corpus found gaps the others structurally could not. aadlib is
       the most valuable, being authored against the OTHER parser rather
       than to OSATE's behaviour.

@@ -26,11 +26,14 @@ probably grow.
 |---|---|---|---|---|
 | `case-aadl/` | [GaloisInc/CASE-AADL-Tutorial](https://github.com/GaloisInc/CASE-AADL-Tutorial) | `ee0947b07eaa` | 52 | BSD-3-Clause |
 | `aadlib/` | [OpenAADL/AADLib](https://github.com/OpenAADL/AADLib) | `c8a5c7e310b3` | 239 | BSD-3-Clause |
-| `fmw/` | [loonwerks/formal-methods-workbench](https://github.com/loonwerks/formal-methods-workbench) | `a5ac418f111a` | 924 | BSD-3-Clause (Rockwell Collins) |
+| `fmw/` | [loonwerks/formal-methods-workbench](https://github.com/loonwerks/formal-methods-workbench) | `a5ac418f111a` | 924 | BSD-3 text, **SPDX-unclassified upstream** |
 | `verdict/` | [ge-high-assurance/VERDICT](https://github.com/ge-high-assurance/VERDICT) | `344e42b5114c` | 132 | BSD-3-Clause |
 
-Vendored 2026-08-14. All four are BSD-3-Clause; the Rockwell Collins file is
-BSD-3 written out longhand rather than by SPDX identifier. Its redistribution
+Vendored 2026-08-14. All four LICENSE files are three-clause BSD texts. Note
+the Rockwell Collins one is written longhand rather than by SPDX identifier,
+so GitHub reports that repository as `NOASSERTION` and automated licence
+tooling will read this corpus as unclassified. "BSD-3-Clause" for `fmw/` is
+our reading of the text, not an upstream declaration. Its redistribution
 clause requires the copyright notice be retained, so each directory carries its
 upstream `LICENSE` verbatim.
 
@@ -38,6 +41,13 @@ upstream `LICENSE` verbatim.
 **Not taken:** everything else — tutorial prose, build files, Eclipse project
 state, generated code, images. Same rule as `osate-examples/`, and it keeps
 1347 models to ~5.7 MB of source.
+
+## The pins are unenforced
+
+The commits above are recorded in prose only — there is no submodule, no
+checksum manifest, and no vendoring script. Nothing detects a vendored file
+drifting from its upstream. Re-verifying means re-cloning at the pin and
+diffing by hand.
 
 ## Provenance of the models themselves
 

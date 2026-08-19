@@ -2,7 +2,7 @@
 //!
 //! `osate_corpus.rs` asks whether spar can read OSATE's files. This asks the
 //! question that actually bites a user: **they open our model in OSATE and it
-//! errors.** Measured over the 117 first-party `.aadl` files (#420).
+//! errors.** Measured over the 120 first-party `.aadl` files (#420).
 //!
 //! ## Why the OSATE column is committed rather than computed
 //!
@@ -17,10 +17,16 @@
 //!
 //! ## What ratchets, and what may never move
 //!
+//! (Snapshot. The test recomputes these on every run and prints them; if
+//! this table and the printed line disagree, the printed line is right.
+//! An audit caught this block reading 117/65/…/21 long after the corpus
+//! had grown to 120 — a hand-typed number beside a gate that computes the
+//! real one, which is the exact defect this suite exists to remove.)
+//!
 //! ```text
 //!                    OSATE accepts   OSATE rejects
-//!   spar accepts          65              53        <- ratchet, may only fall
-//!   spar rejects           0              21        <- must be ADJUDICATED
+//!   spar accepts          45              53        <- ratchet, exact
+//!   spar rejects           0              22        <- must be ADJUDICATED
 //! ```
 //!
 //! **too-strict must be ADJUDICATED, and is 0 today.** spar rejecting AADL

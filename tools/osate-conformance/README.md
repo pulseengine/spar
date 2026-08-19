@@ -24,7 +24,7 @@ Cross-checks spar against OSATE 2.18.0 in **both directions**.
 | direction | question | corpus | gate |
 |---|---|---|---|
 | **A** | can spar read what OSATE wrote? | 548 vendored `osate/examples` | `crates/spar-cli/tests/osate_corpus.rs` |
-| **B** | does OSATE accept what *we* wrote? | 117 first-party `.aadl` | `crates/spar-cli/tests/osate_agreement.rs` |
+| **B** | does OSATE accept what *we* wrote? | 120 first-party `.aadl` | `crates/spar-cli/tests/osate_agreement.rs` |
 
 Direction B is the one that bites a user — they open our model in OSATE and it
 errors. See #420 for the current findings and #246 for the plug-fest design.
@@ -167,18 +167,25 @@ agreement gate treats as an invariant, not a ratchet.
 
 ## What the Direction-B gate enforces
 
+> **The numbers below are a snapshot, and the code is authoritative.** The
+> constants live in `crates/spar-cli/tests/osate_agreement.rs` and
+> `three_way_conformance.rs`, and the tests recompute the real values on every
+> run. Nothing gates this file against them — a clean-room audit found the
+> matrix here had been wrong since the day it was written (a cell read 63 when
+> the baseline said 43, which was arithmetically impossible against the stated
+> total). Prefer the constants; treat this table as illustration.
+
 ```text
                  OSATE accepts   OSATE rejects
-  spar accepts         63              54        <- ratchet, may only fall
-  spar rejects          0              20        <- HARD ZERO
+  spar accepts        45              53        <- ratchet, exact
+  spar rejects         0              22        <- must be ADJUDICATED
 ```
 
 **too-strict is an invariant, not a ratchet.** spar rejecting AADL that OSATE
 accepts means we refuse a model the reference implementation considers valid;
 there is no acceptable non-zero value.
 
-**too-permissive ratchets down from 54.** Lower `MAX_TOO_PERMISSIVE` in
-`osate_agreement.rs` as #420's categories are fixed. The test fails if the
+**too-permissive ratchets down from 53.** Lower `MAX_TOO_PERMISSIVE` in `osate_agreement.rs` as #420's categories are fixed. The test fails if the
 count drops *below* the floor too, so a win is locked in rather than left as
 slack.
 
