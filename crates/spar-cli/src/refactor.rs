@@ -318,7 +318,7 @@ public
 
   system implementation T.impl
     subcomponents
-      t1 : thread;
+      t1 : process;
     properties
       Timing_Properties::Period => 10 ms;
   end T.impl;
@@ -333,7 +333,7 @@ public
 
   system implementation T.impl
     subcomponents
-      t1 : thread;
+      t1 : process;
   end T.impl;
 end Pkg;
 ";
@@ -346,7 +346,7 @@ public
 
   system implementation T.impl
     subcomponents
-      t1 : thread;
+      t1 : process;
       cpu1 : processor;
     properties
       Deployment_Properties::Actual_Processor_Binding => reference (cpu1);
@@ -431,7 +431,7 @@ end Pkg;
         assert!(result.contains("end T;"), "Component type end lost");
         // Subcomponents preserved
         assert!(
-            result.contains("t1 : thread;"),
+            result.contains("t1 : process;"),
             "Subcomponent declaration lost"
         );
         // End impl preserved

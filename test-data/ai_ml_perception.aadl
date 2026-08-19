@@ -82,12 +82,20 @@ public
   system PerceptionSys
   end PerceptionSys;
 
-  system implementation PerceptionSys.Impl
+  -- AS5506B: threads are subcomponents of a process or thread group, never of
+  -- a system. The three detectors sat directly in PerceptionSys.Impl, which
+  -- spar accepted and OSATE rejects (#420); they belong to the pipeline
+  -- process that already declares their model properties.
+  process implementation PerceptionPipeline.Impl
     subcomponents
       detector: thread PedestrianDetector;
       lane: thread LaneDetector;
       slow: thread SlowModel;
-      pipeline: process PerceptionPipeline;
+  end PerceptionPipeline.Impl;
+
+  system implementation PerceptionSys.Impl
+    subcomponents
+      pipeline: process PerceptionPipeline.Impl;
   end PerceptionSys.Impl;
 
 end PerceptionSystem;

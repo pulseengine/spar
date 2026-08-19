@@ -1,0 +1,23 @@
+-- AS5506B: a thread may be a subcomponent only of a process or a thread
+-- group. Declaring one directly in a system implementation is illegal.
+--
+-- spar accepted this until #420. OSATE 2.18.0 rejects it at the GRAMMAR
+-- level ("no viable alternative at input 'thread'"), because its Xtext
+-- grammar has per-category subcomponent rules.
+--
+-- The legality table this pins was derived by probing all 196 (container,
+-- subcomponent) pairs against OSATE: 72 accepted, 124 rejected.
+package ThreadInSystem
+public
+  thread T
+  end T;
+
+  system S
+  end S;
+
+  system implementation S.i
+    subcomponents
+      -- the violation
+      t : thread T;
+  end S.i;
+end ThreadInSystem;

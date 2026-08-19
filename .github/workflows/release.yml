@@ -121,6 +121,72 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p spar
 
+      # #422: run the FRESHLY BUILT binary and assert it reports the tag.
+      #
+      # check-versions already compares the tag to Cargo.toml, but that reads a
+      # file -- it cannot catch a binary that reports something else, and until
+      # this release the binary reported nothing at all. A tool result cited as
+      # qualification evidence has to carry the identity of the binary that
+      # produced it, so the version has to come from the artifact we ship.
+      #
+      # The guard keys on ARCHITECTURE MATCH, not on the `cross` flag. Those
+      # are different questions: x86_64-apple-darwin is built on macos-14,
+      # which is arm64, and is NOT marked cross -- so a `cross`-based condition
+      # would execute a foreign-arch binary and quietly depend on Rosetta being
+      # present on the image. Runs on Windows too (`shell: bash`), because
+      # x86_64-pc-windows-msvc is a published host and skipping it would ship
+      # the one binary nobody checked.
+      #
+      # A skip is ANNOUNCED, never silent: a check that passes by not running
+      # is the failure this step exists to prevent.
+      - name: Assert the built binary reports the tag (#422)
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          target_arch="${TARGET%%-*}"
+          host_arch="$(uname -m)"
+          case "$host_arch" in
+            arm64) host_arch=aarch64 ;;
+            amd64) host_arch=x86_64 ;;
+          esac
+
+          if [ "$target_arch" != "$host_arch" ]; then
+            echo "::notice::SKIPPED the #422 version assertion for ${TARGET}:" \
+                 "target arch ${target_arch} != runner arch ${host_arch}, so the" \
+                 "binary cannot be executed here. This artifact ships WITHOUT a" \
+                 "version check."
+            exit 0
+          fi
+
+          BIN="target/${TARGET}/release/spar"
+          [ -x "$BIN" ] || BIN="target/${TARGET}/release/spar.exe"
+          [ -x "$BIN" ] || { echo "::error::no executable at target/${TARGET}/release/spar[.exe]"; exit 1; }
+
+          got="$("$BIN" --version)"
+          want="spar ${TAG#v}"
+          echo "  binary says: $got"
+          echo "  tag implies: $want"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the shipped binary reports '$got' but the tag is '${TAG}'."
+            echo "::error::An analysis result carrying the wrong version is worse than"
+            echo "::error::one carrying none: it is confidently wrong (#422)."
+            exit 1
+          fi
+
+          # An unknown command must exit 2 (#422). `set -e` would abort on the
+          # non-zero exit, so capture it deliberately.
+          rc=0
+          "$BIN" definitely-not-a-command >/dev/null 2>&1 || rc=$?
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::unknown command exited ${rc}, expected 2 (#422)."
+            exit 1
+          fi
+          echo "  unknown command exits 2 as required"
+
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
         env:

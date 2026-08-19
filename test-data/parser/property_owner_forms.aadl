@@ -1,0 +1,35 @@
+-- Property owners: the category, its type, or its implementation.
+--
+-- `applies to (system, system implementation)` was REJECTED by spar until
+-- #420, while OSATE accepts it with 0 diagnostics. Found by the Galois
+-- CASE-AADL-Tutorial corpus (BSD-3): the 548-file vendored OSATE corpus uses
+-- the construct in ZERO files, so no amount of Tier-A parse-rate could have
+-- surfaced it. A third corpus found what two could not.
+--
+-- MEASURED against OSATE 2.18.0: all 14 categories x {bare, ` implementation`,
+-- ` type`} -> 42/42 accepted.
+property set Property_Owner_Forms is
+  Bare        : aadlinteger applies to (system);
+  Impl        : aadlinteger applies to (system implementation);
+  Typ         : aadlinteger applies to (system type);
+  Mixed       : aadlinteger applies to (system, system implementation);
+  TwoToken    : aadlinteger applies to (thread group implementation);
+  VirtualKind : aadlinteger applies to (virtual processor implementation);
+  -- Singular metaclass names. OSATE rejects the plurals `connections`,
+  -- `ports`, `flows`, `modes` ("Metaclass 'connections' does not exist in
+  -- AADL2"); spar still accepts `connections` and `ports` -- recorded in
+  -- #420 rather than fixed here, since it is a separate change.
+  NonCategory : aadlinteger applies to (port, flow, mode, connection);
+  Everything  : aadlinteger applies to (all);
+
+  -- Owners found by AADLib (OpenAADL/Ocarina, BSD-3, 239 models), all
+  -- rejected by spar until #420 and all accepted by OSATE 2.18.0:
+  Pkg         : aadlinteger applies to (package);
+  PortKinds   : aadlinteger applies to (event data port, event port, data port);
+  BusAcc      : aadlinteger applies to (bus access, connection);
+
+  -- Found by GE VERDICT (BSD-3, 132 models): `classifier` is a keyword in
+  -- spar's lexer and was rejected; `subcomponent` is not, so it slipped
+  -- through as an identifier. OSATE accepts both.
+  Meta        : aadlinteger applies to (classifier, subcomponent);
+end Property_Owner_Forms;

@@ -61,6 +61,9 @@ fn is_implementation_ahead(p: &mut Parser) -> bool {
 /// ```
 fn component_type(p: &mut Parser) {
     let m = p.start();
+    // Feature legality depends on the containing category (#420), so capture
+    // it before the tokens are consumed.
+    let container = super::categories::peek(p.current(), p.nth(1));
     super::component_category(p);
     if p.at_name() {
         p.bump_any();
@@ -74,7 +77,7 @@ fn component_type(p: &mut Parser) {
     }
 
     // Sections (order-independent in practice, but the grammar defines an order)
-    component_type_sections(p);
+    component_type_sections(p, container);
 
     // end Name ;
     p.expect(SyntaxKind::END_KW);
@@ -95,6 +98,9 @@ fn component_type(p: &mut Parser) {
 /// ```
 fn component_impl(p: &mut Parser) {
     let m = p.start();
+    // Capture the container's category before it is consumed: subcomponent
+    // legality is a property of the PAIR, so the section parser needs it.
+    let container = super::categories::peek(p.current(), p.nth(1));
     super::component_category(p);
     p.expect(SyntaxKind::IMPLEMENTATION_KW);
 
@@ -131,7 +137,7 @@ fn component_impl(p: &mut Parser) {
     }
 
     // Sections
-    component_impl_sections(p);
+    component_impl_sections(p, container);
 
     // end QualifiedName ;
     p.expect(SyntaxKind::END_KW);
@@ -187,7 +193,7 @@ impl SeenSections {
     }
 }
 
-fn component_type_sections(p: &mut Parser) {
+fn component_type_sections(p: &mut Parser, container: Option<super::categories::Category>) {
     let mut seen = SeenSections::default();
     loop {
         match p.current() {
@@ -197,7 +203,7 @@ fn component_type_sections(p: &mut Parser) {
             }
             SyntaxKind::FEATURES_KW => {
                 seen.check(p, SyntaxKind::FEATURES_KW, "features");
-                super::features::feature_section(p);
+                super::features::feature_section(p, container);
             }
             SyntaxKind::FLOWS_KW => {
                 seen.check(p, SyntaxKind::FLOWS_KW, "flows");
@@ -223,7 +229,7 @@ fn component_type_sections(p: &mut Parser) {
     }
 }
 
-fn component_impl_sections(p: &mut Parser) {
+fn component_impl_sections(p: &mut Parser, container: Option<super::categories::Category>) {
     let mut seen = SeenSections::default();
     loop {
         match p.current() {
@@ -233,7 +239,7 @@ fn component_impl_sections(p: &mut Parser) {
             }
             SyntaxKind::SUBCOMPONENTS_KW => {
                 seen.check(p, SyntaxKind::SUBCOMPONENTS_KW, "subcomponents");
-                subcomponent_section(p);
+                subcomponent_section(p, container);
             }
             SyntaxKind::INTERNAL_KW => {
                 seen.check(p, SyntaxKind::INTERNAL_KW, "internal features");
@@ -334,7 +340,7 @@ fn prototype(p: &mut Parser) {
     m.complete(p, SyntaxKind::PROTOTYPE);
 }
 
-fn subcomponent_section(p: &mut Parser) {
+fn subcomponent_section(p: &mut Parser, container: Option<super::categories::Category>) {
     let m = p.start();
     p.bump(SyntaxKind::SUBCOMPONENTS_KW);
     if p.at(SyntaxKind::NONE_KW) {
@@ -342,13 +348,13 @@ fn subcomponent_section(p: &mut Parser) {
         p.expect(SyntaxKind::SEMICOLON);
     } else {
         while p.at(SyntaxKind::IDENT) || p.current().is_component_category_kw() {
-            subcomponent(p);
+            subcomponent(p, container);
         }
     }
     m.complete(p, SyntaxKind::SUBCOMPONENT_SECTION);
 }
 
-fn subcomponent(p: &mut Parser) {
+fn subcomponent(p: &mut Parser, container: Option<super::categories::Category>) {
     let m = p.start();
     if p.at(SyntaxKind::IDENT) {
         p.bump(SyntaxKind::IDENT); // name
@@ -362,6 +368,18 @@ fn subcomponent(p: &mut Parser) {
         r.complete(p, SyntaxKind::REFINED_TO);
     }
     // component category
+    //
+    // AS5506B restricts which categories may nest (#420). OSATE enforces this
+    // in its grammar, so a violation is a parse error there and here.
+    if let (Some(outer), Some(inner)) = (container, super::categories::peek(p.current(), p.nth(1)))
+        && !super::categories::may_contain(outer, inner)
+    {
+        p.error(format!(
+            "a `{}` subcomponent is not allowed in a `{}` implementation",
+            inner.as_str(),
+            outer.as_str()
+        ));
+    }
     super::component_category(p);
     // Optional classifier reference
     if p.at(SyntaxKind::IDENT) {
@@ -564,8 +582,11 @@ pub(crate) fn feature_group_type_decl(p: &mut Parser) {
     }
 
     // features section
+    //
+    // `None`: a feature group type has no containing component category, and
+    // a group is a reusable bundle, so no per-category rule applies here.
     if p.at(SyntaxKind::FEATURES_KW) {
-        super::features::feature_section(p);
+        super::features::feature_section(p, None);
     }
 
     // Optional inverse of

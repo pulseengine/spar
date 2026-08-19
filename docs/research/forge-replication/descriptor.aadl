@@ -25,7 +25,7 @@ public
       -- Parsing & syntax layer
       parser   : system Parser.impl;
       syntax   : system Syntax.impl;
-      annex    : system Annex.impl;
+      spar_annex    : system SparAnnex.impl;
 
       -- HIR / instance model
       base_db  : system BaseDb.impl;
@@ -60,96 +60,100 @@ public
       wasm     : system Wasm.impl;
 
     connections
-      c01 : port parser.out      -> syntax.in;
-      c02 : port syntax.out      -> annex.in;
-      c03 : port syntax.out      -> hir_def.in;
-      c04 : port hir_def.out     -> hir.in;
-      c05 : port hir.out         -> analysis.in;
-      c06 : port analysis.out    -> verify.in;
-      c07 : port analysis.out    -> codegen.in;
-      c08 : port analysis.out    -> render.in;
-      c09 : port analysis.out    -> insight.in;
-      c10 : port analysis.out    -> mcp.in;
-      c11 : port hir.out         -> sysml2.in;
-      c12 : port network.out     -> analysis.network_in;
-      c13 : port solver.out      -> network.solver_in;
-      c14 : port hir.out         -> transform.in;
-      c15 : port transform.out   -> variants.in;
-      c16 : port verify_macros.out -> verify.in;
-      c17 : port hir.out         -> trace_topology.in;
-      c18 : port mcp.out         -> cli.mcp_in;
-      c19 : port cli.in          -> Spar.cli_in;
-      c20 : port wasm.in         -> Spar.wasm_in;
-      c21 : port mcp.in          -> Spar.mcp_in;
+      c01 : port parser.data_out      -> syntax.data_in;
+      c02 : port syntax.data_out      -> spar_annex.data_in;
+      c03 : port syntax.data_out      -> hir_def.data_in;
+      c04 : port hir_def.data_out     -> hir.data_in;
+      c05 : port hir.data_out         -> analysis.data_in;
+      c06 : port analysis.data_out    -> verify.data_in;
+      c07 : port analysis.data_out    -> codegen.data_in;
+      c08 : port analysis.data_out    -> render.data_in;
+      c09 : port analysis.data_out    -> insight.data_in;
+      c10 : port analysis.data_out    -> mcp.data_in;
+      c11 : port hir.data_out         -> sysml2.data_in;
+      c12 : port network.data_out     -> analysis.network_in;
+      c13 : port solver.data_out      -> network.solver_in;
+      c14 : port hir.data_out         -> transform.data_in;
+      c15 : port transform.data_out   -> variants.data_in;
+      c16 : port verify_macros.data_out -> verify.data_in;
+      c17 : port hir.data_out         -> trace_topology.data_in;
+      c18 : port mcp.data_out         -> cli.mcp_in;
+      -- Inbound from the enclosing system. An enclosing feature is named
+      -- bare: `Spar.cli_in` reads as a subcomponent named `Spar`, which does
+      -- not exist. The direction was also inverted -- these carry input INTO
+      -- the subcomponent, so the enclosing inbound port is the source.
+      c19 : port cli_in               -> cli.data_in;
+      c20 : port wasm_in              -> wasm.data_in;
+      c21 : port mcp_in               -> mcp.data_in;
   end Spar.v0_9_3;
 
   -- Stub system types (no implementations beyond marker subcomponents)
-  system Parser features out : out event port; end Parser;
+  system Parser features data_out : out event port; end Parser;
   system implementation Parser.impl end Parser.impl;
 
-  system Syntax features in : in event port; out : out event port; end Syntax;
+  system Syntax features data_in : in event port; data_out : out event port; end Syntax;
   system implementation Syntax.impl end Syntax.impl;
 
-  system Annex features in : in event port; end Annex;
-  system implementation Annex.impl end Annex.impl;
+  system SparAnnex features data_in : in event port; end SparAnnex;
+  system implementation SparAnnex.impl end SparAnnex.impl;
 
   system BaseDb end BaseDb;
   system implementation BaseDb.impl end BaseDb.impl;
 
-  system HirDef features in : in event port; out : out event port; end HirDef;
+  system HirDef features data_in : in event port; data_out : out event port; end HirDef;
   system implementation HirDef.impl end HirDef.impl;
 
-  system Hir features in : in event port; out : out event port; end Hir;
+  system Hir features data_in : in event port; data_out : out event port; end Hir;
   system implementation Hir.impl end Hir.impl;
 
   system Analysis
     features
-      in         : in event port;
-      out        : out event port;
+      data_in         : in event port;
+      data_out        : out event port;
       network_in : in event port;
   end Analysis;
   system implementation Analysis.impl end Analysis.impl;
 
-  system Network features out : out event port; solver_in : in event port; end Network;
+  system Network features data_out : out event port; solver_in : in event port; end Network;
   system implementation Network.impl end Network.impl;
 
-  system Solver features out : out event port; end Solver;
+  system Solver features data_out : out event port; end Solver;
   system implementation Solver.impl end Solver.impl;
 
-  system Transform features in : in event port; out : out event port; end Transform;
+  system Transform features data_in : in event port; data_out : out event port; end Transform;
   system implementation Transform.impl end Transform.impl;
 
-  system Codegen features in : in event port; end Codegen;
+  system Codegen features data_in : in event port; end Codegen;
   system implementation Codegen.impl end Codegen.impl;
 
-  system Variants features in : in event port; end Variants;
+  system Variants features data_in : in event port; end Variants;
   system implementation Variants.impl end Variants.impl;
 
-  system Verify features in : in event port; end Verify;
+  system Verify features data_in : in event port; end Verify;
   system implementation Verify.impl end Verify.impl;
 
-  system VerifyMacros features out : out event port; end VerifyMacros;
+  system VerifyMacros features data_out : out event port; end VerifyMacros;
   system implementation VerifyMacros.impl end VerifyMacros.impl;
 
-  system Sysml2 features in : in event port; end Sysml2;
+  system Sysml2 features data_in : in event port; end Sysml2;
   system implementation Sysml2.impl end Sysml2.impl;
 
-  system Render features in : in event port; end Render;
+  system Render features data_in : in event port; end Render;
   system implementation Render.impl end Render.impl;
 
-  system TraceTopology features in : in event port; end TraceTopology;
+  system TraceTopology features data_in : in event port; end TraceTopology;
   system implementation TraceTopology.impl end TraceTopology.impl;
 
-  system Insight features in : in event port; end Insight;
+  system Insight features data_in : in event port; end Insight;
   system implementation Insight.impl end Insight.impl;
 
-  system Mcp features in : in event port; out : out event port; end Mcp;
+  system Mcp features data_in : in event port; data_out : out event port; end Mcp;
   system implementation Mcp.impl end Mcp.impl;
 
-  system Cli features in : in event port; mcp_in : in event port; end Cli;
+  system Cli features data_in : in event port; mcp_in : in event port; end Cli;
   system implementation Cli.impl end Cli.impl;
 
-  system Wasm features in : in event port; end Wasm;
+  system Wasm features data_in : in event port; end Wasm;
   system implementation Wasm.impl end Wasm.impl;
 
 end SparWorkspace;

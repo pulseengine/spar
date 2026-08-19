@@ -3562,6 +3562,15 @@ artifacts:
       output for instance-equivalence. Converts unadjudicated fixtures
       into either genuine spar gaps or confirmed-malformed models.
       Tier-B of issue #246.
+      NOT SATISFIED, though the oracle it needs now exists. v0.37.0 built
+      a headless OSATE application (tools/osate-conformance/headless/,
+      output byte-identical to the committed GUI-generated .aaxl2
+      references) and used it for a DIFFERENT comparison — first-party
+      legality, REQ-PLUGFEST-006. Neither of this requirement's two
+      deliverables was done: unadjudicated.txt still holds 12 entries, and
+      no AAXL2 round-trip instance-equivalence check exists. Recorded
+      explicitly because "the oracle was built" is easy to mistake for
+      "the requirement was met", and they are not the same claim.
     status: proposed
     tags: [interop, plugfest, osate]
     release: v0.23.0
@@ -3619,9 +3628,92 @@ artifacts:
       detect two-vs-one dialect splits (spar+OSATE agree vs Ocarina
       disagrees), preventing silent two-tool consensus drift. Tier-C of
       issue #246.
-    status: proposed
-    tags: [interop, plugfest, ocarina]
-    release: v0.23.0
+      DELIVERED: Ocarina 9873d8b (OpenAADL, Ada — no shared code with
+      OSATE's Xtext grammar), built via Alire's prebuilt toolchain because
+      nixpkgs marks gprbuild broken on aarch64-darwin and it does hang.
+      crates/spar-cli/tests/three_way_conformance.rs grades spar against
+      the CONSENSUS of the two, with three verdicts rather than two:
+      agree-legal (spar must accept), agree-illegal (spar should reject,
+      ratcheted), and CONTESTED — exempt from grading because neither tool
+      is the authority, but counted under a ceiling so the exempt set
+      cannot grow unnoticed. MEASURED over 120 first-party models: 37
+      consensus-legal, 69 consensus-illegal, 14 contested, 0 too-strict,
+      48 too-permissive. It has already paid for itself twice: two
+      unadjudicated entries in the subcomponent-category table are
+      rejected by Ocarina as well (doubt retired), and six new contested
+      pairs surfaced, all with OSATE the more permissive.
+      DISCLOSURE: CI executes NEITHER tool. Both the OSATE and Ocarina
+      columns are committed references, like the .aaxl2 files; only
+      spar's column is re-derived live. The Ocarina column is
+      hand-maintained — the build recipe is in
+      tools/osate-conformance/README.md and is reproducible, but nothing
+      in the repo re-derives it, so its provenance rests on that recipe
+      rather than on a mechanism.
+    status: implemented
+    tags: [interop, plugfest, ocarina, v0370]
+    release: v0.37.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-PLUGFEST-006
+    type: requirement
+    title: "Reverse-direction conformance — does OSATE accept what spar writes"
+    description: >
+      Tier-A asks whether spar can read OSATE's models, over a corpus
+      OSATE authored. That direction cannot fail interestingly. This asks
+      the question a user actually hits: they open OUR model in OSATE and
+      it errors.
+      Every first-party .aadl shall carry a DECLARED expected verdict
+      (test-data/negative/** must be rejected, all others accepted), and
+      spar's acceptance shall be graded against external tools rather than
+      against its own past behaviour.
+      MEASURED at v0.37.0 over 120 first-party models: spar 98 accept /
+      22 reject, matching expectation exactly (22 = every file under
+      test-data/negative/).
+      Found by this requirement, and findable no other way:
+      docs/research/forge-replication/descriptor.aadl had NEVER parsed
+      since #215 — no gate covered docs/ at all — and once fixed, OSATE
+      still rejected it for connections that named the enclosing system
+      and ran backwards out of an inbound port. "spar parses it" was never
+      the same claim as "it is valid AADL".
+      Six parser defects followed, including the first genuine TOO-STRICT
+      one: `applies to (system, system implementation)` was rejected by
+      spar and accepted by OSATE with 0 diagnostics. That construct
+      appears in ZERO of the 548 vendored OSATE models and ZERO of our
+      own, so no parse-rate on either could ever have surfaced it — it
+      took a third, differently-authored corpus.
+    status: implemented
+    tags: [interop, plugfest, osate, reverse, v0370]
+    release: v0.37.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-001
+
+  - id: REQ-PLUGFEST-007
+    type: requirement
+    title: "Third-party AADL corpora as Tier-A parse material"
+    description: >
+      The parse corpus shall include models written by neither pulseengine
+      nor the OSATE team, because two corpora agreeing on what they do NOT
+      contain is a shared blind spot rather than a signal.
+      DELIVERED at v0.37.0: 1347 models under test-data/interop/, all
+      BSD-3-Clause with upstream LICENSE retained and pinned by commit —
+      case-aadl (Galois/DARPA CASE, 52), aadlib (OpenAADL/Ocarina, 239),
+      fmw (Rockwell Collins, 924), verdict (GE, 132).
+      crates/spar-cli/tests/third_party_corpora.rs ratchets a SET OF
+      PATHS, not a percentage: VERDICT's original 14 failures were 14
+      copies of one file, so a rate measures the corpus's duplication as
+      much as the parser. Currently 1333/1347 with 14 baseline entries.
+      Each corpus found gaps the others structurally could not. aadlib is
+      the most valuable, being authored against the OTHER parser rather
+      than to OSATE's behaviour.
+      NOT a specification: two aadlib files are rejected by spar AND by
+      OSATE with grammar errors from both, and sit in the baseline with no
+      implication that spar is wrong.
+    status: implemented
+    tags: [interop, plugfest, corpus, v0370]
+    release: v0.37.0
     links:
       - type: traces-to
         target: REQ-PLUGFEST-001

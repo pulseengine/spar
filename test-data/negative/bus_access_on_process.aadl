@@ -1,0 +1,20 @@
+-- AS5506: bus access is a platform concern. A process binds to a processor;
+-- it does not access a bus directly, so `requires bus access` on a process
+-- type is illegal.
+--
+-- spar accepted this until #420. OSATE 2.18.0 rejects it at the GRAMMAR level
+-- ("no viable alternative at input 'bus'").
+--
+-- Two independent signals agree, which is why this rule is encoded while the
+-- other 12 probed feature kinds are not: the 548-file OSATE corpus puts bus
+-- access on system (53), device (30), processor (18), memory (3), bus (3) and
+-- abstract (1) across 3877 type declarations, and never on a process or
+-- thread.
+package BusAccessOnProcess
+public
+  process P
+    features
+      -- the violation
+      b : requires bus access;
+  end P;
+end BusAccessOnProcess;
