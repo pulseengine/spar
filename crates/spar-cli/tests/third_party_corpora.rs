@@ -43,10 +43,10 @@ const BASELINE: &str = concat!(
 /// (directory, minimum models expected) — the floor guards against a corpus
 /// silently disappearing, which would make "no regressions" vacuously true.
 const CORPORA: &[(&str, usize)] = &[
-    ("test-data/interop/case-aadl", 50),
-    ("test-data/interop/aadlib", 230),
-    ("test-data/interop/fmw", 900),
-    ("test-data/interop/verdict", 130),
+    ("test-data/interop/case-aadl", 52),
+    ("test-data/interop/aadlib", 239),
+    ("test-data/interop/fmw", 924),
+    ("test-data/interop/verdict", 132),
 ];
 
 fn collect_aadl(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -78,6 +78,7 @@ fn third_party_corpora_parse_without_regression() {
     let gaps = known_gaps();
 
     let mut regressions: Vec<String> = Vec::new();
+    let mut unreadable: Vec<String> = Vec::new();
     let mut newly_passing: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
@@ -103,7 +104,17 @@ fn third_party_corpora_parse_without_regression() {
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let src = std::fs::read_to_string(path).unwrap_or_default();
+            // NOT `unwrap_or_default()`. An unreadable file (permissions, a
+            // broken symlink, an I/O error) would become an empty string,
+            // empty input parses clean, and the file would score as PASSING —
+            // the error path yielding the ideal reading, which is the exact
+            // defect class this suite exists to catch. The corpus-count floor
+            // above only notices files that DISAPPEAR, not ones that go
+            // unreadable.
+            let Ok(src) = std::fs::read_to_string(path) else {
+                unreadable.push(rel);
+                continue;
+            };
             let parsed = spar_syntax::parse(&src).ok();
             match (parsed, gaps.contains(&rel)) {
                 (false, false) => regressions.push(rel),
@@ -124,6 +135,16 @@ fn third_party_corpora_parse_without_regression() {
             newly_passing.join("\n  ")
         );
     }
+
+    // A file we could not read is not a file that passed.
+    assert!(
+        unreadable.is_empty(),
+        "{} corpus file(s) could not be read. Not treated as passing: an \
+         unreadable file that scores clean is indistinguishable from a \
+         healthy one:\n  {}",
+        unreadable.len(),
+        unreadable.join("\n  ")
+    );
 
     assert!(
         regressions.is_empty(),

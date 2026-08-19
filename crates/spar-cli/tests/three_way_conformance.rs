@@ -49,12 +49,16 @@ const BASELINE: &str = concat!(
 );
 
 /// Models spar accepts that BOTH implementations reject. MEASURED 48.
-/// Lower as #420 is worked; it may never rise.
+///
+/// EXACT, not a one-sided bound: going below fails too, demanding this be
+/// lowered. So any movement in spar's verdict on these 120 files fails the
+/// test in EITHER direction, and a fix must be accompanied by updating this
+/// number. Calling it a "floor" undersells it.
 const MAX_TOO_PERMISSIVE: usize = 48;
 
 /// Files where OSATE and Ocarina disagree. MEASURED 14.
 ///
-/// A ceiling, not a target. These are exempt from grading, so an unnoticed
+/// EXACT, like MAX_TOO_PERMISSIVE: below fails as well as above. These are exempt from grading, so an unnoticed
 /// increase would quietly shrink the set of files this gate actually judges —
 /// the same vacuity as a corpus that silently stops being scanned.
 const MAX_CONTESTED: usize = 14;
@@ -262,17 +266,24 @@ fn the_three_way_baseline_covers_the_same_corpus_as_the_two_way() {
             .collect();
     let three: std::collections::BTreeSet<String> = load().into_iter().map(|r| r.path).collect();
 
-    let missing: Vec<&String> = two.difference(&three).collect();
+    // Set EQUALITY, not two ⊆ three. A file present only in the three-way
+    // baseline is the same drift facing the other way: the two baselines are
+    // regenerated together, so either asymmetry means one run was partial.
+    let only_two: Vec<&str> = two.difference(&three).map(|s| s.as_str()).collect();
+    let only_three: Vec<&str> = three.difference(&two).map(|s| s.as_str()).collect();
     assert!(
-        missing.is_empty(),
+        only_two.is_empty(),
         "{} file(s) are in the OSATE baseline but not the three-way one, so \
          they are graded by one implementation while the repo looks like it \
          has two:\n  {}",
-        missing.len(),
-        missing
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n  ")
+        only_two.len(),
+        only_two.join("\n  ")
+    );
+    assert!(
+        only_three.is_empty(),
+        "{} file(s) are in the three-way baseline but not the OSATE one — the \
+         two are regenerated together, so this means one run was partial:\n  {}",
+        only_three.len(),
+        only_three.join("\n  ")
     );
 }
