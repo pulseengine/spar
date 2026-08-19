@@ -121,6 +121,49 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p spar
 
+      # #422: run the FRESHLY BUILT binary and assert it reports the tag.
+      #
+      # check-versions already compares the tag to Cargo.toml, but that reads a
+      # file -- it cannot catch a binary that reports something else, and until
+      # this release the binary reported nothing at all. A tool result cited as
+      # qualification evidence has to carry the identity of the binary that
+      # produced it, so the version has to come from the artifact we ship.
+      #
+      # Skipped for cross builds: a foreign-arch binary cannot be executed on
+      # this runner, and pretending otherwise would make the check pass by not
+      # running. Native targets cover every host we publish for.
+      - name: Assert the built binary reports the tag (#422)
+        if: ${{ !matrix.cross && runner.os != 'Windows' }}
+        env:
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          BIN="target/${TARGET}/release/spar"
+          [ -x "$BIN" ] || { echo "::error::$BIN missing or not executable"; exit 1; }
+
+          got="$("$BIN" --version)"
+          want="spar ${TAG#v}"
+          echo "  binary says: $got"
+          echo "  tag implies: $want"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the shipped binary reports '$got' but the tag is '${TAG}'."
+            echo "::error::An analysis result carrying the wrong version is worse than"
+            echo "::error::one carrying none: it is confidently wrong (#422)."
+            exit 1
+          fi
+
+          # An unknown command must exit 2, not 1 (#422). Checked here because
+          # it is a property of the shipped artifact, and `set -e` would abort
+          # on the non-zero exit, so capture it deliberately.
+          rc=0
+          "$BIN" definitely-not-a-command >/dev/null 2>&1 || rc=$?
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::unknown command exited ${rc}, expected 2 (#422)."
+            exit 1
+          fi
+          echo "  unknown command exits 2 as required"
+
       - name: Strip binary (Unix)
         if: runner.os != 'Windows'
         env:

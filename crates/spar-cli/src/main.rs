@@ -88,15 +88,34 @@ fn main() {
             print_usage();
             process::exit(0);
         }
+        // #422: a tool result cited as evidence must carry the version of the
+        // binary that produced it -- `rivet validate` returns FAIL under 0.19.0
+        // and PASS under 0.32.0 on the same tree. spar exposed its version
+        // NOWHERE: not here, not in --help, not in any subcommand.
+        //
+        // stdout, not stderr: this is the requested output, so it must survive
+        // `spar --version > file` and be pipeable into an evidence record.
+        "--version" | "-V" | "version" => {
+            println!("spar {}", env!("CARGO_PKG_VERSION"));
+            process::exit(0);
+        }
         other => {
             eprintln!("Unknown command: {other}");
             print_usage();
-            process::exit(1);
+            // Exit 2, not 1 (#422): one failure, one exit code across the
+            // toolchain, and ordeal already uses 2. It also separates "you
+            // typed something wrong" from "the analysis found a problem",
+            // which a CI script needs to tell apart.
+            process::exit(2);
         }
     }
 }
 
 fn print_usage() {
+    // Version first, as ordeal does (#422). Someone pasting a help dump into a
+    // bug report then carries the version with it whether or not they thought
+    // to run `--version`.
+    eprintln!("spar {}", env!("CARGO_PKG_VERSION"));
     eprintln!("Usage: spar <command> [options] <file...>");
     eprintln!();
     eprintln!("Commands:");
