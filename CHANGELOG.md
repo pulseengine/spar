@@ -1,8 +1,35 @@
 # Changelog
 
-All notable changes to spar are documented here. Format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+**This file stops at 0.9.3.** From **0.10.0 onward the release record is the
+signed annotated tag object**, one per release, plus the GitHub Release it
+generates:
+
+```sh
+git tag -v v0.37.0      # verifies the signature, prints the release notes
+gh release view v0.37.0
+```
+
+The boundary is exact and re-derivable — every tag from `v0.10.0` on is a
+signed annotated tag, and every unsigned one is at or below `v0.9.3`:
+
+```sh
+for t in $(git tag -l 'v*'); do
+  git cat-file -t "$t" | grep -q '^tag$' && git verify-tag "$t" >/dev/null 2>&1 \
+    && echo "SIGNED   $t" || echo "UNSIGNED $t"
+done | sort -k2 -V
+# 16 UNSIGNED, all <= v0.9.3; 28 SIGNED, all >= v0.10.0
+```
+
+That is a deliberate move, not neglect: a tag object is signed and immutable,
+so the notes cannot drift from the commit they describe, whereas this file
+could be edited afterwards to say anything. It is recorded here because the
+sentence that used to stand in this place — "all notable changes to spar are
+documented here" — had been false since 0.10.0, and a claim nothing gates is
+exactly what this project spends its releases removing.
+
+Entries **through 0.9.3** follow
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) throughout.
 
 ## [0.9.3] — 2026-05-10
 
