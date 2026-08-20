@@ -4660,17 +4660,29 @@ artifacts:
       the 210 threshold, exit 1 at 209, and exit 1 at 142 — the threshold that was
       nominally in force for four months while the same report scored green.
 
-      HONEST CEILING: this verifies the checker's decision table, and that the
-      checker is reachable — a PR touching tools/*.py is classified `code` by the
-      change filter, so the self-test runs. It does NOT verify that cargo-mutants
-      itself measured the workspace correctly, and it cannot verify the gate's
-      behaviour on a real three-hour CI run until one completes; the first such
-      run is the PR that lands this.
+      THE SECOND STEP IS RUNNABLE FROM A CHECKOUT (REQ-GUARD-GATE-EVIDENCE-004,
+      #414). It used to be `--output-dir mutants-out --max-missed 210`, which reads
+      the ~3h `mutants` job's output — absent from any checkout, so
+      run_verification.py scored this artifact permanently FAILED — and restated a
+      threshold that had gone stale against ci.yml's 292. It is now
+      `--assert-workflow-threshold .github/workflows/ci.yml`: it reads the workflow,
+      asserts exactly one bounded, un-neutered mutation gate, and prints the
+      threshold it finds rather than carrying a second copy. The `--self-test`
+      decision table above now includes the cases that make THAT check
+      non-vacuous — a different threshold prints differently; an absent, neutered,
+      non-integer, or doubly-declared gate fails.
+
+      HONEST CEILING: this verifies the checker's decision table, that the checker
+      is reachable — a PR touching tools/*.py is classified `code` by the change
+      filter, so the self-test runs — and that the workflow still declares the
+      gate. It does NOT verify that cargo-mutants itself measured the workspace
+      correctly, and it cannot verify the gate's behaviour on a real three-hour CI
+      run until one completes; the first such run is the PR that lands this.
     fields:
       method: automated-test
       steps:
         - run: tools/check_mutants_report.py --self-test
-        - run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210
+        - run: tools/check_mutants_report.py --assert-workflow-threshold .github/workflows/ci.yml
     status: implemented
     tags: [process, guardrail, ci, tooling, mutation-testing, v0360]
     links:
@@ -4678,6 +4690,10 @@ artifacts:
         target: REQ-GUARD-GATE-EVIDENCE-001
       - type: verifies
         target: REQ-GUARD-GATE-EVIDENCE-001
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-004
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-004
 
   - id: TEST-GUARD-FMT-WORKSPACES
     type: feature
