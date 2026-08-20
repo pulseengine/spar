@@ -557,6 +557,7 @@ artifacts:
 
   - id: ARCH-026
     type: design-decision
+    status: proposed
     title: SysML v2 lowering diagnostic infrastructure (planned)
     description: >
       The SysML v2 lower.rs currently has a silent wildcard `_ => {}` in
@@ -573,13 +574,13 @@ artifacts:
         dangerous. The diagnostic infrastructure already exists in ItemTree.
       source-files:
         - crates/spar-sysml2/src/lower.rs  # lower_node wildcard arm
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-032
 
   - id: ARCH-027
     type: design-decision
+    status: proposed
     title: Category inference validation for SysML v2 lowering (planned)
     description: >
       The infer_category heuristic in lower.rs checks for action/state
@@ -599,7 +600,6 @@ artifacts:
         available after lowering and should be propagated.
       source-files:
         - crates/spar-sysml2/src/lower.rs  # infer_category, lower_part_usage_to_subcomponent
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-033
@@ -608,6 +608,7 @@ artifacts:
 
   - id: ARCH-028
     type: design-decision
+    status: proposed
     title: Typed property lowering for SysML v2 constraints (planned)
     description: >
       lower_constraint_usage_to_property and lower_attribute_usage_to_property
@@ -625,7 +626,6 @@ artifacts:
         SysML v2-sourced models receive no timing/resource analysis.
       source-files:
         - crates/spar-sysml2/src/lower.rs  # lower_constraint_usage_to_property
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-035
@@ -656,6 +656,7 @@ artifacts:
 
   - id: ARCH-030
     type: design-decision
+    status: proposed
     title: Verification tool availability guard in Bazel rules (planned)
     description: >
       The verus_verify and lean_verify rules currently fall back to PATH
@@ -673,13 +674,13 @@ artifacts:
       source-files:
         - tools/bazel/rules_verus/defs.bzl   # _verus_verify_impl
         - tools/bazel/rules_lean/defs.bzl    # _lean_verify_impl
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-037
 
   - id: ARCH-031
     type: design-decision
+    status: proposed
     title: Per-crate verification targets in codegen (planned)
     description: >
       workspace_gen.rs currently generates rust_library, wasm_component,
@@ -695,13 +696,13 @@ artifacts:
         it knows which files contain proof annotations.
       source-files:
         - crates/spar-codegen/src/workspace_gen.rs  # generate_crate_build_bazel
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-038
 
   - id: ARCH-032
     type: design-decision
+    status: proposed
     title: Proof log content validation in Bazel rules (planned)
     description: >
       The verus_verify and lean_verify rules produce proof log files but
@@ -719,7 +720,6 @@ artifacts:
       source-files:
         - tools/bazel/rules_verus/defs.bzl   # _verus_verify_impl
         - tools/bazel/rules_lean/defs.bzl    # _lean_verify_impl
-      status: planned
     links:
       - type: satisfies
         target: STPA-REQ-039

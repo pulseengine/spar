@@ -4808,14 +4808,24 @@ artifacts:
       working one. This is the opposite of REQ-GUARD-RELEASE-PLANE-001, which
       needed a tool precisely because rivet was BLIND to the defect.
 
-      TWO HOLES REMAIN OPEN, and neither is closed by this requirement:
-      (1) six `status:` values in safety/stpa/architecture.yaml sit inside the
+      TWO HOLES WERE NAMED HERE, and neither was closed by this requirement:
+      (1) six `status:` values in safety/stpa/architecture.yaml sat inside the
       `fields:` extension bag, where rivet cannot see them — the #370 defect one
       field over, on `status:` instead of `release:`; (2) safety/requirements.yaml
       holds 21 more, and rivet never loads that file at all because it is not
-      under any path in rivet.yaml's `sources:`. Both are invisible to the guard
-      above, which is exactly why they are named here rather than silently
+      under any path in rivet.yaml's `sources:`. Both were invisible to the guard
+      above, which is exactly why they were named here rather than silently
       absorbed into the 276.
+
+      HOLE (1) IS NOW CLOSED by REQ-GUARD-STATUS-PLANE-001 (#375): the
+      release-plane guardrail was generalised to walk a list of core fields,
+      `status` alongside `release`, so it now catches a fields-nested `status:`
+      mechanically; and the six ARCH statuses were promoted to the artifact key
+      plane as `proposed` (the documented `planned -> proposed` mapping above).
+      HOLE (2) REMAINS OPEN and is separable: a plane-checker cannot help a file
+      that is never loaded, so it needs a `sources:` decision (add it, then fix
+      what surfaces, or delete it if dead) rather than a guard — left to the
+      maintainer.
 
       RECONCILIATION (measured, not asserted): 303 raw `status:` text matches
       across 9 committed files, minus 21 in the unloaded file, minus 6 in the
@@ -4834,6 +4844,65 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-GUARD-RELEASE-PLANE-001
+
+  - id: REQ-GUARD-STATUS-PLANE-001
+    type: requirement
+    title: "`status:` shall sit on the plane rivet's query surface reads"
+    description: >
+      `status` is a CORE rivet field: `status-allowed-values` validates it and
+      every lifecycle query filters on it. Written into an artifact's `fields:`
+      extension bag instead, a `status:` is valid YAML, tolerated by the schema,
+      and completely invisible to both — the exact #370 failure that
+      REQ-GUARD-RELEASE-PLANE-001 addresses for `release:`, one field over. This
+      requirement is that every `status:` assignment in this repo sits on the
+      artifact's own key plane, enforced by the SAME gate.
+
+      WHY: #371's status-vocabulary reconciliation measured six such cases in
+      safety/stpa/architecture.yaml — ARCH-026, -027, -028, -030, -031, -032,
+      each carrying `fields.status: planned` with no artifact-plane status at
+      all. They were named as an open hole in REQ-GUARD-STATUS-VOCAB-001 rather
+      than silently absorbed, precisely because the guard of the day could not
+      see them. `rivet` reported them as neither an error nor a lifecycle state:
+      a design decision that read as tracked while being tracked by nothing.
+
+      THE GATE IS NOT NEW CODE — it is REQ-GUARD-RELEASE-PLANE-001's tool
+      generalised. `tools/check_release_plane.py` hardcoded `FIELD = "release"`;
+      it now walks `FIELDS = ("release", "status")` and reports each plane
+      separately. The parser, the block-scalar handling and the two fail-closed
+      guards were already field-agnostic; only the constant and the report
+      strings assumed a single name. Adding a second oracle beside a working one
+      would have been the weaker choice.
+
+      THE SIX WERE MOVED, not merely detected: each `status: planned` was
+      promoted to a top-level `status: proposed` — the `planned -> proposed`
+      mapping documented in REQ-GUARD-STATUS-VOCAB-001, chosen because these are
+      design decisions describing not-yet-implemented work (their titles say
+      "(planned)" and their descriptions say "The planned fix …"), and
+      `proposed` is the lifecycle rung for that. `planned` is not in the schema
+      vocabulary, so a verbatim move would have traded a blind spot for a
+      `status-allowed-values` error; the mapping avoids both.
+
+      SELF-TEST CONSTRAINT: the self-test asserts the finding COUNTS per field,
+      not merely the exit code. A `status-plane-violation` fixture holds two
+      artifacts differing only in where `status:` sits and requires nested=1,
+      visible=1 — so a checker that greps for `status:` (reports both) or that
+      dropped `status` from the field list (reports neither) reds the self-test.
+      Verified by mutation: deleting `status` from `FIELDS` makes that fixture
+      exit 0 and fails the self-test.
+
+      WHAT THIS DOES NOT CLOSE: hole (2) of REQ-GUARD-STATUS-VOCAB-001 —
+      safety/requirements.yaml's 21 off-plane statuses in a file rivet never
+      loads. A plane-checker cannot see a file outside `sources:`; that needs a
+      maintainer decision (add to `sources:` and fix what surfaces, or delete if
+      dead), tracked separately.
+    status: implemented
+    release: v0.38.0
+    tags: [process, guardrail, ci, tooling, traceability]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-RELEASE-PLANE-001
+      - type: traces-to
+        target: REQ-GUARD-STATUS-VOCAB-001
 
   - id: REQ-GUARD-GATE-EVIDENCE-001
     type: requirement
