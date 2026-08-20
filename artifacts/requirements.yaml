@@ -5163,6 +5163,68 @@ artifacts:
     release: v0.37.0
     tags: [process, guardrail, ci, tooling, human-scoped]
 
+  - id: REQ-GUARD-GATE-EVIDENCE-004
+    type: requirement
+    title: A threshold a gate enforces shall live in one place, and an evidence step shall run from a clean checkout
+    description: >
+      Successor to REQ-GUARD-GATE-EVIDENCE-001, found (#414) by EXECUTING the
+      declared verification steps rather than reading them: 17 of 18 pass, and the
+      one that does not is TEST-GUARD-GATE-EVIDENCE's own second step. It is one
+      artifact carrying two of this lineage's recurring defect shapes at once.
+
+      THE INSTANCE. TEST-GUARD-GATE-EVIDENCE (`status: implemented`, the artifact
+      that verifies -001) declared:
+
+        - run: tools/check_mutants_report.py --self-test
+        - run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210
+
+      The second step reads `mutants-out/mutants.out/`, which exists only after
+      the ~3h `mutants` CI job. `tools/run_verification.py` scores a step by
+      `returncode == 0`, so from any clean checkout the step exits 1 and the
+      artifact is permanently FAILED — the exact mirror of #403, where a claiming
+      artifact had NO step and was silently skipped; here it has a step that
+      cannot succeed. And `--max-missed 210` disagreed with `ci.yml`'s
+      `--max-missed 292` (291 survivors live): the same duplicated-fact shape as
+      #381, where the report path was written twice and the copies drifted apart
+      for four months. Deleting the step to make the artifact pass is the move
+      -002/-003 exist to forbid.
+
+      SHALL, two obligations, one per shape:
+
+      (i) A THRESHOLD ENFORCED BY A GATE SHALL BE SINGLE-SOURCED. The mutation
+      ratchet bound shall be recorded in exactly one place — the workflow — and an
+      evidence step that references it shall READ it from there rather than restate
+      it, so the artifact and the workflow cannot disagree. A number stated twice
+      in this repo has, every time, eventually drifted.
+
+      (ii) AN EVIDENCE STEP SHALL RUN FROM A CLEAN CHECKOUT. A `fields.steps[].run`
+      on a claiming artifact shall not depend on output that only a long-running
+      CI job produces. Where a gate is intrinsically CI-context-only, its evidence
+      step shall assert the gate's DECLARATION — that the workflow still invokes it
+      with a bounded, un-neutered ratchet that can actually fail — not re-run the
+      gate's measurement. Asserting the declaration is falsifiable from the
+      checkout (remove the gate, neuter it with `|| true`, or make its bound a
+      non-integer, and the step fails); re-running the measurement is not runnable
+      at all.
+
+      ORACLE: `tools/check_mutants_report.py --assert-workflow-threshold
+      .github/workflows/ci.yml`, plus the decision cases folded into that tool's
+      `--self-test`: a declared bounded gate passes and prints its threshold; a
+      DIFFERENT threshold prints differently (the output tracks the input, so the
+      check is not vacuous); an absent gate, a `|| true`-neutered gate, a
+      non-integer bound, and two gates with disagreeing bounds each fail; a bound
+      of 0 (the ratchet's target, #382) is valid and passes.
+
+      NOT CLAIMED: that the threshold VALUE is correct — walking it down is #382's
+      job — nor that cargo-mutants measured the workspace correctly, which is
+      -001(a)'s honest ceiling. Only that the number lives once and the step runs.
+    status: implemented
+    release: v0.38.0
+    tags: [process, guardrail, ci, tooling, mutation-testing]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-001
+
   - id: REQ-GUARD-FUZZ-SMOKE-001
     type: requirement
     title: The fuzz-target guardrail shall audit the REQUIRED context, not only the advisory one

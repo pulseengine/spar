@@ -113,6 +113,14 @@ fixtures, including a regression case that reproduces the original bug: a tree
 where the `.txt` files exist ONLY at the shallow path must be rejected, not
 scored as zero survivors.
 
+`--assert-workflow-threshold WORKFLOW` is a separate, checkout-runnable mode: it
+reads the workflow file and asserts it declares exactly one bounded, un-neutered
+mutation gate, printing the threshold it finds. It exists so the artifact that
+VERIFIES this gate can assert the gate's *declaration* without re-running the
+~3h `mutants` job, and can read the threshold from the workflow rather than
+carrying its own copy — `--max-missed 210` in an artifact and `--max-missed 292`
+in the workflow was a number stated twice that drifted for four months (#414).
+
 stdlib-only, deliberately: no workflow in this repo installs a Python package,
 and a required check that depends on an unverified runner package is a check
 that can fail to run — which reads as approval. See REQ-GUARD-HUMAN-SCOPED-001
@@ -124,6 +132,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -345,6 +354,114 @@ def check(output_dir: str, max_missed: int, out=None) -> int:
         return 1
 
     print(f"Mutant survivors ({missed}) within threshold ({max_missed}). Target: 0 (#382).", file=out)
+    return 0
+
+
+# The line the mutation gate is enforced by: `check_mutants_report.py` invoked
+# with --max-missed, which is the ratcheting flag. --self-test and --summary-file
+# carry no threshold, so they cannot be mistaken for the gate; --max-missed exists
+# only for the gate, which is why it — and not the defaultable --output-dir — is
+# the discriminator. The threshold is captured so that a caller can single-source
+# it: the artifact that VERIFIES this gate reads the number from here instead of
+# restating it, which is the whole point of #414 — `--max-missed 210` in the
+# artifact and `--max-missed 292` in the workflow was a number stated twice, and
+# the two drifted apart for four months.
+_GATE_INVOCATION = re.compile(
+    r"check_mutants_report\.py\b.*--max-missed(?:=|\s+)(?P<threshold>\S+)"
+)
+# A gate whose exit code is swallowed cannot fail, so it is not a gate — the same
+# `|| true` that let the crashed run of #389 score green. `|| :` is the same
+# no-op with the shell builtin `:`. `\b` cannot follow the `:` alternative — `:`
+# is not a word char, so there is no boundary there — hence the word boundary is
+# tied to `true` alone. `-` on a `run:` line is YAML, not shell, and not neutering.
+_NEUTERED = re.compile(r"\|\|\s*(true\b|:)")
+
+
+def assert_workflow_threshold(workflow_path: str, out=None) -> int:
+    """Assert the workflow declares exactly one bounded, un-neutered mutation gate.
+
+    Runnable from a clean checkout — it reads only the committed workflow file,
+    never the ~3h `mutants` job's output. This is the second step of
+    TEST-GUARD-GATE-EVIDENCE: the artifact used to re-run the gate itself
+    (`--output-dir mutants-out --max-missed 210`), which cannot succeed outside
+    the CI job and which restated a threshold that had gone stale (#414). Here the
+    artifact asserts the gate's DECLARATION instead — that the workflow still
+    invokes it with a bounded integer ratchet that can actually fail — and reads
+    the number from the workflow rather than carrying its own copy.
+
+    NON-VACUITY: the discovered threshold is printed, so distinct workflows
+    (--max-missed 292 vs 142) produce distinct output. A gate that is absent,
+    neutered with `|| true`, given a non-integer bound, or declared twice with
+    disagreeing bounds fails — the error path does not decay into the success
+    reading.
+    """
+    out = out or sys.stdout
+    try:
+        with open(workflow_path, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError as exc:
+        print(f"::error::cannot read workflow {workflow_path}: {exc}", file=out)
+        return 1
+
+    found: list[tuple[int, int, str]] = []  # (lineno, threshold, raw)
+    for i, raw in enumerate(lines, start=1):
+        # A commented-out invocation is not an enforced gate. Strip a leading
+        # comment marker (workflow YAML indents its `#` comments) before matching.
+        if raw.lstrip().startswith("#"):
+            continue
+        m = _GATE_INVOCATION.search(raw)
+        if not m:
+            continue
+        token = m.group("threshold")
+        if _NEUTERED.search(raw):
+            print(
+                f"::error::{workflow_path}:{i}: the mutation gate is neutered — its "
+                f"exit code is swallowed by `|| true`/`|| :`, so it can never fail. "
+                f"A gate that cannot fail is not a gate (#389).",
+                file=out,
+            )
+            print(f"  {raw.strip()}", file=out)
+            return 1
+        if not re.fullmatch(r"\d+", token):
+            print(
+                f"::error::{workflow_path}:{i}: --max-missed threshold is "
+                f"{token!r}, not a non-negative integer. The ratchet bound must be "
+                f"a number this gate can compare survivors against.",
+                file=out,
+            )
+            print(f"  {raw.strip()}", file=out)
+            return 1
+        found.append((i, int(token), raw.strip()))
+
+    if not found:
+        print(
+            f"::error::{workflow_path} declares no mutation gate — no `run:` invokes "
+            f"check_mutants_report.py with --max-missed. The required `Mutation "
+            f"Testing` ratchet has been removed or renamed; this is the gate this "
+            f"artifact exists to keep enforced (#414).",
+            file=out,
+        )
+        return 1
+
+    thresholds = {t for _, t, _ in found}
+    if len(thresholds) > 1:
+        print(
+            f"::error::{workflow_path} declares the mutation threshold "
+            f"{len(found)} times with disagreeing values {sorted(thresholds)} — a "
+            f"number stated twice always drifts (#381, #414). Single-source it.",
+            file=out,
+        )
+        for i, t, raw in found:
+            print(f"  line {i}: --max-missed {t}   {raw}", file=out)
+        return 1
+
+    lineno, threshold, _raw = found[0]
+    print(
+        f"Mutation gate declared at {workflow_path}:{lineno} with a bounded "
+        f"ratchet: --max-missed {threshold}. Threshold single-sourced from the "
+        f"workflow (#414). Target: 0 (#382).",
+        file=out,
+    )
     return 0
 
 
@@ -613,6 +730,93 @@ def self_test() -> int:
           lambda t: _fixture(t, missed=0, caught=0, unviable=0),
           want_in=("**0 caught**",))
 
+    # ── the workflow-declaration path: REQ-GUARD-GATE-EVIDENCE-004, #414 ──
+    # This is what the artifact's SECOND step runs. It reads a workflow file, not
+    # a mutants run, so it is runnable from a clean checkout — the property #414
+    # is about. It asserts on exit code AND, for the pass, on the printed
+    # threshold, because a check whose output does not track its input is vacuous:
+    # 292 and 142 must render differently or the gate proves nothing.
+    def wcase(desc: str, want: int, body: str, want_msg: str | None = None):
+        nonlocal passed, failed
+        with tempfile.TemporaryDirectory() as tmp:
+            wf = os.path.join(tmp, "ci.yml")
+            with open(wf, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            buf = io.StringIO()
+            got = assert_workflow_threshold(wf, out=buf)
+            text = buf.getvalue()
+            if got != want:
+                failed += 1
+                print(f"  FAIL {desc}: got exit {got}, want {want}")
+                for line in text.splitlines()[:4]:
+                    print(f"         {line}")
+            elif want_msg is not None and want_msg not in text:
+                failed += 1
+                print(f"  FAIL {desc}: exit {got} correct, diagnosis wrong — "
+                      f"expected {want_msg!r}")
+                for line in text.splitlines()[:4]:
+                    print(f"         {line}")
+            else:
+                passed += 1
+                print(f"  ok   {desc}")
+
+    print()
+    # A realistic gate: the --self-test line (no threshold) must be ignored, and
+    # only the --output-dir + --max-missed line counts.
+    GATE_292 = (
+        "      - name: Mutants-report guardrail self-test\n"
+        "        run: tools/check_mutants_report.py --self-test\n"
+        "      - name: Check surviving mutants\n"
+        "        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292\n"
+    )
+    wcase("declared gate with a bounded threshold passes and prints it", 0,
+          GATE_292, want_msg="--max-missed 292")
+    # The non-vacuity pair: same shape, different number, different output.
+    wcase("a DIFFERENT threshold prints DIFFERENTLY (output tracks input)", 0,
+          GATE_292.replace("--max-missed 292", "--max-missed 142"),
+          want_msg="--max-missed 142")
+    # Gate removed entirely — the four-months-of-green failure mode, one level up.
+    wcase("no gate invocation at all FAILS", 1,
+          "      - name: Mutants-report guardrail self-test\n"
+          "        run: tools/check_mutants_report.py --self-test\n",
+          want_msg="declares no mutation gate")
+    # The --self-test line must never be mistaken for the gate: it has no
+    # --output-dir/--max-missed pairing, so a workflow with only it is gateless.
+    wcase("the --self-test line alone is NOT a gate", 1,
+          "        run: tools/check_mutants_report.py --self-test\n",
+          want_msg="declares no mutation gate")
+    # A neutered gate cannot fail, so it is not a gate. Both no-op forms — the
+    # `|| true` the crashed run of #389 hid behind, and the `|| :` shell builtin —
+    # must be caught; the `:` form was silently accepted until the `\b` bug in
+    # _NEUTERED was fixed.
+    wcase("a gate whose exit is swallowed by `|| true` FAILS", 1,
+          GATE_292.replace("--max-missed 292",
+                           "--max-missed 292 || true"),
+          want_msg="neutered")
+    wcase("a gate swallowed by `|| :` (shell no-op) also FAILS", 1,
+          GATE_292.replace("--max-missed 292",
+                           "--max-missed 292 || :"),
+          want_msg="neutered")
+    # A non-integer bound cannot ratchet.
+    wcase("a non-integer --max-missed FAILS", 1,
+          GATE_292.replace("--max-missed 292", "--max-missed none"),
+          want_msg="not a non-negative integer")
+    # The duplicated-fact hazard itself: two gates, disagreeing. This is exactly
+    # #414's `210`-vs-`292`, and it must fail rather than silently pick one.
+    wcase("two gates with disagreeing thresholds FAIL", 1,
+          GATE_292 + "        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 210\n",
+          want_msg="disagreeing values")
+    # A commented-out invocation is not an enforced gate.
+    wcase("a commented-out gate does not count as declared", 1,
+          "      - name: Check surviving mutants\n"
+          "        # run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292\n",
+          want_msg="declares no mutation gate")
+    # 0 is a LEGITIMATE bound (the ratchet's target, #382) — it must pass, or the
+    # gate would punish the very state it exists to drive toward.
+    wcase("a threshold of 0 (the target) is a valid bound", 0,
+          GATE_292.replace("--max-missed 292", "--max-missed 0"),
+          want_msg="--max-missed 0")
+
     print(f"\n{passed} passed, {failed} failed")
     return 0 if failed == 0 else 1
 
@@ -633,6 +837,14 @@ def main() -> int:
     )
     ap.add_argument("--self-test", action="store_true", help="run the built-in decision table")
     ap.add_argument(
+        "--assert-workflow-threshold",
+        default=None,
+        metavar="WORKFLOW",
+        help="assert WORKFLOW (e.g. .github/workflows/ci.yml) declares exactly one "
+             "bounded, un-neutered mutation gate, and print its threshold. Runnable "
+             "from a clean checkout — reads the workflow, not the mutants run (#414).",
+    )
+    ap.add_argument(
         "--summary-file",
         default=None,
         help="render the advisory weekly markdown report to this file (append) "
@@ -643,6 +855,9 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
+
+    if args.assert_workflow_threshold:
+        return assert_workflow_threshold(args.assert_workflow_threshold)
 
     # Summary mode is advisory and deliberately separate from the gate: the
     # weekly runs the whole workspace with no ratchet, so it has no threshold
