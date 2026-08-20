@@ -4574,11 +4574,14 @@ artifacts:
       rivet does NOT read, so a refactor that stopped detecting the misplacement
       fails on the fixture rather than passing vacuously over real artifacts.
 
-      NOT claimed: that the checker sees every way a `release:` can be
-      misplaced. #375 records a live gap — its FIELD constant matches a
-      top-level `release:` but not one nested in a `fields:` bag, and there are
-      six such cases in `safety/stpa/architecture.yaml`. That is scoped as its
-      own work, not silently folded in here.
+      SCOPE: this fixture exercises the `release` plane. The same checker now
+      also walks the `status` plane (#375) — its `FIELD` constant became
+      `FIELDS = ("release", "status")` — and that generalisation carries its own
+      falsification fixture and verification artifact, TEST-GUARD-STATUS-PLANE,
+      so the two planes are proven independently rather than folded together.
+      The live gap #375 recorded — six fields-nested `status:` values in
+      `safety/stpa/architecture.yaml` that this tool could not yet see — is
+      closed there.
     status: implemented
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
@@ -4622,6 +4625,44 @@ artifacts:
     status: proposed
     release: v0.36.0
     tags: [process, guardrail, ci, tooling]
+
+  - id: TEST-GUARD-STATUS-PLANE
+    type: feature
+    title: The plane guardrail is proven able to catch a fields-nested status, on the plane the six real cases lived
+    description: >
+      Closes the right side of the V for REQ-GUARD-STATUS-PLANE-001, the
+      generalisation of the release-plane guardrail to the `status` core field
+      (#375).
+
+      `tools/check_release_plane.py --self-test` runs first (ci.yml) and the
+      gate itself second, over both `artifacts/` and `safety/stpa/` — the dirs
+      where the six ARCH cases lived. Ordering is the point: the self-test
+      exercises the decision table, including a `status-plane-violation` fixture
+      whose two artifacts differ ONLY in where `status:` sits. It requires
+      nested=1, visible=1, so a refactor that stopped discriminating on plane —
+      or that dropped `status` from the field list — reds the fixture rather
+      than passing vacuously over real artifacts.
+
+      NON-VACUITY is asserted, not assumed: before this change the real run over
+      `safety/stpa/` exited 1 naming all six ARCH ids; after the six were
+      promoted to the artifact plane it exits 0. Distinct inputs, distinct
+      verdicts — the same property #327's withdrawn certificate lacked. And the
+      `status` field is proven load-bearing by mutation: deleting it from
+      `FIELDS` makes the `status-plane-violation` fixture exit 0 and fails the
+      self-test.
+    status: implemented
+    release: v0.38.0
+    tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_release_plane.py --self-test
+        - run: tools/check_release_plane.py --artifacts-dir artifacts --artifacts-dir safety/stpa
+    links:
+      - type: satisfies
+        target: REQ-GUARD-STATUS-PLANE-001
+      - type: verifies
+        target: REQ-GUARD-STATUS-PLANE-001
 
   - id: TEST-GUARD-GATE-EVIDENCE
     type: feature
