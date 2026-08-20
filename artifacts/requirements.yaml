@@ -5039,7 +5039,7 @@ artifacts:
       deletion time and is not re-run by this guard, because after deletion there
       is nothing to compare — the durable property is "no unloaded safety artifact
       file", which is exactly what the guard checks.
-    status: implemented
+    status: verified
     release: v0.39.0
     tags: [process, guardrail, ci, tooling, traceability, safety]
     links:
