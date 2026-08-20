@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "spar"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "etch",
  "la-arena",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -1427,7 +1427,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "rowan",
  "salsa",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "spar-codegen"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "criterion",
  "la-arena",
@@ -1452,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "spar-dbc"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "can-dbc",
  "expect-test",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "salsa",
  "serde",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "la-arena",
  "rowan",
@@ -1491,7 +1491,7 @@ dependencies = [
 
 [[package]]
 name = "spar-insight"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1503,7 +1503,7 @@ dependencies = [
 
 [[package]]
 name = "spar-mcp"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1518,7 +1518,7 @@ dependencies = [
 
 [[package]]
 name = "spar-mermaid"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
@@ -1527,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "spar-network"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "good_lp",
  "spar-base-db",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "spar-parser"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "expect-test",
  "proptest",
@@ -1546,7 +1546,7 @@ dependencies = [
 
 [[package]]
 name = "spar-render"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "etch",
  "la-arena",
@@ -1557,7 +1557,7 @@ dependencies = [
 
 [[package]]
 name = "spar-solver"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "criterion",
  "good_lp",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "spar-syntax"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "expect-test",
  "rowan",
@@ -1580,7 +1580,7 @@ dependencies = [
 
 [[package]]
 name = "spar-sysml2"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "expect-test",
  "la-arena",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "spar-trace-topology"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "pcap-parser",
  "serde",
@@ -1605,7 +1605,7 @@ dependencies = [
 
 [[package]]
 name = "spar-transform"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "la-arena",
  "serde",
@@ -1616,7 +1616,7 @@ dependencies = [
 
 [[package]]
 name = "spar-variants"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1626,14 +1626,14 @@ dependencies = [
 
 [[package]]
 name = "spar-verify"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "spar-verify-macros",
 ]
 
 [[package]]
 name = "spar-verify-macros"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1642,7 +1642,7 @@ dependencies = [
 
 [[package]]
 name = "spar-wasm"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "etch",
  "la-arena",
