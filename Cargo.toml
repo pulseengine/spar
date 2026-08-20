@@ -27,7 +27,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.37.0"
+version = "0.38.0"
 edition = "2024"
 # The floor is NOT a free choice — it is the maximum `rust-version` over the
 # whole resolved dependency closure, which cargo enforces whether or not it is
