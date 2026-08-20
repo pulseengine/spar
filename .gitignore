@@ -53,3 +53,11 @@ __pycache__/
 codegen-exec-oracle/target/
 codegen-kiln-oracle/target/
 fuzz/target/
+
+# `tools/run_verification.py --results-json` output, which the Verification
+# Gate workflow writes and uploads as an artifact. It is a per-run measurement
+# — its numbers depend on the `--filter` the run used, so a committed copy
+# would be a stale claim about coverage rather than a record of anything. It
+# has been sitting untracked in working trees, and untracked noise hides real
+# changes.
+/verification-results.json
