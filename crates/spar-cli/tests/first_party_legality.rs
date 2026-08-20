@@ -10,7 +10,13 @@
 //! legal, and a model that only parses in spar is a wall the user hits the
 //! moment they open it in OSATE.
 //!
-//! This test covers the 117 first-party files — the ones under our control.
+//! This test covers every first-party file — the ones under our control.
+//! There are `FIRST_PARTY_MODELS` of them, and that number is asserted
+//! rather than described: the doc said 117 while the corpus held 120,
+//! because the blindness guard below only required `> 100` and prose is
+//! not a gate. Adding a first-party model was already a three-file edit
+//! (the two interop baselines have coverage tests), so pinning it exactly
+//! costs nothing and stops the count from rotting again.
 //!
 //! ## The gap that motivated it
 //!
@@ -45,10 +51,13 @@
 //! ## What this does NOT claim
 //!
 //! That an accepted file is *AS5506-legal*. spar's parser is more permissive
-//! than the standard in at least one known way (it accepts a port named `in`
-//! or `out`, which the 548-file OSATE corpus never does in 5414 declarations),
-//! so "spar accepts it" and "OSATE accepts it" are different questions. The
-//! second needs OSATE and is Tier-B's job. This test pins the first.
+//! than the standard in at least one known way: it accepts a port named `in`
+//! or `out`, which not one of the 1895 vendored models does — re-derive with
+//! `grep -rniE '^[[:space:]]*(in|out)[[:space:]]*:' test-data/interop`, which
+//! returns 0. That is a presence claim anyone can check, unlike the count of
+//! declarations this line used to carry, which nobody could.
+//! So "spar accepts it" and "OSATE accepts it" are different questions,
+//! and the second needs OSATE — Tier-B's job. This test pins the first.
 
 use std::path::{Path, PathBuf};
 
@@ -64,6 +73,11 @@ const VENDORED: &[&str] = &[
 
 /// Files whose whole purpose is to be rejected.
 const MUST_REJECT: &str = "test-data/negative";
+
+/// How many `.aadl` files pulseengine itself writes. Asserted exactly by
+/// `every_first_party_aadl_has_the_verdict_it_claims`; see the note there
+/// for why this is a count and not a floor.
+const FIRST_PARTY_MODELS: usize = 120;
 
 /// Same opt-out marker `test_data_parse_roundtrip.rs` honours, so a fixture
 /// needs one convention rather than two.
@@ -144,10 +158,20 @@ fn every_first_party_aadl_has_the_verdict_it_claims() {
 
     // Blindness guard. An empty sweep agrees with every expectation, so zero
     // failures would otherwise be indistinguishable from zero files read.
-    assert!(
-        cases.len() > 100,
-        "expected >100 first-party .aadl files, found {} — the walk is broken \
-         or the corpus moved, and a sweep that reads nothing passes everything",
+    //
+    // EXACT, not a floor. `> 100` caught a broken walk but not a drifting
+    // corpus, which is how the module doc came to claim 117 files against a
+    // corpus of 120. Both interop baselines already have coverage tests that
+    // fail when a first-party model appears, so a new model is a joint edit
+    // either way; requiring the count here adds no work and keeps the stated
+    // number honest.
+    assert_eq!(
+        cases.len(),
+        FIRST_PARTY_MODELS,
+        "expected exactly {FIRST_PARTY_MODELS} first-party .aadl files, found \
+         {} — either the walk is broken (a sweep that reads nothing passes \
+         everything) or a model was added or removed, in which case update \
+         this constant together with the two interop baselines",
         cases.len()
     );
 
