@@ -2,18 +2,36 @@
 # A file NOT listed here that fails is a regression; the test says so.
 # Removing a line is progress -- re-bless to lock it in.
 #
-# path\tfirst-diagnostic
-test-data/interop/aadlib/examples/ping_spark/ping-local.aadl	expected END_KW
-test-data/interop/aadlib/examples/ping_spark/software.aadl	expected END_KW
-test-data/interop/aadlib/src/property_set/arp4761.aadl	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
-test-data/interop/aadlib/src/property_set/milstd882.aadl	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
-test-data/interop/aadlib/src/property_set/pok.aadl	expected R_PAREN
-test-data/interop/fmw/models/Pats_Initial/fooBarTypes.aadl	expected END_KW
-test-data/interop/fmw/models/Pats_Initial/tower_example_signals.aadl	expected END_KW
-test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/FC.aadl	expected `package` or `property set`
-test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/GS.aadl	expected `package` or `property set`
-test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/SW.aadl	expected `package` or `property set`
-test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAS.aadl	expected `package` or `property set`
-test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAV.aadl	expected `package` or `property set`
-test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/SW_Properties.aadl	expected END_KW
-test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/array.aadl	expected END_KW
+# Every row carries a CLASS token so a raw count of this file is not read as
+# raw debt (#427). Recognised classes, one per row:
+#
+#   SPAR-DEFECT       spar is too strict; a legal AADL construct we reject
+#   UPSTREAM-INVALID  the file itself is not AADL (e.g. committed git-conflict
+#                     markers); no parser should accept it
+#   AADLV1            AADL v1 syntax that AADLv2 does not admit (independently
+#                     rejected by OSATE too — see #421)
+#   MALFORMED-V2      malformed AADLv2 (missing keywords, out-of-place blocks)
+#
+# The tests in crates/spar-cli/tests/third_party_corpora.rs:
+#   * reject any row without a recognised class token, so a NEW entry has to
+#     be classified before it can be ratcheted in;
+#   * assert MAX_SPAR_DEFECT exactly (like MAX_TOO_PERMISSIVE in the OSATE
+#     agreement) — that number should only fall, and above OR below the
+#     declared value fails.
+#
+# Fields, tab-separated:
+#   path\tCLASS\tfirst-diagnostic
+test-data/interop/aadlib/examples/ping_spark/ping-local.aadl	AADLV1	expected END_KW
+test-data/interop/aadlib/examples/ping_spark/software.aadl	AADLV1	expected END_KW
+test-data/interop/aadlib/src/property_set/arp4761.aadl	SPAR-DEFECT	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
+test-data/interop/aadlib/src/property_set/milstd882.aadl	SPAR-DEFECT	expected a property owner: a component category, `all`, `port`, `feature`, `flow`, `mode`, `connections`, `access`, or `parameter`
+test-data/interop/aadlib/src/property_set/pok.aadl	SPAR-DEFECT	expected R_PAREN
+test-data/interop/fmw/models/Pats_Initial/fooBarTypes.aadl	MALFORMED-V2	expected END_KW
+test-data/interop/fmw/models/Pats_Initial/tower_example_signals.aadl	MALFORMED-V2	expected END_KW
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/FC.aadl	UPSTREAM-INVALID	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/GS.aadl	UPSTREAM-INVALID	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/SW.aadl	UPSTREAM-INVALID	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAS.aadl	UPSTREAM-INVALID	expected `package` or `property set`
+test-data/interop/fmw/models/agree/CASE_Simple_Example_Test/UAV.aadl	UPSTREAM-INVALID	expected `package` or `property set`
+test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/SW_Properties.aadl	UPSTREAM-INVALID	expected END_KW
+test-data/interop/fmw/models/regression_tests/agree/models/ArrayExample/AADL/array.aadl	UPSTREAM-INVALID	expected END_KW

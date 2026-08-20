@@ -3718,6 +3718,67 @@ artifacts:
       - type: traces-to
         target: REQ-PLUGFEST-001
 
+  - id: REQ-PLUGFEST-CORPUS-CLASSIFY-001
+    type: requirement
+    title: "Third-party gap rows shall carry a class; SPAR-DEFECT is a separate ratchet"
+    description: >
+      `test-data/interop/baseline/third-party-gaps.txt` ratcheted a SET OF
+      PATHS spar failed to parse (REQ-PLUGFEST-007). The right shape — one file
+      that starts failing cannot be paid for by one that starts passing — but
+      the file recorded only THAT spar rejected, so 14 rows read as 14 units of
+      debt. #427 opened all 14 and measured that it is **3**: seven files are
+      not AADL at all (committed git-conflict markers), two are AADLv1 (OSATE
+      rejects them too), two are malformed AADLv2, and three are the ones spar
+      owes a fix on.
+
+      WHY: bundling three genuine defects with eleven files no parser accepts
+      is how someone reads the file, sees "14", and either drives it to zero
+      by relaxing the parser onto invalid input, or absorbs a real regression
+      as one more of the mixed pile. Both moves are silent in the current
+      shape.
+
+      Two obligations, on the file where the count is read:
+
+      (a) EVERY ROW IS CLASSIFIED. A second tab-separated field shall carry
+      one of `SPAR-DEFECT`, `UPSTREAM-INVALID`, `AADLV1`, `MALFORMED-V2`. An
+      unrecognised or missing class reds `every_baseline_entry_is_classified`.
+      A new row cannot be ratcheted in without someone deciding what it is —
+      which is the moment someone actually looks.
+
+      (b) SPAR-DEFECT IS RATCHETED EXACTLY. `MAX_SPAR_DEFECT` is asserted
+      two-sided in `spar_defect_count_matches_ratchet`, in the same shape as
+      `MAX_TOO_PERMISSIVE` in `three_way_conformance.rs`: above the floor is a
+      regression the corpus is meant to red rather than absorb; below the
+      floor means a defect was fixed and the constant must fall so the ground
+      is held. The other three classes stay in the file — they document that
+      spar's rejection is agreed by OSATE, or that the file is not AADL — but
+      they are not accounted for in the debt number.
+
+      NON-VACUITY: three distinct baseline mutations each red a distinct
+      assertion, verified before land: (1) reclassifying one SPAR-DEFECT row
+      to UPSTREAM-INVALID drops the count and reds the below-floor branch;
+      (2) writing an unrecognised class token reds the classifier; (3) adding
+      a fabricated SPAR-DEFECT row raises the count and reds the above-floor
+      branch. Restoring the file greens all four tests.
+
+      WHAT THIS DOES NOT DO. Fix any of the three underlying spar defects.
+      #427 names them — EMV2-qualified property owners (two rows), and the
+      two-token category `virtual processor` inside `reference(...)` (one row)
+      — and each is a parser change that lands separately. This requirement
+      is that the corpus stops reading as 14 units of debt when it is 3, so
+      the fix is measured against the right number.
+
+      NOT PROPOSED HERE: whether the seven UPSTREAM-INVALID rows should stay
+      in the corpus at all. #427 lays out the trade-off and calls it a
+      maintainer decision; changing it changes what the count means and is a
+      separate move.
+    status: implemented
+    tags: [interop, plugfest, corpus, guardrail, v0390]
+    release: v0.39.0
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-007
+
   - id: REQ-TRACE-TOPOLOGY-010
     type: requirement
     title: "TopologyMissingWiring reconciliation check"
