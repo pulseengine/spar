@@ -4883,10 +4883,18 @@ artifacts:
       `status` alongside `release`, so it now catches a fields-nested `status:`
       mechanically; and the six ARCH statuses were promoted to the artifact key
       plane as `proposed` (the documented `planned -> proposed` mapping above).
-      HOLE (2) REMAINS OPEN and is separable: a plane-checker cannot help a file
-      that is never loaded, so it needs a `sources:` decision (add it, then fix
-      what surfaces, or delete it if dead) rather than a guard — left to the
-      maintainer.
+      HOLE (2) IS NOW CLOSED by REQ-GUARD-STATUS-SHADOW-001 (#375): the
+      `sources:` decision was made — DELETE. `safety/requirements.yaml` (23 ids)
+      and `safety/analysis.yaml` (71 ids, the same defect one file over, unnamed
+      here) were a frozen 2026-03-10 snapshot; every id in each already existed,
+      and was strictly ahead (later `links:`, later `status:`), in the
+      `safety/stpa/` copy rivet loads. So the "21 off-vocabulary statuses" were
+      the March values, already migrated in the loaded copy — nothing to fix in
+      them, only two dead files to remove. Adding them to `sources:` instead would
+      have injected 94 duplicate ids carrying STALE fields, which is strictly
+      worse. A new `tools/check_safety_sources.py` guard makes the deletion
+      durable: an artifact file under `safety/` outside every `sources:` path reds
+      the build, so a shadow safety file cannot silently return.
 
       RECONCILIATION (measured, not asserted): 303 raw `status:` text matches
       across 9 committed files, minus 21 in the unloaded file, minus 6 in the
@@ -4962,6 +4970,79 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-GUARD-RELEASE-PLANE-001
+      - type: traces-to
+        target: REQ-GUARD-STATUS-VOCAB-001
+
+  - id: REQ-GUARD-STATUS-SHADOW-001
+    type: requirement
+    title: "A safety artifact file rivet never loads shall not sit in the tree"
+    description: >
+      rivet loads artifacts only from the paths listed under `sources:` in
+      rivet.yaml. A YAML that carries an `artifacts:` list but sits under NO
+      source path is never loaded: `rivet validate` cannot see its ids, `rivet
+      list` never returns them, and no status/release/vocabulary guard reaches
+      them. It reads as tracked safety traceability — ids, statuses, `links:` —
+      while being tracked by nothing. This requirement is that no such shadow
+      file exists in the safety tree, enforced mechanically.
+
+      WHY (#375, hole 2): REQ-GUARD-STATUS-VOCAB-001 named two holes; hole (1)
+      closed as REQ-GUARD-STATUS-PLANE-001, hole (2) was the `sources:` decision
+      left to the maintainer for `safety/requirements.yaml` — 21 off-vocabulary
+      `status:` values (of its 23) in a file rivet never loads, because `safety/`
+      is not a source path (only `safety/stpa` is). Measurement widened it:
+      `safety/analysis.yaml` (71 ids) had the identical defect and was unnamed, so
+      it was 94 unloaded artifacts, not 21.
+
+      THE DECISION WAS DELETE, and it was decidable rather than a judgement call.
+      Every id in each shadow file also existed in the `safety/stpa/` file rivet
+      DOES load (0 ids unique to either shadow), and the loaded copy was strictly
+      ahead: `safety/stpa/requirements.yaml`'s STPA-REQ-* carried later `status:`
+      where the shadow held the pre-#87 values, and `safety/stpa/analysis.yaml`'s
+      H-* carried the `links:` blocks #140 added on 2026-04-22 that the shadow
+      lacked. Both shadow files were written by one commit on 2026-03-10 and never
+      touched again; the canonical copies moved twice after. So the "21
+      off-vocabulary statuses" were the March values, ALREADY migrated in the copy
+      rivet reads — nothing to fix in them, only two dead files to remove. Adding
+      them to `sources:` instead would have injected 94 duplicate ids carrying
+      STALE fields (non-fatal in the pinned rivet, so it would land quietly),
+      which is strictly worse than not loading them.
+
+      THE GUARD MAKES DELETION DURABLE, it is not a one-time cleanup.
+      `tools/check_safety_sources.py` parses `sources:` from rivet.yaml and walks
+      the safety tree; an artifact-bearing file under no source path reds the
+      build. It checks the ACTUAL `sources:` config, not a hardcoded allow-list,
+      so if the maintainer later adds `safety/` (or a specific file) to `sources:`
+      the same file stops being a shadow and the guard stops flagging it — no code
+      change here. Scoped to `safety/` on purpose: that is where an unloaded
+      artifact file masquerades as tracked safety evidence, and a repo-wide scan
+      would red on the many artifact-shaped fixtures under `tools/` that are
+      deliberately not sources.
+
+      NON-VACUITY IS EXERCISED, not asserted. On the real tree the guard exits 1
+      naming both shadow files BEFORE deletion and exits 0 AFTER — the oracle
+      flips. The self-test pins it further with counts, not just exit codes: a
+      `shadow-vs-covered` case (two artifact files differing only in directory)
+      requires shadow=1/covered=1, so a checker that flagged every safety file or
+      none reds it; a `covered-is-under-dir` case kills the exact-match-coverage
+      mutation; a `non-artifact-ignored` case pins that a YAML with no `artifacts:`
+      list is neither; and a `sources-interleaved` case pins that the parser reads
+      past rivet.yaml's inter-entry comment (a parser that stopped at the first
+      comment would drop `safety/stpa` and turn every file under it into a false
+      shadow). Stdlib-only and fail-closed, same as the sibling guardrails: a
+      rivet.yaml whose `sources:` it cannot read exits 2, not 0.
+
+      SCOPE HONESTY: this closes the file-existence half of hole (2) — no shadow
+      safety file, enforced. It does not assert anything about the CONTENT of the
+      loaded `safety/stpa/` copies; those are validated by rivet and the other
+      guards on their own plane. The equivalence that justified DELETE (every
+      shadow id present and strictly-behind in the loaded copy) was measured at
+      deletion time and is not re-run by this guard, because after deletion there
+      is nothing to compare — the durable property is "no unloaded safety artifact
+      file", which is exactly what the guard checks.
+    status: implemented
+    release: v0.39.0
+    tags: [process, guardrail, ci, tooling, traceability, safety]
+    links:
       - type: traces-to
         target: REQ-GUARD-STATUS-VOCAB-001
 

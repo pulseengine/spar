@@ -601,6 +601,30 @@ jobs:
             --artifacts-dir artifacts \
             --artifacts-dir safety/stpa
 
+      # ── safety-sources guardrail (#375, hole 2) ───────────────────────
+      # rivet loads artifacts only from the paths under `sources:` in rivet.yaml.
+      # A YAML with an `artifacts:` list that sits in the safety tree but under
+      # NO source path is never loaded: validate cannot see its ids, no
+      # status/release/vocabulary guard reaches them, and it reads as tracked
+      # safety evidence while being tracked by nothing. safety/requirements.yaml
+      # (23 ids) and safety/analysis.yaml (71 ids) were exactly that — a frozen
+      # 2026-03-10 snapshot, every id already present and strictly ahead in the
+      # safety/stpa/ copy rivet does load. They were deleted; this guard makes the
+      # deletion durable so a shadow safety file cannot silently return.
+      #
+      # Same stdlib-only, fail-closed rationale as the guardrails above, and it
+      # belongs in THIS job for the same reason: rivet-validate has no `changes`
+      # gate, so it runs on the PR that re-adds an un-sourced file even when that
+      # PR touches nothing a path filter would select.
+      - name: Safety-sources guardrail self-test
+        # Self-test first: asserts classify() discriminates on COVERAGE
+        # (shadow=1/covered=1) and that the sources parser reads past the
+        # interleaved comment in rivet.yaml — so a refactor that made it toothless
+        # fails here, not by letting the real check below pass vacuously.
+        run: tools/check_safety_sources.py --self-test
+      - name: Safety-sources guardrail
+        run: tools/check_safety_sources.py
+
       # REQ-GUARD-GATE-EVIDENCE-003 (#403). run_verification.py SKIPS an
       # artifact with no `fields.steps[].run` and counts the skip toward exit 0,
       # so `Verification Gate (rivet-driven)` — a REQUIRED context — goes green
