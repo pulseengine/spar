@@ -31,7 +31,7 @@
 //! paths**, not a percentage, so a corpus that duplicates a file cannot make
 //! the number move without a real change.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const REPO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -49,6 +49,39 @@ const CORPORA: &[(&str, usize)] = &[
     ("test-data/interop/verdict", 132),
 ];
 
+/// Every third-party-gaps row must carry one of these class tokens as its
+/// second tab-separated field. #427: a raw count of the ratchet was being read
+/// as raw debt — nine tenths of it is not. The class token names WHY a row is
+/// in the file, so a "gap" file that is not AADL at all is not accounted for
+/// the same as a "gap" file spar is being too strict on.
+///
+/// A row whose class is not in this set fails `every_baseline_entry_is_classified`.
+/// So the moment someone adds a NEW row — which is the moment someone actually
+/// looks — the class has to be settled explicitly, in the file that the
+/// count is read from, not in a follow-up comment somewhere else.
+const CLASSES: &[&str] = &["SPAR-DEFECT", "UPSTREAM-INVALID", "AADLV1", "MALFORMED-V2"];
+
+/// SPAR-DEFECT is the only class that names debt spar owes — a legal AADL
+/// construct we reject. It is asserted EXACTLY, like `MAX_TOO_PERMISSIVE` in
+/// `three_way_conformance.rs`: above the floor is a regression, below the
+/// floor means the ground was held and the constant must fall to lock it in.
+///
+/// This number is not the total row count of `third-party-gaps.txt`; that
+/// total also includes files no parser accepts and files written to an
+/// older AADL revision. Bundling them into one number is what let #427's
+/// "14 vendored models that spar does not parse" read as 14 units of debt
+/// when it was 3.
+///
+/// Lower this number as (a) and (b) of #427 land. Do not raise it — a new
+/// SPAR-DEFECT is a regression the corpus is meant to catch, not to absorb.
+const MAX_SPAR_DEFECT: usize = 3;
+
+/// One parsed row from `third-party-gaps.txt` (path + class + first-diagnostic).
+struct Gap {
+    path: String,
+    class: String,
+}
+
 fn collect_aadl(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -63,12 +96,29 @@ fn collect_aadl(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn known_gaps() -> BTreeSet<String> {
-    std::fs::read_to_string(BASELINE)
-        .unwrap_or_else(|e| panic!("cannot read {BASELINE}: {e}"))
-        .lines()
+fn read_baseline() -> String {
+    std::fs::read_to_string(BASELINE).unwrap_or_else(|e| panic!("cannot read {BASELINE}: {e}"))
+}
+
+/// Every non-comment, non-empty row parsed into (path, class). A row without a
+/// second tab-separated field is kept with an empty class so the classifier
+/// test can call out the offending row rather than silently dropping it.
+fn parse_baseline(src: &str) -> Vec<Gap> {
+    src.lines()
         .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-        .map(|l| l.split('\t').next().unwrap_or(l).to_string())
+        .map(|l| {
+            let mut parts = l.splitn(3, '\t');
+            let path = parts.next().unwrap_or("").to_string();
+            let class = parts.next().unwrap_or("").to_string();
+            Gap { path, class }
+        })
+        .collect()
+}
+
+fn known_gaps() -> BTreeSet<String> {
+    parse_baseline(&read_baseline())
+        .into_iter()
+        .map(|g| g.path)
         .collect()
 }
 
@@ -179,5 +229,80 @@ fn every_baseline_entry_names_a_real_file() {
         "{} baseline entries name files that do not exist — remove them:\n  {}",
         missing.len(),
         missing.join("\n  ")
+    );
+}
+
+/// Every baseline row shall carry a recognised class in its second field. #427.
+///
+/// The point of the class is that a NEW row cannot be ratcheted in without
+/// someone deciding whether it is a spar defect, a genuinely invalid file, an
+/// AADLv1 leftover, or a malformed v2 file. Rejecting the unclassified row
+/// forces that decision at the moment someone actually looks.
+#[test]
+fn every_baseline_entry_is_classified() {
+    let rows = parse_baseline(&read_baseline());
+    let known: BTreeSet<&str> = CLASSES.iter().copied().collect();
+    let bad: Vec<String> = rows
+        .iter()
+        .filter(|g| !known.contains(g.class.as_str()))
+        .map(|g| format!("{}  [class={:?}]", g.path, g.class))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "{} row(s) in test-data/interop/baseline/third-party-gaps.txt do not \
+         carry a recognised class in field 2. Every row must be classified \
+         (see the file's header) — {:?}:\n  {}",
+        bad.len(),
+        CLASSES,
+        bad.join("\n  ")
+    );
+}
+
+/// The SPAR-DEFECT count in the baseline shall equal `MAX_SPAR_DEFECT` exactly.
+///
+/// The number is what #427 measured, held two-sided like `MAX_TOO_PERMISSIVE`.
+/// Above the floor: a new too-strict rejection has landed and the ratchet is
+/// meant to red rather than absorb it. Below the floor: a defect was fixed
+/// but the constant was not walked back, and the ground is at risk of being
+/// re-lost silently.
+///
+/// The class distribution (SPAR-DEFECT + others = total gaps) is also printed
+/// so a maintainer reading a failure sees the full breakdown, not just the
+/// number that went out of bounds.
+#[test]
+fn spar_defect_count_matches_ratchet() {
+    let rows = parse_baseline(&read_baseline());
+
+    let mut by_class: BTreeMap<String, usize> = BTreeMap::new();
+    for g in &rows {
+        *by_class.entry(g.class.clone()).or_insert(0) += 1;
+    }
+    let spar_defect = by_class.get("SPAR-DEFECT").copied().unwrap_or(0);
+
+    let breakdown = || -> String {
+        by_class
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    assert!(
+        spar_defect <= MAX_SPAR_DEFECT,
+        "SPAR-DEFECT count is {spar_defect}, above the ratchet floor of \
+         {MAX_SPAR_DEFECT}. A new spar-owned parser gap has been ratcheted \
+         into third-party-gaps.txt. This ratchet is exact so absorbing new \
+         defects into the raw total (as #427 called out) is not an option — \
+         fix the parser, or if the new row is not our defect, classify it as \
+         UPSTREAM-INVALID / AADLV1 / MALFORMED-V2. Full breakdown: {}",
+        breakdown()
+    );
+    assert!(
+        spar_defect >= MAX_SPAR_DEFECT,
+        "SPAR-DEFECT count is {spar_defect}, BELOW the ratchet floor of \
+         {MAX_SPAR_DEFECT} — a spar defect was fixed but MAX_SPAR_DEFECT was \
+         not walked back. Lower MAX_SPAR_DEFECT to {spar_defect} in \
+         third_party_corpora.rs to lock the win in. Full breakdown: {}",
+        breakdown()
     );
 }

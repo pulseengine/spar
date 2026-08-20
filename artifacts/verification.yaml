@@ -3870,6 +3870,48 @@ artifacts:
       - type: satisfies
         target: REQ-PLUGFEST-001
 
+  - id: TEST-PLUGFEST-CORPUS-CLASSIFY
+    type: feature
+    title: Third-party gap rows are classified; SPAR-DEFECT count is exact
+    description: >
+      Verifies REQ-PLUGFEST-CORPUS-CLASSIFY-001. Closes #427 (a)+(b).
+
+      Two tests in crates/spar-cli/tests/third_party_corpora.rs turn
+      third-party-gaps.txt from a raw path list into a classified ratchet:
+
+      * `every_baseline_entry_is_classified` reds if any non-comment row is
+        missing a second tab-separated field or carries a token outside
+        `CLASSES = {SPAR-DEFECT, UPSTREAM-INVALID, AADLV1, MALFORMED-V2}`.
+        The error message names the row and the offending token, so a new
+        entry has to be classified before it can be ratcheted in.
+      * `spar_defect_count_matches_ratchet` asserts the SPAR-DEFECT row count
+        equals `MAX_SPAR_DEFECT = 3` EXACTLY, two-sided like
+        `MAX_TOO_PERMISSIVE` in `three_way_conformance.rs`. Above the floor
+        reds with the mechanism named ("a new spar-owned parser gap has been
+        ratcheted into third-party-gaps.txt"). Below reds with the walk-back
+        instruction ("Lower MAX_SPAR_DEFECT to N in third_party_corpora.rs").
+
+      NON-VACUITY is executed, not asserted in prose. Three baseline
+      mutations, each proving a distinct assertion is load-bearing:
+      (1) reclassifying one SPAR-DEFECT row to UPSTREAM-INVALID reds the
+      below-floor branch; (2) writing `SOMETHING-ELSE` as a class reds the
+      classifier; (3) appending a bogus SPAR-DEFECT row reds the above-floor
+      branch. Restoring the file greens all four tests. Recorded here
+      because a green run alone would not prove the assertions can fail —
+      the same mode the parent REQ family (GATE-EVIDENCE) exists to close.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test third_party_corpora every_baseline_entry_is_classified
+        - run: cargo test -p spar --test third_party_corpora spar_defect_count_matches_ratchet
+    status: implemented
+    tags: [interop, plugfest, corpus, guardrail, v0390]
+    links:
+      - type: satisfies
+        target: REQ-PLUGFEST-CORPUS-CLASSIFY-001
+      - type: verifies
+        target: REQ-PLUGFEST-CORPUS-CLASSIFY-001
+
   - id: TEST-CODEGEN-WIT-VALID
     type: feature
     title: Generated WIT parses and resolves (wit-parser round-trip)
