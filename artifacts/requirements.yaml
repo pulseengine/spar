@@ -4895,7 +4895,7 @@ artifacts:
       loads. A plane-checker cannot see a file outside `sources:`; that needs a
       maintainer decision (add to `sources:` and fix what surfaces, or delete if
       dead), tracked separately.
-    status: implemented
+    status: verified
     release: v0.38.0
     tags: [process, guardrail, ci, tooling, traceability]
     links:
