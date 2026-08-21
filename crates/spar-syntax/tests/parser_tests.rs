@@ -1012,6 +1012,99 @@ end P;
     );
 }
 
+// AS-5506B Annex A: `in` and `out` are reserved words, so a feature (port)
+// cannot be named with one. spar accepted `in : in event port;` via the
+// keyword-as-name path (a keyword followed by `:` reads as a declaration
+// name); OSATE 2.18.0 rejects it at the grammar level. #420 category-1.
+#[test]
+fn port_named_in_is_rejected() {
+    let src = "\
+package P
+public
+  system S
+    features
+      in : in event port;
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("reserved word")),
+        "expected a reserved-word error for a port named `in`, got: {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn port_named_out_is_rejected() {
+    let src = "\
+package P
+public
+  system S
+    features
+      out : out event port;
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|e| e.msg.contains("reserved word")),
+        "expected a reserved-word error for a port named `out`, got: {:?}",
+        result.errors()
+    );
+}
+
+// Non-vacuity: the rejection must key on the *name* being `in`/`out`, not on
+// anything else in the declaration. A discriminating partner that differs
+// only in the port name (`inp`/`outp`, ordinary identifiers) must still parse
+// cleanly — otherwise the check above could be passing for the wrong reason.
+#[test]
+fn port_named_inp_outp_still_accepted() {
+    let src = "\
+package P
+public
+  system S
+    features
+      inp : in event port;
+      outp : out event port;
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert!(
+        result.errors().is_empty(),
+        "a port named `inp`/`outp` must still parse cleanly, got: {:?}",
+        result.errors()
+    );
+}
+
+// Rejecting the name must not drop the token: the tree still round-trips so
+// the reserved-word error is a diagnostic, not a rewrite.
+#[test]
+fn port_named_in_still_round_trips() {
+    let src = "\
+package P
+public
+  system S
+    features
+      in : in event port;
+  end S;
+end P;
+";
+    let result = parse(src);
+    assert_eq!(
+        result.syntax_node().text().to_string(),
+        src,
+        "syntax tree must round-trip even when the name is rejected"
+    );
+}
+
 // Regression for the unary-sign operator-precedence bug introduced when
 // property_expression was split into outer-binary-loop + _primary: the
 // PLUS/MINUS arm was still recursing into the outer function, so the sign
