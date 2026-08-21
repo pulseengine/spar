@@ -3901,7 +3901,7 @@ artifacts:
       behaviour in the meantime. Not claimed: that this closes #420, or that
       `in`/`out` is the last reserved word spar admits as an identifier
       (subcomponent/connection/other name positions are not audited here).
-    status: implemented
+    status: verified
     release: v0.42.0
     tags: [parser, interop, plugfest, reverse, v0420]
     links:
