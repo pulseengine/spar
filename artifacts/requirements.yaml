@@ -5499,7 +5499,7 @@ artifacts:
       caught", never "these suites are complete": the table is an allow-list that
       grows, and a hazard with no mutant in it is a known gap, not a hidden one.
       Broadening the table toward all guard tools is left to a successor.
-    status: implemented
+    status: verified
     release: v0.40.0
     tags: [process, guardrail, ci, tooling, mutation-testing]
     links:
