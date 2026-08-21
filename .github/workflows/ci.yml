@@ -581,6 +581,25 @@ jobs:
       # every filter is vacuous.
       - name: Verification-filter guardrail
         run: tools/check_verification_filters.py
+
+      # REQ-GUARD-SELFTEST-POTENCY-001 (#405). A meta-guard over the self-tests
+      # above: every guardrail here ships a `--self-test`, and a self-test case
+      # whose assertion does not actually depend on the code under test is green
+      # forever — including after the behaviour it was meant to pin has rotted
+      # out. This applies a declared table of source mutations to those tools and
+      # asserts each tool's `--self-test` now FAILS; a mutant the suite still
+      # passes (a SURVIVOR) is a case that is not load-bearing, and reds the
+      # build. It mechanises the claim REQ-GUARD-GATE-EVIDENCE-002 once made in
+      # prose and withdrew as false (#405). Self-test first, same reason as every
+      # guardrail here: its own decision table (the SAME mutation CAUGHT by a
+      # potent stub and SURVIVED by a blind one) is what makes it a detector
+      # rather than an assertion. Stdlib-only and self-contained — it runs mutated
+      # COPIES in a temp dir, so the tree is never modified even if a run is
+      # killed mid-flight.
+      - name: Self-test potency guardrail self-test
+        run: tools/check_self_test_potency.py --self-test
+      - name: Self-test potency guardrail
+        run: tools/check_self_test_potency.py
       # REQ-GUARD-GATE-EVIDENCE-002 (h) + REQ-GUARD-FUZZ-SMOKE-001 (#406). Two
       # workflows run the fuzz harnesses from lists maintained apart from
       # fuzz/Cargo.toml's `[[bin]]` declarations: fuzz-nightly's matrix `include`
