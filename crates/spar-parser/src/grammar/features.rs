@@ -50,6 +50,19 @@ fn feature(p: &mut Parser, container: Option<super::categories::Category>) {
     // Name
     if p.at(SyntaxKind::IDENT) {
         p.bump(SyntaxKind::IDENT);
+    } else if (p.at(SyntaxKind::IN_KW) || p.at(SyntaxKind::OUT_KW)) && p.nth(1) == SyntaxKind::COLON
+    {
+        // AS-5506B Annex A: `in` and `out` are reserved words, so a feature
+        // cannot be named with one. spar reached here through the general
+        // keyword-as-name path (a keyword followed by `:` reads as a name);
+        // OSATE 2.18.0 rejects `in`/`out` as a port name at the grammar level
+        // ("no viable alternative at input 'in'"). Report it, but still consume
+        // the token so the rest of the declaration parses and the tree
+        // round-trips. #420 category-1.
+        p.error(
+            "a feature cannot be named `in` or `out`; they are reserved words (AS-5506B Annex A)",
+        );
+        p.bump_any();
     } else if p.at_name() {
         p.bump_any(); // keyword-as-name
     }

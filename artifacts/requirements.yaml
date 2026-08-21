@@ -3842,6 +3842,72 @@ artifacts:
       - type: traces-to
         target: REQ-PLUGFEST-CORPUS-CLASSIFY-001
 
+  - id: REQ-PLUGFEST-PORTNAME-INOUT-001
+    type: requirement
+    title: "spar shall reject a feature named `in` or `out` (AS-5506B Annex A reserved words)"
+    description: >
+      One of the category-1 (grammar-level permissiveness) items #420 measured:
+      spar accepted a feature — in practice a port — NAMED with the reserved
+      word `in` or `out`, e.g. `in : in event port;`. `in`/`out` are AS-5506B
+      Annex A reserved words and cannot be identifiers, so this is a too-
+      PERMISSIVE gap: spar admitted invalid AADL a user's model could carry.
+
+      SHALL: in a feature declaration, the name token shall not be `in` or
+      `out`. spar reached the acceptance through its general keyword-as-name
+      path (`Parser::at_name` treats any keyword followed by `:` as a
+      declaration name); the fix special-cases `IN_KW`/`OUT_KW` in the feature
+      name position (`crates/spar-parser/src/grammar/features.rs`,
+      `feature()`), emitting "a feature cannot be named `in` or `out`; they are
+      reserved words (AS-5506B Annex A)". The offending token is still consumed
+      so the remainder of the declaration parses and the tree round-trips —
+      the reject is a diagnostic, not a rewrite. Scope is exactly the feature-
+      name position; keyword-as-name for other keywords, and `in`/`out` in
+      their legal roles (feature direction `in`/`out`/`in out`, `in modes`, `in
+      binding`), are untouched.
+
+      ORACLE: `crates/spar-syntax/tests/parser_tests.rs` —
+      `port_named_in_is_rejected` / `port_named_out_is_rejected` assert the
+      diagnostic; `port_named_in_still_round_trips` asserts losslessness.
+
+      NON-VACUITY, executed not asserted. Before the fix all three rejection
+      inputs parsed with zero errors (verified against the built test binary);
+      after, they red. The discriminating partner `port_named_inp_outp_still_
+      accepted` — identical but for the port names `inp`/`outp` (ordinary
+      identifiers) — parses cleanly both before and after, so the check keys on
+      the name being a reserved word and nothing else. Reverting the
+      `features.rs` branch re-greens the three rejection tests, proving they
+      bite.
+
+      Corroboration (external, not re-run here): OSATE 2.18.0 rejects a port
+      named `in`/`out` at the GRAMMAR level ("no viable alternative at input
+      'in'") — recorded on #420 — and not one of the 1895 vendored interop
+      models names a feature `in`/`out` (`grep -rniE
+      '^[[:space:]]*(in|out)[[:space:]]*:' test-data/interop` returns 0, re-run
+      here over every first-party and vendored .aadl: 0 hits). So the
+      tightening removes a latent gap without rejecting any AADL that is
+      actually written, and the graded conformance suites (`osate_agreement.rs`
+      too-permissive floor 53, too-strict 0; `three_way_conformance.rs`) were
+      re-run and hold their ceilings unchanged — no first-party file flips
+      verdict.
+
+      HONEST CEILING / DEFERRED. This ships the parser behaviour and its inline
+      oracle only. The reverse-direction discipline pins such a rule with a
+      `test-data/negative/**` fixture carrying MEASURED OSATE and Ocarina
+      verdicts (the two graded baselines are asserted set-equal and must cover
+      every first-party file). This automated environment has neither a
+      downloaded OSATE nor Ocarina, and a baseline row must be measured, never
+      assumed, so the corpus fixture + its two baseline rows are DEFERRED to a
+      run or maintainer with both oracles — the inline tests fully pin the
+      behaviour in the meantime. Not claimed: that this closes #420, or that
+      `in`/`out` is the last reserved word spar admits as an identifier
+      (subcomponent/connection/other name positions are not audited here).
+    status: implemented
+    release: v0.42.0
+    tags: [parser, interop, plugfest, reverse, v0420]
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-006
+
   - id: REQ-TRACE-TOPOLOGY-010
     type: requirement
     title: "TopologyMissingWiring reconciliation check"
