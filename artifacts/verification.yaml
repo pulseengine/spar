@@ -4778,6 +4778,67 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-GATE-EVIDENCE-004
 
+  - id: TEST-GUARD-SELFTEST-POTENCY
+    type: feature
+    title: The potency harness reds when a load-bearing self-test case is removed, and refuses to judge a mutation it did not apply
+    description: >
+      Verifies REQ-GUARD-SELFTEST-POTENCY-001 through the 12-case decision table
+      in tools/check_self_test_potency.py --self-test AND the default run over the
+      declared mutant table, both of which run as their own CI steps in the
+      rivet-validate job, beside the sibling guardrail self-tests.
+
+      THE LOAD-BEARING PAIR is non-vacuity made executable. The harness's own
+      self-test applies the SAME source mutation (`>` -> `>=`) to two stub tools
+      that differ ONLY in whether the stub's suite carries the boundary case that
+      reads the mutated behaviour: the potent stub must yield CAUGHT, the blind
+      stub must yield SURVIVED. A harness whose verdict did not depend on the
+      target suite would give both the same answer and could not tell them apart,
+      so these two cases are what make the whole check a detector rather than an
+      assertion.
+
+      IT IS ALSO MEASURED AGAINST THE REAL TOOLS, not only stubs. The default run
+      declares four mutants across the two tools #405 falsified
+      (check_verification_filters.py, check_lean_sorries.py), including the exact
+      two the issue demonstrated — `vf-colon-tail` (`filt` matched by its `::`
+      tail) and `ls-drop-below-floor` (the deleted ratchet notice). All four are
+      CAUGHT on this tree. That the run can FAIL was confirmed by removing the
+      catching case: dropping the `::` case reds `vf-colon-tail`, dropping the
+      `axiom COUNTS` case reds `ls-drop-axiom` — the oracle flips with the input,
+      which is the property that distinguishes it from a check that is green no
+      matter what.
+
+      THE TRAP IT IS BUILT AROUND is a mutation that silently fails to apply and
+      reads as "caught" while testing nothing — a shape this repo has been bitten
+      by. Four cases pin the fail-closed behaviour: a `old` that has drifted out
+      of the source, a no-op `new == old`, an ambiguous match count, and a tool
+      whose baseline self-test is already red each ERROR (exit 2) rather than
+      returning a CAUGHT/SURVIVED verdict. Three further cases pin check()'s
+      aggregation — a survivor reds the table (exit 1), an errored mutant takes
+      precedence over a survivor (exit 2), and duplicate ids are rejected before
+      any mutant runs.
+
+      HONEST CEILING: this shows the cases PRESENT in the four declared mutants'
+      target suites are load-bearing and stay so. It does NOT show those suites
+      are complete — mutation testing cannot — nor does the seeded table yet
+      cover the other guard tools; broadening it is the successor named in the
+      requirement. Reachability is unconditional in the sense that matters here:
+      the rivet-validate job declares no `changes` gate, so both steps run on
+      every PR, and a PR touching tools/*.py is `code` regardless. The failure
+      mode is fail-closed — a missing python3 exits 127 and reds the required
+      check — so the PR that lands this is its own first measurement.
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_self_test_potency.py --self-test
+        - run: tools/check_self_test_potency.py
+    status: implemented
+    tags: [process, guardrail, ci, tooling, mutation-testing, v0400]
+    links:
+      - type: satisfies
+        target: REQ-GUARD-SELFTEST-POTENCY-001
+      - type: verifies
+        target: REQ-GUARD-SELFTEST-POTENCY-001
+
   - id: TEST-GUARD-FMT-WORKSPACES
     type: feature
     title: The format gate fails on a dirty nested workspace and on a discovery that came up short

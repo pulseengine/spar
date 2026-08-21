@@ -5436,6 +5436,76 @@ artifacts:
       - type: traces-to
         target: REQ-GUARD-GATE-EVIDENCE-001
 
+  - id: REQ-GUARD-SELFTEST-POTENCY-001
+    type: requirement
+    title: A guard's self-test cases shall be shown load-bearing by a declared mutation it must catch
+    description: >
+      Every artifact guardrail in this repo ships a `--self-test` that runs
+      BEFORE the gate it protects, so a refactor that makes the gate toothless
+      fails loudly instead of letting the real gate pass vacuously. A self-test
+      is itself an operation that can produce "nothing happened" while reading
+      as "it worked": a case whose assertion never actually depends on the code
+      under test is green forever, including after the behaviour it was meant to
+      pin has rotted out from under it. This requirement is that the potency of
+      those cases be MECHANISED rather than asserted.
+
+      WHY (#405). REQ-GUARD-GATE-EVIDENCE-002 once asserted in prose that "each
+      was mutation-tested to show its cases are load-bearing rather than merely
+      green." That universal was false and was withdrawn: an adversarial review
+      applied one-line mutations to two of the six tools and their self-tests
+      stayed green — `filt in name` -> `filt.split('::')[-1] in name` in
+      `check_verification_filters.py` (blind to the 16-of-60 filters carrying
+      `::`), and deleting the below-floor ratchet-notice branch of
+      `check_lean_sorries.py` (no case read what it printed). Both holes were
+      then closed by hand, but nothing PREVENTED them reopening: delete either
+      case and the suite is green again, silently — the same
+      unfalsifiable-by-construction shape the -002 lineage is about, one level
+      up. The withdrawn claim named a mechanism it did not have; this is that
+      mechanism.
+
+      SHALL: a declared table of source mutations, each naming a guard tool and
+      the self-test case expected to catch it, shall be enforced on every PR. For
+      each mutant: apply the textual substitution to the tool's source, run that
+      tool's `--self-test`, and the run shall exit non-zero (CAUGHT). A mutant
+      the suite still passes (SURVIVED) reds the build; so does a declaration
+      that cannot be applied exactly as written, or a tool whose baseline
+      self-test is not already green.
+
+      ORACLE: `tools/check_self_test_potency.py` (default run over the declared
+      table; `--self-test` for the harness's own decision table). Exit 0 iff
+      every declared mutant is caught, 1 on a survivor, 2 on a
+      declaration/baseline fault that means potency could not be judged. Seeded
+      with four mutants across the two tools #405 falsified, including the exact
+      two it demonstrated.
+
+      NON-VACUITY, executed rather than asserted. The harness's own `--self-test`
+      runs the SAME mutation against two stub tools that differ only in whether
+      the stub's suite carries the case that reads the mutated behaviour: the
+      potent stub yields CAUGHT, the blind stub yields SURVIVED — distinct
+      inputs, distinct outputs, so a harness whose verdict ignored the suite
+      could not tell them apart. Against the real tools it was confirmed the same
+      way: removing the `::` case reds `vf-colon-tail`, and removing the axiom
+      case reds `ls-drop-axiom`. A mutant whose `old` text has drifted, a no-op
+      `new == old`, an ambiguous match count, and a red baseline suite each ERROR
+      (exit 2) rather than being smoothed into a verdict — the harness refuses to
+      report a mutation it did not actually exercise, which is the specific trap
+      (a mutation silently failing to apply and reading as "caught") this repo
+      has been bitten by before.
+
+      NOT CLAIMED. Mutation testing shows the cases PRESENT are load-bearing; it
+      cannot show the case set COVERS the hazard. A tool with one well-pinned
+      case passes every mutation that flips that case and still misses a defect
+      it has no case for. A green run here means "the declared mutants are all
+      caught", never "these suites are complete": the table is an allow-list that
+      grows, and a hazard with no mutant in it is a known gap, not a hidden one.
+      Broadening the table toward all guard tools is left to a successor.
+    status: implemented
+    release: v0.40.0
+    tags: [process, guardrail, ci, tooling, mutation-testing]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-002
+
   - id: REQ-GUARD-FUZZ-SMOKE-001
     type: requirement
     title: The fuzz-target guardrail shall audit the REQUIRED context, not only the advisory one
