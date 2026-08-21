@@ -3835,7 +3835,7 @@ artifacts:
       (FG_System_pkg, ModalDualFGS, ThreeStateDualFGS) still fail on a separate,
       later construct, so -005 is NOT closed here. Not claimed: that these two
       forms are the last too-strict property-owner gaps.
-    status: implemented
+    status: verified
     release: v0.41.0
     tags: [parser, interop, plugfest, corpus, emv2, v0410]
     links:
