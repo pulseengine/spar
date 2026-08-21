@@ -74,7 +74,12 @@ const CLASSES: &[&str] = &["SPAR-DEFECT", "UPSTREAM-INVALID", "AADLV1", "MALFORM
 ///
 /// Lower this number as (a) and (b) of #427 land. Do not raise it — a new
 /// SPAR-DEFECT is a regression the corpus is meant to catch, not to absorb.
-const MAX_SPAR_DEFECT: usize = 3;
+///
+/// #434 landed all three: (a) annex-qualified property owners
+/// (`{emv2}**error type` — arp4761.aadl, milstd882.aadl) and (b) a two-token
+/// category inside `reference (...)` (`virtual processor` — pok.aadl) now
+/// parse, so the count walked 3 -> 0.
+const MAX_SPAR_DEFECT: usize = 0;
 
 /// One parsed row from `third-party-gaps.txt` (path + class + first-diagnostic).
 struct Gap {
@@ -287,22 +292,29 @@ fn spar_defect_count_matches_ratchet() {
             .join(", ")
     };
 
-    assert!(
-        spar_defect <= MAX_SPAR_DEFECT,
-        "SPAR-DEFECT count is {spar_defect}, above the ratchet floor of \
-         {MAX_SPAR_DEFECT}. A new spar-owned parser gap has been ratcheted \
-         into third-party-gaps.txt. This ratchet is exact so absorbing new \
-         defects into the raw total (as #427 called out) is not an option — \
-         fix the parser, or if the new row is not our defect, classify it as \
-         UPSTREAM-INVALID / AADLV1 / MALFORMED-V2. Full breakdown: {}",
-        breakdown()
-    );
-    assert!(
-        spar_defect >= MAX_SPAR_DEFECT,
-        "SPAR-DEFECT count is {spar_defect}, BELOW the ratchet floor of \
-         {MAX_SPAR_DEFECT} — a spar defect was fixed but MAX_SPAR_DEFECT was \
-         not walked back. Lower MAX_SPAR_DEFECT to {spar_defect} in \
-         third_party_corpora.rs to lock the win in. Full breakdown: {}",
-        breakdown()
-    );
+    // Two-sided and exact, matched on `Ordering` rather than a pair of `<=` /
+    // `>=` assertions: once the ratchet reaches its floor of 0, `spar_defect >=
+    // 0` is vacuously true for `usize` (clippy `absurd_extreme_comparisons`,
+    // and the below-floor tooth would be meaningless anyway). `cmp` keeps both
+    // distinct diagnostics — above is a regression, below is an un-walked win —
+    // at every value of the constant, including 0.
+    match spar_defect.cmp(&MAX_SPAR_DEFECT) {
+        std::cmp::Ordering::Greater => panic!(
+            "SPAR-DEFECT count is {spar_defect}, above the ratchet floor of \
+             {MAX_SPAR_DEFECT}. A new spar-owned parser gap has been ratcheted \
+             into third-party-gaps.txt. This ratchet is exact so absorbing new \
+             defects into the raw total (as #427 called out) is not an option — \
+             fix the parser, or if the new row is not our defect, classify it as \
+             UPSTREAM-INVALID / AADLV1 / MALFORMED-V2. Full breakdown: {}",
+            breakdown()
+        ),
+        std::cmp::Ordering::Less => panic!(
+            "SPAR-DEFECT count is {spar_defect}, BELOW the ratchet floor of \
+             {MAX_SPAR_DEFECT} — a spar defect was fixed but MAX_SPAR_DEFECT was \
+             not walked back. Lower MAX_SPAR_DEFECT to {spar_defect} in \
+             third_party_corpora.rs to lock the win in. Full breakdown: {}",
+            breakdown()
+        ),
+        std::cmp::Ordering::Equal => {}
+    }
 }

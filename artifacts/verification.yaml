@@ -3912,6 +3912,59 @@ artifacts:
       - type: verifies
         target: REQ-PLUGFEST-CORPUS-CLASSIFY-001
 
+  - id: TEST-PLUGFEST-CORPUS-OWNER
+    type: feature
+    title: Annex-qualified property owners and two-token reference() categories parse; the SPAR-DEFECT ratchet is walked to zero
+    description: >
+      Verifies REQ-PLUGFEST-CORPUS-OWNER-001. Lands the three SPAR-DEFECT
+      parser gaps #434 re-homed from #427, and re-arms the same two-sided
+      ratchet TEST-PLUGFEST-CORPUS-CLASSIFY set up.
+
+      THE ORACLE IS `third_party_corpora.rs`, unchanged in shape. Fixing the
+      parser makes arp4761.aadl, milstd882.aadl and pok.aadl parse; their rows
+      are removed from `third-party-gaps.txt`; the SPAR-DEFECT count falls to 0
+      and `MAX_SPAR_DEFECT` is walked 3 -> 0 to match. `spar_defect_count_
+      matches_ratchet` is two-sided, so a fix that did not walk the constant
+      down would red the below-floor branch — the walk-down is forced, not
+      optional. `third_party_corpora_parse_without_regression` proves the three
+      files now parse and none of the other corpora regressed.
+
+      NON-VACUITY is executed against the built binary, distinct inputs to
+      distinct verdicts (not a green-either-way check):
+      (a) `applies to ({emv2}**error type)` parses; `applies to ({emv2}**)`
+          reds "expected an annex property owner name after `**`"; the missing
+          brace `applies to ({emv2 error type)` reds "expected R_CURLY".
+      (b) `reference (virtual processor)` parses; `reference (virtual widget)`
+          — `virtual` not followed by `bus`/`processor` — still reds
+          "expected R_PAREN"; `reference (processor, Pkg::Type)` still parses.
+      Reverting either parser branch re-reds the ratchet by exactly its files,
+      so each branch is load-bearing for the count it moves.
+
+      NO NEW TOO-PERMISSIVE. The graded `osate_agreement.rs` and
+      `three_way_conformance.rs` suites hold their ceilings over the 120
+      first-party models — this is a too-strict fix and is not paid for by
+      loosening elsewhere. As a consequence of (a),
+      `EMV2TR_Test_Files/MyErrorProperties.aadl` (OSATE corpus) now parses and
+      was re-blessed out of `spar-gaps.txt`; `osate_corpus_parses_without_
+      regression` stays green.
+
+      HONEST CEILING: syntax acceptance only — the annex owner path is consumed
+      without EMV2 meta-model validation (spar has no such layer). One of the
+      four files REQ-PLUGFEST-005 names is closed by side effect; the other
+      three fail on a separate later construct and remain gapped.
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test third_party_corpora
+        - run: cargo test -p spar --test osate_corpus osate_corpus_parses_without_regression
+    status: implemented
+    tags: [parser, interop, plugfest, corpus, emv2, v0410]
+    links:
+      - type: satisfies
+        target: REQ-PLUGFEST-CORPUS-OWNER-001
+      - type: verifies
+        target: REQ-PLUGFEST-CORPUS-OWNER-001
+
   - id: TEST-CODEGEN-WIT-VALID
     type: feature
     title: Generated WIT parses and resolves (wit-parser round-trip)

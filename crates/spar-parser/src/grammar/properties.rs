@@ -531,11 +531,30 @@ fn classifier_ref_list_in_parens(p: &mut Parser) {
         return;
     }
     p.bump(SyntaxKind::L_PAREN);
-    super::classifier_ref(p);
+    classifier_ref_list_element(p);
     while p.eat(SyntaxKind::COMMA) {
-        super::classifier_ref(p);
+        classifier_ref_list_element(p);
     }
     p.expect(SyntaxKind::R_PAREN);
+}
+
+/// One element of a `reference(...)` / `classifier(...)` category list.
+///
+/// A referent category may be a *two-token* component category (`virtual bus`,
+/// `virtual processor`). `classifier_ref` consumes only the first keyword of
+/// such a pair as an `IDENT` and stops, leaving `processor` to fail the
+/// enclosing `expect(R_PAREN)` — the `reference (virtual processor)` rejection
+/// in pok.aadl:52 (#434). Single-token categories (`processor`, `bus`) already
+/// survive by being consumed as an `IDENT` by `classifier_ref`, so only the
+/// two-token `virtual …` forms need lifting out; everything else, including
+/// dotted classifier paths, falls through unchanged.
+fn classifier_ref_list_element(p: &mut Parser) {
+    use SyntaxKind::*;
+    if p.at(VIRTUAL_KW) && matches!(p.nth(1), BUS_KW | PROCESSOR_KW) {
+        super::component_category(p);
+    } else {
+        super::classifier_ref(p);
+    }
 }
 
 /// Parse an optional numeric range constraint on `aadlinteger`/`aadlreal`
@@ -675,6 +694,32 @@ fn applies_to_category(p: &mut Parser) {
         // may also apply to ports, flows, modes, connections, access
         // features, and parameters — not just component categories.
         p.bump_any();
+    } else if p.at(L_CURLY) {
+        // Annex-qualified property owner (AS5506 §4.8 / Annex A):
+        //   `{emv2}**error type`, `{emv2}**type set`, `{emv2}**error flow`, ...
+        // The `{ident}` names the annex, `**` qualifies into it, and the owner
+        // name that follows is an annex meta-model element. That name is
+        // multi-word and freely uses keywords (`error type`, `type set`,
+        // `error behavior state`), so `type` arrives as `TYPE_KW` and `set` as
+        // `SET_KW` rather than `IDENT`; it is consumed token-by-token up to the
+        // list separator rather than as a single `IDENT`.
+        //
+        // Rejected by spar until #434 (arp4761.aadl:48, milstd882.aadl:50);
+        // OSATE accepts both files with 0 diagnostics. The `{ident}` here is a
+        // plain `L_CURLY`, distinct from the `{**` annex-open token, so the
+        // lexer already yields these tokens (see the #434 `parse --tree`).
+        p.bump(L_CURLY);
+        p.expect(IDENT);
+        p.expect(R_CURLY);
+        p.expect(STAR);
+        p.expect(STAR);
+        // Owner name: at least one token, then greedily to the list separator.
+        if p.at(COMMA) || p.at(R_PAREN) || p.at_end() {
+            p.error("expected an annex property owner name after `**`");
+        }
+        while !p.at(COMMA) && !p.at(R_PAREN) && !p.at_end() {
+            p.bump_any();
+        }
     } else if p.at(IDENT) {
         p.bump(IDENT);
     } else {
