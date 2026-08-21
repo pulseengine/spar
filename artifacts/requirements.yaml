@@ -3779,6 +3779,69 @@ artifacts:
       - type: traces-to
         target: REQ-PLUGFEST-007
 
+  - id: REQ-PLUGFEST-CORPUS-OWNER-001
+    type: requirement
+    title: "spar shall parse annex-qualified property owners and two-token categories in reference(...)"
+    description: >
+      The three SPAR-DEFECT rows that REQ-PLUGFEST-CORPUS-CLASSIFY-001 measured
+      (#427) and #434 re-homed name two too-strict parser gaps — legal AADL
+      OSATE accepts with 0 diagnostics that spar rejected. This requirement is
+      that both parse.
+
+      SHALL (a): an `applies to (...)` property-owner list shall accept an
+      annex-qualified owner `{<annex>}**<owner name>`, where the owner name is
+      an annex meta-model element that is multi-word and freely uses keywords
+      (`{emv2}**error type`, `{emv2}**type set`, `{emv2}**error behavior
+      state`, ...). The `{<annex>}` here lexes as `L_CURLY IDENT R_CURLY` (it is
+      NOT the `{**` annex-open token — `{emv2}` is `{` then `e`), so no lexer
+      work is involved; the owner name is consumed token-by-token to the list
+      separator (`,` / `)`) rather than as a single `IDENT`. Rejected until
+      #434 at arp4761.aadl:48 and milstd882.aadl:50.
+
+      SHALL (b): a `reference (...)` / `classifier (...)` referent-category list
+      shall accept the two-token component categories `virtual bus` and
+      `virtual processor`. `classifier_ref` consumed only the first keyword of
+      the pair as an `IDENT`, leaving `processor` to fail the enclosing
+      `expect(R_PAREN)` — pok.aadl:52 `reference (virtual processor)`.
+      Single-token categories and dotted classifier paths already parsed and are
+      unchanged.
+
+      ORACLE: `crates/spar-cli/tests/third_party_corpora.rs`. The three files
+      leave `third-party-gaps.txt` and `MAX_SPAR_DEFECT` walks 3 -> 0, asserted
+      two-sided in `spar_defect_count_matches_ratchet` (below-floor reds until
+      the constant falls). No new too-permissive divergence: the graded
+      conformance suites (`osate_agreement.rs`, `three_way_conformance.rs`) stay
+      at their ceilings over the 120 first-party models.
+
+      NON-VACUITY, executed not asserted. Distinct inputs yield distinct
+      verdicts against the built binary: (a) `{emv2}**error type` parses, but
+      an empty owner name `{emv2}**)` reds with "expected an annex property
+      owner name after `**`" and a missing `}` (`{emv2 error type`) reds
+      "expected R_CURLY"; (b) `reference (virtual processor)` parses, but
+      `reference (virtual widget)` — a `virtual` not followed by
+      `bus`/`processor` — still reds `expected R_PAREN`, and single-token /
+      dotted lists still parse. Each fix walks the ratchet down by exactly its
+      files: reverting either branch reds the two-sided assertion.
+
+      HONEST CEILING. This is a SYNTAX acceptance: spar consumes the annex owner
+      path without validating that the named element exists in the EMV2
+      meta-model (spar has no EMV2 semantic layer), consistent with how it
+      treats other annex bodies. The graded corpora are OSATE-authored so OSATE
+      accepts them by construction; on the ungraded third-party set the too-
+      strict direction is the only one this closes. As a direct consequence of
+      (a), the OSATE-corpus file `EMV2TR_Test_Files/MyErrorProperties.aadl` now
+      parses and was re-blessed out of `spar-gaps.txt`; this advances
+      REQ-PLUGFEST-005 by one file only — the other three files it names
+      (FG_System_pkg, ModalDualFGS, ThreeStateDualFGS) still fail on a separate,
+      later construct, so -005 is NOT closed here. Not claimed: that these two
+      forms are the last too-strict property-owner gaps.
+    status: implemented
+    release: v0.41.0
+    tags: [parser, interop, plugfest, corpus, emv2, v0410]
+    links:
+      - type: traces-to
+        target: REQ-PLUGFEST-CORPUS-CLASSIFY-001
+
   - id: REQ-TRACE-TOPOLOGY-010
     type: requirement
     title: "TopologyMissingWiring reconciliation check"

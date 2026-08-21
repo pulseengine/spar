@@ -2,7 +2,6 @@
 # parse. A file leaving this list = spar improved; a file that fails
 # but is absent from EITHER baseline = a regression the test rejects.
 # Regenerate: SPAR_CORPUS_BLESS=1 cargo test -p spar --test osate_corpus
-EMV2TR_Test_Files/MyErrorProperties.aadl
 LargeExamplesforEMV2TR/FG_System_pkg.aadl
 error-model/DualFGS/ModalDualFGS.aadl
 error-model/DualFGS/ThreeStateDualFGS.aadl
