@@ -5565,6 +5565,66 @@ artifacts:
       - type: traces-to
         target: REQ-GUARD-GATE-EVIDENCE-001
 
+  - id: REQ-GUARD-GATE-EVIDENCE-005
+    type: requirement
+    title: The verification runner shall not report success having executed zero commands
+    description: >
+      Successor to REQ-GUARD-GATE-EVIDENCE-003. -003 (and its
+      `check_evidence_steps.py`) bound the artifact PLANE: no new claiming
+      artifact may arrive with no runnable step, and the existing backlog is a
+      declared floor that may only fall. -003 stated explicitly that whether a
+      present step actually RUNS, and what the runner does when it does not, is
+      `run_verification.py`'s own question, left open. This is that question.
+
+      THE INSTANCE (#403, the reported title). `tools/run_verification.py` skips
+      an artifact with no `fields.steps[].run` and counts the skip toward exit 0.
+      Its terminal decision was `return 0 if failed_count == 0 else 1`, so a run
+      that matched artifacts and executed ZERO commands returned 0. Measured on
+      the live plane: `--filter '(and (= type "feature") (has-field
+      "test-name"))'` matched 64 artifacts, ran nothing, exit 0 — and
+      `Verification Gate (rivet-driven)` is a REQUIRED context, so it reported
+      green having verified nothing. The sibling `if not ids: return 1` had
+      already closed "the filter matched nothing"; "the filter matched, and
+      nothing ran" sat open one branch below — the same recognise-it-once shape
+      -003's own instance had.
+
+      SHALL: when the runner matches a non-empty artifact set but no verification
+      command executes — every match was skipped — it shall exit non-zero rather
+      than report success. A gate that measured nothing shall not read as a pass,
+      and the exit reason shall name the cause ("verified nothing"), so the
+      required context does not go green-adjacent with a silent explanation.
+
+      DELIBERATELY BOUNDED, so it does not re-open what -003 closed. A run where
+      at least one command executed and none failed still passes even if some
+      claiming artifact in the set was skipped: hard-failing the whole skip
+      backlog is precisely the "fail all 85 at once → a gate that gets disabled"
+      posture -003 chose a ratchet to avoid. This closes only the case where
+      NOTHING at all was verified.
+
+      ORACLE: `tools/run_verification.py --self-test` — the decision table over
+      `decide_exit(total, passed, failed, skipped)`, run with neither rivet nor a
+      shell, on every PR beside its sibling guardrail self-tests. Plus the
+      potency mutant `rv-zero-executed-lenient` in
+      `tools/check_self_test_potency.py`: replacing the zero-executed guard with a
+      condition that never fires reds the self-test (CAUGHT), so the load-bearing
+      case is shown to be load-bearing rather than merely green.
+
+      NON-VACUITY, executed not asserted: the `all skipped (nothing ran)` case
+      expects exit 1 where the pre-fix runner returned 0, and the verdict pins
+      the "verified nothing" reason text; a real pass is asserted NOT to carry
+      that text. Distinct inputs, distinct outputs.
+
+      NOT CLAIMED: that a present step is the RIGHT step or that it passes — that
+      remains `check_verification_filters.py`'s and the per-step cargo exit's
+      question, -001(a)'s honest ceiling. Nor that the skip backlog is failed: it
+      is not, by design; bounding it stays -003's job.
+    status: implemented
+    release: v0.43.0
+    tags: [process, guardrail, ci, tooling]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-003
+
   - id: REQ-GUARD-SELFTEST-POTENCY-001
     type: requirement
     title: A guard's self-test cases shall be shown load-bearing by a declared mutation it must catch
