@@ -669,6 +669,21 @@ jobs:
       - name: Evidence-step guardrail
         run: tools/check_evidence_steps.py --max-stepless 78
 
+      # REQ-GUARD-GATE-EVIDENCE-005 (#403). check_evidence_steps.py above bounds
+      # the artifact PLANE — no new claiming artifact may arrive step-less. This
+      # is the sibling half, in the RUNNER: run_verification.py counted a run
+      # where every matched artifact was skipped toward exit 0, so a filter that
+      # selected only step-less artifacts reported the required
+      # `Verification Gate (rivet-driven)` context green having executed nothing
+      # (measured: 64 matched, 0 ran, exit 0). decide_exit now reds a run that
+      # verified nothing; the self-test is the decision table for that (no rivet,
+      # no shell — it runs here, on every PR, for the same reason as its
+      # siblings). Deliberately not a hard fail on the skip backlog: a mixed run
+      # still passes, so this does not re-introduce the "fail all 85 at once"
+      # posture the ratchet in the guardrail above exists to avoid.
+      - name: Verification-runner guardrail self-test
+        run: tools/run_verification.py --self-test
+
       # Required-context drift (#372). Same stdlib-only, fail-closed rules as
       # above, and here for the same reason: it must run on the PR that edits a
       # workflow, and that PR need not touch anything a path filter selects.
