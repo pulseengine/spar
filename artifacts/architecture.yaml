@@ -1103,3 +1103,151 @@ artifacts:
         target: REQ-TSN-SYNTH-MILP-001
       - type: satisfies
         target: REQ-PROOF-NC-CERT-001
+
+  - id: DEC-NORTHSTAR-001
+    type: design-decision
+    title: The analysis engine for the SysML v2 + AADL world; own flows and modes
+    description: >
+      Maintainer decision (2026-08-26), taken on the audit reproduced against
+      f395518 (v0.40.0). spar's North Star is stated as an outcome rather than
+      a component list: a systems engineer models in SysML v2, and spar tells
+      them — with evidence — whether the timing, the partitioning and the
+      failure propagation hold.
+
+      Concretely this reprioritises three things. The AADL front end becomes
+      the PROVEN path rather than the destination. The analyses become the
+      product. SysML v2 becomes an input format held to the same conformance
+      discipline the AADL side already survives, and spar parses only as much
+      of it as the analyses need rather than racing for parser parity.
+    status: proposed
+    fields:
+      rationale: >
+        WHAT MOVED. SysML v2 reached OMG final adoption in July 2025 with
+        KerML 1.0 and the Systems Modeling API, and OMG opened its official
+        SysML v2 certification programme on 2026-06-02 — demand is being
+        manufactured deliberately. Then in March 2026 Galois, with Ellidiss,
+        CMU/SEI and Collins Aerospace, released
+        `Systems-Modeling/SysML-v2-AADL-Release`, a domain extension library
+        carrying most of AADLv2 core into SysML v2 inside the OMG RTESC working
+        group. That is the institutional core of AADL — SEI wrote the language,
+        Ellidiss tools it, Collins flies it — moving it into the SysML v2
+        ecosystem.
+
+        THE OPENING, and why it is narrow enough to hold [SOLID]. That
+        library's stated exclusions are AADL flows and modes, with typing rules
+        deferred. Those are precisely what spar's strongest analyses consume:
+        latency, flow legality, mode reachability, modal scheduling and the
+        entire network-calculus arm, which reads flows to compute end-to-end
+        bounds. The standards track is carrying AADL STRUCTURE across and
+        explicitly not the BEHAVIOUR that makes it analysable. Nobody is
+        contesting that gap and spar is already built for it.
+
+        ALTERNATIVES REJECTED. (A) Best open-source AADL analyser — the safe
+        extension of what exists, aimed at a pool the institutions that own
+        AADL are leaving; winning AADL tooling in 2028 is winning a smaller
+        room. (B) A serious Rust SysML v2 toolchain — parser parity is a
+        commodity race against `syster`, MontiCore, the Xtext pilot and Eclipse
+        SysON, and it discards the analysis work that is actually rare. B is
+        rejected as a GOAL and required as a MEANS: enough SysML v2 to feed the
+        analyses, gated, and no more.
+
+        RECONCILIATION WITH DEC-TSN-OSS-001. That decision names AADL as the
+        front-end/IR and argues the timing/NC math is a fabric-agnostic
+        substrate paying for itself through internal demand. This decision does
+        not overturn it; it extends the same argument one layer up. The
+        substrate is formalism-agnostic as well as fabric-agnostic, so a SysML
+        v2 front door adds an ingest path without invalidating a single Tier-1
+        or Tier-3 requirement. Tier 2 keeps its kill-gates.
+
+        WHAT THIS DOES NOT DECIDE. Whether spar keeps its own SysML v2 parser
+        or adopts an existing Rust one is left open and should be re-costed
+        once REQ-SYSML2-CONFORMANCE-001 has produced a real parse number
+        against the official corpus — today's figure is unmeasured, so the
+        build-or-adopt question cannot be answered honestly yet.
+      interfaces:
+        provides:
+          - SysML v2 ingest for analysis
+          - flows and modes semantics
+          - timing verdict with derivation
+        requires:
+          - official SysML v2 corpus vendored and gated
+          - AADL domain library consumed verbatim
+    tags: [strategy, northstar, sysml2, interop, analysis]
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-CONFORMANCE-001
+      - type: satisfies
+        target: REQ-SYSML2-VISIBILITY-001
+      - type: satisfies
+        target: REQ-SYSML2-FLOWS-MODES-001
+
+  - id: DEC-POSITIONING-001
+    type: design-decision
+    title: Lead with the verdict, not the pipeline — retire the compiler headline
+    description: >
+      Maintainer decision (2026-08-26). The masthead reads "a compiler for
+      system-architecture models". It moves down into the architecture section
+      it belongs in, and the headline becomes an outcome: WORST-CASE ANSWERS
+      FOR REAL-TIME ARCHITECTURES.
+
+      The compiler framing is kept, not deleted. It is an accurate and unusually
+      honest answer to HOW THIS IS BUILT — genuine front-ends, a salsa-backed
+      incremental HIR on rust-analyzer's patterns, a pass-structured middle-end,
+      real back-ends — and it is why the codebase is as good as it is. It is an
+      architecture note, and it already has a component diagram to sit beside.
+      It is not a value proposition.
+    status: proposed
+    fields:
+      rationale: >
+        FOUR REASONS IT FAILS AT THE MASTHEAD, each measured in the same audit.
+
+        (1) A compiler is judged on back-end fidelity, and that is spar's
+        weakest organ. The metaphor invites exactly the scrutiny the tool
+        currently fails: an SVG back end that renders 3 of 11 components is,
+        under this headline, a MISCOMPILATION, and a Mermaid back end emitting
+        two nodes with the same identifier is a name-mangling bug. The README
+        even prints the cause in its own component diagram — "spar-render — SVG
+        (Sugiyama layout)" — without recognising it as one.
+
+        (2) It points at translation when the value is judgement. Nobody wants
+        AADL lowered to WIT for its own sake; they want to be told the
+        end-to-end latency is N worst case and how that was derived. Compilers
+        translate, they do not tell you your design is wrong. spar's rare organ
+        is the middle-end, and "compiler" is a headline pointing at both ENDS.
+
+        (3) The differentiator it leans on is the least supported claim in the
+        repo. "AADL v2.3, SysML v2 / KerML, and CAN .dbc all lower into one
+        semantic model", with a SysML v2 capability badge above it, while the
+        parser rejects a KerML core construct. Multi-formalism is the
+        load-bearing word and it is carried by the one front end with no
+        outside oracle.
+
+        (4) It aims at a receding target. "I ingest many formalisms" was right
+        while formalisms proliferated; they are now converging on SysML v2, so
+        a headline whose distinguishing promise is BREADTH OF INPUT gets less
+        interesting every quarter while trustworthy verdicts get more so.
+
+        WHY THIS WORDING. "Worst-case" is the exact technical term for what the
+        middle-end computes and signals the domain to anyone who knows it.
+        "Answers" is judgement rather than translation. "Real-time
+        architectures" is formalism-neutral, so it survives the AADL to SysML
+        v2 transition without a rewrite. It is true today on evidence already
+        in the repo and is not hostage to the SysML v2 work landing.
+
+        SEQUENCING. "The analysis engine for SysML v2 and AADL" is the stronger
+        headline ONCE IT IS TRUE, and adopting it today would restate the claim
+        this audit just falsified. Revisit it when the v0.41-v0.42 SysML v2
+        gate is green, so it is earned rather than asserted.
+
+        ALSO IN SCOPE, because they are the same claim surface: drop the SysML
+        v2 capability badge until the gate exists; scope "replaces the
+        Eclipse/Java OSATE2 toolchain" to what is measured — speed,
+        embeddability, WASM, SARIF, conformance-gated parsing, NOT diagrams;
+        and stop advertising the Sugiyama layout in the component diagram until
+        REQ-RENDER-COMPOUND-001 lands.
+      interfaces:
+        provides: [README masthead, COMPLIANCE.md maturity claims, capability badges]
+    tags: [strategy, positioning, documentation, claims, northstar]
+    links:
+      - type: satisfies
+        target: REQ-CLAIM-LEDGER-001
