@@ -5785,10 +5785,18 @@ artifacts:
       and nothing outside the repo has ever graded it. Three facts, each
       measured: the official corpus directories
       `test-data/sysml2/{examples,training,validation}/official/` are EMPTY (a
-      `download-official-suite.sh` was written and never run); `grep sysml
-      .github/workflows/*.yaml` returns nothing, so none of it executes in CI;
-      and all eight tests in `crates/spar-sysml2/tests/conformance_tests.rs`
-      PASS while the files they name fail to parse.
+      `download-official-suite.sh` was written and never run); no workflow
+      mentions sysml by name; and all eight tests in
+      `crates/spar-sysml2/tests/conformance_tests.rs` PASS while the files they
+      name fail to parse.
+
+      CORRECTION, made while implementing this: the second fact does NOT mean
+      the tests never ran. `cargo nextest run --workspace` in the Test job has
+      been executing them on every PR — the job log names `conformance_tests`
+      seventeen times. They ran and measured nothing, which is the worse
+      finding: not dormant code, but a GREEN REQUIRED CHECK reporting on a
+      parser that rejects the standard's own examples. It also means this
+      requirement needs no CI wiring, only tests that can fail.
 
       The last of those is the load-bearing one. The assertion is
       `assert!(!result.syntax_node().text().is_empty())` — it checks that the
