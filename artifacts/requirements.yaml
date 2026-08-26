@@ -5818,7 +5818,7 @@ artifacts:
       next to the corpus it was measured on, which is why the corpus is
       vendored and pinned rather than fetched.
     status: proposed
-    release: v0.41.0
+    release: v0.43.0
     tags: [sysml2, interop, guardrail, conformance, northstar]
     links:
       - type: traces-to
@@ -5843,7 +5843,7 @@ artifacts:
       legitimately be experimental; the requirement is that its existence is
       visible, not that it is advertised as stable.
     status: proposed
-    release: v0.41.0
+    release: v0.43.0
     tags: [cli, tooling, guardrail, ux]
 
   - id: REQ-CLAIM-LEDGER-001
@@ -5878,7 +5878,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.41.0
+    release: v0.43.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -5905,7 +5905,7 @@ artifacts:
       is that the ratchet moves and the specification's Annex A model parses,
       not that the count reaches its maximum.
     status: proposed
-    release: v0.42.0
+    release: v0.44.0
     tags: [sysml2, parser, grammar]
     links:
       - type: traces-to
@@ -5934,7 +5934,7 @@ artifacts:
       refinement and nesting semantics are not in scope and are not asserted to
       work.
     status: proposed
-    release: v0.42.0
+    release: v0.44.0
     tags: [hir, instance, aadl, defect]
 
   - id: REQ-FINDINGS-LAYER-001
@@ -5967,7 +5967,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: proposed
-    release: v0.43.0
+    release: v0.45.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -5993,7 +5993,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.44.0
+    release: v0.46.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6024,7 +6024,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.44.0
+    release: v0.46.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6049,7 +6049,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.44.0
+    release: v0.46.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6087,7 +6087,7 @@ artifacts:
       form, spar adopts it; until then spar's expression is a proposal and must
       be labelled as one wherever it is emitted.
     status: proposed
-    release: v0.45.0
+    release: v0.47.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
       - type: traces-to
