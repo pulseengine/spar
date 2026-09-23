@@ -766,11 +766,19 @@ mod tests {
 
         let m = &matrices[0];
         assert!(m.unreachable.is_empty());
-        // Every mode can reach every other mode
-        for i in 0..3 {
-            for j in 0..3 {
+        // Every mode can reach every other mode.
+        //
+        // Iterates the whole matrix rather than a hardcoded 0..3. That is a
+        // STRICTER assertion, not just a lint fix: the old bounds would have
+        // ignored a fourth mode entirely, so a regression that added an
+        // unreachable one could not have failed here. The dimension is pinned
+        // separately so "every" still means a known number.
+        assert_eq!(m.matrix.len(), 3, "expected a 3-mode reachability matrix");
+        for (i, row) in m.matrix.iter().enumerate() {
+            assert_eq!(row.len(), 3, "row {i} is not 3 wide");
+            for (j, reachable) in row.iter().enumerate() {
                 if i != j {
-                    assert!(m.matrix[i][j], "mode {} should reach mode {}", i, j);
+                    assert!(*reachable, "mode {i} should reach mode {j}");
                 }
             }
         }
