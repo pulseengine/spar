@@ -398,8 +398,8 @@ fn cmd_items(args: &[String]) {
                     .map(|n| n.as_str())
                     .collect::<Vec<_>>()
             );
-            print_items("    public", &pkg.public_items, &tree);
-            print_items("    private", &pkg.private_items, &tree);
+            print_items("    public", &pkg.public_items, tree);
+            print_items("    private", &pkg.private_items, tree);
         }
 
         for (_idx, ps) in tree.property_sets.iter() {

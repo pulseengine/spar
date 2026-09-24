@@ -258,9 +258,27 @@ end ErrorLib;
             "package V1\npublic\nend V1;".to_string(),
         );
 
-        // First parse.
-        let r1 = parse_file(&db, file);
-        assert!(r1.ok());
+        // First parse. Materialise the text BEFORE mutating the database.
+        //
+        // This used to hold `r1` across the `set_text` below and read it
+        // afterwards. Under salsa 0.26 that compiled; under 0.28.5 the borrow
+        // checker refuses it, and that refusal is the point of the upgrade.
+        // 0.28.5 refuses the shape RUSTSEC-2026-0308 describes: holding a
+        // handle to a cached result across a revision change and then reading
+        // it. NOT claimed: that this test was reachable use-after-free. The
+        // advisory needs interned values (spar has no `#[salsa::interned]`) and
+        // either a salsa dependency-tracking bug or an application `Eq` that
+        // misreports equality (spar hand-writes none). The compile error is a
+        // mitigation the 0.28 line added, not proof this was exploitable.
+        //
+        // Taking the string here keeps what the test is actually for — a
+        // changed input must produce a different result — without holding a
+        // database-derived handle across the edit.
+        let text1 = {
+            let r1 = parse_file(&db, file);
+            assert!(r1.ok());
+            r1.syntax_node().text().to_string()
+        };
 
         // Change file text — salsa should recompute.
         file.set_text(&mut db)
@@ -270,7 +288,6 @@ end ErrorLib;
         assert!(r2.ok());
 
         // Results should differ (different package name).
-        let text1 = r1.syntax_node().text().to_string();
         let text2 = r2.syntax_node().text().to_string();
         assert_ne!(text1, text2);
         assert!(text2.contains("V2"));

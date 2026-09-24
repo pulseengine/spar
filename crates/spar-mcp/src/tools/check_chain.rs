@@ -254,7 +254,7 @@ fn parse_and_instantiate(model: &str, root: &str) -> Result<SystemInstance, Tool
 
     let db = spar_hir_def::HirDefDatabase::default();
     let sf = spar_base_db::SourceFile::new(&db, model.to_string(), source);
-    let tree: Arc<ItemTree> = spar_hir_def::file_item_tree(&db, sf);
+    let tree: Arc<ItemTree> = spar_hir_def::file_item_tree(&db, sf).clone();
 
     let (pkg_name, type_name, impl_name) = parse_root_ref(root)?;
     let scope = spar_hir_def::GlobalScope::from_trees(vec![tree]);

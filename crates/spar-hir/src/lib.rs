@@ -81,7 +81,10 @@ impl Database {
 
         for (filename, content) in sources {
             let sf = spar_base_db::SourceFile::new(&db, filename.clone(), content.clone());
-            trees.push(spar_hir_def::file_item_tree(&db, sf));
+            // `.clone()` is an Arc refcount bump. Needed because salsa 0.28
+            // hands back `&Arc<ItemTree>` borrowed from `db`, and `db` is
+            // local to this constructor while `Database` keeps the trees.
+            trees.push(spar_hir_def::file_item_tree(&db, sf).clone());
         }
 
         let scope = GlobalScope::from_trees(trees.clone());

@@ -243,9 +243,27 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # rustsec/audit-check accepts only `token`, `ignore` and
+      # `working-directory` — it has NO input that makes an informational
+      # advisory fail. `cargo audit` exits 0 on class `unsound`, so
+      # RUSTSEC-2026-0308 (use-after-free in salsa, the crate spar's whole
+      # incremental core is built on) was live against main while this required
+      # check reported SUCCESS.
+      #
+      # A required check that cannot go red for a memory-safety advisory is the
+      # vacuous-gate shape REQ-GUARD-GATE-EVIDENCE-002 names. The action stays
+      # for its inline PR annotations; the explicit run below is the part that
+      # can actually fail. Installed as a prebuilt binary via the same
+      # mechanism the Test job uses for nextest, because `cargo install
+      # cargo-audit` trips over the sccache-on-cc setup noted above.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit (informational advisories included)
+        run: cargo audit --deny warnings
 
   deny:
     name: Cargo Deny
