@@ -5618,7 +5618,7 @@ artifacts:
       remains `check_verification_filters.py`'s and the per-step cargo exit's
       question, -001(a)'s honest ceiling. Nor that the skip backlog is failed: it
       is not, by design; bounding it stays -003's job.
-    status: implemented
+    status: verified
     release: v0.43.0
     tags: [process, guardrail, ci, tooling]
     links:
