@@ -34,7 +34,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-26
       - uses: Swatinem/rust-cache@v2
       - name: Run solver benchmarks (save baseline)
         # --save-baseline nightly stores this run under
