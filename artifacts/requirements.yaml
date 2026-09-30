@@ -5768,3 +5768,335 @@ artifacts:
     status: verified
     release: v0.37.0
     tags: [process, guardrail, ci, tooling, v0370]
+
+  # --- North Star scope (DEC-NORTHSTAR-001) ---
+  #
+  # Ten requirements landed together as a PLAN, all `proposed`, each carrying
+  # the measurement that motivated it so the scope can be argued with rather
+  # than inherited. None is implemented; none claims to be. The audit behind
+  # them was run against f395518 (v0.40.0) on 2026-08-26 and every number below
+  # is reproducible with the command quoted beside it.
+
+  - id: REQ-SYSML2-CONFORMANCE-001
+    type: requirement
+    title: SysML v2 support shall be graded by an outside corpus, not by fixtures we wrote
+    description: >
+      spar-sysml2 is 8378 LOC — the second-largest parsing effort in the repo —
+      and nothing outside the repo has ever graded it. Three facts, each
+      measured: the official corpus directories
+      `test-data/sysml2/{examples,training,validation}/official/` are EMPTY (a
+      `download-official-suite.sh` was written and never run); no workflow
+      mentions sysml by name; and all eight tests in
+      `crates/spar-sysml2/tests/conformance_tests.rs` PASS while the files they
+      name fail to parse.
+
+      CORRECTION, made while implementing this: the second fact does NOT mean
+      the tests never ran. `cargo nextest run --workspace` in the Test job has
+      been executing them on every PR — the job log names `conformance_tests`
+      seventeen times. They ran and measured nothing, which is the worse
+      finding: not dormant code, but a GREEN REQUIRED CHECK reporting on a
+      parser that rejects the standard's own examples. It also means this
+      requirement needs no CI wiring, only tests that can fail.
+
+      The last of those is the load-bearing one. The assertion is
+      `assert!(!result.syntax_node().text().is_empty())` — it checks that the
+      INPUT SOURCE TEXT is non-empty, which it is by construction. Zero of the
+      eight call `errors()`. `parse_annex_a_simple_vehicle` and
+      `parse_package_example` both report ok while `spar sysml2 parse` on the
+      same files reports parse errors. This is precisely the defect class
+      REQ-GUARD-GATE-EVIDENCE-002 names — an operation that can produce
+      "nothing happened" rendering identically to "it worked" — sitting
+      untouched in the crate the strategy documents lean on hardest, because
+      four releases of that discipline were applied to the CI guardrails and
+      never to the tool's own interop claim.
+
+      THE REQUIREMENT. Vendor the official Systems-Modeling SysML v2 corpus
+      with a pinned upstream commit and a PROVENANCE file, exactly as
+      REQ-PLUGFEST-007 did for the 1347 third-party AADL models. Rewrite every
+      conformance test to assert on `errors()`. Gate the result in CI as a
+      ratchet on a named parse count that may only rise, with the same
+      two-sided discipline as MAX_TOO_PERMISSIVE — below the floor fails too,
+      so a win is locked in rather than left as slack.
+
+      NOT CLAIMED: that a high parse rate means the parser is correct. A
+      parse-rate is a property of the CORPUS as much as the parser — the AADL
+      side learned this when a "14 failures" figure turned out to be one file
+      copied fourteen times, and again when 11 of 14 ratcheted gaps turned out
+      to be files no parser should accept (#427). The number is only meaningful
+      next to the corpus it was measured on, which is why the corpus is
+      vendored and pinned rather than fetched.
+    status: proposed
+    release: v0.43.0
+    tags: [sysml2, interop, guardrail, conformance, northstar]
+    links:
+      - type: traces-to
+        target: REQ-INGEST-SYSML2-DIFF-001
+
+  - id: REQ-CLI-SURFACE-001
+    type: requirement
+    title: Every command the CLI dispatches shall appear in its help
+    description: >
+      `spar --help` documents 16 commands. `main.rs` dispatches 21. The four
+      undocumented ones are `sysml2`, `extract`, `generate` and `version` —
+      which means the entire SysML v2 surface, 8378 LOC and 276 tests, is
+      undiscoverable to anyone who did not read the source. Measured by
+      diffing the dispatch arms against the `Commands:` block of `--help`.
+
+      The requirement is the invariant, not the one-off fix: a command that
+      dispatches and is not documented shall fail a guard, in the same shape as
+      the other fifteen tools in `tools/` — the list is derived from the source
+      rather than restated, so the two cannot drift apart again.
+
+      NOT CLAIMED: that every command should be PROMOTED. A command may
+      legitimately be experimental; the requirement is that its existence is
+      visible, not that it is advertised as stable.
+    status: proposed
+    release: v0.43.0
+    tags: [cli, tooling, guardrail, ux]
+
+  - id: REQ-CLAIM-LEDGER-001
+    type: requirement
+    title: The README's load-bearing claims shall be bound to evidence and gated
+    description: >
+      The repo spent v0.36.0 through v0.40.0 establishing that a claim nothing
+      checks will drift, then left its largest claim surface ungated. Measured
+      instances, all currently on main: COMPLIANCE.md calls spar-sysml2
+      "production-grade"; `docs/designs/track-f-sysml-kerml-engagement.md`
+      calls it "the most mature Rust SysML v2 parser" and "mature and tested";
+      the README carries a `SysML v2 — KerML` capability badge. All four are
+      contradicted by REQ-SYSML2-CONFORMANCE-001's measurements — the parser
+      rejects `public import`, a KerML core construct, so the specification's
+      own Annex A model fails on line 3.
+
+      Two neighbouring claims are falsifiable in the same direction. "replaces
+      the Eclipse/Java OSATE2 toolchain" is refuted by one screenshot while the
+      renderer drops 8 of 11 components (REQ-RENDER-COMPOUND-001), and "reaches
+      well past what OSATE, or a single-formalism SysML v2 tool, covers" is not
+      true of the SysML v2 half.
+
+      THE REQUIREMENT. Mark the load-bearing assertions in README.md and
+      COMPLIANCE.md — capability badges, maturity words, competitive claims,
+      and any stated count — in a claims ledger binding each to a re-derivable
+      predicate, and run the checker in CI beside the existing guards. The
+      distinction that keeps this writable: mark the ASSERTIONS, never the
+      narrative. Motivation, rationale and examples stay free.
+
+      NOT CLAIMED: that a gated claim is a true claim. The gate proves the
+      stated evidence still holds, not that the evidence supports the wording.
+      A badge whose predicate passes can still overclaim, and choosing honest
+      wording stays a human judgement.
+    status: proposed
+    release: v0.43.0
+    tags: [process, guardrail, claims, documentation]
+
+  - id: REQ-SYSML2-VISIBILITY-001
+    type: requirement
+    title: The SysML v2 grammar shall accept visibility modifiers and quoted names
+    description: >
+      Isolated to minimal cases against f395518. `import ISQ` with a wildcard
+      parses; the same line prefixed `public` does not. Neither does `private
+      part def A;`, nor `public alias B for A;`, nor a quoted package name
+      written with single quotes around an identifier containing a space —
+      that last one produces three errors on an eight-line published example.
+
+      These are not edge cases. Visibility modifiers are KerML core and appear
+      on essentially every member of every real model, which is why the
+      specification's own Annex A vehicle model fails at line 3 rather than
+      somewhere deep. One grammar gap accounts for most of the seven failing
+      files in the current corpus, so the fix is small — the reason it went
+      unnoticed is the part REQ-SYSML2-CONFORMANCE-001 addresses, and this
+      requirement is deliberately sequenced AFTER it so that the gate exists to
+      register the win.
+
+      NOT CLAIMED: that closing this gap parses the whole corpus. Each file may
+      carry further constructs behind its first error; the acceptance criterion
+      is that the ratchet moves and the specification's Annex A model parses,
+      not that the count reaches its maximum.
+    status: proposed
+    release: v0.44.0
+    tags: [sysml2, parser, grammar]
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-CONFORMANCE-001
+
+  - id: REQ-HIR-FEATUREGROUP-PATH-001
+    type: requirement
+    title: A connection endpoint shall resolve through feature-group members
+    description: >
+      `spar analyze` on the repo's own showcase model reports two errors:
+      `connection 'c1': unresolved source subcomponent 'sensor_input'` and the
+      same for `c2`. `sensor_input` is a feature group on the FMC system, and
+      the connection addresses one of its members. The instantiator resolves
+      connection endpoints against SUBCOMPONENTS and does not walk into
+      feature-group members, so a standard AADL idiom fails — on
+      `test-data/parser/complex_system.aadl`, the model the README's own
+      examples are drawn from.
+
+      Carried with it, because it is visible in the same line of output and has
+      been for months: `Instantiated Avionics_System::Avionics_Platform. (11
+      components)` drops the implementation name `deployed`, leaving a trailing
+      dot. Cosmetic, but it is printed on every instantiate and analyze run.
+
+      NOT CLAIMED: that feature groups are otherwise complete. This requirement
+      is scoped to endpoint resolution in connections; feature-group inverse,
+      refinement and nesting semantics are not in scope and are not asserted to
+      work.
+    status: proposed
+    release: v0.44.0
+    tags: [hir, instance, aadl, defect]
+
+  - id: REQ-FINDINGS-LAYER-001
+    type: requirement
+    title: One fact shall be reported once, by the pass that owns it
+    description: >
+      On an eleven-component model spar emits 54 diagnostics. They are not 54
+      findings. A single missing `Actual_Processor_Binding` is reported NINE
+      times — `binding_rules` at ERROR, `scheduling` at WARNING and
+      `binding_check` at INFO, for each of three threads. A further 11 come
+      from `emv2_fault_tree` naming every component without declared redundancy
+      a single point of failure, including the processor, the memory and the
+      bus. That is enumeration, not analysis.
+
+      The reader has no way to tell which of the 54 lines matters because
+      nothing in the pipeline has an opinion. The missing piece is not more
+      passes — there are already 42 modules in `crates/spar-analysis/src` — it
+      is an editorial layer: deduplicate by (fact, element), let one pass own
+      each fact at one severity, and demote the others to supporting evidence
+      on that finding rather than separate lines.
+
+      Sequenced after the corpus work because it needs a fixture that PINS the
+      expected finding count; without one, "we reduced the noise" is
+      unfalsifiable and the next refactor re-inflates it.
+
+      NOT CLAIMED: that the machine-readable path is broken — it is not, and
+      this requirement must not degrade it. `--format sarif` already emits
+      valid SARIF on stdout with 54 results against 15 declared rules, which is
+      the correct behaviour for a CI annotator; the defect is the human-facing
+      editorial layer above it, and SARIF consumers may legitimately want the
+      unmerged rows.
+    status: proposed
+    release: v0.45.0
+    tags: [analysis, ux, diagnostics]
+
+  - id: REQ-RENDER-METRICS-001
+    type: requirement
+    title: Layout shall measure text rather than guess at it
+    description: >
+      Grepping the layout engine (`etch` 0.2.0, pinned by git rev) for
+      `text_width`, `measure`, `advance`, `overlap` and `collision` across
+      `layout.rs` and `svg.rs` returns exactly one hit — a comment about
+      nudging an edge label off a path. Node boxes and label placement are
+      therefore sized without knowing how wide the text is, which is the direct
+      cause of the collided labels in the rendered output: on the avionics
+      model, `in1`, `nav_in` and `in2` stack on top of one another at the left
+      edge, and several edge labels overprint their own lines.
+
+      This is the cheap half of the renderer problem and is separable from
+      REQ-RENDER-COMPOUND-001: advancing text metrics fixes collisions without
+      touching the layout algorithm.
+
+      NOT CLAIMED: that measured text makes the diagram good. It removes one
+      failure mode. The structural failure — a flat layered algorithm applied
+      to a nested graph — is a different requirement, and shipping this alone
+      would produce legible labels on a diagram that is still missing most of
+      the model.
+    status: proposed
+    release: v0.46.0
+    tags: [render, etch, layout]
+
+  - id: REQ-RENDER-COMPOUND-001
+    type: requirement
+    title: The renderer shall lay out a nested graph, because that is what AADL is
+    description: >
+      An eleven-component model renders as three boxes. The processor, memory,
+      bus, the FMC system and all three processes do not appear; the two
+      `nav_thread` instances are drawn identically with nothing distinguishing
+      `primary` from `backup`; the container is clipped at the right edge and
+      the lower third of the canvas is empty. Reproduced with `spar render
+      --root Avionics_System::Avionics_Platform.deployed`.
+
+      The cause is a category error, not a bug. `etch`'s own docstring reads
+      "Sugiyama-style hierarchical (layered) DAG layout", whose third phase is
+      "simple placement on a grid with centering". Sugiyama layers a FLAT DAG.
+      AADL is a COMPOUND graph — systems containing processes containing
+      threads, with ports on every boundary. Nesting is not something a layered
+      DAG algorithm degrades at; it is something it does not model, which is
+      why the hierarchy vanished rather than came out ugly.
+
+      The decision this requires is build-or-delegate: extend `etch` toward
+      compound layout with port constraints, or delegate to an ELK-class engine
+      that already implements it — which is what OSATE's own diagrams use. That
+      choice is deliberately left open here and belongs in its own
+      design-decision once someone has costed both.
+
+      NOT CLAIMED: that this is a small change. It is the largest single item
+      in this plan and the only one whose shape is not yet decided.
+    status: proposed
+    release: v0.46.0
+    tags: [render, etch, layout, architecture]
+
+  - id: REQ-RENDER-GOLDEN-001
+    type: requirement
+    title: The renderer shall have an oracle at all
+    description: >
+      Every capability in spar that was graded against an outside oracle is in
+      good shape, and every capability graded against our own judgement is not.
+      The renderer is the extreme case: it has no oracle of any kind. 26 tests
+      cover 1167 lines and none of them looks at the produced image, which is
+      how output this broken shipped without a red build.
+
+      The requirement is golden-image regression over a named set of models
+      spanning the shapes that matter — flat, deeply nested, wide fan-out, a
+      model with feature groups — with the images committed and a diff gate on
+      change. A rendering change then has to be ACKNOWLEDGED rather than
+      discovered later, in the same shape as the committed OSATE and Ocarina
+      baselines that make the AADL front end trustworthy.
+
+      NOT CLAIMED: that a golden image is a quality bar. It pins CHANGE, not
+      goodness — a golden set blessed from today's broken output would lock the
+      breakage in, so the baseline must be blessed after
+      REQ-RENDER-COMPOUND-001 and not before.
+    status: proposed
+    release: v0.46.0
+    tags: [render, guardrail, testing]
+
+  - id: REQ-SYSML2-FLOWS-MODES-001
+    type: requirement
+    title: Flows and modes shall be analysable from a SysML v2 model
+    description: >
+      The North Star's first executable mile, and the reason DEC-NORTHSTAR-001
+      picks the position it does. In March 2026 Galois, with Ellidiss, CMU/SEI
+      and Collins Aerospace, released `Systems-Modeling/SysML-v2-AADL-Release`:
+      a domain extension library translating most of AADLv2 core into SysML v2
+      parts, ports and attributes, developed inside the OMG RTESC working
+      group. Its stated exclusions are AADL FLOWS and MODES, with typing rules
+      deferred.
+
+      Those exclusions are exactly the constructs spar's strongest analyses
+      consume — `latency`, `flow_rules`, `mode_reachability`, `modal`, and the
+      whole network-calculus arm, which reads flows to compute end-to-end
+      bounds. The standards track is carrying AADL STRUCTURE into SysML v2 and
+      explicitly not carrying the BEHAVIOUR that makes it analysable, which is
+      a narrow and defensible opening that nobody else is contesting.
+
+      THE REQUIREMENT. A SysML v2 model expressing flows and modes shall reach
+      the existing latency, mode-reachability and modal-scheduling passes and
+      produce a timing verdict with its derivation. Acceptance is end-to-end: a
+      SysML v2 file goes in, a bound with evidence comes out.
+
+      LICENCE CONSTRAINT, load-bearing for how this is built: the official
+      library is CC-BY-ND 4.0. It may be vendored VERBATIM with attribution and
+      used as a conformance corpus; it may not be forked or modified. Any
+      spar-side extension for flows and modes must therefore live beside it as
+      a separate artefact, not as a patched copy.
+
+      NOT CLAIMED: that spar defines how flows and modes SHOULD be expressed in
+      SysML v2. That is the RTESC working group's to settle. If they publish a
+      form, spar adopts it; until then spar's expression is a proposal and must
+      be labelled as one wherever it is emitted.
+    status: proposed
+    release: v0.47.0
+    tags: [sysml2, northstar, flows, modes, analysis, interop]
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-CONFORMANCE-001
