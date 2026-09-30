@@ -1439,10 +1439,10 @@ fn cmd_modes(args: &[String]) {
 
                 for (i, src) in matrix.modes.iter().enumerate() {
                     print!("{:width$} |", src, width = max_len);
-                    for j in 0..matrix.modes.len() {
+                    for (j, reachable) in matrix.matrix[i].iter().enumerate() {
                         let mark = if i == j {
                             "."
-                        } else if matrix.matrix[i][j] {
+                        } else if *reachable {
                             "Y"
                         } else {
                             "-"
