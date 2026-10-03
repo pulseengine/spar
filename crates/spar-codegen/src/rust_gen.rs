@@ -879,7 +879,9 @@ mod tests {
     #[test]
     fn feature_rust_type_mapping() {
         // No classifier → scope is not consulted; an empty scope is fine.
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope = GlobalScope::from_trees(
+            Vec::<std::sync::Arc<spar_hir_def::item_tree::ItemTree>>::new(),
+        );
         let pkg = spar_hir_def::name::Name::new("Pkg");
         assert_eq!(
             feature_to_rust_type(FeatureKind::EventPort, &None, &scope, &pkg),

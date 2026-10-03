@@ -152,10 +152,25 @@ pub struct GlobalScope {
 
 impl GlobalScope {
     /// Build a global scope from a set of item trees.
-    pub fn from_trees(trees: Vec<std::sync::Arc<ItemTree>>) -> Self {
+    ///
+    /// Generic over `Borrow<Arc<ItemTree>>` so it accepts both owned
+    /// `Arc<ItemTree>` and the `&Arc<ItemTree>` that salsa 0.28 tracked queries
+    /// now return — both satisfy it through std's blanket impls
+    /// (`impl<T> Borrow<T> for T` and `impl<T> Borrow<T> for &T`).
+    ///
+    /// Before 0.28, `file_item_tree` handed back an owned `Arc` and every
+    /// caller passed one. Widening here rather than cloning at 36 call sites
+    /// keeps the upgrade a signature change instead of a sweep.
+    ///
+    /// `Borrow<Arc<_>>` and not `AsRef<ItemTree>`: this function does not only
+    /// read the trees, it KEEPS them (`scope.trees` below), so it needs to be
+    /// able to produce an owned `Arc`. `AsRef<ItemTree>` would have compiled
+    /// for the read paths and failed at the one line that stores.
+    pub fn from_trees<T: std::borrow::Borrow<std::sync::Arc<ItemTree>>>(trees: Vec<T>) -> Self {
         let mut scope = GlobalScope::default();
 
         for (tree_idx, tree) in trees.iter().enumerate() {
+            let tree: &ItemTree = tree.borrow();
             for (_idx, pkg) in tree.packages.iter() {
                 let mut pkg_scope = PackageScope {
                     name: pkg.name.clone(),
@@ -241,7 +256,8 @@ impl GlobalScope {
             }
         }
 
-        scope.trees = trees;
+        // One Arc clone per tree, which is a refcount bump, not a deep copy.
+        scope.trees = trees.iter().map(|t| t.borrow().clone()).collect();
 
         // Register standard predefined property sets (AS5506 Appendix A)
         // so they can be resolved without explicit `with` imports.
