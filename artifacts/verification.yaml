@@ -5048,6 +5048,58 @@ artifacts:
       - type: verifies
         target: REQ-GUARD-GATE-EVIDENCE-003
 
+  - id: TEST-GUARD-EVIDENCE-RUNNER
+    type: feature
+    title: The verification runner is proven to fail when it matched artifacts but executed nothing
+    description: >
+      Verifies REQ-GUARD-GATE-EVIDENCE-005. Addresses #403's reported title —
+      the RUNNER half, sibling to TEST-GUARD-EVIDENCE-STEPS which verifies the
+      PLANE half (-003).
+
+      THE LOAD-BEARING CASE is `decide_exit(64, 0, 0, 64) -> 1`: a run that
+      matched 64 artifacts and executed zero commands. Against the shipped
+      runner before this change the same tallies returned 0 (`return 0 if
+      failed_count == 0 else 1`), which is why the case is written as an executed
+      assertion rather than prose. The verdict pins BOTH the exit code and the
+      "verified nothing" reason text, because a fix that returned the right code
+      with a silent message would still leave the required
+      `Verification Gate (rivet-driven)` context reading green with no
+      explanation on the PR.
+
+      IT IS SHOWN NON-VACUOUS TWO WAYS. The self-test's own table contrasts the
+      zero-executed case (exit 1) with a real pass (exit 0, asserted NOT to carry
+      the "verified nothing" text) and a mixed pass-with-skips (exit 0) — the
+      last of which pins the DELIBERATE bound: a run that verified something does
+      not fail merely because a claiming artifact in the set was skipped, so this
+      does not re-introduce the "fail the whole backlog" posture -003's ratchet
+      avoids. And the second step, `check_self_test_potency.py`, carries the
+      `rv-zero-executed-lenient` mutant: it replaces the zero-executed guard with
+      a condition that never fires and asserts the self-test then FAILS (CAUGHT),
+      so removing the load-bearing case cannot pass silently.
+
+      BOTH STEPS RUN FROM A CLEAN CHECKOUT — stdlib only, no rivet, no shell, no
+      CI-only output — so this artifact is not the permanently-FAILED shape
+      REQ-GUARD-GATE-EVIDENCE-004 was about. Both were EXECUTED before being
+      committed.
+
+      NOT claimed: that a present step is the right step or that it passes — that
+      is the per-step cargo exit's question — nor that the runner fails on a
+      skipped claiming artifact in an otherwise-productive run; by design it does
+      not.
+    status: implemented
+    release: v0.43.0
+    tags: [process, guardrail, ci, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/run_verification.py --self-test
+        - run: tools/check_self_test_potency.py
+    links:
+      - type: satisfies
+        target: REQ-GUARD-GATE-EVIDENCE-005
+      - type: verifies
+        target: REQ-GUARD-GATE-EVIDENCE-005
+
   - id: TEST-GUARD-CONTEXT-TIMEOUT
     type: feature
     title: The job-timeout gate fails on an unbounded required job and is blind to advisory ones

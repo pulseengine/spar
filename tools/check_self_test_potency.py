@@ -162,6 +162,19 @@ MUTANTS: list[Mutant] = [
              "count as zero. Caught by `REGRESSION #385(b): axiom COUNTS` (want_msg "
              "'axiom=1').",
     ),
+    # ── run_verification.py ────────────────────────────────────────────────
+    Mutant(
+        tool="run_verification.py",
+        id="rv-zero-executed-lenient",
+        old="    if passed == 0:",
+        new="    if passed < 0:",
+        note="#403: a run that matched artifacts but executed zero commands (every "
+             "match SKIPPED) must exit 1, not report success having verified nothing. "
+             "`passed < 0` is never true, so the zero-executed guard never fires and "
+             "an all-skipped run scores 0 again. Caught by the `all skipped (nothing "
+             "ran)` case and the `verified nothing` message pin; survives if either "
+             "is dropped.",
+    ),
 ]
 
 
