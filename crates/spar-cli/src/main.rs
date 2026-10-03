@@ -64,26 +64,24 @@ fn main() {
         process::exit(1);
     }
 
+    // Dispatch and `--help` read the SAME table (REQ-CLI-SURFACE-001).
+    //
+    // They used to be two hand-maintained lists — a `match` here and a run of
+    // `eprintln!`s in `print_usage` — and they drifted: `sysml2`, `extract`,
+    // `generate` and `version` all dispatched while appearing nowhere in the
+    // help, which made the entire SysML v2 surface (8378 LOC, 276 tests)
+    // undiscoverable to anyone who had not read this file.
+    //
+    // A guard comparing the two lists would have caught that. Sharing one list
+    // means there is nothing left to compare: a command that dispatches is
+    // documented by construction, and adding one without a description does
+    // not compile.
+    if let Some((_, _, run)) = COMMANDS.iter().find(|(name, _, _)| *name == args[1]) {
+        run(&args[2..]);
+        return;
+    }
+
     match args[1].as_str() {
-        "parse" => cmd_parse(&args[2..]),
-        "items" => cmd_items(&args[2..]),
-        "instance" => cmd_instance(&args[2..]),
-        "analyze" => cmd_analyze(&args[2..]),
-        "allocate" => cmd_allocate(&args[2..]),
-        "diff" => cmd_diff(&args[2..]),
-        "modes" => cmd_modes(&args[2..]),
-        "emit" => cmd_emit(&args[2..]),
-        "render" => cmd_render(&args[2..]),
-        "verify" => cmd_verify(&args[2..]),
-        "codegen" => cmd_codegen(&args[2..]),
-        "sysml2" => cmd_sysml2(&args[2..]),
-        "dbc" => cmd_dbc(&args[2..]),
-        "extract" => cmd_sysml2_extract(&args[2..]),
-        "generate" => cmd_sysml2_generate(&args[2..]),
-        "lsp" => cmd_lsp(),
-        "mcp" => cmd_mcp(&args[2..]),
-        "moves" => moves::cmd_moves_dispatch(&args[2..]),
-        "insight" => insight::cmd_insight(&args[2..]),
         "help" | "--help" | "-h" => {
             print_usage();
             process::exit(0);
@@ -118,6 +116,119 @@ fn main() {
     }
 }
 
+/// A subcommand entry point. Every command takes the argv tail; `lsp` ignores
+/// it and is wrapped rather than special-cased, so the table stays uniform.
+type CmdFn = fn(&[String]);
+
+fn cmd_lsp_argv(_args: &[String]) {
+    cmd_lsp();
+}
+
+/// Every subcommand spar dispatches, with the one-line description `--help`
+/// prints. THE list — see the note in `main`.
+///
+/// `version`, `help` and their flag spellings are deliberately absent: they are
+/// not subcommands over a model, they short-circuit before this table, and
+/// listing them under `Commands:` would imply `spar version <file>`. `--help`
+/// documents them in its own line instead.
+const COMMANDS: &[(&str, &str, CmdFn)] = &[
+    (
+        "parse",
+        "Parse AADL file(s) and report diagnostics",
+        cmd_parse,
+    ),
+    (
+        "items",
+        "Show item tree (declarations) for file(s)",
+        cmd_items,
+    ),
+    (
+        "instance",
+        "Instantiate a root system implementation",
+        cmd_instance,
+    ),
+    (
+        "analyze",
+        "Run analyses on an instantiated system model",
+        cmd_analyze,
+    ),
+    (
+        "allocate",
+        "Allocate threads to processors via bin-packing",
+        cmd_allocate,
+    ),
+    (
+        "diff",
+        "Compare two model versions and report changes",
+        cmd_diff,
+    ),
+    (
+        "modes",
+        "Mode reachability analysis and SMV/DOT export",
+        cmd_modes,
+    ),
+    (
+        "emit",
+        "Emit a Mermaid diagram, target constants module, or linker memory map",
+        cmd_emit,
+    ),
+    (
+        "render",
+        "Render architecture SVG from an instantiated system",
+        cmd_render,
+    ),
+    (
+        "verify",
+        "Verify requirements against analysis results",
+        cmd_verify,
+    ),
+    (
+        "codegen",
+        "Generate code from an instantiated system model",
+        cmd_codegen,
+    ),
+    (
+        "sysml2",
+        "Parse SysML v2 / KerML, or lower it to AADL",
+        cmd_sysml2,
+    ),
+    (
+        "extract",
+        "Extract SysML v2 requirements to rivet YAML",
+        cmd_sysml2_extract,
+    ),
+    (
+        "generate",
+        "Generate SysML v2 from rivet YAML (--from-rivet)",
+        cmd_sysml2_generate,
+    ),
+    (
+        "dbc",
+        "Ingest a CAN .dbc file and emit AADL (bus, devices, frames, message flows)",
+        cmd_dbc,
+    ),
+    (
+        "moves",
+        "Hypothetical-rebinding oracle (verify a move under the migration overlay)",
+        moves::cmd_moves_dispatch,
+    ),
+    (
+        "insight",
+        "Discrepancy assistant: compare CTF traces to Expected_BCET/WCET/Mean",
+        insight::cmd_insight,
+    ),
+    (
+        "lsp",
+        "Start Language Server Protocol server (stdin/stdout)",
+        cmd_lsp_argv,
+    ),
+    (
+        "mcp",
+        "Start MCP server (read-only verification oracles for AI agent integration)",
+        cmd_mcp,
+    ),
+];
+
 fn print_usage() {
     // Version first, as ordeal does (#422). Someone pasting a help dump into a
     // bug report then carries the version with it whether or not they thought
@@ -126,28 +237,22 @@ fn print_usage() {
     eprintln!("Usage: spar <command> [options] <file...>");
     eprintln!();
     eprintln!("Commands:");
-    eprintln!("  parse      Parse AADL file(s) and report diagnostics");
-    eprintln!("  items      Show item tree (declarations) for file(s)");
-    eprintln!("  instance   Instantiate a root system implementation");
-    eprintln!("  analyze    Run analyses on an instantiated system model");
-    eprintln!("  allocate   Allocate threads to processors via bin-packing");
-    eprintln!("  diff       Compare two model versions and report changes");
-    eprintln!("  modes      Mode reachability analysis and SMV/DOT export");
-    eprintln!("  emit       Emit a Mermaid diagram, target constants module, or linker memory map");
-    eprintln!("  render     Render architecture SVG from an instantiated system");
-    eprintln!("  verify     Verify requirements against analysis results");
-    eprintln!("  codegen    Generate code from an instantiated system model");
-    eprintln!(
-        "  dbc        Ingest a CAN .dbc file and emit AADL (bus, devices, frames, message flows)"
-    );
-    eprintln!(
-        "  moves      Hypothetical-rebinding oracle (verify a move under the migration overlay)"
-    );
-    eprintln!("  insight    Discrepancy assistant: compare CTF traces to Expected_BCET/WCET/Mean");
-    eprintln!("  lsp        Start Language Server Protocol server (stdin/stdout)");
-    eprintln!(
-        "  mcp        Start MCP server (read-only verification oracles for AI agent integration)"
-    );
+    // Generated from COMMANDS, padded to the longest name, so a new subcommand
+    // appears here the moment it dispatches and the column never drifts.
+    // Widest of the command names AND the two flag spellings below, so the
+    // description column is one column for the whole block.
+    let width = COMMANDS
+        .iter()
+        .map(|(n, _, _)| n.len())
+        .chain(["--version".len()])
+        .max()
+        .unwrap_or(0);
+    for (name, help, _) in COMMANDS {
+        eprintln!("  {name:<width$}  {help}");
+    }
+    eprintln!();
+    eprintln!("  {:<width$}  Print the version and exit", "--version");
+    eprintln!("  {:<width$}  Print this help and exit", "--help");
     eprintln!();
     eprintln!("Options:");
     eprintln!("  parse    [--tree] <file...>");
