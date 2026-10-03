@@ -216,7 +216,7 @@ impl ServerState {
         let trees: Vec<Arc<ItemTree>> = self
             .files
             .values()
-            .map(|file| file_item_tree(&self.db, *file))
+            .map(|file| file_item_tree(&self.db, *file).clone())
             .collect();
         self.global_scope = GlobalScope::from_trees(trees);
     }
@@ -265,7 +265,7 @@ impl ServerState {
     /// Get the item tree for a file URI via salsa (parse + lower).
     fn get_item_tree(&self, uri_str: &str) -> Option<Arc<ItemTree>> {
         let file = self.files.get(uri_str)?;
-        Some(file_item_tree(&self.db, *file))
+        Some(file_item_tree(&self.db, *file).clone())
     }
 }
 
@@ -471,8 +471,8 @@ fn publish_diagnostics(state: &ServerState, connection: &Connection, uri: &Uri) 
     // 2. Lower to item tree via salsa-cached query.
     let tree = file_item_tree(&state.db, file);
 
-    let naming_diags = spar_analysis::naming_rules::check_naming_rules(&tree);
-    let category_diags = spar_analysis::category_check::check_category_rules(&tree);
+    let naming_diags = spar_analysis::naming_rules::check_naming_rules(tree);
+    let category_diags = spar_analysis::category_check::check_category_rules(tree);
 
     let root = parse_result.syntax_node();
     for diag in naming_diags.iter().chain(category_diags.iter()) {
@@ -553,7 +553,7 @@ fn handle_hover(state: &ServerState, params: lsp_types::HoverParams) -> Option<H
     // Identifier hover: look up in the ItemTree.
     if kind == SyntaxKind::IDENT {
         let tree = file_item_tree(&state.db, *file);
-        if let Some(info) = identifier_hover_info(&tree, text) {
+        if let Some(info) = identifier_hover_info(tree, text) {
             return Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(info)),
                 range: Some(token_range(&token)),
@@ -2569,7 +2569,7 @@ fn handle_prepare_rename(
 
     // Check if this identifier is a renameable symbol
     let tree = file_item_tree(&state.db, *file);
-    if find_symbol_kind(&tree, name, &state.global_scope).is_some() {
+    if find_symbol_kind(tree, name, &state.global_scope).is_some() {
         let range = token_range(&token);
         Some(PrepareRenameResponse::Range(range))
     } else {
@@ -2599,7 +2599,7 @@ fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<Workspace
 
     let old_name = token.text().to_string();
     let tree = file_item_tree(&state.db, *file);
-    let symbol_kind = find_symbol_kind(&tree, &old_name, &state.global_scope)?;
+    let symbol_kind = find_symbol_kind(tree, &old_name, &state.global_scope)?;
 
     // Find all references across all documents
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
