@@ -665,7 +665,7 @@ end P;
         let ct_idx = tree.component_types.iter().next().unwrap().0;
         let ci_idx = tree.component_impls.iter().next().unwrap().0;
 
-        let map = properties::PropertyMap::collect_for_component(&tree, Some(ct_idx), Some(ci_idx));
+        let map = properties::PropertyMap::collect_for_component(tree, Some(ct_idx), Some(ci_idx));
 
         // Period should be overridden by impl
         assert_eq!(map.get("", "Period"), Some("20 ms"));
@@ -745,7 +745,7 @@ end P;
         let ct_idx = tree.component_types.iter().next().unwrap().0;
         let ci_idx = tree.component_impls.iter().next().unwrap().0;
 
-        let map = properties::PropertyMap::collect_for_component(&tree, Some(ct_idx), Some(ci_idx));
+        let map = properties::PropertyMap::collect_for_component(tree, Some(ct_idx), Some(ci_idx));
 
         // Both values should be present (append, not override)
         let values = map.get_all("", "Allowed_Processor_Binding");
@@ -2942,7 +2942,7 @@ end P;
     fn lower_first_property_set(src: &str) -> std::sync::Arc<item_tree::ItemTree> {
         let db = make_db();
         let file = spar_base_db::SourceFile::new(&db, "test.aadl".to_string(), src.to_string());
-        file_item_tree(&db, file)
+        file_item_tree(&db, file).clone()
     }
 
     #[test]

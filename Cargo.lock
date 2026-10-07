@@ -58,7 +58,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.2",
  "shlex",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -567,8 +567,6 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -582,12 +580,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashlink"
-version = "0.10.0"
+name = "hashbrown"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
- "hashbrown 0.15.5",
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
+dependencies = [
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -642,18 +651,15 @@ dependencies = [
 
 [[package]]
 name = "intrusive-collections"
-version = "0.9.7"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "189d0897e4cbe8c75efedf3502c18c887b05046e59d28404d4d8e46cbc4d1e86"
-dependencies = [
- "memoffset",
-]
+checksum = "4275b20e6057cd7733fd8df8a5a31701e4fe44497dad0f3fa0e1c4fb971506be"
 
 [[package]]
 name = "inventory"
-version = "0.3.23"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8062b737e5389949f477d4760a2ebbff0c366f97798f2419b8d8f366363d3342"
+checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
 dependencies = [
  "rustversion",
 ]
@@ -785,15 +791,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
-name = "memoffset"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -894,7 +891,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -993,7 +990,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1213,14 +1210,14 @@ dependencies = [
 
 [[package]]
 name = "salsa"
-version = "0.26.0"
+version = "0.28.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f77debccd43ba198e9cee23efd7f10330ff445e46a98a2b107fed9094a1ee676"
+checksum = "27d2e6e19e39591cd99c01ac4141544b4d012cfd0831348629b8187fa9fe6d34"
 dependencies = [
  "boxcar",
  "crossbeam-queue",
  "crossbeam-utils",
- "hashbrown 0.15.5",
+ "hashbrown 0.17.1",
  "hashlink",
  "indexmap",
  "intrusive-collections",
@@ -1234,24 +1231,24 @@ dependencies = [
  "smallvec",
  "thin-vec",
  "tracing",
+ "typeid",
 ]
 
 [[package]]
 name = "salsa-macro-rules"
-version = "0.26.0"
+version = "0.28.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea07adbf42d91cc076b7daf3b38bc8168c19eb362c665964118a89bc55ef19a5"
+checksum = "baf90a551c38f25ed8489111d3d5827aa18e1b85963f5e6a298505b1d1e2cb7e"
 
 [[package]]
 name = "salsa-macros"
-version = "0.26.0"
+version = "0.28.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16d4d8b66451b9c75ddf740b7fc8399bc7b8ba33e854a5d7526d18708f67b05"
+checksum = "69dd77f86ec10e72e314f4ddf7c44c8d349e73cdff1aad524ba9668603fb0549"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
- "synstructure",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1302,7 +1299,7 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1326,7 +1323,7 @@ checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1373,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "spar"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "etch",
  "la-arena",
@@ -1405,7 +1402,7 @@ dependencies = [
 
 [[package]]
 name = "spar-analysis"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
@@ -1419,7 +1416,7 @@ dependencies = [
 
 [[package]]
 name = "spar-annex"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "rowan",
  "spar-syntax",
@@ -1427,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "spar-base-db"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "rowan",
  "salsa",
@@ -1437,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "spar-codegen"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "criterion",
  "la-arena",
@@ -1452,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "spar-dbc"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "can-dbc",
  "expect-test",
@@ -1463,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "salsa",
  "serde",
@@ -1476,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "spar-hir-def"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "la-arena",
  "rowan",
@@ -1491,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "spar-insight"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1503,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "spar-mcp"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1518,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "spar-mermaid"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "la-arena",
  "rustc-hash 2.1.2",
@@ -1527,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "spar-network"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "good_lp",
  "spar-base-db",
@@ -1536,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "spar-parser"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "expect-test",
  "proptest",
@@ -1546,7 +1543,7 @@ dependencies = [
 
 [[package]]
 name = "spar-render"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "etch",
  "la-arena",
@@ -1557,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "spar-solver"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "criterion",
  "good_lp",
@@ -1571,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "spar-syntax"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "expect-test",
  "rowan",
@@ -1580,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "spar-sysml2"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "expect-test",
  "la-arena",
@@ -1591,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "spar-trace-topology"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "pcap-parser",
  "serde",
@@ -1605,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "spar-transform"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "la-arena",
  "serde",
@@ -1616,7 +1613,7 @@ dependencies = [
 
 [[package]]
 name = "spar-variants"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -1626,23 +1623,23 @@ dependencies = [
 
 [[package]]
 name = "spar-verify"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "spar-verify-macros",
 ]
 
 [[package]]
 name = "spar-verify-macros"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
 name = "spar-wasm"
-version = "0.42.0"
+version = "0.43.0"
 dependencies = [
  "etch",
  "la-arena",
@@ -1672,14 +1669,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "synstructure"
-version = "0.13.2"
+name = "syn"
+version = "3.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "unicode-ident",
 ]
 
 [[package]]
@@ -1724,7 +1721,7 @@ checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1796,6 +1793,12 @@ checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
 ]
+
+[[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"
@@ -1902,7 +1905,7 @@ dependencies = [
  "bumpalo",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
  "wasm-bindgen-shared",
 ]
 
@@ -2087,7 +2090,7 @@ dependencies = [
  "heck",
  "indexmap",
  "prettyplease",
- "syn",
+ "syn 2.0.117",
  "wasm-metadata 0.244.0",
  "wit-bindgen-core 0.51.0",
  "wit-component 0.244.0",
@@ -2103,7 +2106,7 @@ dependencies = [
  "heck",
  "indexmap",
  "prettyplease",
- "syn",
+ "syn 2.0.117",
  "wasm-metadata 0.245.1",
  "wit-bindgen-core 0.53.1",
  "wit-component 0.245.1",
@@ -2119,7 +2122,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
  "wit-bindgen-core 0.51.0",
  "wit-bindgen-rust 0.51.0",
 ]
@@ -2134,7 +2137,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
  "wit-bindgen-core 0.53.1",
  "wit-bindgen-rust 0.53.1",
 ]
@@ -2256,7 +2259,7 @@ checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]

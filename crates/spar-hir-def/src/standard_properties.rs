@@ -1005,7 +1005,8 @@ mod tests {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
 
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Spar_Network::Switch_Type is resolvable without explicit `with`.
         let result = scope.resolve_property(&Name::new("Spar_Network"), &Name::new("Switch_Type"));
@@ -1025,7 +1026,8 @@ mod tests {
         assert_eq!(standard_property_type("Spar_Network", "Nonexistent"), None);
 
         // Resolver layer: unknown property in a known spar set is Unresolved.
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
         let result = scope.resolve_property(&Name::new("Spar_Network"), &Name::new("Nonexistent"));
         assert!(
             matches!(result, ResolvedProperty::Unresolved),
@@ -1039,7 +1041,8 @@ mod tests {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
 
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Spar_Timing::ISR_Priority is resolvable without explicit `with`.
         let result = scope.resolve_property(&Name::new("Spar_Timing"), &Name::new("ISR_Priority"));
@@ -1127,7 +1130,8 @@ mod tests {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
 
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Each Spar_Migration property is resolvable without explicit `with`.
         for prop_name in ["Frozen", "Mobile", "Allowed_Targets", "Pinned_Reason"] {
@@ -1225,7 +1229,8 @@ mod tests {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
 
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Each Spar_TSN property is resolvable without explicit `with`.
         for prop_name in [
@@ -1333,7 +1338,8 @@ mod tests {
         use crate::name::Name;
         use crate::resolver::{GlobalScope, ResolvedProperty};
 
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Each Spar_Identity property is resolvable without explicit `with`.
         for prop_name in [
@@ -1505,7 +1511,8 @@ mod tests {
 
         // Build a GlobalScope with no item trees — standard properties
         // should still be registered automatically.
-        let scope = GlobalScope::from_trees(vec![]);
+        let scope =
+            GlobalScope::from_trees(Vec::<std::sync::Arc<crate::item_tree::ItemTree>>::new());
 
         // Resolve Timing_Properties::Period
         let result = scope.resolve_property(&Name::new("Timing_Properties"), &Name::new("Period"));
