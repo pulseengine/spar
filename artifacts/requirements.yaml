@@ -6160,3 +6160,48 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SYSML2-CONFORMANCE-001
+
+  - id: REQ-ANALYSIS-RANGE-UNITS-001
+    type: requirement
+    title: A range property's bounds shall be compared on a common scale, and an incomparable pair shall not read as ordered
+    description: >
+      `property_rules`' PROP-RANGE-ORDER check compared the two ends of a range
+      by MAGNITUDE, with the unit stripped by `parse_numeric_value`. Reported
+      from a real model (#454) with a 2x2 that isolates it:
+
+        200 ns ..  20 us     valid      -> ERROR     false positive
+        200 ns ..  20000 ns  valid      -> ok        control
+        20000 ns ..  200 ns  INVERTED   -> ERROR     control
+        20 us  ..  200 ns    INVERTED   -> ok        FALSE NEGATIVE
+
+      The two same-unit rows are what make this a unit defect rather than a
+      broken comparison: the ordering logic was already right in both
+      directions, so only normalisation was missing.
+
+      THE FALSE NEGATIVE IS THE HALF THAT MATTERS. Row 1 is loud, attributable
+      and blocks nothing permanently. Row 4 is silent: a thread whose WCET
+      envelope is declared backwards in mixed units passes `spar analyze`
+      clean, and `Compute_Execution_Time` is an input to the latency and
+      scheduling analyses a timing argument rests on. Mixed units in a timing
+      property are ordinary — `ns` for a tight compute path beside `us` or `ms`
+      for a deadline is the natural way to write them.
+
+      THE REQUIREMENT. Bounds carrying units shall be normalised onto one scale
+      before comparison, reusing `spar_hir_def::property_value`'s existing time
+      and size tables rather than a second copy. Bare numbers shall still
+      compare by magnitude, since there is no unit to lose. A pair that cannot
+      be placed on a common scale — a unit on one end only, two different
+      dimensions, an unrecognised unit — shall NOT be reported as correctly
+      ordered; the check shall say nothing rather than declare it fine.
+
+      That last clause is the one that keeps the repair from becoming the next
+      silent failure, and it is tested separately: the comparison returns an
+      explicit "cannot compare" rather than a bool, so a bound with a unit can
+      never fall through to a magnitude comparison with the unit discarded.
+
+      NOT CLAIMED: that a mixed unit-and-unitless range is well formed. It is
+      probably a model error, and it is now unreported rather than
+      mis-reported. Flagging it is a successor.
+    status: implemented
+    release: v0.43.0
+    tags: [analysis, properties, units, defect, v0430]

@@ -109,11 +109,7 @@ fn check_range_ordering(
             if let Some((low_str, high_str)) = val.split_once("..") {
                 let low_str = low_str.trim();
                 let high_str = high_str.trim();
-                // Try to parse as integers
-                if let (Ok(low), Ok(high)) =
-                    (parse_numeric_value(low_str), parse_numeric_value(high_str))
-                    && low > high
-                {
+                if range_is_inverted(low_str, high_str) == Some(true) {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
                         message: format!(
@@ -130,6 +126,65 @@ fn check_range_ordering(
 }
 
 /// Try to parse a numeric value string, stripping any trailing unit.
+/// Does this bound carry a unit suffix (`20 us`) rather than being a bare
+/// number (`20`)?
+fn has_unit(s: &str) -> bool {
+    s.trim()
+        .chars()
+        .last()
+        .is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// Is this range's lower bound greater than its upper bound?
+///
+/// `None` means the two ends could not be put on a common scale. That is NOT
+/// the same as "correctly ordered" and must not be reported as ok — returning
+/// a plain bool here would reintroduce the bug this exists to fix.
+///
+/// ## Why this is not a magnitude comparison (#454)
+///
+/// It used to be. `parse_numeric_value` strips the unit and returns the bare
+/// number, so `200 ns .. 20 us` compared `200 > 20` and errored on a valid
+/// range — and, far worse, `20 us .. 200 ns` compared `20 > 200`, found it
+/// false, and passed a genuinely INVERTED range in silence. The false negative
+/// is the dangerous half: `Compute_Execution_Time` feeds the latency and
+/// scheduling analyses, so a WCET envelope declared backwards in mixed units
+/// reached a timing argument with nothing said.
+///
+/// Mixed units are not exotic — `ns` for a tight compute path beside `us` or
+/// `ms` for a deadline is the natural way to write these, which is how the
+/// reporting model came to have one.
+///
+/// Units are normalised with `spar_hir_def::property_value`'s existing tables
+/// (times to picoseconds, sizes to bits) rather than a second unit table here:
+/// two tables would be two things to drift apart.
+fn range_is_inverted(low: &str, high: &str) -> Option<bool> {
+    use spar_hir_def::property_value::{parse_size_value, parse_time_value};
+
+    // Same dimension, unit-aware: both ends normalise onto one scale, so mixed
+    // units compare correctly in both directions.
+    if let (Some(l), Some(h)) = (parse_time_value(low), parse_time_value(high)) {
+        return Some(l > h);
+    }
+    if let (Some(l), Some(h)) = (parse_size_value(low), parse_size_value(high)) {
+        return Some(l > h);
+    }
+
+    // Bare numbers: comparing magnitudes is correct, because there are no units
+    // to lose. Guarded so a bound that DOES carry a unit never reaches here —
+    // falling through to a magnitude compare is precisely the old defect.
+    if !has_unit(low)
+        && !has_unit(high)
+        && let (Ok(l), Ok(h)) = (parse_numeric_value(low), parse_numeric_value(high))
+    {
+        return Some(l > h);
+    }
+
+    // Mixed dimensions, an unknown unit, or a unit on one end only: not
+    // comparable. Saying nothing is honest; saying "ok" would not be.
+    None
+}
+
 fn parse_numeric_value(s: &str) -> Result<f64, ()> {
     let s = s.trim();
     // Try direct parse first
@@ -1613,6 +1668,106 @@ mod tests {
             list_warns.is_empty(),
             "reversed parens must not trigger list check: {:?}",
             list_warns
+        );
+    }
+
+    /// The 2x2 from #454, pinned as a table.
+    ///
+    /// Rows b and c are the controls that made the original report a UNIT bug
+    /// rather than a broken comparison: with both ends in the same unit the
+    /// check was already right in both directions, so only normalisation was
+    /// missing. They stay here for the same reason — if a future change breaks
+    /// the comparison itself, these fail and the mixed-unit rows alone would
+    /// not have told us which half broke.
+    #[test]
+    fn range_ordering_is_unit_aware() {
+        let cases: &[(&str, &str, bool, &str)] = &[
+            // low,        high,          inverted?, why it is in the table
+            (
+                "200 ns",
+                "20 us",
+                false,
+                "#454 row 1 — was a FALSE POSITIVE",
+            ),
+            ("200 ns", "20000 ns", false, "control: same unit, ordered"),
+            ("20000 ns", "200 ns", true, "control: same unit, inverted"),
+            (
+                "20 us",
+                "200 ns",
+                true,
+                "#454 row 4 — was a SILENT FALSE NEGATIVE",
+            ),
+        ];
+        for (low, high, want, why) in cases {
+            assert_eq!(
+                range_is_inverted(low, high),
+                Some(*want),
+                "{low} .. {high} ({why})"
+            );
+        }
+    }
+
+    /// Bare numbers still compare by magnitude — there is no unit to lose, and
+    /// breaking this would be a regression dressed as a fix.
+    #[test]
+    fn unitless_ranges_still_compare_by_magnitude() {
+        assert_eq!(range_is_inverted("1", "2"), Some(false));
+        assert_eq!(range_is_inverted("2", "1"), Some(true));
+        assert_eq!(range_is_inverted("1.5", "2.5"), Some(false));
+    }
+
+    /// Sizes get the same treatment as times, through the same shared tables.
+    #[test]
+    fn size_ranges_are_unit_aware() {
+        assert_eq!(range_is_inverted("1 KByte", "1 MByte"), Some(false));
+        assert_eq!(range_is_inverted("1 MByte", "1 KByte"), Some(true));
+    }
+
+    /// What CANNOT be compared must not be reported as ordered.
+    ///
+    /// This is the half that keeps the fix from becoming the next silent
+    /// failure: a bound carrying a unit must never fall through to a magnitude
+    /// comparison with the unit discarded. `None` here means "said nothing",
+    /// which is honest; `Some(false)` would mean "declared it fine".
+    #[test]
+    fn incomparable_bounds_return_none_not_ok() {
+        // a unit on one end only
+        assert_eq!(range_is_inverted("20 us", "200"), None);
+        assert_eq!(range_is_inverted("200", "20 us"), None);
+        // different dimensions
+        assert_eq!(range_is_inverted("20 us", "1 KByte"), None);
+        // an unknown unit
+        assert_eq!(range_is_inverted("20 furlongs", "200 furlongs"), None);
+    }
+
+    /// A range whose bounds are EQUAL is valid, not inverted.
+    ///
+    /// `low <= high` is the rule, so `1 KByte .. 1 KByte` is a degenerate but
+    /// legal range. Found by mutation testing: `replace > with >=` in the size
+    /// branch survived, because every other case here has distinct bounds and
+    /// `>` and `>=` differ only when they are equal. Under `>=` a model
+    /// declaring a fixed-size or fixed-duration property as a one-point range
+    /// would be reported as inverted.
+    ///
+    /// Both dimensions are covered, not just the one that survived — the time
+    /// branch is the same expression one line up and would survive the same
+    /// mutation the moment whichever test currently covers it changes.
+    #[test]
+    fn equal_bounds_are_not_inverted() {
+        assert_eq!(range_is_inverted("1 KByte", "1 KByte"), Some(false));
+        assert_eq!(range_is_inverted("20 us", "20 us"), Some(false));
+        assert_eq!(range_is_inverted("20 us", "20000 ns"), Some(false));
+        assert_eq!(range_is_inverted("7", "7"), Some(false));
+    }
+
+    /// Non-vacuity: the function must be able to return BOTH verdicts on real
+    /// input, or a table of `Some(false)` expectations would pass against a
+    /// function stuck on one answer.
+    #[test]
+    fn the_range_verdict_discriminates() {
+        assert_ne!(
+            range_is_inverted("200 ns", "20 us"),
+            range_is_inverted("20 us", "200 ns")
         );
     }
 }
