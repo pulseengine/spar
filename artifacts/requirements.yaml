@@ -6205,3 +6205,43 @@ artifacts:
     status: implemented
     release: v0.43.0
     tags: [analysis, properties, units, defect, v0430]
+  - id: REQ-GUARD-STALE-SCOPE-001
+    type: requirement
+    title: An artifact shall not be scoped to a release that has already gone by
+    description: >
+      An artifact carrying `release: vX.Y.Z` with a status short of verified,
+      where X.Y.Z is BELOW the version in Cargo.toml, is a scheduling failure
+      the board cannot see: the release it was promised to has shipped and
+      nothing said so. Measured 2026-10-09 across artifacts/ and safety/stpa/:
+      90 of them, the oldest assigned to v0.13.0.
+
+      TWO SHAPES HIDE IN ONE COUNT, and they need different work. `proposed`
+      below the line is scope planned and never built — v0.23.0 alone carries
+      26. `implemented` below the line is work that shipped but never closed
+      the right side of the V. Treating them as one pile is why neither moves;
+      the guard reports the split by release so they can be worked separately.
+
+      `rivet validate` catches neither: both are schema-valid and a release
+      field is just a string. The only thing that ever noticed was a human
+      reading the board, which is how 90 accumulated across 19 releases.
+
+      RATCHET, NOT A ZERO. A guard demanding zero would be red on every PR from
+      the day it landed, be neutered within a week, and join the checks people
+      route around — the cry-wolf failure, which carries as little information
+      as a check that can never fail. It is EXACT like MAX_TOO_PERMISSIVE:
+      above the declared count fails as a regression, below it fails until the
+      constant is lowered, so a cleanup is locked in rather than left as slack
+      the next pass re-spends.
+
+      The comparison is against Cargo.toml, not the newest tag, because
+      Cargo.toml is the release being PREPARED. Against tags, the whole
+      bumped-but-untagged window — v0.41.0, v0.42.0, v0.43.0 at the time of
+      writing — would have hidden artifacts.
+
+      NOT CLAIMED: that the 90 are all worth finishing. An artifact on a
+      shipped release may be real work to schedule or scope that should be
+      deleted, and that is a maintainer judgement. The guard has no opinion; it
+      insists only that the number is known and only falls.
+    status: implemented
+    release: v0.43.0
+    tags: [process, guardrail, planning, rivet, v0430]
