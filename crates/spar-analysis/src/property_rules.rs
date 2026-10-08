@@ -1740,6 +1740,26 @@ mod tests {
         assert_eq!(range_is_inverted("20 furlongs", "200 furlongs"), None);
     }
 
+    /// A range whose bounds are EQUAL is valid, not inverted.
+    ///
+    /// `low <= high` is the rule, so `1 KByte .. 1 KByte` is a degenerate but
+    /// legal range. Found by mutation testing: `replace > with >=` in the size
+    /// branch survived, because every other case here has distinct bounds and
+    /// `>` and `>=` differ only when they are equal. Under `>=` a model
+    /// declaring a fixed-size or fixed-duration property as a one-point range
+    /// would be reported as inverted.
+    ///
+    /// Both dimensions are covered, not just the one that survived — the time
+    /// branch is the same expression one line up and would survive the same
+    /// mutation the moment whichever test currently covers it changes.
+    #[test]
+    fn equal_bounds_are_not_inverted() {
+        assert_eq!(range_is_inverted("1 KByte", "1 KByte"), Some(false));
+        assert_eq!(range_is_inverted("20 us", "20 us"), Some(false));
+        assert_eq!(range_is_inverted("20 us", "20000 ns"), Some(false));
+        assert_eq!(range_is_inverted("7", "7"), Some(false));
+    }
+
     /// Non-vacuity: the function must be able to return BOTH verdicts on real
     /// input, or a table of `Some(false)` expectations would pass against a
     /// function stuck on one answer.
