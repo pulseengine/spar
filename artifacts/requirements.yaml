@@ -5885,7 +5885,7 @@ artifacts:
       to be files no parser should accept (#427). The number is only meaningful
       next to the corpus it was measured on, which is why the corpus is
       vendored and pinned rather than fetched.
-    status: proposed
+    status: verified
     release: v0.43.0
     tags: [sysml2, interop, guardrail, conformance, northstar]
     links:
@@ -5910,7 +5910,7 @@ artifacts:
       NOT CLAIMED: that every command should be PROMOTED. A command may
       legitimately be experimental; the requirement is that its existence is
       visible, not that it is advertised as stable.
-    status: proposed
+    status: verified
     release: v0.43.0
     tags: [cli, tooling, guardrail, ux]
 
@@ -5946,7 +5946,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.43.0
+    release: v0.44.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
