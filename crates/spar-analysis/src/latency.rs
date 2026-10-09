@@ -54,15 +54,18 @@ impl Analysis for LatencyAnalysis {
             // subcomponent flow references ("subcomp.flow_name")
             let mut best_case_ps: u64 = 0;
             let mut worst_case_ps: u64 = 0;
-            // Count the timing quantities that actually fed the figure. A
-            // latency aggregated from ZERO contributions is not a derived
-            // value, and reporting it as INFO `[0.000 ms .. 0.000 ms]` lets a
-            // declared budget look satisfied by a number the analysis never
-            // computed (spar#455). We count contributions rather than testing
-            // whether the sum is zero, so a flow whose elements legitimately
-            // declare `0 ns` execution still reads as derived and stays
-            // reportable.
-            let mut timing_contributions: u64 = 0;
+            // Provenance tracking (spar#455). A latency aggregated from no
+            // timing is not a derived value, and reporting it as INFO
+            // `[0.000 ms .. 0.000 ms]` lets a declared budget look satisfied by
+            // a number the analysis never computed. The figure is derived if a
+            // positive quantity was added (`worst_case_ps > 0`) OR an execution
+            // time was read — `Compute_Execution_Time` is the one input that
+            // may be legitimately zero (`0 ns`), so a zero worst-case with an
+            // exec present is a derived zero, not an absence, and must stay
+            // reportable. Every other contributor (network-hop bound, sampling
+            // delay, inter-processor overhead) is positive in practice, so
+            // `worst_case_ps > 0` already covers it.
+            let mut saw_exec = false;
             let mut missing_timing = Vec::new();
             let mut connection_count: u64 = 0;
             let mut prev_processor: Option<String> = None;
@@ -125,7 +128,6 @@ impl Analysis for LatencyAnalysis {
                         }
                         best_case_ps = best_case_ps.saturating_add(hop_lat.min_ps);
                         worst_case_ps = worst_case_ps.saturating_add(hop_lat.max_ps);
-                        timing_contributions += 1;
                         network_hops.push(NetworkHopAnnotation {
                             connection_name: conn_name.to_string(),
                             min_ps: hop_lat.min_ps,
@@ -164,7 +166,7 @@ impl Analysis for LatencyAnalysis {
                     if let Some(exec) = exec_ps {
                         best_case_ps = best_case_ps.saturating_add(exec);
                         worst_case_ps = worst_case_ps.saturating_add(exec);
-                        timing_contributions += 1;
+                        saw_exec = true;
                     } else {
                         missing_timing.push(child_comp.name.as_str().to_string());
                     }
@@ -179,7 +181,6 @@ impl Analysis for LatencyAnalysis {
                         && let Some(period) = period_ps
                     {
                         worst_case_ps = worst_case_ps.saturating_add(period);
-                        timing_contributions += 1;
                     }
 
                     // Track processor binding for inter-processor overhead.
@@ -197,7 +198,6 @@ impl Analysis for LatencyAnalysis {
                             && let Some(overhead) = inter_proc_overhead_ps
                         {
                             worst_case_ps = worst_case_ps.saturating_add(overhead);
-                            timing_contributions += 1;
                         }
                     }
 
@@ -244,13 +244,15 @@ impl Analysis for LatencyAnalysis {
                 });
             }
 
-            // Provenance (spar#455): a figure built from no contributions was
-            // never derived, so do not render it as a latency range. Report it
-            // as an Error — "not computed" — rather than an INFO carrying
-            // `0.000`, which a reader (or a budget check) would otherwise take
-            // for a satisfied bound. The `missing timing properties` warning
-            // above already names which components lacked timing.
-            if timing_contributions == 0 {
+            // Provenance (spar#455): a figure built from no timing was never
+            // derived, so do not render it as a latency range. Report it as an
+            // Error — "not computed" — rather than an INFO carrying `0.000`,
+            // which a reader (or a budget check) would otherwise take for a
+            // satisfied bound. Nothing was derived when the worst case is still
+            // zero AND no execution time was read (an exec may legitimately be
+            // `0 ns`). The `missing timing properties` warning above already
+            // names which components lacked timing.
+            if worst_case_ps == 0 && !saw_exec {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Error,
                     message: format!(

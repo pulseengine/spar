@@ -6526,17 +6526,19 @@ artifacts:
       `latency` range excludes zero, reported as `0.000 ms .. 0.000 ms` without
       an error.
 
-      THE REQUIREMENT. A latency figure that was aggregated from ZERO timing
-      contributions was never derived and shall not be rendered as a latency
-      range. It shall instead be reported as an Error stating that nothing could
-      be computed. The discriminator is the COUNT of contributions that fed the
-      figure (execution times, network-hop bounds, sampling delays,
-      inter-processor overheads), not whether the numeric sum is zero: a flow
-      whose elements legitimately declare `0 ns` execution has a real, derived
-      figure of zero and stays reportable as INFO. A check on the sum alone
-      would wrongly turn that legitimate zero into an error, so the fix counts
-      contributions and both directions are pinned by tests — the zero-element
-      flow errors, the explicit-`0 ns` flow still reports.
+      THE REQUIREMENT. A latency figure that no timing fed was never derived and
+      shall not be rendered as a latency range. It shall instead be reported as
+      an Error stating that nothing could be computed. The figure counts as
+      derived when the worst case is positive (some quantity was added) OR an
+      execution time was read: `Compute_Execution_Time` is the one input that
+      may be legitimately zero (`0 ns`), so a zero worst-case with an exec
+      present is a derived zero, not an absence, and stays reportable as INFO.
+      Every other contributor (network-hop bound, sampling delay,
+      inter-processor overhead) is positive in practice, so the positive-worst
+      test already covers it. A bare `sum == 0` check would wrongly turn the
+      legitimate `0 ns` case into an error; keying additionally on the exec flag
+      avoids that, and both directions are pinned by tests — the no-timing flow
+      errors, the explicit-`0 ns` flow still reports.
 
       NON-VACUITY. The kill-criterion test is the bug's own repro: under the
       pre-fix behaviour the same flow produced the INFO `0.000` and no error, so
