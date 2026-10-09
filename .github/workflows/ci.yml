@@ -107,6 +107,14 @@ jobs:
       # Self-test first, as with the other guardrails: the decision table
       # carries the #383 regression itself (root clean + fuzz/ dirty must exit
       # 1), so the gate proves it can still fail before it may pass.
+      - name: Stale-scope guardrail self-test
+        run: tools/check_stale_scope.py --self-test
+      - name: No artifact scoped to a release that has gone by
+        # Ratchet, not a zero: 90 artifacts carry a release below the one being
+        # prepared and never reached verified. Demanding zero would be red on
+        # every PR and get routed around; EXACT means a cleanup has to be
+        # recorded rather than pocketed.
+        run: tools/check_stale_scope.py --artifacts-dir artifacts --artifacts-dir safety/stpa
       - name: Format guardrail self-test
         run: tools/check_fmt_workspaces.py --self-test
       - name: Format (every workspace in the repo)
