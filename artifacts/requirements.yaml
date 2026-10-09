@@ -6509,3 +6509,54 @@ artifacts:
     status: verified
     release: v0.44.0
     tags: [process, guardrail, ci, release, supply-chain]
+
+  - id: REQ-ANALYSIS-LATENCY-PROVENANCE-001
+    type: requirement
+    title: A latency figure aggregated from no timing contributions shall not be reported as a derived value
+    description: >
+      When an end-to-end flow traverses only components that carry no timing,
+      the latency analysis computed `[0.000 ms .. 0.000 ms]` and reported it as
+      INFO (spar#455). A declared `latency` budget was not even consulted, so a
+      flow whose declared range excludes zero — e.g. `300 ns .. 250 us` — passed
+      `spar analyze` with zero errors next to a figure of zero. In a safety
+      case that zero is the one value that makes any budget look satisfied,
+      which is precisely why it must not be mistaken for evidence.
+
+      KILL-CRITERION (from the issue): an end-to-end flow whose declared
+      `latency` range excludes zero, reported as `0.000 ms .. 0.000 ms` without
+      an error.
+
+      THE REQUIREMENT. A latency figure that was aggregated from ZERO timing
+      contributions was never derived and shall not be rendered as a latency
+      range. It shall instead be reported as an Error stating that nothing could
+      be computed. The discriminator is the COUNT of contributions that fed the
+      figure (execution times, network-hop bounds, sampling delays,
+      inter-processor overheads), not whether the numeric sum is zero: a flow
+      whose elements legitimately declare `0 ns` execution has a real, derived
+      figure of zero and stays reportable as INFO. A check on the sum alone
+      would wrongly turn that legitimate zero into an error, so the fix counts
+      contributions and both directions are pinned by tests — the zero-element
+      flow errors, the explicit-`0 ns` flow still reports.
+
+      NON-VACUITY. The kill-criterion test is the bug's own repro: under the
+      pre-fix behaviour the same flow produced the INFO `0.000` and no error, so
+      the test fails against the old code. Its discrimination counterpart
+      asserts the explicit-`0 ns` flow is still reported, so the error cannot be
+      fired unconditionally.
+
+      SCOPE — PROVEN HERE vs SUCCESSORS (tracked under #455, NOT closed by this
+      increment):
+        * item (2), budget comparison: read the flow's OWN
+          `{ latency => min .. max }` association (today only the owner
+          component's `Timing_Properties::Latency` is read, as a single value,
+          and only the upper bound is checked). This needs the flow's
+          `property_associations` threaded through `EndToEndFlowInstance`, which
+          currently drops them at instantiation. NOT done here.
+        * item (3), process descent: a flow segment naming
+          `app.caller.lock_flow` is truncated at the first path component, so a
+          thread's `Compute_Execution_Time` inside a process is never reached.
+          This is the larger capability change. NOT done here.
+      Only item (1), provenance, is implemented and verified by this increment.
+    status: implemented
+    release: v0.45.0
+    tags: [analysis, latency, provenance, defect, v0450]
