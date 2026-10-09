@@ -5946,7 +5946,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -5973,7 +5973,7 @@ artifacts:
       is that the ratchet moves and the specification's Annex A model parses,
       not that the count reaches its maximum.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [sysml2, parser, grammar]
     links:
       - type: traces-to
@@ -6002,7 +6002,7 @@ artifacts:
       refinement and nesting semantics are not in scope and are not asserted to
       work.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [hir, instance, aadl, defect]
 
   - id: REQ-FINDINGS-LAYER-001
@@ -6297,7 +6297,7 @@ artifacts:
       NOT CLAIMED: that all 13 uncovered tools have vacuous self-tests. Only
       that nothing distinguishes a potent one from a vacuous one today.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [process, guardrail, ci, tooling, mutation]
 
   - id: REQ-GUARD-STALE-SCOPE-002
@@ -6341,7 +6341,7 @@ artifacts:
       NOT CLAIMED: that every one of the 225 is correctly recorded today. 15
       TEST-* carry no status at all, which is a separate gap.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [process, guardrail, planning, rivet]
 
   - id: REQ-AADL-APPLIES-TO-LIST-001
@@ -6426,5 +6426,86 @@ artifacts:
 
       NOT CLAIMED: that every reported binding error is this cause.
     status: proposed
-    release: v0.44.0
+    release: v0.45.0
     tags: [aadl, analysis, properties, bug, interop]
+
+  - id: REQ-RELEASE-COMPLIANCE-PIN-001
+    type: requirement
+    title: The release's compliance gate shall run the same rivet the required CI gate runs, from a pinned action
+    description: >
+      v0.43.0 was tagged, every build job succeeded — 5 platform binaries, 5 VS
+      Code extensions, the wasm bundle, SBOM, test evidence — and NOTHING
+      PUBLISHED. `create-release` gates on `build-compliance` via `needs:`, and
+      that job failed, so the release and Marketplace steps were skipped (#464).
+
+      MEASURED on the v0.43.0 tag commit 0b9b9f8, running what the action runs:
+      rivet v0.1.0 exits 1 with `Result: FAIL (47 errors)`; v0.4.3 exits 0 with
+      `PASS (148 warnings)`; v0.40.0 exits 0 with `PASS (823 warnings)`.
+      release.yml passed v0.1.0 while ci.yml pins v0.4.3 for the REQUIRED
+      `Rivet validate (artifacts)` context — so the release and CI disagreed
+      about the same tree, and only the release's half was wrong. The 47 errors
+      are all `missing: design-decision`, which later rivet reports as a
+      warning: a strictness difference between rivet versions, not a defect in
+      the artifacts. NOT CLAIMED that newer rivet is stricter here — v0.40.0
+      passes, so that long-held assumption is refuted by measurement.
+
+      WHY IT SURFACED NOW, and why it is not a regression. The action was
+      referenced `@main`. rivet #953 (48df5f798) replaced a VACUOUS gate: the
+      previous step captured `rivet validate`'s exit code and never used it,
+      inferring the verdict by grepping stdout for "Result: PASS". Two shapes
+      fell through green — a non-zero exit whose output still contained the
+      string, and a panic that printed nothing but ended on an `echo`. So this
+      validation had been failing for as long as v0.1.0 had been running; the
+      step could not say so, and v0.36.0/v0.37.0/v0.40.0 reported success
+      because the check could not fail. spar is here on the receiving end of
+      the discipline it applies to its own gates (#381, #388, #403).
+
+      CHECKED rather than insinuated: the shipped
+      spar-v0.40.0-compliance-report.tar.gz contains index.html,
+      requirements.reqif, config.js, README.md and artifacts.yaml, and NO
+      validate verdict line. No published bundle asserted a PASS. The gate was
+      vacuous; nothing false shipped.
+
+      TWO OBLIGATIONS. The rivet version used to generate the compliance bundle
+      shall equal the one the required CI validate gate uses, so the two cannot
+      disagree about the same tree. Both are now v0.40.0, the newest release.
+      And the action shall be referenced by commit SHA, never a moving branch:
+      an unpinned release-path dependency changed behaviour with no diff in this
+      repo, which is the class that froze the PR queue for five weeks under a
+      moving nightly toolchain (#449/#450).
+
+      The pin deliberately KEEPS #953's honest gate. The defect was the input,
+      not the check; pinning to a SHA that reverted it would re-introduce a
+      check that cannot fail.
+
+      WHY v0.40.0 AND NOT v0.4.3. Both pass, so either would unblock the
+      release; v0.40.0 is chosen because it is current and reports its embedded
+      schema versions (common@0.3.1, dev@0.4.0, aspice@0.2.0, stpa@0.1.0,
+      aadl@0.1.0, sysml2@0.1.0), which is what an auditor reading the bundle
+      wants. The 148 -> 826 warning jump was read before being accepted: it is
+      new CHECKS, not noise — v0.40.0 adds `requirement should be verified by at
+      least one test` (303 instances) and a detector for prose that mentions an
+      artifact id without a typed link. Both are coverage spar did not have, and
+      neither is an error.
+
+      THE RELEASE NUMBER IS 0.44.0, NOT 0.43.1. v0.43.0's tag was deleted and
+      the number collapsed, the same move as v0.41.0/v0.42.0 into v0.43.0 and
+      0.37.0 into 0.40.0. A tag with no release behind it renders like a shipped
+      version and is not one — the very confusion this project's guardrails
+      exist to prevent. Nothing referenced it: no GitHub Release, no assets.
+      SCOPE MOVED DELIBERATELY, not silently. Six artifacts left v0.44.0 for
+      v0.45.0: REQ-SYSML2-VISIBILITY-001 and REQ-HIR-FEATUREGROUP-PATH-001
+      (both `proposed`, neither built), REQ-CLAIM-LEDGER-001, and the three
+      landed for #460/#461/#462. REQ-AADL-APPLIES-TO-LIST-001 deliberately
+      STAYS at v0.44.0: PR #463 implements it with an AS5506D §11.3 citation
+      and a non-vacuous oracle, so #459's fix ships in the release that carries
+      it rather than being pushed past it. v0.44.0 is therefore the compliance
+      pin plus that fix, not a bare hotfix.
+
+      NOT CLAIMED: that the release published. That is reported against the
+      tag, not asserted here. This requirement's predicate is that the two
+      gates run one pinned version, which is verified by inspection and by the
+      required `Rivet validate (artifacts)` context running v0.40.0 green.
+    status: verified
+    release: v0.44.0
+    tags: [process, guardrail, ci, release, supply-chain]

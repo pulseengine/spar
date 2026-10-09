@@ -543,13 +543,61 @@ jobs:
         with:
           cache-bin: false
       - name: Install rivet CLI
-        # The binary `rivet` ships in the `rivet-cli` package (renamed
-        # in the 0.4.x rework). v0.1.0 used a single `rivet` package
-        # and treated unknown fields as errors, which fails on legitimate
-        # schema-extension fields used by Track A/B/D/E artifacts.
-        # `--force` guarantees this exact pinned tag is the binary that runs,
-        # even if a stale `rivet` is present, so the gate is deterministic.
-        run: cargo install --force --locked --git https://github.com/pulseengine/rivet --tag v0.4.3 rivet-cli
+        # PREBUILT + CHECKSUM, not `cargo install` (#464).
+        #
+        # Two changes, one step. The VERSION moves v0.4.3 -> v0.40.0 so this
+        # required context and release.yml's compliance gate run the SAME rivet;
+        # they disagreed before, which is how v0.43.0 built every artifact and
+        # published nothing. The METHOD moves from a from-source build to the
+        # signed release asset, because the source build FAILS on this runner:
+        # rivet v0.40.0 pulls `highs`/`good_lp` (a native C++ LP solver) and a
+        # `spar-analysis v0.10.0` git dependency, and the step died after 154s
+        # on `rust-cpu` while succeeding locally in 102s. Building a heavy
+        # native dependency tree inside a required gate is a liability the gate
+        # does not need — the compliance action already consumes the prebuilt
+        # asset for a release tag, so this makes the two use the same artifact,
+        # not merely the same version number.
+        #
+        # The checksum is verified BEFORE extraction and the version is asserted
+        # AFTER: a truncated download or a redirect to an error page must not
+        # read as a working tool, and `rivet --version` disagreeing with the pin
+        # is the only thing that proves the binary on PATH is the one we asked
+        # for. That is the failure this step has already had once — rust-cache
+        # restoring a `rivet` built elsewhere, which produced the v0.33.0 bump's
+        # false-red of 464 phantom errors. `cache-bin: false` above remains the
+        # other half of that fix.
+        env:
+          RIVET_VERSION: v0.40.0
+        run: |
+          set -euo pipefail
+          asset="rivet-${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          base="https://github.com/pulseengine/rivet/releases/download/${RIVET_VERSION}"
+          mkdir -p .rivet-dl/bin && cd .rivet-dl
+          # -f: a 404 or an error page must fail the step, not be extracted.
+          curl -fsSL -o "$asset" "${base}/${asset}"
+          curl -fsSL -o SHA256SUMS.txt "${base}/SHA256SUMS.txt"
+          # The sums file lists names as `./<asset>`; strip the prefix so
+          # sha256sum can find the local file. The `= 1` assertion pins
+          # EXACTLY ONE matching line: zero (the asset is absent from
+          # SHA256SUMS) and more than one (a duplicated or superstring entry,
+          # where -c would verify a different file and could pass) are both
+          # wrong, and the second cannot be caught downstream at all.
+          # Measured, so the rationale is not folklore: GNU coreutils 9.11
+          # `sha256sum -c` over an empty list exits 1 ("no properly formatted
+          # checksum lines found"), so zero-match IS caught without this — the
+          # assertion earns its place on the duplicate case and on giving a
+          # legible failure instead of that message.
+          grep " \./${asset}$" SHA256SUMS.txt | sed 's|\./||' > asset.sha256
+          test "$(grep -c . asset.sha256)" = "1"
+          sha256sum -c asset.sha256
+          tar xzf "$asset" -C bin
+          test -x bin/rivet
+          echo "${PWD}/bin" >> "$GITHUB_PATH"
+          # Assert the tool on PATH is the pinned one; a silent mismatch here is
+          # the whole defect class this step guards.
+          got="$(./bin/rivet --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          echo "rivet --version reports: ${got} (pinned ${RIVET_VERSION})"
+          test "v${got}" = "${RIVET_VERSION}"
       - name: rivet validate
         run: rivet validate --format text
 
