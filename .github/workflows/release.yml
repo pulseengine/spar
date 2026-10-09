@@ -235,10 +235,38 @@ jobs:
 
       - name: Generate compliance report
         id: report
-        uses: pulseengine/rivet/.github/actions/compliance@main
+        # PINNED, not @main (#464). This action is on the release path and
+        # `create-release` gates on this job, yet it was referenced unpinned:
+        # rivet #953 (48df5f798) changed its behaviour under us with no diff in
+        # this repo, and v0.43.0's release did not publish. Same class as the
+        # moving nightly toolchain that froze the PR queue for five weeks
+        # (#449/#450) — a release-critical dependency must move when we say so.
+        #
+        # This SHA KEEPS #953's fix, which made the gate honest: the previous
+        # step captured `rivet validate`'s exit code and never used it, reading
+        # the verdict by grepping stdout for "Result: PASS". We want the gate;
+        # the bug was the input below.
+        uses: pulseengine/rivet/.github/actions/compliance@6cd75d3d3b05b4e882da9a05144f6e5da964019a
         with:
           theme: dark
-          rivet-version: v0.1.0
+          # v0.40.0, NOT v0.1.0 (#464). Measured on this tree, running what
+          # this action runs:
+          #   v0.1.0  -> exit 1, FAIL (47 errors)  <- all `missing: design-decision`
+          #   v0.4.3  -> exit 0, PASS (148 warnings)
+          #   v0.40.0 -> exit 0, PASS (826 warnings), 0 errors
+          # v0.1.0 requires a downstream design-decision per requirement, which
+          # later rivet reports as a warning — a strictness difference between
+          # rivet versions, not a defect in our artifacts. The long-standing
+          # assumption that NEWER rivet false-fails spar is refuted: v0.40.0
+          # passes.
+          #
+          # ci.yml pins the SAME v0.40.0 for the required
+          # `Rivet validate (artifacts)` context, so the release and CI cannot
+          # disagree about one tree. The 148 -> 826 warning jump is new CHECKS,
+          # not noise: v0.40.0 adds "requirement should be verified by at least
+          # one test" (303) and a prose-mentions-without-a-typed-link detector.
+          # Both are real coverage we did not have; neither is an error.
+          rivet-version: v0.40.0
           # Emit artifacts.yaml (generic-yaml) into the bundle so the website's
           # fetch-reports can auto-generate data/spar/{stats,artifacts}.json.
           include-data-formats: true
