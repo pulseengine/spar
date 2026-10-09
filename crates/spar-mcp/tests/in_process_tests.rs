@@ -123,6 +123,50 @@ public
 end Chain;
 ";
 
+// A flat latency chain: source and sink are DIRECT subcomponents of the
+// flow's owner, each carrying `Compute_Execution_Time`, so the latency pass
+// resolves both ends and derives a real figure. CHAIN_MODEL nests the threads
+// inside a `process`, where the end-to-end flow segments resolve to the
+// enclosing process (which has no timing) until process descent lands
+// (spar#455 item 3) — so CHAIN_MODEL yields a "not computed" latency today,
+// not a derived breakdown. This model exercises the breakdown capability that
+// exists now, without depending on that unimplemented descent.
+const LATENCY_CHAIN_MODEL: &str = "\
+package LatChain
+public
+  device Producer
+    features
+      out_p: out data port;
+    flows
+      f1: flow source out_p;
+    properties
+      Compute_Execution_Time => 1 ms .. 2 ms;
+  end Producer;
+
+  device Consumer
+    features
+      in_p: in data port;
+    flows
+      f2: flow sink in_p;
+    properties
+      Compute_Execution_Time => 1 ms .. 3 ms;
+  end Consumer;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.Impl
+    subcomponents
+      producer: device Producer;
+      consumer: device Consumer;
+    connections
+      c: port producer.out_p -> consumer.in_p;
+    flows
+      chain: end to end flow producer.f1 -> c -> consumer.f2;
+  end Sys.Impl;
+end LatChain;
+";
+
 // ── 1. verify_tool_returns_ok_when_move_is_valid ─────────────────────
 
 #[test]
@@ -201,10 +245,14 @@ fn enumerate_tool_lists_all_processors_no_allowed_targets() {
 
 #[test]
 fn check_chain_tool_returns_latency_breakdown() {
-    let path = write_model("chain", CHAIN_MODEL);
+    // Uses the flat LATENCY_CHAIN_MODEL so both flow ends resolve to timed
+    // components and a real breakdown is derived. The nested CHAIN_MODEL would
+    // report "latency: not computed" here because its segments resolve to the
+    // enclosing process until process descent lands (spar#455 item 3).
+    let path = write_model("lat_chain", LATENCY_CHAIN_MODEL);
     let args = json!({
         "model": path.to_string_lossy(),
-        "root":  "Chain::Sys.Impl",
+        "root":  "LatChain::Sys.Impl",
         "source_thread": "producer",
         "sink_thread":   "consumer",
     });
@@ -236,6 +284,17 @@ fn check_chain_tool_returns_latency_breakdown() {
     assert!(
         has_bounds,
         "expected a latency-bounds diagnostic; got {diags:?}",
+    );
+    // And no "not computed" provenance error, since this flow IS derivable.
+    let not_computed = diags.iter().any(|d| {
+        d["message"]
+            .as_str()
+            .map(|m| m.contains("not computed"))
+            .unwrap_or(false)
+    });
+    assert!(
+        !not_computed,
+        "a flow with timing on both ends must derive a figure, not error: {diags:?}",
     );
     cleanup(&path);
 }
