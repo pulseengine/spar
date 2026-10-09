@@ -175,6 +175,49 @@ MUTANTS: list[Mutant] = [
              "ran)` case and the `verified nothing` message pin; survives if either "
              "is dropped.",
     ),
+    # ── check_stale_scope.py ───────────────────────────────────────────────
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-swallow-bad-yaml",
+        old='print(f"::error::cannot parse {path}: {exc}", file=sys.stderr)\n'
+            '                sys.exit(2)',
+        new='print(f"::error::cannot parse {path}: {exc}", file=sys.stderr)\n'
+            '                continue',
+        note="an artifact file the guard cannot parse must be INCONCLUSIVE, never "
+             "scanned past as zero stale artifacts. The guard's error path yields "
+             "its IDEAL reading — a truncated artifacts file counts nothing and the "
+             "run prints `ok` — which is the red flag the whole tool is about. The "
+             "property was asserted in a source comment and pinned by nothing: this "
+             "mutant was confirmed SURVIVED before the `an unparseable artifact file "
+             "is exit 2` case was added, and CAUGHT after.",
+    ),
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-skip-statusless",
+        old='f"closed one and must not guess.", file=sys.stderr)\n'
+            '                        sys.exit(2)',
+        new='f"closed one and must not guess.", file=sys.stderr)\n'
+            '                        continue',
+        note="an artifact declaring a release with NO status is unclassifiable, and "
+             "every remaining branch reads it as not-stale if it is waved past. This "
+             "reverts the guard to the silent skip it shipped with. Inert today (0 of "
+             "937 artifacts) but 322 carry no top-level status, so the tree can grow "
+             "into it. Caught by `a release with no status is exit 2`.",
+    ),
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-skip-unparseable-release",
+        old='f"made.", file=sys.stderr)\n'
+            '                        sys.exit(2)',
+        new='f"made.", file=sys.stderr)\n'
+            '                        continue',
+        note="a release string the guard cannot ORDER (`release: next-sprint`) is a "
+             "measurement that was not made, not a release above the line. The "
+             "original `if rel is not None` skipped it silently. Caught by `an "
+             "unparseable release string is exit 2`; its deliberate bound — a SETTLED "
+             "artifact's release need not parse — is pinned by its own case so a "
+             "tightening cannot swallow it.",
+    ),
 ]
 
 

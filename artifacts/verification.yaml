@@ -5087,7 +5087,6 @@ artifacts:
       skipped claiming artifact in an otherwise-productive run; by design it does
       not.
     status: implemented
-    release: v0.43.0
     tags: [process, guardrail, ci, tooling]
     fields:
       method: automated-test

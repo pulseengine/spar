@@ -105,10 +105,36 @@ def stale_artifacts(dirs: list[Path], current: tuple[int, ...]) -> list[tuple[st
                     if not isinstance(a, dict) or "id" not in a:
                         continue
                     status, release = a.get("status"), a.get("release")
-                    if not status or not release or status in SETTLED:
+
+                    # No release is backlog, not a missed commitment.
+                    if not release:
                         continue
+
+                    # A release with NO status is unclassifiable, and the three
+                    # conditions below all silently read as "not stale" if it is
+                    # waved past: the guard cannot tell a missed commitment from a
+                    # closed one. 322 of the artifacts here carry no top-level
+                    # status, so this is a shape the tree can genuinely grow.
+                    if not status:
+                        print(f"::error::{a['id']} declares release {release!r} with no "
+                              f"status. The guard cannot tell a missed commitment from a "
+                              f"closed one and must not guess.", file=sys.stderr)
+                        sys.exit(2)
+
+                    # Settled before parsing: for a closed artifact the release
+                    # field is history, and history need not be orderable.
+                    if status in SETTLED:
+                        continue
+
                     rel = parse_version(str(release))
-                    if rel is not None and rel < current:
+                    if rel is None:
+                        print(f"::error::{a['id']} declares an unparseable release "
+                              f"{release!r}. A release the guard cannot order is not a "
+                              f"release above the line; it is a measurement that was not "
+                              f"made.", file=sys.stderr)
+                        sys.exit(2)
+
+                    if rel < current:
                         out.append((str(release), status, a["id"]))
     return out
 
@@ -232,6 +258,79 @@ def self_test() -> int:
             failures += not ok
             print(f"[{'PASS' if ok else 'FAIL'}] ratchet {label}-the-bound: exit {got} (want {want})")
         print("       proves: the bound is EXACT — a cleanup must be recorded, not pocketed")
+
+    # A release the guard cannot CLASSIFY must be inconclusive, the same as one it
+    # cannot read. Both of these were silent skips: `if not status or not release`
+    # and `if rel is not None` each sent an unclassifiable artifact down the
+    # not-stale path, which is the guard's own ERROR path yielding its IDEAL
+    # reading. Inert today (0 of 937 artifacts), but 322 carry no top-level
+    # status, so it is a shape the tree can grow into — and an inert path with no
+    # case is how the unparseable-FILE hole above survived its own code review.
+    for name, artifact, why in (
+        (
+            "a release with no status",
+            {"id": "A", "release": "v0.23.0"},
+            "cannot tell a missed commitment from a closed one",
+        ),
+        (
+            "an unparseable release string",
+            {"id": "A", "status": "proposed", "release": "next-sprint"},
+            "a release that cannot be ordered is not a release above the line",
+        ),
+    ):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            _write(tmp, "a.yaml", [artifact])
+            (tmp / "Cargo.toml").write_text('[workspace.package]\nversion = "0.43.0"\n')
+            try:
+                rc = check([tmp], tmp / "Cargo.toml", 0)
+            except SystemExit as exc:
+                rc = exc.code
+            ok = rc == 2
+            failures += not ok
+            print(f"[{'PASS' if ok else 'FAIL'}] {name} is exit 2, not 0 stale: {rc}")
+            print(f"       proves: {why}")
+
+    # The DELIBERATE bound on the pair above, kept explicit so a later tightening
+    # does not quietly swallow it: for a SETTLED artifact the release field is
+    # history, and history need not be orderable. Without this case, moving the
+    # settled check after the parse would look like a harmless reordering.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        _write(tmp, "a.yaml", [{"id": "A", "status": "verified", "release": "whenever"}])
+        (tmp / "Cargo.toml").write_text('[workspace.package]\nversion = "0.43.0"\n')
+        try:
+            rc = check([tmp], tmp / "Cargo.toml", 0)
+        except SystemExit as exc:
+            rc = exc.code
+        ok = rc == 0
+        failures += not ok
+        print(f"[{'PASS' if ok else 'FAIL'}] a SETTLED artifact's release need not parse: {rc}")
+        print("       proves: the V is closed — the release field is history, not debt")
+
+    # A corrupt ARTIFACT FILE must be inconclusive too, and this is the case the
+    # suite shipped without: the `except yaml.YAMLError` branch was asserted in a
+    # source comment and pinned by nothing. Replacing its `sys.exit(2)` with
+    # `continue` — a truncated artifacts file scanned past as clean — passed the
+    # whole suite (confirmed SURVIVED before this case was written). It is now the
+    # `ss-swallow-bad-yaml` mutant in check_self_test_potency.py, so the case
+    # cannot be dropped again silently.
+    #
+    # `max_stale=0` is deliberate: under the mutant the file yields zero
+    # artifacts, 0 == declared 0, and the run reports `ok`. The ideal reading
+    # produced by the error path is the red flag this whole guard is about.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        (tmp / "broken.yaml").write_text("artifacts:\n  - id: A\n   bad-indent: [\n")
+        (tmp / "Cargo.toml").write_text('[workspace.package]\nversion = "0.43.0"\n')
+        try:
+            rc = check([tmp], tmp / "Cargo.toml", 0)
+        except SystemExit as exc:  # stale_artifacts exits directly
+            rc = exc.code
+        ok = rc == 2
+        failures += not ok
+        print(f"[{'PASS' if ok else 'FAIL'}] an unparseable artifact file is exit 2, not 0 stale: {rc}")
+        print("       proves: a file the guard cannot read must not be scanned past as clean")
 
     # A version this script cannot read must be INCONCLUSIVE, never "0 stale".
     with tempfile.TemporaryDirectory() as td:

@@ -6202,7 +6202,7 @@ artifacts:
       NOT CLAIMED: that a mixed unit-and-unitless range is well formed. It is
       probably a model error, and it is now unreported rather than
       mis-reported. Flagging it is a successor.
-    status: implemented
+    status: verified
     release: v0.43.0
     tags: [analysis, properties, units, defect, v0430]
   - id: REQ-GUARD-STALE-SCOPE-001
@@ -6242,6 +6242,157 @@ artifacts:
       shipped release may be real work to schedule or scope that should be
       deleted, and that is a maintainer judgement. The guard has no opinion; it
       insists only that the number is known and only falls.
-    status: implemented
+
+      FAIL-CLOSED ON WHAT IT CANNOT CLASSIFY, which is the same premise applied
+      to its own inputs: an unparseable artifact file, an artifact declaring a
+      release with no status, and a release string that cannot be ordered all
+      exit 2 rather than taking the not-stale path. All three were silent skips,
+      and each was a branch whose ERROR path yielded the guard's IDEAL reading.
+      The first was asserted in a source comment and tested by nothing; the
+      other two are inert today (0 of 937 artifacts) but 322 carry no top-level
+      status. All three are pinned by self-test cases and by declared mutants in
+      check_self_test_potency.py, so none can become silent again unnoticed.
+
+      DELIBERATE BOUND: a SETTLED artifact's release need not parse. For a
+      closed artifact the release field is history, and history need not be
+      orderable. It has its own case so a later tightening cannot swallow it.
+    status: verified
     release: v0.43.0
     tags: [process, guardrail, planning, rivet, v0430]
+
+  - id: REQ-GUARD-SELFTEST-COVERAGE-001
+    type: requirement
+    title: A guard tool shall not ship a self-test that no declared mutant exercises
+    description: >
+      REQ-GUARD-SELFTEST-POTENCY-001 (#405) applies a declared table of source
+      mutations to the guard tools and asserts each tool's `--self-test` then
+      FAILS, so a case that is not load-bearing cannot sit green forever. The
+      table is a hand-maintained list with NO completeness check.
+
+      Measured 2026-10-09 (#461): it covers 4 of the 17 tools that ship a
+      `--self-test`. ci.yml describes it as applying the table to "those tools"
+      — the guardrails as a class — so the gate reads "the self-tests are
+      potent" while checking 4 of 17 of them. Nothing fails when a new
+      guardrail ships without a mutant, which is how check_stale_scope.py
+      (#457) came within one commit of landing outside it.
+
+      This is the shape #381 recorded: `Mutation Testing` read `mutants-out/`
+      while cargo-mutants wrote `mutants-out/mutants.out/` — required and
+      vacuous for four months, 210 survivors printed as 0. A gate measuring a
+      narrower thing than its name claims. Note the self-reference:
+      check_self_test_potency.py ships a `--self-test` and is itself uncovered.
+
+      THE FIX IS TWO-SIDED and the first half is what stops the bleeding: the
+      potency guard shall fail when a tool ships `--self-test` with no
+      registered mutant, as a ratchet (MIN_COVERED) like DEFAULT_MAX and
+      OFFICIAL_PARSING — below the declared coverage fails as a regression,
+      above it fails until the constant is raised, so coverage only rises.
+      Closing the remaining 13 may then ratchet across releases.
+
+      Each new mutant must be confirmed SURVIVED before its case is written and
+      CAUGHT after, per the table's own rule: a mutant already caught proves
+      the new case is not what catches it. `ss-swallow-bad-yaml` was derived
+      that way and exposed a real hole.
+
+      NOT CLAIMED: that all 13 uncovered tools have vacuous self-tests. Only
+      that nothing distinguishes a potent one from a vacuous one today.
+    status: proposed
+    release: v0.44.0
+    tags: [process, guardrail, ci, tooling, mutation]
+
+  - id: REQ-GUARD-STALE-SCOPE-002
+    type: requirement
+    title: A verification artifact shall count as settled at implemented, having no right side of the V to close
+    description: >
+      check_stale_scope.py treats a status as settled only in {verified,
+      accepted, rejected}. For a REQUIREMENT that is correct and is the guard's
+      main finding — `implemented` means the left side of the V closed and the
+      right side did not, and v0.23.0 alone carries 26 such.
+
+      For a VERIFICATION artifact it is wrong. A test does not get verified by
+      another test; that regresses infinitely. A verification artifact closes
+      its V by existing and running, which this repo records as `implemented`.
+
+      MEASURED 2026-10-09 (#462): of 937 artifacts, 225 carry a `fields.method`
+      — automated-test 144, unit-test 60, then performance-test, formal-bounded
+      and integration-test at 5 each, and inspection, formal-proof, smoke-test,
+      workflow-inspection and code-review in the tail. The convention is
+      unambiguous: of 129 TEST-* artifacts, 111 are `implemented` and ZERO are
+      `verified`. There is no higher state in use. It is not an id-prefix
+      question either — VAL-* and FUZZ-* carry automated-test too.
+
+      10 of the current 90 stale-scoped artifacts are verification artifacts at
+      `implemented`, every one a TEST-GUARD-* whose steps run and pass in CI.
+      They are counted as debt and are not debt.
+
+      THE MARKER DISCRIMINATES, which is what makes this a fix rather than an
+      exemption: `automated-test` + `implemented` is a test that exists and
+      runs, so settled; `automated-test` + `proposed` is a test that was never
+      built, so real debt that stays counted. TEST-GUARD-STATUS-VOCAB
+      (proposed, v0.36.0) is correctly left in by that rule. `fields.method`
+      and "has a verifies link" selected the SAME 10 artifacts in the stale
+      set, so either marker works and they can cross-check.
+
+      DEFAULT_MAX shall be re-derived in the same commit — expected 90 -> ~80,
+      a ratchet win locked in by lowering the constant rather than pocketed.
+      Self-test cases shall pin both arms, and the mutant collapsing them
+      belongs in the potency table (REQ-GUARD-SELFTEST-COVERAGE-001).
+
+      NOT CLAIMED: that every one of the 225 is correctly recorded today. 15
+      TEST-* carry no status at all, which is a separate gap.
+    status: proposed
+    release: v0.44.0
+    tags: [process, guardrail, planning, rivet]
+
+  - id: REQ-AADL-APPLIES-TO-LIST-001
+    type: requirement
+    title: An applies-to clause shall resolve each comma-separated path independently
+    description: >
+      Reported 2026-10-09 (#459) from external tool testing. AADL permits an
+      `applies to` clause to carry a LIST of paths — `applies to (app.s,
+      app.c)`. spar treats the whole list as a single path, so `app.s, app.c`
+      is reported as one unresolvable element reference, and a legal model is
+      rejected with a diagnostic that names a path the user never wrote.
+
+      The failure is in the diagnostic as much as the resolution: a user cannot
+      act on "cannot resolve `app.s, app.c`" because no such path exists in
+      their source. A rejection a user cannot act on is no better than a silent
+      acceptance.
+
+      NOT YET CHECKED against the AS5506 text — the reporter flagged their own
+      reading as unverified, and this requirement carries that caveat until the
+      clause is cited. Fixing it shall include the citation, and a test naming
+      a multi-path applies-to with each path resolving independently.
+    status: proposed
+    release: v0.44.0
+    tags: [aadl, parser, analysis, bug, interop]
+
+  - id: REQ-AADL-PROPERTY-INHERIT-001
+    type: requirement
+    title: Property lookup shall honour inheritance from the containing component
+    description: >
+      Reported 2026-10-09 (#460) from external tool testing:
+      `Actual_Processor_Binding` set on a process is not seen by that process's
+      threads, so spar reports an error on a model that is legal.
+
+      RE-SCOPED during triage. The report framed it as a binding-rule defect
+      and cited AS5506 §10.6; that citation is unverified and is not what this
+      requirement rests on. The mechanism is the `inherit` keyword in the
+      predeclared property sets: a property declared `inherit` takes its value
+      from the containing component when the component itself declares none.
+      spar's property lookup does not implement that, which is a general defect
+      affecting every `inherit` property, not Actual_Processor_Binding alone.
+
+      Scoping it to the keyword rather than the one property is deliberate: a
+      fix that special-cased binding would leave the same hole behind every
+      other inherit property, and would have to be re-derived the next time one
+      is reported.
+
+      The EPL-2.0 predeclared property sets are open material and carry the
+      `inherit` declarations directly, so the fix has a citable source that
+      does not depend on the unverified §10.6 reading.
+
+      NOT CLAIMED: that every reported binding error is this cause.
+    status: proposed
+    release: v0.44.0
+    tags: [aadl, analysis, properties, bug, interop]
