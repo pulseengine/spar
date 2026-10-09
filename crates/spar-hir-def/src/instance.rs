@@ -2467,43 +2467,91 @@ impl<'a> Builder<'a> {
     /// downstream analyses can retrieve it via `properties_for`.  No diagnostic
     /// is emitted for valid feature paths.
     ///
-    /// If the path cannot be resolved at all (bad subcomponent name or name
+    /// The `applies to` clause may carry a comma-separated LIST of paths
+    /// (AS5506D §11.3, `contained_property_association`); the association then
+    /// applies to each path independently (#459). Each element is resolved on
+    /// its own, so a list where some elements resolve and others do not attaches
+    /// the property to the ones that resolve and reports only the ones that fail.
+    ///
+    /// If a path cannot be resolved at all (bad subcomponent name or name
     /// that matches neither a subcomponent nor a feature), the property stays
-    /// on the declaring component and a diagnostic is recorded.
+    /// on the declaring component and a diagnostic is recorded for that path.
     fn resolve_pending_applies_to(&mut self) {
         let pending = std::mem::take(&mut self.pending_applies_to);
         for (owner, path, prop) in pending {
-            match self.resolve_applies_to_path(owner, &path) {
-                AppliesTarget::Component(target) => {
-                    self.property_maps.entry(target).or_default().add(prop);
+            // AS5506D §11.3: a `contained_property_association`'s `applies to`
+            // clause is a LIST of containment paths —
+            //   `applies to` contained_model_element_path { `,` contained_model_element_path }*
+            // — and the association applies to EACH element independently
+            // (#459). The item-tree lowering joins the parsed paths with ", "
+            // (see `lower.rs::lower_property_association`), so split them back
+            // apart here and resolve each on its own. A containment path never
+            // itself contains a comma, so the split is lossless; a single-path
+            // clause yields exactly one element and behaves as before.
+            let elements: Vec<&str> = path
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            match elements.as_slice() {
+                // Degenerate (all-whitespace) path: preserve the historical
+                // single-element behavior by resolving the string as-is.
+                [] => self.attach_applies_to(owner, &path, prop),
+                [single] => self.attach_applies_to(owner, single, prop),
+                // A genuine list: the property applies to each element, so each
+                // target gets its own copy. Resolving per element also means a
+                // partial list reports only the elements that failed, naming a
+                // path the author actually wrote rather than the joined string.
+                many => {
+                    for element in many {
+                        self.attach_applies_to(owner, element, prop.clone());
+                    }
                 }
-                AppliesTarget::Feature(feature) => {
-                    // Last segment named a feature (AS5506D §11.3). Store on the
-                    // feature instance so each port keeps its own values instead
-                    // of colliding by property name on the component map (#237).
-                    self.feature_property_maps
-                        .entry(feature)
-                        .or_default()
-                        .add(prop);
-                }
-                AppliesTarget::Connection(connection) => {
-                    // Last segment named a connection — store per-connection (#237).
-                    self.connection_property_maps
-                        .entry(connection)
-                        .or_default()
-                        .add(prop);
-                }
-                AppliesTarget::Unresolvable => {
-                    // Unresolvable path: keep on owner (prior behavior) and
-                    // emit a diagnostic so the author notices.
-                    self.property_maps.entry(owner).or_default().add(prop);
-                    self.diagnostics.push(InstanceDiagnostic {
-                        message: format!(
-                            "applies_to path '{path}' could not be resolved to a component instance or feature"
-                        ),
-                        path: vec![self.components[owner].name.clone()],
-                    });
-                }
+            }
+        }
+    }
+
+    /// Resolve a single `applies to` containment path and attach `prop` to the
+    /// element it names, or — when it resolves to nothing — keep it on `owner`
+    /// and record a diagnostic naming that one path.
+    fn attach_applies_to(
+        &mut self,
+        owner: ComponentInstanceIdx,
+        path: &str,
+        prop: crate::properties::PropertyValue,
+    ) {
+        match self.resolve_applies_to_path(owner, path) {
+            AppliesTarget::Component(target) => {
+                self.property_maps.entry(target).or_default().add(prop);
+            }
+            AppliesTarget::Feature(feature) => {
+                // Last segment named a feature (AS5506D §11.3). Store on the
+                // feature instance so each port keeps its own values instead
+                // of colliding by property name on the component map (#237).
+                self.feature_property_maps
+                    .entry(feature)
+                    .or_default()
+                    .add(prop);
+            }
+            AppliesTarget::Connection(connection) => {
+                // Last segment named a connection — store per-connection (#237).
+                self.connection_property_maps
+                    .entry(connection)
+                    .or_default()
+                    .add(prop);
+            }
+            AppliesTarget::Unresolvable => {
+                // Unresolvable path: keep on owner (prior behavior) and
+                // emit a diagnostic so the author notices. The diagnostic names
+                // this one path, not the whole comma-joined clause (#459).
+                self.property_maps.entry(owner).or_default().add(prop);
+                self.diagnostics.push(InstanceDiagnostic {
+                    message: format!(
+                        "applies_to path '{path}' could not be resolved to a component instance or feature"
+                    ),
+                    path: vec![self.components[owner].name.clone()],
+                });
             }
         }
     }

@@ -6349,23 +6349,55 @@ artifacts:
     title: An applies-to clause shall resolve each comma-separated path independently
     description: >
       Reported 2026-10-09 (#459) from external tool testing. AADL permits an
-      `applies to` clause to carry a LIST of paths — `applies to (app.s,
-      app.c)`. spar treats the whole list as a single path, so `app.s, app.c`
-      is reported as one unresolvable element reference, and a legal model is
-      rejected with a diagnostic that names a path the user never wrote.
+      `applies to` clause to carry a LIST of paths — `applies to app.s, app.c`.
+      spar treated the whole list as a single path, so `app.s, app.c` was
+      reported as one unresolvable element reference, and a legal model was
+      rejected with a diagnostic that named a path the user never wrote.
 
       The failure is in the diagnostic as much as the resolution: a user cannot
       act on "cannot resolve `app.s, app.c`" because no such path exists in
       their source. A rejection a user cannot act on is no better than a silent
       acceptance.
 
-      NOT YET CHECKED against the AS5506 text — the reporter flagged their own
-      reading as unverified, and this requirement carries that caveat until the
-      clause is cited. Fixing it shall include the citation, and a test naming
-      a multi-path applies-to with each path resolving independently.
-    status: proposed
+      CITED. AS5506D §11.3 defines a `contained_property_association`'s clause
+      as `applies to` contained_model_element_path { `,`
+      contained_model_element_path }*, so the association applies to EACH
+      element independently. The reporter had flagged their own reading as
+      unverified; the standard grammar settles it — this is a list, not a single
+      path. Corroborating but not load-bearing: the list form appears in 75
+      files of the vendored third-party corpus (grep over test-data/interop),
+      i.e. it is a real-world idiom, independent of the grammar citation.
+
+      THE REQUIREMENT. The `applies to` list shall be split at the commas and
+      each containment path resolved on its own, so one association can target N
+      elements. A list where some elements resolve and others do not shall
+      attach the property to the ones that resolve and report ONLY the ones that
+      fail, each named by the path the author actually wrote — never the joined
+      string.
+
+      WHERE. The split is in `instance.rs::resolve_pending_applies_to`: the
+      item-tree lowering joins the parsed paths with ", "
+      (`lower.rs::lower_property_association`), so they are split back apart and
+      each resolved through the existing single-path resolver. A containment
+      path never itself contains a comma, so the split is lossless and a
+      single-path clause still yields exactly one element with unchanged
+      behavior.
+
+      ORACLE, non-vacuous. `crates/spar-cli/tests/applies_to_list.rs`:
+      `applies to app.s, app.c` reports zero binding errors and never reports
+      the joined string unresolvable (the kill-criterion from the report);
+      `applies to app.s, no_such` binds `app.s`, reports exactly `no_such`, and
+      never names `app.s, no_such`. The partial case is what proves the split is
+      real — the pre-fix resolver named the whole string and left the resolvable
+      thread unbound, so the two inputs produce distinct outputs and the oracle
+      cannot pass vacuously.
+
+      NOT CLAIMED: that every applies-to list in the wild resolves fully. A list
+      targeting a path that genuinely does not exist is still reported — now
+      per-element rather than as one opaque whole.
+    status: verified
     release: v0.44.0
-    tags: [aadl, parser, analysis, bug, interop]
+    tags: [aadl, parser, analysis, bug, interop, v0440]
 
   - id: REQ-AADL-PROPERTY-INHERIT-001
     type: requirement
