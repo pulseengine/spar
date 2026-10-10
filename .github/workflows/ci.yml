@@ -92,6 +92,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: the closing-keyword guardrail below reads every COMMIT
+          # MESSAGE in the PR's range, not only the PR body, and a shallow clone
+          # cannot resolve `origin/<base>..HEAD`. The guard exits 2 rather than
+          # passing when it cannot resolve a range — but red-for-the-wrong-reason
+          # is still wrong, so give it the history it needs.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-08-26
@@ -107,6 +114,41 @@ jobs:
       # Self-test first, as with the other guardrails: the decision table
       # carries the #383 regression itself (root clean + fuzz/ dirty must exit
       # 1), so the gate proves it can still fail before it may pass.
+      # ── closing-keyword guardrail (#467) ───────────────────────────────
+      # GitHub auto-closes an issue from a closing keyword in a merged PR's BODY
+      # and from one in a COMMIT MESSAGE landing on the default branch. Closure
+      # here cites a PUBLISHED release, because merged is not released: v0.43.0
+      # was tagged, built all 17 artifacts, and published nothing (#464).
+      #
+      # Three live instances, each committed by someone who had just written the
+      # rule down:
+      #   #459  `Fixes #459.`          PR body      -> closed on merge
+      #   #464  `Fixes #464.`          PR body      -> closed on merge
+      #   #455  `(closes #455 item 1)` commit prose -> closed a 4-item umbrella
+      #                                                with 3 items still open
+      # The third is why a qualifier after the reference must NOT exempt it, and
+      # why this reads both paths — checking one would have caught two of three.
+      - name: Closing-keyword guardrail self-test
+        # Runs FIRST, same reason as every guardrail self-test in this job. Its
+        # table carries the discriminating pair (`Fixes #1` fails, `Refs #1`
+        # passes), so a checker that flagged every `#N` — and would therefore
+        # reject the one form we require — fails here instead of passing
+        # vacuously. It also pins the code-span exemption and its bound.
+        run: tools/check_closing_keywords.py --self-test
+      - name: No closing keyword in the PR body or its commits
+        if: github.event_name == 'pull_request'
+        env:
+          # Through env, never interpolated into the script: a PR body is
+          # attacker-controlled text, and `${{ }}` inside `run:` is injection.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PR_BODY" > "${RUNNER_TEMP}/pr-body.txt"
+          tools/check_closing_keywords.py \
+            --body-file "${RUNNER_TEMP}/pr-body.txt" \
+            --range "origin/${BASE_REF}..HEAD"
+
       - name: Stale-scope guardrail self-test
         run: tools/check_stale_scope.py --self-test
       - name: No artifact scoped to a release that has gone by

@@ -218,6 +218,43 @@ MUTANTS: list[Mutant] = [
              "artifact's release need not parse — is pinned by its own case so a "
              "tightening cannot swallow it.",
     ),
+    # ── check_closing_keywords.py ──────────────────────────────────────────
+    Mutant(
+        tool="check_closing_keywords.py",
+        id="ck-require-eol",
+        old='CLOSING = re.compile(rf"\\b({_KEYWORDS})\\b\\s*:?\\s+({_REF})", re.IGNORECASE)',
+        new='CLOSING = re.compile(rf"\\b({_KEYWORDS})\\b\\s*:?\\s+({_REF})\\s*$", re.IGNORECASE)',
+        note="requiring the reference to END the line is the exact hole that let "
+             "`(closes #455 item 1)` through — a keyword mid-sentence inside "
+             "parentheses, written by someone scoping it to one item, which GitHub "
+             "de-scoped and used to close a four-item umbrella with three items "
+             "open. Caught by the `(closes #455 item 1)` case and by `a correct "
+             "Refs trailer does NOT excuse a keyword earlier in the prose`.",
+    ),
+    Mutant(
+        tool="check_closing_keywords.py",
+        id="ck-strip-whole-line",
+        old='scannable = _CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line)',
+        new='scannable = "" if "`" in line else line',
+        note="the BOUND on the code-span exemption. Blanking any line containing a "
+             "backtick would hide a live keyword that merely shares a line with "
+             "quoted text — `\x60Refs #1\x60 is right, Fixes #2 is wrong`. Confirmed "
+             "load-bearing: with that one case removed the mutant SURVIVES, so "
+             "nothing else catches it.",
+    ),
+    Mutant(
+        tool="check_closing_keywords.py",
+        id="ck-nothing-scanned-ok",
+        old='        print("::error::no PR body and no commit range were given, so nothing "\n'
+            '              "was scanned. That is not a pass.", file=sys.stderr)\n'
+            '        return 2',
+        new='        print("::error::no PR body and no commit range were given, so nothing "\n'
+            '              "was scanned. That is not a pass.", file=sys.stderr)\n'
+            '        return 0',
+        note="a workflow that failed to pass the body and the range must not report "
+             "a clean bill of health having read no text — the shape of #381, #403 "
+             "and #464. Caught by `scanning nothing is exit 2, not 0`.",
+    ),
 ]
 
 
