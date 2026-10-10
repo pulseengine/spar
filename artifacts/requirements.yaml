@@ -6644,3 +6644,58 @@ artifacts:
     status: verified
     release: v0.45.0
     tags: [cli, analysis, exit-code, sarif, json, defect, ci, v0450]
+
+  - id: REQ-GUARD-CLOSING-KEYWORD-001
+    type: requirement
+    title: A closing keyword shall not reach a merge, in a PR body or a commit message
+    description: >
+      GitHub auto-closes an issue from a closing keyword in a merged PR's BODY,
+      and again from one in a COMMIT MESSAGE landing on the default branch.
+      Closure in this project cites a PUBLISHED RELEASE, because merged is not
+      released: v0.43.0 was tagged, built all 17 artifacts, and published
+      nothing (#464).
+
+      THREE LIVE INSTANCES, each committed by someone who had just written the
+      rule down. #459 and #464 were closed on merge by `Fixes #459.` and
+      `Fixes #464.` in PR bodies — a TIMING error, right keyword, wrong moment.
+      #455 is the serious one: `(closes #455 item 1)` in e293a2d's PROSE closed
+      a four-item umbrella with three items still open, and an external reporter
+      saw their issue closed while the work was outstanding. That commit ends
+      with the CORRECT trailer `Refs #455, #468`; the parenthetical was written
+      to scope the claim to one item, and GitHub discarded the qualifier.
+
+      So: a closing keyword immediately preceding an issue reference is
+      forbidden regardless of what follows it. A checker that allowed
+      `closes #455 item 1` because of the trailing words would reproduce exactly
+      the bug it exists to prevent. And it must read BOTH paths — the PR body
+      and every commit message in the range — because checking one would have
+      caught two of the three.
+
+      THE CODE-SPAN EXEMPTION IS MEASURED, not assumed. PR #471's body carried
+      the literal `Closes #469.` inside backticks, placed there by the note
+      explaining this rule, and #469 remained OPEN after that PR merged. So
+      GitHub does not act on code spans, and flagging them would make the rule
+      impossible to document — this guard's first run against reality failed
+      #471 for precisely that reason. The exemption carries its own BOUND as a
+      declared case: blanking a whole line that contains a backtick would hide a
+      live keyword sharing a line with quoted text.
+
+      VALIDATED AGAINST REALITY, not only fixtures: all three historical
+      instances are caught (two via the PR-body path, one via the commit-message
+      path), and the two PRs that got it right — #468 and #471 — pass. 14
+      self-test cases including the discriminating pair (`Fixes #1` fails,
+      `Refs #1` passes), every inflection GitHub honours, the colon form,
+      cross-repo and URL references, and fail-closed exits for "scanned nothing"
+      and "unresolvable range". Five mutants confirmed CAUGHT; for two of them
+      the killing case was confirmed to be the ONLY thing catching it, by
+      removing the case and watching the mutant survive. Three are registered in
+      check_self_test_potency.py.
+
+      NOT CLAIMED: that this decides when an issue should close. That stays a
+      human judgement against a published release. The gate removes only the
+      AUTOMATIC premature close, which is the half a machine can own. Nor that
+      the keyword is wrong in general — on a repo that closes on merge it is
+      correct. It is wrong HERE.
+    status: implemented
+    release: v0.45.0
+    tags: [process, guardrail, ci, tooling, traceability]
