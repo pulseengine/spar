@@ -6559,7 +6559,7 @@ artifacts:
           thread's `Compute_Execution_Time` inside a process is never reached.
           This is the larger capability change. NOT done here.
       Only item (1), provenance, is implemented and verified by this increment.
-    status: implemented
+    status: verified
     release: v0.45.0
     tags: [analysis, latency, provenance, defect, v0450]
 
