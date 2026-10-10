@@ -54,6 +54,18 @@ impl Analysis for LatencyAnalysis {
             // subcomponent flow references ("subcomp.flow_name")
             let mut best_case_ps: u64 = 0;
             let mut worst_case_ps: u64 = 0;
+            // Provenance tracking (spar#455). A latency aggregated from no
+            // timing is not a derived value, and reporting it as INFO
+            // `[0.000 ms .. 0.000 ms]` lets a declared budget look satisfied by
+            // a number the analysis never computed. The figure is derived if a
+            // positive quantity was added (`worst_case_ps > 0`) OR an execution
+            // time was read — `Compute_Execution_Time` is the one input that
+            // may be legitimately zero (`0 ns`), so a zero worst-case with an
+            // exec present is a derived zero, not an absence, and must stay
+            // reportable. Every other contributor (network-hop bound, sampling
+            // delay, inter-processor overhead) is positive in practice, so
+            // `worst_case_ps > 0` already covers it.
+            let mut saw_exec = false;
             let mut missing_timing = Vec::new();
             let mut connection_count: u64 = 0;
             let mut prev_processor: Option<String> = None;
@@ -154,6 +166,7 @@ impl Analysis for LatencyAnalysis {
                     if let Some(exec) = exec_ps {
                         best_case_ps = best_case_ps.saturating_add(exec);
                         worst_case_ps = worst_case_ps.saturating_add(exec);
+                        saw_exec = true;
                     } else {
                         missing_timing.push(child_comp.name.as_str().to_string());
                     }
@@ -229,6 +242,29 @@ impl Analysis for LatencyAnalysis {
                     path: owner_path.clone(),
                     analysis: self.name().to_string(),
                 });
+            }
+
+            // Provenance (spar#455): a figure built from no timing was never
+            // derived, so do not render it as a latency range. Report it as an
+            // Error — "not computed" — rather than an INFO carrying `0.000`,
+            // which a reader (or a budget check) would otherwise take for a
+            // satisfied bound. Nothing was derived when the worst case is still
+            // zero AND no execution time was read (an exec may legitimately be
+            // `0 ns`). The `missing timing properties` warning above already
+            // names which components lacked timing.
+            if worst_case_ps == 0 && !saw_exec {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "end-to-end flow '{}' latency: not computed — no element on \
+                         the flow carries timing properties, so no latency figure \
+                         could be derived",
+                        e2e.name,
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+                continue;
             }
 
             // Report latency range
@@ -732,6 +768,155 @@ mod tests {
             warnings[0].message.contains("controller"),
             "warning should mention controller: {}",
             warnings[0].message
+        );
+    }
+
+    /// spar#455 kill-criterion: an end-to-end flow on which NO element carries
+    /// any timing must not report a derived latency of `[0.000 ms .. 0.000 ms]`
+    /// as INFO. With no contribution the figure was never computed, so it is an
+    /// Error ("not computed"), never an INFO carrying a zero a budget check
+    /// would read as satisfied.
+    ///
+    /// Non-vacuity: under the pre-fix behaviour this flow produced exactly that
+    /// INFO and no Error, so this test fails against the old code — it is the
+    /// bug's own repro.
+    #[test]
+    fn latency_zero_contribution_flow_errors_not_info() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let src = b.add_component("src", ComponentCategory::Device, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![src, dst]);
+        b.add_connection_inst("c1", root);
+
+        // A well-formed flow, but not one component on it declares any timing.
+        b.add_e2e("req_to_done", root, vec!["src.out", "c1", "dst.in"]);
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        // No derived latency range may be reported.
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency: ["))
+            .collect();
+        assert!(
+            infos.is_empty(),
+            "a figure derived from zero contributions must not be reported as \
+             an INFO latency range: {diags:?}"
+        );
+
+        // Instead there is an Error stating nothing could be derived.
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("not computed"))
+            .collect();
+        assert_eq!(
+            errors.len(),
+            1,
+            "a flow with no timing must raise a 'not computed' error: {diags:?}"
+        );
+        assert!(
+            errors[0].message.contains("req_to_done"),
+            "the error must name the flow: {}",
+            errors[0].message
+        );
+    }
+
+    /// Discrimination / non-vacuity counterpart to the kill-criterion test: a
+    /// flow whose elements declare `0 ns` execution is a legitimately-zero
+    /// latency, derived from real contributions. It stays reportable as INFO
+    /// `[0.000 ms .. 0.000 ms]` and must NOT be turned into an error. This is
+    /// why the fix counts contributions rather than testing whether the sum is
+    /// zero — a check on the sum alone would mis-fire here, and this test would
+    /// catch that regression.
+    #[test]
+    fn latency_explicit_zero_execution_is_reported_not_errored() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let src = b.add_component("src", ComponentCategory::Device, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![src, dst]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e("zero_flow", root, vec!["src.out", "c1", "dst.in"]);
+
+        // Both ends declare a real, explicitly-zero execution time.
+        b.set_property(src, "Timing_Properties", "Compute_Execution_Time", "0 ns");
+        b.set_property(dst, "Timing_Properties", "Compute_Execution_Time", "0 ns");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency: ["))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "a legitimately-zero derived latency must still be reported: {diags:?}"
+        );
+        assert!(
+            infos[0].message.contains("0.000 ms .. 0.000 ms"),
+            "the derived figure is zero: {}",
+            infos[0].message
+        );
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("not computed"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "a derived zero is not a 'not computed' error: {diags:?}"
+        );
+    }
+
+    /// Locks the discriminator on a NON-execution contribution: a flow whose
+    /// only timing is a sampling delay (a `Period`, no `Compute_Execution_Time`
+    /// anywhere) is still derived from a real timing quantity, so it is
+    /// reported, not errored. This guards against a future change that counted
+    /// only execution times as contributions — the "not computed" error must
+    /// key on all four contribution kinds, not just WCET.
+    #[test]
+    fn latency_period_only_flow_is_reported_not_errored() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let src = b.add_component("src", ComponentCategory::Device, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::Device, Some(root));
+        b.set_children(root, vec![src, dst]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e("period_flow", root, vec!["src.out", "c1", "dst.in"]);
+
+        // Only a Period is declared — a sampling delay, but no execution time.
+        // The sampling delay applies to `dst` because it follows a connection.
+        b.set_property(dst, "Timing_Properties", "Period", "10 ms");
+
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+
+        let infos: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Info && d.message.contains("latency: ["))
+            .collect();
+        assert_eq!(
+            infos.len(),
+            1,
+            "a flow whose only timing is a sampling delay is still derived: {diags:?}"
+        );
+        assert!(
+            infos[0].message.contains("10.000 ms"),
+            "the sampling delay must feed the worst case: {}",
+            infos[0].message
+        );
+
+        let errors: Vec<_> = diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error && d.message.contains("not computed"))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "a figure derived from a sampling delay is not 'not computed': {diags:?}"
         );
     }
 
