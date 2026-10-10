@@ -741,7 +741,7 @@ fn cmd_analyze(args: &[String]) {
                 if i < args.len() {
                     format = Some(args[i].clone());
                 } else {
-                    eprintln!("--format requires a value (text|json)");
+                    eprintln!("--format requires a value (text|json|sarif)");
                     process::exit(1);
                 }
             }
@@ -844,39 +844,64 @@ fn cmd_analyze(args: &[String]) {
     // output also reflects the user's policy choices.
     apply_allow_categories(&mut diagnostics, &allow_categories);
 
-    // JSON output path
-    if format.as_deref() == Some("json") {
-        // Build HIR database for package data
-        let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
-        let hir_db = spar_hir::Database::from_aadl(&sources);
-        let Some(instance) = hir_db.instantiate(&root) else {
-            die_unresolvable_root(&root, &hir_db);
-        };
-        let instance_tree = Some(instance.to_serializable());
-        let output = AnalyzeJsonOutput {
-            root: root.clone(),
-            packages: hir_db.packages(),
-            instance: instance_tree,
-            diagnostics: diagnostics.clone(),
-        };
-        println!("{}", serde_json::to_string_pretty(&output).unwrap());
-        return;
-    }
+    // #469: the exit code is a property of the analysis RESULT, not of how the
+    // result is rendered. Compute the verdict ONCE, here, before any format
+    // dispatch, so text / json / sarif all return the same code for the same
+    // model. Previously the json and sarif arms `return`ed before the error
+    // gate that only the text arm ran, so `spar analyze --format sarif` (the
+    // SARIF path README advertises for CI, and the json form rivet shells out
+    // to) exited 0 on a model whose own emitted document carried Error
+    // diagnostics — a caller checking the exit code read an erroring model as
+    // analysed-clean.
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == spar_analysis::Severity::Error);
 
-    // SARIF output path
-    if format.as_deref() == Some("sarif") {
-        let sarif_output = sarif::to_sarif(&diagnostics, &files);
-        println!("{}", serde_json::to_string_pretty(&sarif_output).unwrap());
-        return;
-    }
-
-    if diagnostics.is_empty() {
-        eprintln!("No diagnostics. Model is clean.");
-    } else {
-        let has_errors = print_diagnostics(&diagnostics);
-        if has_errors {
+    match format.as_deref() {
+        Some("json") => {
+            // Build HIR database for package data
+            let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+            let hir_db = spar_hir::Database::from_aadl(&sources);
+            let Some(instance) = hir_db.instantiate(&root) else {
+                die_unresolvable_root(&root, &hir_db);
+            };
+            let instance_tree = Some(instance.to_serializable());
+            let output = AnalyzeJsonOutput {
+                root: root.clone(),
+                packages: hir_db.packages(),
+                instance: instance_tree,
+                diagnostics: diagnostics.clone(),
+            };
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+        }
+        Some("sarif") => {
+            let sarif_output = sarif::to_sarif(&diagnostics, &files);
+            println!("{}", serde_json::to_string_pretty(&sarif_output).unwrap());
+        }
+        None | Some("text") => {
+            if diagnostics.is_empty() {
+                eprintln!("No diagnostics. Model is clean.");
+            } else {
+                // The verdict is taken from `has_errors` above, not from this
+                // return value: the exit gate below is the single source.
+                print_diagnostics(&diagnostics);
+            }
+        }
+        Some(other) => {
+            // #469: an unrecognised --format must FAIL, not silently fall
+            // through to the text renderer and exit 0 (a typo'd `--format jsonn`
+            // would otherwise print text and a clean model would exit 0). Exit 1,
+            // matching every other argument error in this command.
+            eprintln!("Unknown --format: {other} (expected text|json|sarif)");
             process::exit(1);
         }
+    }
+
+    // The single, shared verdict gate (#469): one model, one exit code, in
+    // every format. A model carrying Error diagnostics exits non-zero whether
+    // it was rendered as text, json or sarif.
+    if has_errors {
+        process::exit(1);
     }
 }
 
