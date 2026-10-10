@@ -6562,3 +6562,85 @@ artifacts:
     status: implemented
     release: v0.45.0
     tags: [analysis, latency, provenance, defect, v0450]
+
+  - id: REQ-CLI-ANALYZE-EXITCODE-001
+    type: requirement
+    title: The analyze exit code shall reflect the analysis verdict in every output format
+    description: >
+      Reported 2026-10-09 (#469), spotted as an out-of-scope note in #468.
+      `spar analyze` exited 0 on a model carrying analysis ERRORS whenever
+      `--format json` or `--format sarif` was selected. The Error survived in
+      the emitted document; only the process exit code was wrong. The default
+      `--format text` path exited 1 correctly. The structured arms `return`ed
+      before the error gate the text arm ran, so the severity reached the
+      payload and was lost from the process result.
+
+      WHY THIS IS WORSE THAN COSMETIC. The two affected formats are the
+      documented CI integration paths: `README.md` advertises SARIF output "for
+      CI integration", and rivet shells out to `spar analyze --root ...
+      --format json`. A CI step written the documented way — check the exit
+      code — gets green on a model with errors; whether anything is caught then
+      depends on a consumer parsing severities, not on the tool's verdict. This
+      is the same defect shape v0.44.0 shipped fixes for one layer out: the
+      compliance gate that captured `rivet validate`'s exit code and never used
+      it (#464), and the verification runner that reported success having
+      executed zero commands (#403) — the operation produced "something is
+      wrong" and rendered it to the consumer that matters as "it worked". It is
+      not specific to one analysis: Error diagnostics are emitted across dozens
+      of analysis modules in `spar-analysis`, and every one is invisible to an
+      exit-code check in these formats. (A raw `grep -c 'Severity::Error'` over
+      `crates/spar-analysis/src` reads 313 across 31 files, but that over-counts
+      production emission sites — it folds in the `#[cfg(test)]` `tests` module,
+      10 on its own, and the inline test blocks most analysis files carry — so
+      it is cited as an upper bound, not a measured count of live sites.) #468
+      merely added one more and did not cause this.
+
+      THE REQUIREMENT. The exit code is a property of the analysis RESULT, not
+      of how the result is rendered. `spar analyze` shall compute the verdict
+      ONCE — a model carrying any `Severity::Error` diagnostic — before any
+      format dispatch, and return the SAME code for the same model in text,
+      json and sarif: zero when clean, non-zero (1) when it carries errors.
+      An unrecognised `--format` shall FAIL (exit 1, nothing on stdout), not
+      fall through to the text renderer where a typo'd format on a clean model
+      would exit 0.
+
+      WHERE. `crates/spar-cli/src/main.rs::cmd_analyze`: `has_errors` is
+      computed from the shared `diagnostics` (after `--allow` demotions) and the
+      three render arms become a `match` that prints and falls through to one
+      shared exit gate, replacing the two early `return`s. The text arm still
+      calls `print_diagnostics` for its side effect but no longer takes the
+      verdict from its return value — the single gate is the only source.
+
+      ORACLE, non-vacuous — `crates/spar-cli/tests/analyze_exit_code_formats.rs`.
+      The oracle is the MATRIX the issue demands: {text, json, sarif} × {clean
+      model, error model} = six exit-code assertions. A test that only checked
+      the error model would pass a build that exited 1 unconditionally; one that
+      only checked a single format would miss the defect. The clean rows (exit
+      0) and the error rows (exit != 0) disagree on every format, so a build
+      constant in either direction fails half the matrix — and against the
+      pre-fix binary the json and sarif error rows fail (they exited 0), which
+      is the bug's own repro (verified: 4 of 5 tests red pre-fix, all green
+      post-fix). The error case additionally asserts the emitted document STILL
+      CARRIES the `not computed` diagnostic, rejecting a "fix" that exits 1 by
+      dropping the payload. The unknown-format case asserts failure plus empty
+      stdout on BOTH a clean and an error model, so the fall-through cannot be
+      reintroduced for the clean case alone.
+
+      SCOPE — the sibling is deliberately left alone. `spar instance --format
+      json --analyze` carries the SAME early-return-before-the-gate shape: the
+      json arm `return`s before the `--analyze` block runs, so the analysis is
+      skipped entirely and the command exits 0 on an erroring model (and an
+      unrecognised `--format` falls through to text there too). This increment
+      fixes ONLY `cmd_analyze`, because #469 is scoped to `spar analyze` and
+      widening it would mix two commands in one change. The `instance` path is a
+      known, out-of-scope sibling for a successor issue — named here rather than
+      left silent, since this requirement argues the defect at the level of a
+      class and honesty requires admitting the class is still alive next door.
+
+      NOT CLAIMED: that any consumer is currently mis-reporting because of this.
+      spar's own CI does not run `analyze --format sarif`, and rivet's live
+      adapter was not inspected for whether it checks the exit code or only
+      parses the payload. The defect is in spar regardless of who relies on it.
+    status: implemented
+    release: v0.45.0
+    tags: [cli, analysis, exit-code, sarif, json, defect, ci, v0450]
