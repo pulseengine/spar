@@ -6641,6 +6641,6 @@ artifacts:
       spar's own CI does not run `analyze --format sarif`, and rivet's live
       adapter was not inspected for whether it checks the exit code or only
       parses the payload. The defect is in spar regardless of who relies on it.
-    status: implemented
+    status: verified
     release: v0.45.0
     tags: [cli, analysis, exit-code, sarif, json, defect, ci, v0450]
