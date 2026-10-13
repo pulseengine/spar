@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -218,6 +219,101 @@ MUTANTS: list[Mutant] = [
              "artifact's release need not parse — is pinned by its own case so a "
              "tightening cannot swallow it.",
     ),
+    # REQ-GUARD-STALE-SCOPE-002's discriminator. Each of these four was
+    # confirmed to SURVIVE with its case removed before being declared here,
+    # and each is killed by EXACTLY ONE case — which is what makes the cases
+    # load-bearing rather than four restatements of one assertion.
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-excuse-any-status",
+        old="""return status == STATUS_SETTLING_A_VERIFICATION_ARTIFACT and verification_method(a) is not None""",
+        new="""return verification_method(a) is not None""",
+        note="dropping the status half: a test that was never BUILT (`method` + "
+             "`proposed`) is the realest debt there is, and excusing it on the "
+             "marker alone converts unbuilt tests into settled ones. Caught only by "
+             "`a verification artifact at proposed is STILL debt`.",
+    ),
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-never-excuse",
+        old="""return status == STATUS_SETTLING_A_VERIFICATION_ARTIFACT and verification_method(a) is not None""",
+        new="""return False""",
+        note="collapsing the excusal to nothing restores the 90-count bug: ten "
+             "TEST-GUARD-* artifacts that exist and run, counted as debt in a state "
+             "nothing in this repo ever leaves (ZERO of 129 TEST-* are `verified`). "
+             "Caught only by `a verification artifact at implemented is settled`.",
+    ),
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-fields-presence-is-marker",
+        old='method = fields.get("method")\n'
+            '    return str(method) if method else None',
+        new='return "present" if "method" in fields or True else None',
+        note="reading the mere EXISTENCE of a `fields` block as the marker. "
+             "`fields: null` and `fields: {}` are both real in this tree, so this "
+             "would settle every artifact that happens to carry fields at all. "
+             "Caught only by `an empty or null fields block does not excuse`.",
+    ),
+    Mutant(
+        tool="check_stale_scope.py",
+        id="ss-link-also-excuses",
+        old="""return status == STATUS_SETTLING_A_VERIFICATION_ARTIFACT and verification_method(a) is not None""",
+        new="""return status == STATUS_SETTLING_A_VERIFICATION_ARTIFACT and (verification_method(a) is not None or has_verifies_link(a))""",
+        note="promoting the verifies link from a printed CROSS-CHECK to a second way "
+             "of being excused. Both markers select the same ten artifacts today, so "
+             "this mutant changes NO current count — it is caught only because the "
+             "case constructs the divergence, which is the whole reason that case "
+             "exists. Caught only by `the verifies link does not excuse on its own`.",
+    ),
+    # ── check_self_test_potency.py — THE SELF-REFERENCE ────────────────────
+    #
+    # REQ-GUARD-SELFTEST-COVERAGE-001 names this hole explicitly: the potency
+    # checker ships a `--self-test` and was the one tool nothing proved potent.
+    # The table now mutates itself, which is not a curiosity — a vacuous case in
+    # THIS suite would make every other verdict here unreliable.
+    #
+    # Earning it found a real defect. `pt-empty-denominator-ok` SURVIVED on the
+    # first attempt: the empty-denominator case was passing off the ORPHAN
+    # branch, since against an empty directory every declared mutant names a
+    # missing tool, and both branches return 2. The case was repaired to pass an
+    # EMPTY mutant list — the one input only the branch under test can answer —
+    # and the mutant is now caught. That is the table catching a vacuous case in
+    # the gate added to catch vacuous cases.
+    Mutant(
+        tool="check_self_test_potency.py",
+        id="pt-empty-denominator-ok",
+        # SPLIT LITERAL, and it is load-bearing: this tool is its own target,
+        # so a contiguous `old` would occur twice in the source — here and at
+        # the real site — and `apply_mutation` replaces ALL occurrences, which
+        # would mutate this declaration too. Adjacent literals keep the value
+        # identical while leaving exactly one contiguous match in the file.
+        old="    if not " "shipping:",
+        new="    if False:",
+        note="a coverage ratio over an EMPTY denominator satisfies any floor by "
+             "arithmetic — the fail-open of #381's shape, where a gate that measured "
+             "nothing printed a clean result. Caught only by `an EMPTY denominator is "
+             "exit 2`, and only since that case stopped relying on the orphan branch.",
+    ),
+    Mutant(
+        tool="check_self_test_potency.py",
+        id="pt-no-upper-bound",
+        old="    if n > " "min_covered:",
+        new="    if False:",
+        note="removing the UPPER arm turns the exact ratchet into a floor, so newly "
+             "covered tools become unrecorded slack the next pass can re-spend "
+             "instead of ground that is locked in. Caught only by `ABOVE the floor "
+             "also fails`.",
+    ),
+    Mutant(
+        tool="check_self_test_potency.py",
+        id="pt-ignore-orphans",
+        old="    if " "orphans:",
+        new="    if False:",
+        note="a table entry naming a renamed or deleted tool would shrink real "
+             "coverage while the count still read correct — the hand-maintained-list "
+             "drift this whole table exists to stop. Caught only by `a mutant naming "
+             "a tool with no --self-test is exit 2`.",
+    ),
     # ── check_closing_keywords.py ──────────────────────────────────────────
     Mutant(
         tool="check_closing_keywords.py",
@@ -329,6 +425,113 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
         return CAUGHT, f"self-test exits {rc} under the mutation"
     return SURVIVED, ("self-test still exits 0 under the mutation — no case reads "
                       "the behaviour this mutant changes")
+
+
+# ── Coverage: a guard tool shall not ship a self-test no mutant exercises ────
+#
+# REQ-GUARD-SELFTEST-COVERAGE-001 (#461). The table above is hand-maintained and
+# had NO completeness check, so the gate read "the self-tests are potent" while
+# exercising a handful of them. ci.yml describes it as applying the table to
+# "those tools" — the guardrails as a class.
+#
+# This is the shape #381 recorded: `Mutation Testing` read `mutants-out/` while
+# cargo-mutants wrote `mutants-out/mutants.out/` — required and vacuous for four
+# months, 210 survivors printed as 0. A gate measuring a narrower thing than its
+# name claims. check_stale_scope.py came within one commit of landing outside
+# this table, and the potency checker itself is still outside it.
+#
+# EXACT, TWO-SIDED, like DEFAULT_MAX and OFFICIAL_PARSING: below fails as a
+# regression, above fails until the constant is raised. Coverage can then only
+# rise, and closing the remaining tools can ratchet across releases instead of
+# needing one heroic pass.
+#
+# Re-derived mechanically 2026-10-13: 5 of 18. The requirement says 4 of 17,
+# measured 2026-10-09 — #474 then added check_closing_keywords.py together with
+# its mutants, moving both figures. That drift is the reason this is a derived
+# count with a locked constant rather than a number in a sentence.
+MIN_COVERED = 6
+
+# Fixtures for THIS tool's own self-test, written into a temp dir. They are
+# named in the table but are not guard tools, and they ship no `--self-test`
+# flag, so they fall out of the denominator on their own. Named anyway, because
+# a future stub that did ship one would silently inflate the coverage ratio.
+STUB_FIXTURES = frozenset({"nope.py", "stub_potent.py", "stub_blind.py", "stub_red.py"})
+
+# How a tool declares it has a self-test. Matching the argparse FLAG, not the
+# mere string "--self-test", is deliberate: a tool that only mentions the flag
+# in a docstring or passes it to a subprocess does not ship one, and counting it
+# would put a tool in the denominator that can never leave it.
+_SELF_TEST_FLAG = re.compile(r"""add_argument\(\s*["']--self-test""")
+
+
+def ships_a_self_test(path: Path) -> bool:
+    """Whether this file exposes a `--self-test` argparse flag."""
+    try:
+        return _SELF_TEST_FLAG.search(path.read_text(encoding="utf-8")) is not None
+    except OSError:
+        # Unreadable is not "ships none". Same rule the other guards hold to:
+        # a measurement that could not be made must not read as a clean one.
+        print(f"::error::cannot read {path} to determine self-test coverage",
+              file=sys.stderr)
+        sys.exit(2)
+
+
+def coverage(mutants: list[Mutant], tools_dir: Path, min_covered: int,
+             out=sys.stdout) -> int:
+    """Gate the number of guard tools the mutant table actually exercises."""
+    shipping = sorted(
+        p.name for p in tools_dir.glob("*.py")
+        if p.name not in STUB_FIXTURES and ships_a_self_test(p)
+    )
+    if not shipping:
+        # Zero tools found is the fail-open this guard class keeps producing: a
+        # wrong --tools-dir, or a glob that matched nothing, would otherwise
+        # satisfy any floor and print a clean result.
+        print(f"::error::no tool under {tools_dir} ships a --self-test flag. A "
+              f"coverage ratio over an empty denominator is not a measurement.",
+              file=out)
+        return 2
+
+    registered = {m.tool for m in mutants}
+    covered = [t for t in shipping if t in registered]
+    uncovered = [t for t in shipping if t not in registered]
+
+    print("", file=out)
+    print("== self-test coverage ratchet ==", file=out)
+    print(f"tools shipping --self-test: {len(shipping)}", file=out)
+    print(f"exercised by a declared mutant: {len(covered)} (declared {min_covered})",
+          file=out)
+    for t in uncovered:
+        print(f"  UNCOVERED  {t}", file=out)
+
+    # A mutant naming a tool that is not in the denominator is a stale table
+    # entry pointing at a renamed or deleted tool, and it would quietly shrink
+    # coverage while the count still looked right.
+    orphans = sorted(registered - set(shipping) - STUB_FIXTURES)
+    if orphans:
+        print(f"::error::mutant table names tool(s) that ship no --self-test under "
+              f"{tools_dir}: {', '.join(orphans)}. A mutant against a tool with no "
+              f"self-test cannot be caught by one.", file=out)
+        return 2
+
+    n = len(covered)
+    if n < min_covered:
+        print(f"::error::{n} of {len(shipping)} guard tools are exercised by a declared "
+              f"mutant, BELOW the declared {min_covered}. A tool that ships a "
+              f"--self-test with no mutant has nothing distinguishing a potent suite "
+              f"from a vacuous one. Add a mutant — confirmed SURVIVED before the case "
+              f"is written, CAUGHT after — or this is a regression.", file=out)
+        return 1
+    if n > min_covered:
+        print(f"::error::{n} of {len(shipping)} guard tools are exercised, ABOVE the "
+              f"declared {min_covered}. That is a win: raise MIN_COVERED to {n} so it "
+              f"is locked in rather than left as slack the next pass can re-spend.",
+              file=out)
+        return 1
+
+    print(f"coverage is exactly {n}; {len(uncovered)} tool(s) remain to ratchet in.",
+          file=out)
+    return 0
 
 
 def check(mutants: list[Mutant], tools_dir: Path, out=sys.stdout) -> int:
@@ -525,6 +728,68 @@ def self_test() -> int:
         report("check(): duplicate mutant ids are rejected (exit 2)", rc_dup == 2,
                rc_dup, 2)
 
+    # ── the coverage ratchet, proved the same way: executed, not asserted ───
+    #
+    # A denominator is built from scratch each time, because the gate's whole
+    # claim is that it reads the REAL set of tools shipping a --self-test. Two
+    # files ship one, a third does not, so the denominator must come out 2 and
+    # not 3 — and the `--self-test`-in-a-docstring file is what separates
+    # "declares a self-test" from "mentions the string".
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        shipping = ('import argparse\n'
+                    'ap = argparse.ArgumentParser()\n'
+                    'ap.add_argument("--self-test", action="store_true")\n')
+        (d / "a_tool.py").write_text(shipping, encoding="utf-8")
+        (d / "b_tool.py").write_text(shipping, encoding="utf-8")
+        (d / "c_nohook.py").write_text(
+            '"""Mentions --self-test in prose only."""\n'
+            'CMD = [sys.executable, "x", "--self-test"]\n', encoding="utf-8")
+        mut = dict(id="m", old="x", new="y", note="n")
+        one = [Mutant(tool="a_tool.py", **mut)]
+        two = [Mutant(tool="a_tool.py", **mut),
+               Mutant(tool="b_tool.py", id="m2", old="x", new="y", note="n")]
+
+        buf = io.StringIO()
+        rc = coverage(two, d, 2, out=buf)
+        report("coverage(): exact coverage passes (exit 0)", rc == 0, rc, 0)
+        report("coverage(): the denominator counts FLAGS, not mentions of the string",
+               "shipping --self-test: 2" in buf.getvalue(), buf.getvalue()[-90:], 2)
+
+        buf = io.StringIO()
+        rc_below = coverage(one, d, 2, out=buf)
+        report("coverage(): BELOW the floor fails (exit 1)", rc_below == 1, rc_below, 1)
+        report("coverage(): a below-floor run NAMES the uncovered tool",
+               "UNCOVERED  b_tool.py" in buf.getvalue(), buf.getvalue()[-90:], True)
+
+        rc_above = coverage(two, d, 1, out=io.StringIO())
+        report("coverage(): ABOVE the floor also fails — the bound is EXACT, so a "
+               "win is locked in and not pocketed (exit 1)", rc_above == 1, rc_above, 1)
+
+        # The fail-open this guard class keeps producing. An empty denominator
+        # satisfies ANY floor by arithmetic, so it must be refused outright
+        # rather than divided by.
+        #
+        # THE MUTANT TABLE CAUGHT THIS CASE BEING VACUOUS, which is worth
+        # recording where the case lives. It first passed `two` here and
+        # asserted exit 2 — and got it from the ORPHAN branch, because against
+        # an empty directory every declared mutant names a tool that is not
+        # there. Deleting the empty-denominator branch outright left the case
+        # green. An EMPTY mutant list is the input only this branch can answer:
+        # no mutants means no orphans, so 2 can come from nowhere else.
+        with tempfile.TemporaryDirectory() as empty:
+            rc_empty = coverage([], Path(empty), 0, out=io.StringIO())
+        report("coverage(): an EMPTY denominator is exit 2, not a satisfied floor",
+               rc_empty == 2, rc_empty, 2)
+
+        # A table entry pointing at a renamed or deleted tool would quietly
+        # shrink real coverage while the count still read correct.
+        rc_orphan = coverage(
+            two + [Mutant(tool="c_nohook.py", id="m3", old="x", new="y", note="n")],
+            d, 2, out=io.StringIO())
+        report("coverage(): a mutant naming a tool with no --self-test is exit 2",
+               rc_orphan == 2, rc_orphan, 2)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
@@ -537,7 +802,13 @@ def main() -> int:
     a = ap.parse_args()
     if a.self_test:
         return self_test()
-    return check(MUTANTS, Path(a.tools_dir))
+    # BOTH gates run, and the worse verdict wins — 2 (could not judge) over
+    # 1 (ratchet) over 0. Returning early on the first non-zero would hide a
+    # coverage regression behind a surviving mutant, and the two are independent
+    # findings an operator needs to see together.
+    rc_potency = check(MUTANTS, Path(a.tools_dir))
+    rc_coverage = coverage(MUTANTS, Path(a.tools_dir), MIN_COVERED)
+    return max(rc_potency, rc_coverage)
 
 
 if __name__ == "__main__":

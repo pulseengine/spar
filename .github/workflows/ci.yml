@@ -717,8 +717,8 @@ jobs:
       # above: every guardrail here ships a `--self-test`, and a self-test case
       # whose assertion does not actually depend on the code under test is green
       # forever — including after the behaviour it was meant to pin has rotted
-      # out. This applies a declared table of source mutations to those tools and
-      # asserts each tool's `--self-test` now FAILS; a mutant the suite still
+      # out. This applies a declared table of source mutations and asserts the
+      # mutated tool's `--self-test` now FAILS; a mutant the suite still
       # passes (a SURVIVOR) is a case that is not load-bearing, and reds the
       # build. It mechanises the claim REQ-GUARD-GATE-EVIDENCE-002 once made in
       # prose and withdrew as false (#405). Self-test first, same reason as every
@@ -727,9 +727,20 @@ jobs:
       # rather than an assertion. Stdlib-only and self-contained — it runs mutated
       # COPIES in a temp dir, so the tree is never modified even if a run is
       # killed mid-flight.
+      #
+      # IT DOES NOT APPLY TO ALL OF THEM, and the wording above used to imply it
+      # did — REQ-GUARD-SELFTEST-COVERAGE-001 (#461). The table is
+      # hand-maintained, and it covered 5 of the 18 tools shipping a
+      # `--self-test` while the step name read as a claim about the guardrails
+      # as a class. That is #381's shape exactly: a gate measuring a narrower
+      # thing than its name claims. The same invocation below now ALSO runs an
+      # exact two-sided coverage ratchet (MIN_COVERED, currently 6 of 18), so a
+      # new guardrail cannot land outside the table — check_stale_scope.py came
+      # within one commit of doing so — and newly covered tools are locked in
+      # rather than left as slack. Both gates run and the worse verdict wins.
       - name: Self-test potency guardrail self-test
         run: tools/check_self_test_potency.py --self-test
-      - name: Self-test potency guardrail
+      - name: Self-test potency + coverage guardrail
         run: tools/check_self_test_potency.py
       # REQ-GUARD-GATE-EVIDENCE-002 (h) + REQ-GUARD-FUZZ-SMOKE-001 (#406). Two
       # workflows run the fuzz harnesses from lists maintained apart from
