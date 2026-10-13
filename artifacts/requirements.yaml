@@ -5946,7 +5946,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.45.0
+    release: v0.46.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -5973,7 +5973,7 @@ artifacts:
       is that the ratchet moves and the specification's Annex A model parses,
       not that the count reaches its maximum.
     status: proposed
-    release: v0.45.0
+    release: v0.46.0
     tags: [sysml2, parser, grammar]
     links:
       - type: traces-to
@@ -6002,7 +6002,7 @@ artifacts:
       refinement and nesting semantics are not in scope and are not asserted to
       work.
     status: proposed
-    release: v0.45.0
+    release: v0.46.0
     tags: [hir, instance, aadl, defect]
 
   - id: REQ-FINDINGS-LAYER-001
@@ -6035,7 +6035,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: proposed
-    release: v0.45.0
+    release: v0.46.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6426,7 +6426,7 @@ artifacts:
 
       NOT CLAIMED: that every reported binding error is this cause.
     status: proposed
-    release: v0.45.0
+    release: v0.46.0
     tags: [aadl, analysis, properties, bug, interop]
 
   - id: REQ-RELEASE-COMPLIANCE-PIN-001
@@ -6696,6 +6696,126 @@ artifacts:
       AUTOMATIC premature close, which is the half a machine can own. Nor that
       the keyword is wrong in general — on a repo that closes on merge it is
       correct. It is wrong HERE.
-    status: implemented
+      VERIFIED ON THE SURFACE THAT MATTERS. On PR #474's own Format run both
+      steps passed and the real check logged `texts scanned: 3` and
+      `ok — no closing keyword; \`Refs #N\` is the allowed form`, so it measured
+      the body and the commits rather than passing vacuously.
+
+      On a PUSH to main the real check reports `skipped`, because
+      `github.event_name == 'pull_request'` is false and a push has no PR body
+      to read. That is deliberate, and it is recorded here because `skipped`
+      SATISFIES a required context — the shape that let 10 such checks through
+      on #367. It is benign only because the self-test still runs on every push
+      (observed `success` on main's run 38040265052), so the tool is proven
+      potent on the branch even where it has no text to scan. The commit-message
+      half of the rule is enforced at PR time, which is the only point where a
+      merge can still be stopped.
+    status: verified
     release: v0.45.0
     tags: [process, guardrail, ci, tooling, traceability]
+
+  - id: REQ-TSN-YANG-DEPLOYABLE-001
+    type: requirement
+    title: An emitted switch configuration shall be activatable, or the export shall fail
+    description: >
+      From an internal TSN evaluation of v0.44.0 on a zonal EE model (2 zone
+      switches, a central switch, 2 streams), #475/#476. The evaluator's verdict
+      on the generated config: "not deployable as it stands".
+
+      MEASURED against crates/spar-network/src/tsn.rs on 12b4f68, four of five
+      sub-claims confirmed:
+
+      `base-time` — 0 occurrences. `config-change` — 0 occurrences. Without
+      both, a switch has NOTHING TO ACTIVATE: Qbv is a timed configuration, and
+      an admin control list with no base time and no change trigger is inert.
+      `operation-name` is emitted bare (`<operation-name>set-gate-states</...>`)
+      where ieee802-dot1q-sched types it as an IDENTITYREF, which needs a prefix
+      to resolve. The `interface` carries `name` and `gate-parameter-table` but
+      no `type`, which ietf-interfaces makes a mandatory leaf.
+
+      ONE SUB-CLAIM IS REFUTED, and it is worth recording because the triage got
+      it wrong first too: the gate table is NOT at the wrong path. It is
+      correctly nested inside the `interface` list entry with its `name` key. A
+      grep window that skipped the `<interface>` line produced the same false
+      reading in triage as in the report. The conclusion stands on base-time and
+      config-change alone.
+
+      WHY THIS OUTRANKS THE OTHER THIRTEEN GAPS. Most of the evaluation is
+      missing capability — no CLI path to synthesis, no ARXML ingest, coarse CQF
+      output. Those are honest absences: you reach for the feature, it is not
+      there, you know at once. This one EMITS SOMETHING THAT LOOKS DEPLOYABLE
+      AND IS NOT, which is the defect class this project keeps finding in its own
+      gates (#464 tagged a release that published nothing; #403 reported success
+      having executed zero commands; #469 exited 0 on a model carrying errors).
+      An export that cannot be applied shall fail loudly rather than hand back
+      plausible XML.
+
+      ORACLE — AND ITS HONEST LIMIT. The emission must be pinned by assertions
+      that the PRE-FIX output FAILS, so the bug's own repro is the test. But
+      schema validation against the real models cannot currently be run here:
+      no `yanglint` and no `pyang` are available, and ZERO `.yang` files are
+      vendored in the repo. So structural assertions are the strongest available
+      oracle, and they are weaker than validation — they check the elements we
+      thought of. Closing this requires vendoring and pinning
+      ieee802-dot1q-sched and ietf-interfaces the way the 310-model SysML corpus
+      is pinned (#442), plus a validator in CI.
+
+      NOT CLAIMED, and not claimable from this repo: that a real switch accepts
+      the output. The evaluator did not test a switch or a NETCONF session and
+      neither has this triage. Schema-valid is necessary, not sufficient.
+    status: proposed
+    release: v0.46.0
+    tags: [tsn, yang, interop, bug, deployment]
+
+  - id: REQ-TSN-CLI-SURFACE-001
+    type: requirement
+    title: GCL synthesis and YANG export shall be reachable without writing Rust
+    description: >
+      From the same evaluation (#476). MEASURED: `synthesize_gcl` has one
+      defining file and ZERO callers outside spar-network, and
+      crates/spar-cli/src/main.rs mentions neither `yang` nor `gcl`. So the two
+      capabilities the evaluation most wanted are library-only and unconnected
+      to AADL — using them means writing Rust, which is what the evaluator did.
+
+      This is the capability gap behind the evaluation's overall position:
+      usable today as an early bound estimator, with glue code for synthesis and
+      a re-analysis step. The glue code IS the gap.
+
+      The CLI surface is already guarded: REQ-CLI-SURFACE-001 made one
+      `&[(&str, &str, CmdFn)]` table drive both dispatch and `--help`, so a
+      command cannot exist and be undocumented. Adding subcommands here inherits
+      that, and the deleting-an-entry-stops-compiling property is what keeps the
+      new surface honest.
+
+      NOT CLAIMED: that a CLI alone closes the evaluation's synthesis gap. The
+      synthesizer's output and the analyzer's bounds currently DISAGREE on the
+      same artifact (a schedule passing the synthesizer's own check measured 254
+      us end-to-end against a 100 us/hop budget over 2 hops), and exposing a
+      command would make that disagreement easier to reach, not smaller. That
+      mismatch is its own requirement and is not yet reproduced here.
+    status: proposed
+    release: v0.46.0
+    tags: [tsn, cli, synthesis, interop]
+
+  - id: REQ-DBC-CYCLE-TIME-001
+    type: requirement
+    title: DBC ingest shall carry message cycle times into the AADL model
+    description: >
+      From the same evaluation (#476). MEASURED: crates/spar-dbc/src/lib.rs
+      contains ZERO occurrences of `cycle`, so a CAN message's cycle time is
+      dropped on ingest.
+
+      It matters because the downstream analyses need a period: CQF cycle-time
+      synthesis reads `Deadline` and a flow's period (cqf_synth.rs), and a frame
+      with no declared rate cannot contribute an arrival curve. So a model
+      ingested from a .dbc is timing-blind by construction, and the gap is
+      invisible — the ingest succeeds and produces AADL that simply has no rates
+      in it.
+
+      NOT CLAIMED: that `GenMsgCycleTime` is present in every .dbc. It is a
+      vendor attribute and may be absent, so the requirement is that a cycle
+      time present in the source reaches the model, and that its ABSENCE is
+      reported rather than silently yielding an unrated frame.
+    status: proposed
+    release: v0.46.0
+    tags: [dbc, can, ingest, interop]
