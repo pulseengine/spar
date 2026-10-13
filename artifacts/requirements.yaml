@@ -6971,12 +6971,37 @@ artifacts:
       one, because a figure produced by a dispatch fall-through is not worth
       validating.
 
-      ALSO NOT FIXED HERE, measured and left to successors: `WCTT_Budget` is
-      still read from `hops.first()` only; cross-class rate subtraction still
-      declares a gate-protected stream unservable (pessimistic, hence safe, but
-      it rejects the designs TSN exists for); `--pmoo` is still a silent no-op
-      on any TSN model; and `spar verify` still has no numeric comparison, so
-      "this stream's bound <= 400 us" remains inexpressible as a requirement.
+      ALSO NOT FIXED HERE, measured and left to successors. Each was re-verified
+      against the source on 2026-10-13 rather than carried over from the report:
+
+      `WCTT_Budget` is still read from `hops.first()` only — wctt.rs:836, whose
+      own comment elects "the *first* bound switch's budget as the per-stream
+      budget", so a budget declared on any later bus of a multi-hop stream is
+      never consulted.
+
+      `--pmoo` is still a silent no-op on any TSN model, and the mechanism is
+      specific: `pmoo_or_sfa` returns None at wctt.rs:1414 for any hop whose
+      switch is not Fifo or Priority, and the caller emits NOTHING on None — so
+      the flag is accepted, no PMOO diagnostic appears, and the SFA bound stands.
+      The `milp-solver` feature is default-on, so this is not a build-config
+      artefact.
+
+      Cross-class rate subtraction still declares a gate-protected stream
+      unservable (pessimistic, hence safe, but it rejects the designs TSN exists
+      for). Attributed to the evaluation; not independently re-derived here.
+
+      CORRECTION TO THIS REQUIREMENT'S OWN EARLIER WORDING, which claimed
+      `spar verify` "has no numeric comparison". That is FALSE and the first
+      draft of this text shipped it. The assertion language does have `<`, `<=`,
+      `>`, `>=`, `==` and `!=` with integer literals. What it lacks is a
+      MEASURED-VALUE TERM: eval.rs:154-158 compares those operators against a
+      `count` only, so the left operand is always a cardinality, and the two
+      pipeline sources are `components` and `diagnostics`. A WCTT bound is not
+      addressable as a value at all — it exists only as formatted text inside a
+      diagnostic message, matchable by severity and kind and countable, never
+      readable as a number. So "this stream's bound <= 400 us" is indeed
+      inexpressible, but the missing piece is a value term, NOT an operator,
+      which changes what the fix is.
     status: implemented
     release: v0.46.0
     tags: [tsn, wctt, analysis, bug, provenance]
