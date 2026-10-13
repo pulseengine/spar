@@ -51,17 +51,100 @@ except ImportError:  # pragma: no cover - environment problem, not a verdict
     print("::error::PyYAML is required", file=sys.stderr)
     sys.exit(2)
 
-# Measured 2026-10-09 against Cargo.toml 0.43.0, scanning BOTH artifacts/ and
-# safety/stpa/ — the same two directories the other plane guards scan. The
-# number depends on that scope: counting artifacts/ alone gives 89, and a guard
-# whose floor was measured over a narrower tree than it runs on would be red on
-# its first CI run. Lower it when a cleanup lands; the run prints the new number
-# when it disagrees.
-DEFAULT_MAX = 90
+# Re-measured 2026-10-13 against Cargo.toml 0.45.0, scanning BOTH artifacts/ and
+# safety/stpa/ — the same two directories the other plane guards scan, and now
+# also this tool's DEFAULT_DIRS, so the local default and the CI invocation
+# cannot disagree. They used to: `--artifacts-dir` defaulted to artifacts/ alone,
+# which counts 89 against CI's 90, and the below-floor branch then advised
+# lowering DEFAULT_MAX to a number that would have gone red on the next CI run.
+# A guard that measures a narrower tree than it governs gives confident wrong
+# advice, so the default now IS the governed scope.
+#
+# 90 -> 80 is REQ-GUARD-STALE-SCOPE-002: ten TEST-GUARD-* verification artifacts
+# were counted as debt and are not debt (see IS_SETTLED_AT_IMPLEMENTED).
+DEFAULT_MAX = 80
+
+# The two directories this guard governs. CI passes them explicitly; this is the
+# same list so an operator running the tool bare measures what the gate measures.
+DEFAULT_DIRS = (Path("artifacts"), Path("safety/stpa"))
 
 # A status at or past this point has closed the V and is not stale whatever its
 # release says.
 SETTLED = {"verified", "accepted", "rejected"}
+
+# ── Why `implemented` settles a VERIFICATION artifact but not a requirement ──
+#
+# For a REQUIREMENT, `implemented` is the guard's main finding and must stay
+# counted: the left side of the V closed and the right side did not. v0.23.0
+# alone carries 26 of those.
+#
+# For a VERIFICATION artifact it is wrong, and the reason is structural rather
+# than a matter of convention: a test is not verified by another test, which
+# would regress infinitely. A verification artifact closes its V by existing and
+# running, and this repo records that as `implemented`. The convention is
+# unambiguous — of 129 TEST-* artifacts, 111 are `implemented` and ZERO are
+# `verified`. There is no higher state in use, so counting them as debt counts a
+# state nothing can ever leave.
+#
+# THE MARKER DISCRIMINATES, which is what makes this a fix and not an exemption.
+# `fields.method` names HOW the artifact verifies — `automated-test`,
+# `unit-test`, `formal-proof`. Paired with a status it separates two different
+# things that look alike:
+#
+#   method + implemented  -> a test that exists and runs      -> SETTLED
+#   method + proposed     -> a test that was never built       -> real debt
+#
+# It is deliberately not an id-prefix question: VAL-* and FUZZ-* carry
+# `automated-test` too, and TEST-GUARD-STATUS-VOCAB carries no `fields` at all,
+# so it stays counted for lacking the marker rather than for its status.
+STATUS_SETTLING_A_VERIFICATION_ARTIFACT = "implemented"
+
+
+def verification_method(a: dict) -> str | None:
+    """`fields.method` if the artifact declares one, else None.
+
+    The marker that says "this artifact verifies something, and here is how".
+    Read defensively: `fields` is absent on most artifacts and has been seen as
+    an explicit null, and neither may raise.
+    """
+    fields = a.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    method = fields.get("method")
+    return str(method) if method else None
+
+
+def has_verifies_link(a: dict) -> bool:
+    """Whether the artifact carries a `links:` entry of type `verifies`.
+
+    The SECOND, independent record of the same fact. Note the key is `type`,
+    not `relation` — `{type: verifies, target: REQ-...}`. It is read only as a
+    printed cross-check and never changes the count; see `settles_as_verification`.
+    """
+    for link in a.get("links") or []:
+        if isinstance(link, dict) and link.get("type") == "verifies":
+            return True
+    return False
+
+
+def settles_as_verification(a: dict, status: str) -> bool:
+    """A verification artifact that exists and runs has no right side left to close.
+
+    THE COUNT IS DECIDED BY `fields.method` ALONE, deliberately, even though
+    `has_verifies_link` records the same fact and selects the identical ten
+    artifacts in today's stale set. Requiring BOTH would be the conservative
+    reading, and it is the wrong one here: a missing `links` entry is a routine
+    data-entry omission, so demanding it would turn a real, running test into
+    phantom debt — and the way phantom debt gets "fixed" is by moving
+    DEFAULT_MAX, which pockets a false reading into the ratchet. That is the
+    failure this requirement exists to prevent.
+
+    The optimistic direction is already defended, which is why one marker is
+    enough: DEFAULT_MAX is an EXACT two-sided bound, so a genuinely new stale
+    artifact pushes the count above the constant and reds CI regardless. This
+    guard does not need to be the thing that catches it.
+    """
+    return status == STATUS_SETTLING_A_VERIFICATION_ARTIFACT and verification_method(a) is not None
 
 
 def parse_version(text: str) -> tuple[int, ...] | None:
@@ -83,9 +166,18 @@ def current_version(cargo_toml: Path) -> tuple[int, ...] | None:
     return None
 
 
-def stale_artifacts(dirs: list[Path], current: tuple[int, ...]) -> list[tuple[str, str, str]]:
-    """(release, status, id) for every artifact scoped below `current`."""
-    out = []
+def stale_artifacts(
+    dirs: list[Path], current: tuple[int, ...]
+) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, bool]]]:
+    """Two lists: the stale artifacts, and the verification artifacts excused.
+
+    The second return value is the whole reason this is a fix and not a silent
+    threshold change. Ten artifacts stopped being counted, and a reader has to
+    be able to see WHICH ten and on what marker — an excusal that prints nothing
+    is indistinguishable from a bug that loses rows.
+    """
+    out: list[tuple[str, str, str]] = []
+    settled_verifications: list[tuple[str, str, bool]] = []
     for d in dirs:
         for path in sorted(d.glob("*.yaml")):
             try:
@@ -126,6 +218,16 @@ def stale_artifacts(dirs: list[Path], current: tuple[int, ...]) -> list[tuple[st
                     if status in SETTLED:
                         continue
 
+                    # A verification artifact at `implemented` has closed the
+                    # only V it has. Checked BEFORE parsing the release, for the
+                    # same reason SETTLED is: for a closed artifact the release
+                    # field is history, and history need not be orderable.
+                    if settles_as_verification(a, status):
+                        settled_verifications.append(
+                            (a["id"], str(verification_method(a)), has_verifies_link(a))
+                        )
+                        continue
+
                     rel = parse_version(str(release))
                     if rel is None:
                         print(f"::error::{a['id']} declares an unparseable release "
@@ -136,7 +238,7 @@ def stale_artifacts(dirs: list[Path], current: tuple[int, ...]) -> list[tuple[st
 
                     if rel < current:
                         out.append((str(release), status, a["id"]))
-    return out
+    return out, settled_verifications
 
 
 def check(dirs: list[Path], cargo_toml: Path, max_stale: int) -> int:
@@ -145,7 +247,7 @@ def check(dirs: list[Path], cargo_toml: Path, max_stale: int) -> int:
         print(f"::error::no [workspace.package] version in {cargo_toml}", file=sys.stderr)
         return 2
 
-    stale = stale_artifacts(dirs, current)
+    stale, excused = stale_artifacts(dirs, current)
     n = len(stale)
     cur_s = ".".join(str(x) for x in current)
 
@@ -158,6 +260,28 @@ def check(dirs: list[Path], cargo_toml: Path, max_stale: int) -> int:
         by_release[rel] = by_release.get(rel, 0) + 1
     for rel in sorted(by_release, key=lambda r: parse_version(r) or (0, 0, 0)):
         print(f"  {rel:>9}  {by_release[rel]}")
+
+    if excused:
+        print(
+            f"not counted: {len(excused)} verification artifact(s) at "
+            f"{STATUS_SETTLING_A_VERIFICATION_ARTIFACT} — a test is not verified by "
+            f"another test, so this is the end of its V, not a missed commitment"
+        )
+        # THE CROSS-CHECK. `fields.method` decided the count; the verifies link
+        # is the independent second record of the same fact. Where they disagree
+        # the artifact is still excused — saying so is the point, because a
+        # divergence is a data-quality signal and not a verdict, and a guard that
+        # printed only the number it liked would hide it.
+        for ident, method, linked in sorted(excused):
+            mark = "" if linked else "   (no verifies link — marker disagreement)"
+            print(f"  {ident:<40} {method}{mark}")
+        disagree = [e for e in excused if not e[2]]
+        if disagree:
+            print(
+                f"::notice::{len(disagree)} of {len(excused)} excused artifact(s) carry "
+                f"`fields.method` but no `links: {{type: verifies}}`. Both markers record "
+                f"the same fact; adding the link makes the trace navigable."
+            )
 
     if n > max_stale:
         print(
@@ -230,6 +354,61 @@ def self_test() -> int:
             "0.43.0", 0,
             "a withdrawn requirement is decided, not outstanding",
         ),
+        # ── REQ-GUARD-STALE-SCOPE-002: the discriminator, both arms ──────────
+        #
+        # These four are a MATRIX over (has a method marker) x (status), and the
+        # pair is the point in each direction. The first case alone would pass a
+        # build that excused `implemented` unconditionally; the third is what
+        # refuses that build. The second alone would pass a build that excused
+        # any artifact carrying a method; the first is what refuses that one.
+        (
+            "a verification artifact at implemented is settled",
+            [{"id": "TEST-X", "status": "implemented", "release": "v0.23.0",
+              "fields": {"method": "automated-test"}}],
+            "0.43.0", 0,
+            "a test is not verified by another test — `implemented` is the end of "
+            "its V, and 111 of 129 TEST-* sit there with ZERO ever reaching verified",
+        ),
+        (
+            "a verification artifact at proposed is STILL debt",
+            [{"id": "TEST-X", "status": "proposed", "release": "v0.23.0",
+              "fields": {"method": "automated-test"}}],
+            "0.43.0", 1,
+            "the marker alone must not excuse: a test that was never built is the "
+            "realest debt there is. NOTE this arm has NO instance in the tree today, "
+            "so it exists only here — the measurement that said otherwise named "
+            "TEST-GUARD-STATUS-VOCAB, which carries no `fields` at all and is counted "
+            "for lacking the marker, not for its status",
+        ),
+        (
+            "a REQUIREMENT at implemented is NOT settled",
+            [{"id": "REQ-X", "status": "implemented", "release": "v0.23.0"}],
+            "0.43.0", 1,
+            "the guard's main finding, and the thing the new arm must not swallow: "
+            "left side of the V closed, right side open. v0.23.0 alone carries 26",
+        ),
+        (
+            "an empty or null fields block does not excuse",
+            [{"id": "TEST-X", "status": "implemented", "release": "v0.23.0",
+              "fields": None},
+             {"id": "TEST-Y", "status": "implemented", "release": "v0.23.0",
+              "fields": {}},
+             {"id": "TEST-Z", "status": "implemented", "release": "v0.23.0",
+              "fields": {"method": ""}}],
+            "0.43.0", 3,
+            "`fields: null` is real in this tree and an absent method must read as "
+            "absent, not as a truthy marker — an excusal keyed on a block that merely "
+            "EXISTS would settle every artifact that happens to carry fields",
+        ),
+        (
+            "the verifies link does not excuse on its own",
+            [{"id": "TEST-X", "status": "implemented", "release": "v0.23.0",
+              "links": [{"type": "verifies", "target": "REQ-Y"}]}],
+            "0.43.0", 1,
+            "the link is a printed CROSS-CHECK, not a second way to be excused. "
+            "Pinning that keeps the count decided by exactly one marker, so a "
+            "reader of the requirement can predict the number",
+        ),
     ]
 
     failures = 0
@@ -239,7 +418,7 @@ def self_test() -> int:
             _write(tmp, "a.yaml", artifacts)
             cur = parse_version(version)
             assert cur is not None
-            got = len(stale_artifacts([tmp], cur))
+            got = len(stale_artifacts([tmp], cur)[0])
             ok = got == want_count
             failures += not ok
             print(f"[{'PASS' if ok else 'FAIL'}] {name}: {got} stale (want {want_count})")
@@ -358,7 +537,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    dirs = args.artifacts_dir or [Path("artifacts")]
+    dirs = args.artifacts_dir or list(DEFAULT_DIRS)
     return check(dirs, args.cargo_toml, args.max)
 
 

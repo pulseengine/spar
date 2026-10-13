@@ -6269,7 +6269,7 @@ artifacts:
       FAILS, so a case that is not load-bearing cannot sit green forever. The
       table is a hand-maintained list with NO completeness check.
 
-      Measured 2026-10-09 (#461): it covers 4 of the 17 tools that ship a
+      Measured 2026-10-09 (#461): it covered 4 of the 17 tools that ship a
       `--self-test`. ci.yml describes it as applying the table to "those tools"
       — the guardrails as a class — so the gate reads "the self-tests are
       potent" while checking 4 of 17 of them. Nothing fails when a new
@@ -6296,7 +6296,48 @@ artifacts:
 
       NOT CLAIMED: that all 13 uncovered tools have vacuous self-tests. Only
       that nothing distinguishes a potent one from a vacuous one today.
-    status: proposed
+
+      IMPLEMENTED 2026-10-13. `coverage()` in check_self_test_potency.py is an
+      EXACT two-sided ratchet at MIN_COVERED, run from `main()` alongside the
+      existing mutant evaluation — both gates run and the worse verdict wins, so
+      a coverage regression cannot hide behind a surviving mutant. CI needed no
+      change: it already invokes the tool bare.
+
+      THE FIGURE WAS RE-DERIVED MECHANICALLY RATHER THAN INHERITED, and it had
+      moved: 5 of 18, not the 4 of 17 measured four days earlier — #474 landed
+      check_closing_keywords.py together with its mutants, shifting numerator
+      and denominator at once. That drift inside a single release is the whole
+      argument for a derived count behind a locked constant. It is also why the
+      denominator counts the argparse FLAG and not the string `--self-test`,
+      which also appears in docstrings and in subprocess argument lists.
+
+      SHIPPED AT 6 OF 18, one above the measurement, because the self-reference
+      this requirement named was closed in the same pass: the potency checker
+      ships a `--self-test` and was the one tool nothing proved potent. Three
+      mutants now target its own coverage gate.
+
+      EARNING THAT FOUND A REAL VACUOUS CASE, which is the strongest available
+      evidence the new gate is not ornamental. `pt-empty-denominator-ok`
+      SURVIVED on first attempt: the new `an EMPTY denominator is exit 2` case
+      was passing off the ORPHAN branch, because against an empty directory
+      every declared mutant names a missing tool and both branches return 2. A
+      case pinning only an exit code cannot separate two fail-closed paths. It
+      was repaired to pass an EMPTY mutant list — the one input only the branch
+      under test can answer. The table caught a vacuous case in the gate added
+      to catch vacuous cases, minutes after it existed.
+
+      ONE STRUCTURAL CONSEQUENCE OF SELF-MUTATION, recorded because it recurs
+      for anyone extending this: a mutant's `old` text appears TWICE in a
+      self-targeting tool — at the real site and inside its own declaration —
+      and `apply_mutation` replaces every occurrence, so the declaration would
+      be mutated too. The count guard refused to judge, correctly. The three
+      declarations use adjacent string literals so the contiguous text matches
+      exactly one site.
+
+      REMAINING: 12 tools uncovered, to ratchet in across later releases. The
+      ratchet is the deliverable; the coverage number is now ground that cannot
+      be re-spent.
+    status: verified
     release: v0.45.0
     tags: [process, guardrail, ci, tooling, mutation]
 
@@ -6328,7 +6369,16 @@ artifacts:
       THE MARKER DISCRIMINATES, which is what makes this a fix rather than an
       exemption: `automated-test` + `implemented` is a test that exists and
       runs, so settled; `automated-test` + `proposed` is a test that was never
-      built, so real debt that stays counted. TEST-GUARD-STATUS-VOCAB
+      built, so real debt that stays counted. CORRECTION, measured 2026-10-13
+      while implementing this: the rationale below named TEST-GUARD-STATUS-VOCAB
+      (proposed, v0.36.0) as the artifact "correctly left in by that rule". The
+      outcome is right and the MECHANISM was wrong — it carries `fields: null`
+      and no verifies link, so it stays counted for lacking the MARKER, not for
+      its status. The `method` + `proposed` arm has NO instance in the tree at
+      all, which is why it exists only as a self-test case; a requirement whose
+      discriminator is demonstrated solely by its own fixture should say so
+      rather than borrow an example that does not fit. Original text:
+      TEST-GUARD-STATUS-VOCAB
       (proposed, v0.36.0) is correctly left in by that rule. `fields.method`
       and "has a verifies link" selected the SAME 10 artifacts in the stale
       set, so either marker works and they can cross-check.
@@ -6340,7 +6390,46 @@ artifacts:
 
       NOT CLAIMED: that every one of the 225 is correctly recorded today. 15
       TEST-* carry no status at all, which is a separate gap.
-    status: proposed
+
+      IMPLEMENTED 2026-10-13. `settles_as_verification` excuses an artifact only
+      at `implemented` and only with a `fields.method`; DEFAULT_MAX re-derived
+      90 -> 80, exactly as predicted, and the ten excusals are PRINTED by id and
+      method — an excusal that prints nothing is indistinguishable from a bug
+      that loses rows.
+
+      THE COUNT IS DECIDED BY ONE MARKER, DELIBERATELY. Both markers select the
+      identical ten (confirmed — the link is `{type: verifies}`, keyed on `type`
+      and not `relation`), so the count is 80 either way and only FUTURE
+      behaviour was being chosen. Requiring BOTH is the conservative reading and
+      the wrong one here: a missing `links` entry is a routine data-entry
+      omission, so demanding it would turn a real running test into phantom
+      debt — and phantom debt gets "fixed" by moving DEFAULT_MAX, which pockets
+      a false reading into the ratchet. The optimistic direction needs no second
+      marker because DEFAULT_MAX is EXACT: a genuinely new stale artifact pushes
+      the count above the constant regardless. The verifies link is therefore
+      printed as a cross-check that cannot change the count, with a notice on
+      divergence.
+
+      FIVE SELF-TEST CASES, a matrix over (marker) x (status), and four of the
+      five mutants are killed by EXACTLY ONE case, which is what makes them
+      load-bearing rather than restatements of one assertion:
+      ss-never-excuse, ss-excuse-any-status, ss-fields-presence-is-marker and
+      ss-link-also-excuses are each uniquely attributed.
+      `ss-excuse-any-implemented` trips three, as a mutation deleting the marker
+      requirement wholesale should. `fields: null` and `fields: {}` are both
+      real in this tree, so an excusal keyed on a fields block merely EXISTING
+      is pinned against separately.
+
+      A SECOND DEFECT WAS FOUND AND FIXED IN THE SAME FILE, unasked: the tool's
+      `--artifacts-dir` defaulted to artifacts/ alone while CI passes artifacts/
+      AND safety/stpa. The bare invocation counted 89 against CI's 90, and the
+      below-floor branch then advised lowering DEFAULT_MAX to a number that
+      would have gone RED on the next CI run — a guard measuring a narrower tree
+      than it governs, giving confident wrong advice in the direction of action.
+      The source comment had recorded the 89-vs-90 hazard in prose while the
+      code kept the hazard. DEFAULT_DIRS now makes the default the governed
+      scope, so the two cannot disagree.
+    status: verified
     release: v0.45.0
     tags: [process, guardrail, planning, rivet]
 
