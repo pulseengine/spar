@@ -6908,3 +6908,75 @@ artifacts:
     status: proposed
     release: v0.46.0
     tags: [dbc, can, ingest, interop]
+  - id: REQ-TSN-WCTT-PROVENANCE-001
+    type: requirement
+    title: A WCTT bound shall report the hops it covers, and shall be checked against the stream's own deadline
+    description: >
+      Found by an independent evaluation that built its own zonal EE model
+      rather than reusing the earlier report's (#478, #476).
+
+      spar's property set documents `Class_of_Service` as "Applies to port and
+      connection". Declaring it EITHER documented way produced
+      `WcttBound ... 0 ps (2 hops)` at severity Info, exit 0 — because
+      `collect_streams` reads it from the source COMPONENT, so neither
+      documented placement is seen and the TSN dispatch defers every hop,
+      `continue`-ing with zero contribution. The figure then passed
+      `WCTT_Budget => 200 us` (0 < 200000000) and `spar verify` 3/3, because
+      `WcttDeferred` is severity Info and `SeverityFilter::Info` matches every
+      diagnostic including every `WcttBound`. A user following spar's own
+      documentation got an unsound number with every gate green. OPTIMISTIC,
+      therefore UNSAFE — and a different mechanism from the recorded TAS
+      longest-gap optimism: this is a dispatch fall-through contributing
+      nothing, not a loose service curve.
+
+      THE DISCRIMINATOR IS THE CONTRIBUTION COUNT, not whether the sum is zero.
+      `hops_counted` already existed and already guarded the sensitivity
+      diagnostic ("when no hop contributed"), so the code knew; it printed the
+      bound anyway. Zero contributions now emit `WcttNotComputed` at Error and
+      NO bound figure. A partial walk emits `WcttPartialBound` and labels the
+      bound with the hops it actually covers. A flow whose hops genuinely add
+      nothing stays reportable. Same repair REQ-ANALYSIS-LATENCY-PROVENANCE-001
+      made for latency: a figure the analysis could not derive must not render
+      as a derived value.
+
+      AND THE DEADLINE IS NOW COMPARED. `Timing_Properties::Deadline` had ZERO
+      occurrences in wctt.rs. The only numeric gate was `Spar_Network::
+      WCTT_Budget` on a bus — read from the FIRST HOP ONLY — so a stream 9.4x
+      over its declared deadline exited 0 in text, json AND sarif. The source
+      end station's declared deadline is now checked against the derived bound.
+
+      ORACLE — A DECLARED MATRIX, and the PAIR is the point. One template
+      varies exactly one line per row. `a_bound_no_hop_contributed_to_is_an_
+      error_not_a_zero` and `the_provenance_gate_discriminates` are both
+      required: the first alone would pass a build that always emitted
+      NotComputed, the second alone would pass the 0 ps bug itself. Likewise
+      `a_bound_over_its_declared_deadline_is_an_error` with
+      `a_bound_within_its_deadline_is_not_flagged`, and
+      `an_undeclared_deadline_is_not_a_violation` so defaulting an absent
+      deadline to zero cannot pass.
+
+      MUTATION-TESTED, each mutant killed by EXACTLY ONE case, which is what
+      proves the cases load-bearing rather than incidental: reverting the
+      provenance gate (`if hops_counted == 0` -> `if false`) fails only the
+      first; deleting the comparison (`> deadline_ps` -> `false`) fails only
+      the deadline row; making it flag everything (`>= 0`) fails only the
+      within-deadline row. Control: the restored tree is green.
+
+      NOT CLAIMED: that the surviving bound figures are CORRECT. The evaluation
+      cross-checked them for internal consistency only — `1 Gbps x (25 us -
+      1 us eps) / 125 us = 192000000 bps` and `192e6 - 125 Mbps = 67000000 bps`
+      both reproduce spar's printed numbers exactly — with no external
+      network-calculus tool or simulator validating the magnitude. Validating a
+      magnitude is the next question and is deliberately downstream of this
+      one, because a figure produced by a dispatch fall-through is not worth
+      validating.
+
+      ALSO NOT FIXED HERE, measured and left to successors: `WCTT_Budget` is
+      still read from `hops.first()` only; cross-class rate subtraction still
+      declares a gate-protected stream unservable (pessimistic, hence safe, but
+      it rejects the designs TSN exists for); `--pmoo` is still a silent no-op
+      on any TSN model; and `spar verify` still has no numeric comparison, so
+      "this stream's bound <= 400 us" remains inexpressible as a requirement.
+    status: implemented
+    release: v0.46.0
+    tags: [tsn, wctt, analysis, bug, provenance]
