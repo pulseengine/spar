@@ -3231,6 +3231,82 @@ end Net;
         )
     }
 
+    /// A stream crossing one CONTRIBUTING hop and one DEFERRING hop.
+    ///
+    /// `provenance_model` above is single-bus, so it can only produce "all
+    /// hops contributed" or "none did" — the two extremes. The middle case
+    /// needs a mixed chain: a FIFO switch, which always contributes a delay
+    /// term, in series with a TSN switch, which defers when
+    /// `Class_of_Service` is unreadable at the source.
+    fn mixed_chain_model(cos: Option<u8>) -> String {
+        let props = match cos {
+            Some(c) => format!("      Spar_TSN::Class_of_Service => {c};\n"),
+            None => String::new(),
+        };
+        format!(
+            r#"
+package Net
+public
+
+  bus fifo_eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end fifo_eth;
+  bus implementation fifo_eth.impl
+  end fifo_eth.impl;
+
+  bus tsn_eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end tsn_eth;
+  bus implementation tsn_eth.impl
+  end tsn_eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+    properties
+      Spar_Network::Output_Rate => 1000000 bitsps;
+{props}  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw1 : bus fifo_eth.impl;
+      sw2 : bus tsn_eth.impl;
+      a   : device d.impl;
+      b   : device d.impl;
+    connections
+      c_sw1_a : bus access sw1 -> a.net;
+      c_sw2_b : bus access sw2 -> b.net;
+      data1   : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw1), reference (sw2));
+  end Sys.impl;
+end Net;
+"#
+        )
+    }
+
+    fn mixed_chain_diags(cos: Option<u8>) -> Vec<AnalysisDiagnostic> {
+        let src = mixed_chain_model(cos);
+        let inst = instantiate(&src, "Net", "Sys", "impl");
+        WcttAnalysis::default().analyze(&inst)
+    }
+
     fn provenance_diags(cos: Option<u8>, deadline: Option<&str>) -> Vec<AnalysisDiagnostic> {
         let src = provenance_model(cos, deadline);
         let inst = instantiate(&src, "Net", "Sys", "impl");
@@ -3239,6 +3315,74 @@ end Net;
 
     fn has(diags: &[AnalysisDiagnostic], prefix: &str) -> bool {
         diags.iter().any(|d| d.message.starts_with(prefix))
+    }
+
+    /// The MIDDLE case, and the one `codecov/patch` caught this PR shipping
+    /// untested: some hops contributed, others did not.
+    ///
+    /// `WcttPartialBound` existed in this PR's first revision with ZERO tests
+    /// reaching it — a diagnostic branch that emitted nothing any oracle read,
+    /// in the PR whose own thesis is that "nothing happened" must render
+    /// differently from "it worked". The non-required coverage check was the
+    /// only thing that noticed.
+    ///
+    /// The label on the BOUND is the load-bearing assertion, not the warning:
+    /// the original #478 bug was a figure claiming `(2 hops)` while carrying
+    /// the contribution of none. Here one hop of two contributes, so the bound
+    /// must say `(1 hop)` — the count it actually covers.
+    #[test]
+    fn a_partial_bound_warns_and_labels_the_hops_it_actually_covers() {
+        let d = mixed_chain_diags(None);
+        let partial = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttPartialBound"))
+            .unwrap_or_else(|| panic!("expected WcttPartialBound: {d:#?}"));
+        assert_eq!(
+            partial.severity,
+            Severity::Warning,
+            "a partial bound must outrank an ordinary one: at Info it is \
+             indistinguishable from the complete bound printed beside it"
+        );
+        assert!(
+            partial.message.contains("covers 1 of 2 hops"),
+            "the warning must name both counts: {}",
+            partial.message
+        );
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("(1 hop)"),
+            "the bound must be labelled with the hops that CONTRIBUTED: {}",
+            bound.message
+        );
+        assert!(
+            !bound.message.contains("(2 hops)"),
+            "claiming 2 hops while one contributed nothing is the #478 bug: {}",
+            bound.message
+        );
+    }
+
+    /// The other arm, and without it the test above would pass a build that
+    /// emitted `WcttPartialBound` unconditionally and always under-labelled
+    /// the hop count. Same chain, CoS now readable, so BOTH hops contribute.
+    #[test]
+    fn a_complete_bound_on_the_same_chain_carries_no_partial_warning() {
+        let d = mixed_chain_diags(Some(6));
+        assert!(
+            !has(&d, "WcttPartialBound"),
+            "every hop contributed; a partial warning here would be false: {d:#?}"
+        );
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("(2 hops)"),
+            "both hops contributed, so the label must say so: {}",
+            bound.message
+        );
     }
 
     #[test]

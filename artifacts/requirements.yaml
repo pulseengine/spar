@@ -6971,6 +6971,30 @@ artifacts:
       one, because a figure produced by a dispatch fall-through is not worth
       validating.
 
+      THE FIRST REVISION OF THIS FIX SHIPPED AN UNTESTED DIAGNOSTIC, and only
+      a NON-REQUIRED check noticed. `WcttPartialBound` — the middle arm, where
+      some hops contributed and others did not — appeared exactly ONCE in
+      wctt.rs: at its own emission site. No test reached it. The declared
+      matrix covered the two extremes (all hops, no hops) because the fixture
+      was single-bus and structurally could not produce a partial walk.
+
+      `codecov/patch` failed on the PR and was the only signal. It is not one
+      of the 18 required contexts, so nothing would have blocked the merge, and
+      the whole-crate mutation ratchet at 292 survivors would have absorbed one
+      more. A diagnostic branch no oracle reads, in the change whose own thesis
+      is that "nothing happened" must render differently from "it worked".
+
+      CLOSED with a mixed FIFO-then-TSN chain, which is what the single-bus
+      fixture could not express: the FIFO hop always contributes, the TSN hop
+      defers when Class_of_Service is unreadable, so hops_counted is 1 of 2.
+      The load-bearing assertion is on the BOUND's label, not the warning —
+      `(1 hop)`, never `(2 hops)` — because the original defect was a figure
+      claiming coverage of two hops while carrying the contribution of none.
+      Paired with the CoS-readable arm, without which the test would pass a
+      build that warned unconditionally and always under-labelled the count.
+      Four mutants, each killed by EXACTLY ONE test: never-warn, always-warn,
+      Warning-downgraded-to-Info, and the label reverted to hop_total.
+
       ALSO NOT FIXED HERE, measured and left to successors. Each was re-verified
       against the source on 2026-10-13 rather than carried over from the report:
 
