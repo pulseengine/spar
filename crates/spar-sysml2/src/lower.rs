@@ -171,6 +171,7 @@ fn is_ignorable_kind(kind: SyntaxKind) -> bool {
             | SyntaxKind::FEATURE_CHAIN
             // Usages (lowered when encountered inside their parent)
             | SyntaxKind::IMPORT_DECL
+            | SyntaxKind::ALIAS_DECL
             | SyntaxKind::PART_USAGE
             | SyntaxKind::PORT_USAGE
             | SyntaxKind::ATTRIBUTE_USAGE
@@ -2955,6 +2956,31 @@ part def Controller {
             pa.typed_value,
             Some(PropertyExpr::Opaque("Mass".to_string())),
             "without default value, should fall back to Opaque(type_name)"
+        );
+    }
+
+    /// A construct lowering cannot express is REPORTED, while an `alias`
+    /// (no AADL equivalent, but nothing lost) is not — the two directions of
+    /// `is_ignorable_kind`, which no test exercised before.
+    #[test]
+    fn unsupported_body_member_is_reported_but_alias_is_not() {
+        let diags = |src: &str| {
+            let parse = crate::parse(src);
+            assert!(parse.ok(), "`{src}`: {:?}", parse.errors());
+            lower_to_aadl_with_diagnostics(&parse).1
+        };
+        let d = diags("part def P { action def A; }");
+        assert!(
+            d.iter()
+                .any(|x| x.msg.contains("unsupported construct inside part def body")),
+            "{:?}",
+            d.iter().map(|x| &x.msg).collect::<Vec<_>>()
+        );
+        let d = diags("part def P { alias B for A; }");
+        assert!(
+            d.is_empty(),
+            "{:?}",
+            d.iter().map(|x| &x.msg).collect::<Vec<_>>()
         );
     }
 }

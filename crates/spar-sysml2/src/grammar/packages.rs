@@ -4,6 +4,8 @@
 //! Package = 'package' QualifiedName '{' NamespaceMember* '}'
 //!         | 'package' QualifiedName ';'
 //! ImportDecl = 'import' QualifiedName ('::' '*')? ';'
+//! AliasDecl  = 'alias' Name 'for' QualifiedName (';' | NamespaceBody)
+//! Visibility = ('public' | 'private' | 'protected') NamespaceMember
 //! ```
 
 use crate::parser::Parser;
@@ -45,6 +47,30 @@ pub(crate) fn import_decl(p: &mut Parser) {
     m.complete(p, SyntaxKind::IMPORT_DECL);
 }
 
+/// Parse an alias declaration.
+///
+/// ```text
+/// alias Car for Vehicle;
+/// alias Torque for ISQ::TorqueValue { doc /* ... */ }
+/// ```
+pub(crate) fn alias_decl(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::ALIAS_KW);
+    super::name(p);
+    if p.at_contextual_kw("for") {
+        p.bump_any();
+    } else {
+        p.error("expected `for`");
+    }
+    super::qualified_name(p);
+    if p.at(SyntaxKind::L_CURLY) {
+        namespace_body(p);
+    } else {
+        p.expect(SyntaxKind::SEMICOLON);
+    }
+    m.complete(p, SyntaxKind::ALIAS_DECL);
+}
+
 /// Parse a namespace body: `{ member* }`
 pub(crate) fn namespace_body(p: &mut Parser) {
     let m = p.start();
@@ -54,6 +80,8 @@ pub(crate) fn namespace_body(p: &mut Parser) {
         match p.current() {
             SyntaxKind::PACKAGE_KW => package(p),
             SyntaxKind::IMPORT_KW => import_decl(p),
+            SyntaxKind::ALIAS_KW => alias_decl(p),
+            k if super::is_visibility(k) => super::visibility(p),
             SyntaxKind::SATISFY_KW => super::requirements::satisfy_req(p),
             SyntaxKind::VERIFY_KW => super::requirements::verify_req(p),
             SyntaxKind::REFINE_KW => super::requirements::refine_req(p),

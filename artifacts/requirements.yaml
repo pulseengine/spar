@@ -5952,27 +5952,19 @@ artifacts:
   - id: REQ-SYSML2-VISIBILITY-001
     type: requirement
     title: The SysML v2 grammar shall accept visibility modifiers and quoted names
-    description: >
-      Isolated to minimal cases against f395518. `import ISQ` with a wildcard
-      parses; the same line prefixed `public` does not. Neither does `private
-      part def A;`, nor `public alias B for A;`, nor a quoted package name
-      written with single quotes around an identifier containing a space —
-      that last one produces three errors on an eight-line published example.
-
-      These are not edge cases. Visibility modifiers are KerML core and appear
-      on essentially every member of every real model, which is why the
-      specification's own Annex A vehicle model fails at line 3 rather than
-      somewhere deep. One grammar gap accounts for most of the seven failing
-      files in the current corpus, so the fix is small — the reason it went
-      unnoticed is the part REQ-SYSML2-CONFORMANCE-001 addresses, and this
-      requirement is deliberately sequenced AFTER it so that the gate exists to
-      register the win.
-
-      NOT CLAIMED: that closing this gap parses the whole corpus. Each file may
-      carry further constructs behind its first error; the acceptance criterion
-      is that the ratchet moves and the specification's Annex A model parses,
-      not that the count reaches its maximum.
-    status: proposed
+    description: |-
+      Isolated to minimal cases against f395518. `import ISQ` with a wildcard parses; the same line prefixed `public` does not. Neither does `private part def A;`, nor `public alias B for A;`, nor a quoted package name written with single quotes around an identifier containing a space — that last one produces three errors on an eight-line published example.
+      These are not edge cases. Visibility modifiers are KerML core and appear on essentially every member of every real model, which is why the specification's own Annex A vehicle model fails at line 3 rather than somewhere deep. This requirement is deliberately sequenced AFTER REQ-SYSML2-CONFORMANCE-001 so that the gate exists to register the win.
+      SHIPPED (2026-10-14):
+      - Visibility: `public` / `private` / `protected` prefix any member at file level and in every namespace body (one dispatch in `source_file` and `namespace_body`; every definition body goes through the latter). A prefix with no member after it, or a second prefix, is an error rather than silently accepted. Lowering walks nodes only, so the prefix token is invisible to it — private members still lower as public (see NOT CLAIMED).
+      - Quoted names: the lexer reads a KerML unrestricted name `'Application Layer'` (with `\'` escapes) as IDENT, so every name position accepts it. An unterminated name ends at the line break as ONE error token instead of swallowing the rest of the file.
+      - `alias Name for QualifiedName (; | body)` — `alias` was lexed as a keyword but no rule parsed it. ALIAS_DECL is ignorable in lowering (no AADL equivalent, nothing lost).
+      - Recursive import `Pkg::**`, found as Annex A's next blocker (line 17) once line 3 parsed.
+      MEASURED: official corpus 1 -> 16 of 310 (OFFICIAL_PARSING raised; a two-sided ratchet, so the win is locked in). Three named conformance files flip to Parses (Package_Example, Part_Definition_Example, Port_Example); the other four move PAST the constructs they were recorded against, and conformance_tests.rs now records their new first errors. The 2026-08-26 estimate that these constructs "account for 258 of the 309 failures" counted files whose FIRST error was one of them; behind it most files carry further unsupported constructs, so clearing the first error freed 15 files, not 258.
+      ACCEPTANCE AMENDED, deliberately: "the specification's Annex A model parses" is NOT met and is split out as REQ-SYSML2-ANNEX-A-001 (backlog). Annex A now gets past lines 3 and 17 and stops at 35:17, `perform action providePower;` — behaviour syntax, a different grammar area. What this requirement claims is its title: the grammar accepts visibility modifiers and quoted names.
+      ORACLE AND MUTATION: two existing tests (`parse_private_import`, `parse_public_import`) were VACUOUS — they asserted only that a PACKAGE node existed, with a comment conceding visibility "may cause a parse error"; they now require a clean parse. New: visibility at every level, dangling and duplicate visibility are errors, alias at file level and without `for`, `::**`, quoted names in the parser; one-token quoted name, escaped quote, unterminated-at-newline and backslash-before-newline in the lexer; and the first test of lowering's unsupported-construct diagnostic in both directions (`action def` inside a part def is reported, `alias` is not). In-diff mutants before the tests: 8 MISSED; after: 29 tested, 22 caught, 2 unviable, 5 timeouts (parser/lexer stalls, which hang the suite), 0 missed.
+      NOT CLAIMED: that visibility has any SEMANTIC effect — lowering ignores it, so a private member is exported to AADL like a public one; that parsing implies lowering; or that the corpus count reaches its maximum.
+    status: verified
     release: v0.46.0
     tags: [sysml2, parser, grammar]
     links:
@@ -7286,3 +7278,13 @@ artifacts:
     status: verified
     release: v0.46.0
     tags: [tsn, wctt, analysis, bug, provenance]
+
+  - id: REQ-SYSML2-ANNEX-A-001
+    type: requirement
+    title: The SysML v2 specification's own Annex A vehicle model shall parse
+    status: proposed
+    description: "Split out of REQ-SYSML2-VISIBILITY-001 on 2026-10-14, where 'the Annex A model parses' was an acceptance criterion resting on the premise that visibility and quoted names were what stopped it. Measured: they stopped it at lines 3 and 17 (`public import Definitions::*;`, `public import MetadataDefinitions::**;`), and with both fixed the model now reaches line 35:17, `perform action providePower;` — SysML BEHAVIOUR syntax, a different grammar area, with 1582 lines of the full language behind it. Corpus-wide the remaining first errors are a long tail: `perform action` 9 files, `metadata def` 8, `library package` 7, KerML `class` 7, `first start` 6, `occurrence def` 5, `use case` / `require constraint` / `event occurrence` / redefinition `:>>` 4 each; multiplicity after a type (`part cyl : Cylinder[4..6];`) and unit expressions (`10.0 [N * m]`) stop two of the named conformance files. ORACLE: `SysML_v2_Spec_Annex_A_SimpleVehicleModel.sysml` flips to Parses in crates/spar-sysml2/tests/conformance_tests.rs, and OFFICIAL_PARSING in official_corpus.rs rises with it. Unassigned to a release on purpose: this is a grammar-breadth programme, not one fix, and should be scoped construct by construct when taken up. NOT CLAIMED: that parsing it implies lowering it — lowering to AADL covers a subset of what parses."
+    tags: [sysml2, parser, grammar]
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-VISIBILITY-001

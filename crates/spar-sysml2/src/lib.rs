@@ -383,6 +383,10 @@ requirement def LatencyReq {
     // grammar/packages.rs coverage (private import, public/private visibility)
     // -----------------------------------------------------------------------
 
+    // REQ-SYSML2-VISIBILITY-001. These two used to assert only that a
+    // PACKAGE node existed, with a comment conceding the visibility keyword
+    // "may cause a parse error" — so they passed while it did. They now
+    // require a clean parse.
     #[test]
     fn parse_private_import() {
         let source = r#"
@@ -392,25 +396,91 @@ package Pkg {
 }
 "#;
         let parse = parse(source);
-        // Private keyword may cause a parse error in current grammar, but
-        // the parser should handle it gracefully
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
         let root = parse.syntax_node();
-        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
-        assert!(pkg.is_some(), "expected PACKAGE node");
+        assert!(
+            root.descendants()
+                .any(|n| n.kind() == SyntaxKind::IMPORT_DECL),
+            "expected IMPORT_DECL node"
+        );
     }
 
     #[test]
     fn parse_public_import() {
-        let source = r#"
-package Pkg {
-    public import Definitions::*;
-    part def B { }
-}
-"#;
-        let parse = parse(source);
+        let parse =
+            parse("package Pkg {\n    public import Definitions::*;\n    part def B { }\n}\n");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    /// Visibility is KerML core: it prefixes a member at file level, in a
+    /// package body, and in a definition body, on every member kind.
+    #[test]
+    fn visibility_prefixes_a_member_at_every_level() {
+        for src in [
+            "public part def A;",
+            "private import P::*;",
+            "package P { private part def A; protected attribute x : Real; }",
+            "package P { public package Q { } }",
+            "part def P { private port p : T; public part q : Q; }",
+            "package P { public alias B for A; }",
+        ] {
+            let parse = parse(src);
+            assert!(parse.ok(), "`{src}` errors: {:?}", parse.errors());
+        }
+    }
+
+    /// A visibility keyword qualifies the member after it; with none, it is an
+    /// error — at the end of a body and at the end of the file.
+    #[test]
+    fn dangling_or_duplicate_visibility_is_an_error() {
+        for (src, want) in [
+            ("package P { public }", "expected member after visibility"),
+            ("public", "expected member after visibility"),
+            (
+                "package P { public private part def A; }",
+                "duplicate visibility",
+            ),
+        ] {
+            let parse = parse(src);
+            assert!(
+                parse.errors().iter().any(|e| e.msg.contains(want)),
+                "`{src}` should report `{want}`: {:?}",
+                parse.errors()
+            );
+        }
+    }
+
+    #[test]
+    fn alias_declares_a_name_for_a_qualified_target() {
+        // At file level as well as inside a package.
+        let parse = parse("alias Car for Vehicles::Vehicle;");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
         let root = parse.syntax_node();
-        let pkg = root.children().find(|n| n.kind() == SyntaxKind::PACKAGE);
-        assert!(pkg.is_some(), "expected PACKAGE node");
+        assert!(
+            root.children().any(|n| n.kind() == SyntaxKind::ALIAS_DECL),
+            "expected a top-level ALIAS_DECL"
+        );
+        let parse = crate::parse("alias Car Vehicle;");
+        assert!(
+            parse
+                .errors()
+                .iter()
+                .any(|e| e.msg.contains("expected `for`")),
+            "{:?}",
+            parse.errors()
+        );
+    }
+
+    #[test]
+    fn recursive_import_parses() {
+        let parse = parse("package P { public import MetadataDefinitions::**; }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
+    }
+
+    #[test]
+    fn quoted_names_are_names() {
+        let parse = parse("package 'Application Layer' { part def 'Fuel Pump'; }");
+        assert!(parse.ok(), "errors: {:?}", parse.errors());
     }
 
     #[test]
