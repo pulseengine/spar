@@ -3424,6 +3424,44 @@ end Net;
         );
     }
 
+    /// THE BOUNDARY, which the over/under pair could not reach.
+    ///
+    /// `cargo-mutants` found the survivor this closes: replacing `>` with `>=`
+    /// in the deadline comparison survived the whole suite. The over-deadline
+    /// case uses a bound far above its deadline and the within-deadline case
+    /// one far below, so neither can distinguish `>` from `>=` — only a bound
+    /// EXACTLY equal to its deadline can.
+    ///
+    /// And the semantics are not arbitrary: a deadline is MET when completion
+    /// is at or before it, so an exactly-on-time stream conforms. `>=` would
+    /// report a conforming stream as a violation — a false positive on the
+    /// most safety-relevant boundary there is, since a system tuned right to
+    /// its deadline is exactly what a designer aims for.
+    ///
+    /// The literal is this fixture's measured bound. If the fixture's timing
+    /// changes, this test fails loudly rather than silently ceasing to sit on
+    /// the boundary — which is the failure mode of a boundary test written
+    /// against a value that drifted.
+    #[test]
+    fn a_bound_exactly_equal_to_its_deadline_is_met_not_exceeded() {
+        let d = provenance_diags(Some(6), Some("366440000 ps"));
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("366440000 ps"),
+            "this test only sits on the boundary while the fixture's bound IS the \
+             declared deadline; the bound has moved, so re-derive the literal: {}",
+            bound.message
+        );
+        assert!(
+            !has(&d, "WcttExceedsDeadline"),
+            "a bound EQUAL to its deadline meets it — `>=` here would fail a \
+             conforming stream: {d:#?}"
+        );
+    }
+
     #[test]
     fn a_bound_over_its_declared_deadline_is_an_error() {
         // `Timing_Properties::Deadline` had ZERO occurrences in this file
