@@ -7007,7 +7007,29 @@ artifacts:
       a model with scalar execution times must be unchanged, so the fix
       cannot be a blanket rescale. And it is a BEHAVIOUR CHANGE to every
       reported range with a ranged execution time — release notes.
-    status: proposed
+
+      IMPLEMENTED 2026-10-14. The best case now sums each component's
+      execution-time MINIMUM. End to end through the CLI on the two-device
+      model, published v0.45.0 against this change:
+
+        [80.000 ms .. 80.000 ms]  ->  [40.000 ms .. 80.000 ms]
+
+      THE UPPER BOUND IS BIT-FOR-BIT UNCHANGED, and that is the safety property
+      of the change: both accessors read the same property and parse the
+      maximum identically, and the `[compute hop]` figure still reports the
+      worst case. A range whose MINIMUM fails to parse falls back to the old
+      worst-case accessor, so no model loses an execution time it has today.
+
+      THE SUITE WAS BLIND TO BOTH ENDS. No test used a ranged execution time
+      before this, so all 944 analysis tests passed on a mutant that made the
+      WORST case take the minimum — an OPTIMISTIC bound on every model with a
+      ranged execution time, the unsafe direction for a timing analysis. And
+      the `[compute hop]` millisecond value had never been asserted at all;
+      its only test checked the hop COUNT. Four mutants, each confirmed
+      surviving before its case was written, each now killed by exactly one
+      test: best-takes-max (the original bug), worst-takes-min (optimistic),
+      no-fallback, and the compute hop reporting its minimum.
+    status: implemented
     release: v0.46.0
     tags: [analysis, latency, provenance, bug]
 

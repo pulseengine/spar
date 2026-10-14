@@ -25,7 +25,8 @@ use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::property_accessors::{
-    get_execution_time, get_latency_budget, get_processor_binding, get_timing_property,
+    get_execution_time, get_execution_time_range, get_latency_budget, get_processor_binding,
+    get_timing_property,
 };
 use crate::wctt::compute_network_hop_latency;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -160,14 +161,29 @@ impl Analysis for LatencyAnalysis {
                     let child_comp = instance.component(child_idx);
                     let child_props = instance.properties_for(child_idx);
 
-                    // Get execution time contribution
-                    let exec_ps = get_execution_time(child_props);
+                    // Execution-time contribution: the BEST case takes the
+                    // range's MINIMUM, the worst case its maximum
+                    // (REQ-ANALYSIS-LATENCY-BEST-CASE-001). This used to add
+                    // `get_execution_time` — the worst case — to BOTH, so a
+                    // flow of two `20 ms .. 40 ms` components reported
+                    // `[80 .. 80]` instead of `[40 .. 80]`: a lower bound that
+                    // was really an upper bound, which no below-minimum check
+                    // could be built on.
+                    //
+                    // The worst case is unchanged bit for bit — both accessors
+                    // read the same property and parse the maximum identically
+                    // — so every upper-bound and budget comparison is untouched.
+                    // If a range's MINIMUM fails to parse, fall back to the
+                    // worst case for both ends rather than lose an execution
+                    // time this flow has today.
+                    let exec_range = get_execution_time_range(child_props)
+                        .or_else(|| get_execution_time(child_props).map(|w| (w, w)));
                     // Get period for sampling delay
                     let period_ps = get_timing_property(child_props, "Period");
 
-                    if let Some(exec) = exec_ps {
-                        best_case_ps = best_case_ps.saturating_add(exec);
-                        worst_case_ps = worst_case_ps.saturating_add(exec);
+                    if let Some((bcet, wcet)) = exec_range {
+                        best_case_ps = best_case_ps.saturating_add(bcet);
+                        worst_case_ps = worst_case_ps.saturating_add(wcet);
                         saw_exec = true;
                     } else {
                         missing_timing.push(child_comp.name.as_str().to_string());
@@ -212,7 +228,8 @@ impl Analysis for LatencyAnalysis {
                     if !crossed_boundary && prev_processor.is_some() {
                         compute_hops.push(ComputeHopAnnotation {
                             component_name: child_comp.name.as_str().to_string(),
-                            exec_ps: exec_ps.unwrap_or(0),
+                            // the WORST case, exactly as before this change
+                            exec_ps: exec_range.map(|(_, wcet)| wcet).unwrap_or(0),
                         });
                     }
 
@@ -1587,6 +1604,71 @@ mod tests {
         );
     }
 
+    // ── REQ-ANALYSIS-LATENCY-BEST-CASE-001 ──────────────────────────────
+    //
+    // Before this, NO test used a RANGED execution time, so the whole suite
+    // was blind to both ends of the reported range: a mutant that made the
+    // WORST case take the minimum — an optimistic, unsafe bound on every model
+    // with a ranged execution time — survived all 944 analysis tests.
+
+    /// Two components, no Period (so no sampling term), each a ranged CET.
+    fn range_fixture(cet: &str) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(sensor, "Timing_Properties", "Compute_Execution_Time", cet);
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", cet);
+        let inst = b.build(root);
+        LatencyAnalysis.analyze(&inst)
+    }
+
+    fn reported_range(d: &[AnalysisDiagnostic]) -> String {
+        d.iter()
+            .find(|x| x.severity == Severity::Info && x.message.contains("latency: ["))
+            .map(|x| x.message.clone())
+            .unwrap_or_else(|| panic!("no derived latency reported: {d:#?}"))
+    }
+
+    /// The LOWER end is a best case: 20 + 20, not the 40 + 40 the old code
+    /// summed. Without this the lower bound was an upper bound, and no
+    /// below-minimum check could be built on it.
+    #[test]
+    fn a_ranged_execution_time_gives_a_real_best_case() {
+        let r = reported_range(&range_fixture("20 ms .. 40 ms"));
+        assert!(r.contains("[40.000 ms .."), "best case is 20 + 20 ms: {r}");
+    }
+
+    /// The UPPER end is untouched — this is the safety property of the change.
+    /// Pinned separately because a mutant that made the worst case take the
+    /// MINIMUM is optimistic, and it survived the entire suite before this.
+    #[test]
+    fn the_worst_case_is_still_the_sum_of_maxima() {
+        let r = reported_range(&range_fixture("20 ms .. 40 ms"));
+        assert!(r.contains(".. 80.000 ms]"), "worst case is 40 + 40 ms: {r}");
+    }
+
+    /// A range whose MINIMUM does not parse must not cost the flow its
+    /// execution time. The old accessor read only the maximum and so accepted
+    /// it; falling back to that keeps every model that computed a latency
+    /// before still computing one — here at [40 .. 40], not "not computed".
+    #[test]
+    fn a_malformed_minimum_does_not_lose_the_execution_time() {
+        let d = range_fixture("garbage .. 20 ms");
+        assert!(
+            !d.iter().any(|x| x.message.contains("not computed")),
+            "the maximum still parses, so the latency is still derivable: {d:#?}"
+        );
+        assert!(reported_range(&d).contains("[40.000 ms .. 40.000 ms]"));
+    }
+
     /// The declared MINIMUM is read but deliberately NOT enforced, and this
     /// pins that decision so it cannot be reversed without the reason below
     /// being addressed. `best_case_ps` sums `get_execution_time`, which is the
@@ -2145,6 +2227,69 @@ mod tests {
     /// (canonical AADL behaviour — bindings inherit unless overridden
     /// per-connection), so both are network hops; actuator on the
     /// same CPU as controller is a compute hop. We therefore expect
+    /// The `[compute hop]` figure is a WORST case, and must stay one after
+    /// REQ-ANALYSIS-LATENCY-BEST-CASE-001 split the range into its two ends.
+    ///
+    /// Pinned because, before this, the printed millisecond value had NEVER
+    /// been asserted — `compute_then_network_then_compute` checks only the hop
+    /// COUNT, and every compute-hop fixture used a scalar execution time where
+    /// minimum and maximum coincide. A mutant reporting the hop's MINIMUM
+    /// survived the whole suite. Same chain as that test, but the compute hop
+    /// (the actuator, sharing cpu2 with the controller) runs `1 ms .. 3 ms`.
+    #[test]
+    fn a_compute_hop_reports_its_worst_case_execution_time() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let actuator = b.add_component("actuator", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, ctrl, actuator]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_connection_with_endpoints("c2", root, "controller", "out_p", "actuator", "in_p");
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.pass", "c2", "actuator.sink"],
+        );
+        for (comp, cpu, cet) in [
+            (sensor, "cpu1", "1 ms"),
+            (ctrl, "cpu2", "1 ms"),
+            (actuator, "cpu2", "1 ms .. 3 ms"),
+        ] {
+            b.set_property(comp, "Timing_Properties", "Compute_Execution_Time", cet);
+            b.set_property(comp, "Timing_Properties", "Period", "10 ms");
+            b.set_property(
+                comp,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                &format!("reference ({})", cpu),
+            );
+        }
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+        let hop = diags
+            .iter()
+            .find(|d| d.message.contains("'actuator' [compute hop]"))
+            .unwrap_or_else(|| panic!("expected the actuator compute hop: {diags:#?}"));
+        assert!(
+            hop.message.contains("[compute hop] 3.000 ms"),
+            "a compute hop is charged its WORST case, 3 ms, not its 1 ms minimum: {}",
+            hop.message
+        );
+    }
+
     /// `2 network hop` + `1 compute hop` in the LatencyHopMixed marker.
     /// This is the canonical "WCET+WCTT alternation is live" model.
     #[test]
