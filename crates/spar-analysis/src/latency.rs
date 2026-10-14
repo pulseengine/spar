@@ -24,7 +24,9 @@
 use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::property_accessors::{get_execution_time, get_processor_binding, get_timing_property};
+use crate::property_accessors::{
+    get_execution_time, get_latency_budget, get_processor_binding, get_timing_property,
+};
 use crate::wctt::compute_network_hop_latency;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
@@ -332,15 +334,32 @@ impl Analysis for LatencyAnalysis {
                 }
             }
 
-            // Check against Latency property if set on the E2E flow
-            // The Latency property might be on the owner component for the flow
+            // Compare against the declared budget (#455). This reads the
+            // OWNER component's `Latency`; the flow's own `{ Latency => .. }`
+            // association is dropped at instantiation and is not reachable
+            // here yet (REQ-ANALYSIS-LATENCY-BUDGET-001, clause b).
+            //
+            // ERROR, not Warning: a budget breach that exits 0 is a budget
+            // nobody can gate on, the same defect REQ-CLI-ANALYZE-EXITCODE-001
+            // fixed one layer down. This is a deliberate behaviour change for
+            // models that are over budget today and were told so only at
+            // Warning.
+            //
+            // UPPER BOUND ONLY, deliberately. A declared minimum is read but
+            // not checked, because `best_case_ps` is not a best case: it sums
+            // `get_execution_time`, which is the WORST-case execution time. A
+            // below-minimum test against that figure compares an inflated lower
+            // bound and would miss real violations — unsound in exactly the
+            // direction the check exists for. It needs a true best case first.
+            //
+            // `>` not `>=`: a flow whose worst case equals its budget meets it.
             let owner_props = instance.properties_for(e2e.owner);
-            if let Some(latency_bound) = get_timing_property(owner_props, "Latency")
-                && worst_case_ps > latency_bound
+            if let Some(budget) = get_latency_budget(owner_props)
+                && worst_case_ps > budget.max_ps
             {
-                let bound_ms = latency_bound as f64 / 1_000_000_000.0;
+                let bound_ms = budget.max_ps as f64 / 1_000_000_000.0;
                 diags.push(AnalysisDiagnostic {
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     message: format!(
                         "end-to-end flow '{}' worst-case latency {:.3} ms exceeds bound {:.3} ms",
                         e2e.name, worst_ms, bound_ms,
@@ -955,7 +974,7 @@ mod tests {
         // Worst case: 5 + 5 exec + 20 sampling = 30ms > 10ms bound
         let bound_warns: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .filter(|d| d.severity == Severity::Error && d.message.contains("exceeds bound"))
             .collect();
         assert_eq!(
             bound_warns.len(),
@@ -1228,7 +1247,7 @@ mod tests {
 
         let bound_warns: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .filter(|d| d.message.contains("exceeds bound"))
             .collect();
         assert!(
             bound_warns.is_empty(),
@@ -1274,7 +1293,7 @@ mod tests {
 
         let bound_warns: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .filter(|d| d.severity == Severity::Error && d.message.contains("exceeds bound"))
             .collect();
         assert_eq!(
             bound_warns.len(),
@@ -1381,7 +1400,7 @@ mod tests {
 
         let bound_warns: Vec<_> = diags
             .iter()
-            .filter(|d| d.severity == Severity::Warning && d.message.contains("exceeds bound"))
+            .filter(|d| d.message.contains("exceeds bound"))
             .collect();
         assert!(
             bound_warns.is_empty(),
@@ -1390,6 +1409,126 @@ mod tests {
         );
     }
 
+    // ── #455 / REQ-ANALYSIS-LATENCY-BUDGET-001 ──────────────────────────
+    //
+    // Same fixture as `latency_exceeds_bound_warns`: worst case = 5 + 5 ms
+    // execution + 20 ms sampling = 30 ms, best case (a sum of WCETs) = 10 ms.
+    // Each test varies ONE dimension of the budget declaration, so a mutant of
+    // that dimension is attributable to exactly one test.
+    fn budget_fixture(set: &str, value: Option<&str>) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "5 ms",
+        );
+        b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "5 ms");
+        b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
+        if let Some(v) = value {
+            b.set_property(root, set, "Latency", v);
+        }
+        let inst = b.build(root);
+        LatencyAnalysis.analyze(&inst)
+    }
+
+    fn breaches(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|x| x.message.contains("exceeds bound"))
+            .collect()
+    }
+
+    /// A RANGE budget is how `Latency` is declared — the standard types it
+    /// `Time_Range` — and the previous scalar-only lookup read it as "no budget
+    /// declared". #455's own `300 ns .. 250 us` could not have fired.
+    #[test]
+    fn a_range_budget_is_read_and_a_breach_is_an_error() {
+        let d = budget_fixture("Timing_Properties", Some("1 ms .. 10 ms"));
+        let b = breaches(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "30 ms against a 1..10 ms budget must breach: {d:#?}"
+        );
+        assert_eq!(
+            b[0].severity,
+            Severity::Error,
+            "a breach that exits 0 is a budget nobody can gate on"
+        );
+        assert!(
+            b[0].message.contains("exceeds bound 10.000 ms"),
+            "{}",
+            b[0].message
+        );
+    }
+
+    /// The pair for the test above: without it, a build that flagged every
+    /// ranged budget would pass.
+    #[test]
+    fn a_range_budget_that_is_met_is_silent() {
+        let d = budget_fixture("Timing_Properties", Some("1 ms .. 100 ms"));
+        assert!(
+            breaches(&d).is_empty(),
+            "30 ms meets a 1..100 ms budget: {d:#?}"
+        );
+    }
+
+    /// `Latency` is a `Communication_Properties` property. The old lookup
+    /// searched `Timing_Properties` and then the empty set, so the CORRECTLY
+    /// qualified spelling was the one spelling that could never be found.
+    #[test]
+    fn a_budget_under_its_standard_property_set_is_found() {
+        let d = budget_fixture("Communication_Properties", Some("10 ms"));
+        assert_eq!(
+            breaches(&d).len(),
+            1,
+            "qualified Latency must be read: {d:#?}"
+        );
+    }
+
+    /// An absent budget is not a violation. Pinned because the cheapest wrong
+    /// fix — defaulting a missing bound to zero — would flag every flow.
+    #[test]
+    fn an_absent_budget_is_not_a_violation() {
+        let d = budget_fixture("Timing_Properties", None);
+        assert!(
+            breaches(&d).is_empty(),
+            "no budget declared, nothing to breach: {d:#?}"
+        );
+    }
+
+    /// The declared MINIMUM is read but deliberately NOT enforced, and this
+    /// pins that decision so it cannot be reversed without the reason below
+    /// being addressed. `best_case_ps` sums `get_execution_time`, which is the
+    /// WORST-case execution time, so it is not a best case. Here it reads
+    /// 10 ms against a declared minimum of 50 ms: a below-minimum check over
+    /// that figure would fire here, and — worse — would stay silent on real
+    /// violations whenever the inflated figure happened to clear the minimum.
+    /// Unsound in exactly the direction it exists for. It needs a true best
+    /// case first.
+    #[test]
+    fn a_declared_minimum_is_not_checked_against_a_sum_of_wcets() {
+        let d = budget_fixture("Timing_Properties", Some("50 ms .. 100 ms"));
+        assert!(
+            breaches(&d).is_empty(),
+            "30 ms is within the 100 ms maximum: {d:#?}"
+        );
+        assert!(
+            !d.iter().any(|x| x.message.contains("below")),
+            "no below-minimum diagnostic may ship over an inflated best case: {d:#?}"
+        );
+    }
     #[test]
     fn latency_no_sampling_delay_for_first_component() {
         // Verify the first component in a flow does NOT get sampling delay added.

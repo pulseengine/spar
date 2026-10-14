@@ -6936,9 +6936,79 @@ artifacts:
       NOT CLAIMED: that item (3), process descent, is covered here. It is a
       separate defect with its own confirmation below and needs the HIR flow
       resolution changed, not the comparison.
-    status: proposed
+
+      IMPLEMENTED 2026-10-14 — PARTIALLY, and the status says so. Two of the
+      requirement's clauses shipped; two did not, and it stays `implemented`
+      rather than `verified` until they do.
+
+      SHIPPED. `get_latency_budget` reads `Latency` as a RANGE (a scalar is an
+      upper bound only, never `min == max`), and searches the property set the
+      standard actually puts it in. A FOURTH defect surfaced while doing it, not
+      in the original three: `Latency` is a `Communication_Properties` property
+      typed `Time_Range` (standard_properties.rs), but the old lookup searched
+      `Timing_Properties` and then the empty set — so the CORRECTLY qualified
+      spelling was the one spelling that could never be found. The breach is now
+      an ERROR, so the run fails. End to end through the CLI, published v0.45.0
+      against this change, two devices summing 80 ms against a 1 ms budget:
+
+        range, bare `Latency`                  exit 0 -> exit 1 [ERROR]
+        range, Communication_Properties        exit 0 -> exit 1 [ERROR]
+        scalar (previously only a Warning)     exit 0 -> exit 1 [ERROR]
+        range budget that is MET               exit 0 -> exit 0
+        no budget at all                       exit 0 -> exit 0
+
+      NOT SHIPPED (b): the flow's OWN `{ Latency => .. }` association. The item
+      tree carries `property_associations` on an end-to-end flow, but
+      `EndToEndFlowInstance` has no properties at all — they are dropped at
+      instantiation. Reading them needs a HIR change and a side-table like
+      `connection_property_maps`.
+
+      NOT SHIPPED, AND DELIBERATELY: the below-MINIMUM check. `best_case_ps` is
+      not a best case — it sums `get_execution_time`, documented as the
+      WORST-case execution time, which is why a flow of two 20..40 ms devices
+      reports `[80.000 ms .. 80.000 ms]` rather than 40..80. A minimum check
+      over that figure compares an INFLATED lower bound, so it would stay
+      silent on real violations whenever the inflated sum cleared the minimum:
+      unsound in exactly the direction #455's kill-criterion needs. Blocked on
+      REQ-ANALYSIS-LATENCY-BEST-CASE-001. A test pins that no below-minimum
+      diagnostic ships in the meantime.
+
+      ORACLE. Nine tests; every mutant of the shipped behaviour is killed, most
+      by exactly one test. Two existing negative tests became VACUOUS the moment
+      severity moved to Error — they filtered on `Severity::Warning` and asserted
+      empty, so a spurious Error passed them — and that was demonstrated, not
+      assumed: `>` -> `>=` SURVIVED the at-bound test before the fix and is
+      caught by it after. `scalar-becomes-min` survived the whole analysis suite
+      because nothing consumes `min_ps` yet, so it is pinned at the accessor.
+    status: implemented
     release: v0.46.0
     tags: [analysis, latency, budget, bug, provenance]
+
+  - id: REQ-ANALYSIS-LATENCY-BEST-CASE-001
+    type: requirement
+    title: A reported best-case latency shall be a best case, not a sum of worst-case execution times
+    description: >
+      Found 2026-10-14 while implementing REQ-ANALYSIS-LATENCY-BUDGET-001, and
+      it blocks that requirement's below-minimum clause.
+
+      latency.rs accumulates `best_case_ps` from `get_execution_time`, whose
+      doc comment says "worst-case from range". So the lower end of every
+      reported latency range is a sum of WCETs. Measured: two devices declaring
+      `Compute_Execution_Time => 20 ms .. 40 ms` produce
+      `latency: [80.000 ms .. 80.000 ms]` — the lower bound should be 40 ms.
+
+      THIS IS THE PROVENANCE DEFECT CLASS AGAIN: a printed figure labelled as
+      something it is not. It is conservative as an UPPER bound and wrong as a
+      LOWER one, and nothing downstream can tell which end of the range is
+      trustworthy.
+
+      ORACLE: the two-device model above must report a lower bound of 40 ms;
+      a model with scalar execution times must be unchanged, so the fix
+      cannot be a blanket rescale. And it is a BEHAVIOUR CHANGE to every
+      reported range with a ranged execution time — release notes.
+    status: proposed
+    release: v0.46.0
+    tags: [analysis, latency, provenance, bug]
 
   - id: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
     type: requirement
