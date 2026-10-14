@@ -7026,6 +7026,6 @@ artifacts:
       readable as a number. So "this stream's bound <= 400 us" is indeed
       inexpressible, but the missing piece is a value term, NOT an operator,
       which changes what the fix is.
-    status: implemented
+    status: verified
     release: v0.46.0
     tags: [tsn, wctt, analysis, bug, provenance]
