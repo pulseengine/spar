@@ -233,6 +233,80 @@ pub fn get_execution_time(props: &PropertyMap) -> Option<u64> {
     parse_time_value(raw)
 }
 
+/// An end-to-end flow's declared latency budget.
+///
+/// `max_ps` is always present. `min_ps` is present only when the budget was
+/// declared as a genuine RANGE: a scalar is read as an upper bound alone, not
+/// as `min == max`, because the latter would make every within-budget flow a
+/// below-minimum violation the moment a lower-bound check exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LatencyBudget {
+    pub min_ps: Option<u64>,
+    pub max_ps: u64,
+}
+
+/// Read a component's declared `Latency` budget (#455).
+///
+/// Three things the previous `get_timing_property(props, "Latency")` got wrong,
+/// each on its own enough to make an over-budget flow silent:
+///
+/// - **Wrong property set.** `Latency` is a `Communication_Properties`
+///   property (see `standard_properties.rs`). The old lookup searched
+///   `Timing_Properties` and then the empty set, so the correctly qualified
+///   spelling could never be found — only a bare `Latency` reached it.
+///   `Timing_Properties` is still consulted afterwards, because existing models
+///   and tests in this repo were written against the old lookup.
+/// - **Scalar only.** The standard types `Latency` as `Time_Range`, and a range
+///   is how a budget is written. `extract_time_ps` returns `None` for a range,
+///   so `300 ns .. 250 us` read as "no budget declared".
+/// - The third — that it is the OWNER component's property rather than the
+///   flow's own `{ Latency => .. }` association — is not fixed here; the flow's
+///   associations are dropped at instantiation and need a HIR change.
+pub fn get_latency_budget(props: &PropertyMap) -> Option<LatencyBudget> {
+    const SETS: [&str; 3] = ["Communication_Properties", "Timing_Properties", ""];
+
+    // Typed path: distinguishes a declared Range from a scalar structurally.
+    for set in SETS {
+        if let Some(expr) = get_typed_qualified(props, set, "Latency") {
+            match expr {
+                PropertyExpr::Range { min, max, .. } => {
+                    if let (Some(lo), Some(hi)) = (extract_time_ps(min), extract_time_ps(max)) {
+                        return Some(LatencyBudget {
+                            min_ps: Some(lo),
+                            max_ps: hi,
+                        });
+                    }
+                }
+                other => {
+                    if let Some(v) = extract_time_ps(other) {
+                        return Some(LatencyBudget {
+                            min_ps: None,
+                            max_ps: v,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // String fallback.
+    let raw = SETS.iter().find_map(|set| props.get(set, "Latency"))?;
+    if let Some((lo, hi)) = raw.split_once("..") {
+        let lo = parse_time_value(lo.trim())?;
+        let hi = parse_time_value(hi.trim())?;
+        Some(LatencyBudget {
+            min_ps: Some(lo),
+            max_ps: hi,
+        })
+    } else {
+        let v = parse_time_value(raw)?;
+        Some(LatencyBudget {
+            min_ps: None,
+            max_ps: v,
+        })
+    }
+}
+
 /// Get `Compute_Execution_Time` as a (min, max) pair in picoseconds.
 ///
 /// For a range "1 ms .. 5 ms", returns (1_000_000_000, 5_000_000_000).
@@ -735,6 +809,59 @@ mod tests {
             });
         }
         props
+    }
+
+    /// The scalar-vs-range distinction is the whole reason `LatencyBudget`
+    /// exists. Nothing consumes `min_ps` yet — the minimum is deliberately not
+    /// enforced while `best_case_ps` is a sum of WCETs — so at the analysis
+    /// level a scalar that set `min == max` is UNOBSERVABLE, and that mutant
+    /// survived the latency suite. It is pinned here, at the accessor, because
+    /// a future minimum check is only correct if a scalar stays an upper bound:
+    /// read as `min == max`, every within-budget flow would breach its minimum.
+    #[test]
+    fn a_scalar_latency_budget_is_an_upper_bound_only() {
+        let b = get_latency_budget(&make_props(&[("Timing_Properties", "Latency", "10 ms")]))
+            .expect("scalar budget must be read");
+        assert_eq!(
+            b,
+            LatencyBudget {
+                min_ps: None,
+                max_ps: 10_000_000_000
+            }
+        );
+    }
+
+    #[test]
+    fn a_range_latency_budget_carries_both_ends() {
+        let b = get_latency_budget(&make_props(&[("", "Latency", "300 ns .. 250 us")]))
+            .expect("range budget must be read — this is #455's own declaration");
+        assert_eq!(
+            b,
+            LatencyBudget {
+                min_ps: Some(300_000),
+                max_ps: 250_000_000
+            }
+        );
+    }
+
+    #[test]
+    fn the_standard_property_set_wins_over_the_legacy_one() {
+        // `Communication_Properties` is where the standard puts `Latency`; it
+        // is searched first, so a model carrying both reads the standard one.
+        let b = get_latency_budget(&make_props(&[
+            ("Timing_Properties", "Latency", "99 ms"),
+            ("Communication_Properties", "Latency", "5 ms"),
+        ]))
+        .expect("budget must be read");
+        assert_eq!(b.max_ps, 5_000_000_000);
+    }
+
+    #[test]
+    fn no_latency_property_is_no_budget() {
+        assert_eq!(
+            get_latency_budget(&make_props(&[("", "Period", "10 ms")])),
+            None
+        );
     }
 
     /// Build a PropertyMap with a typed expression AND a raw string value.
