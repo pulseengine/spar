@@ -147,6 +147,32 @@ fn scan_string(c: &mut Cursor<'_>) {
     // unterminated string -- still produce STRING_LIT for error recovery
 }
 
+/// Scan an unrestricted name starting at `'`, honouring `\'` escapes.
+///
+/// Returns `false` for an unterminated name. It stops at the end of the line
+/// rather than consuming to EOF: a stray `'` must cost one error, not swallow
+/// the rest of the file into a single token.
+fn scan_unrestricted_name(c: &mut Cursor<'_>) -> bool {
+    c.bump(); // opening `'`
+    while !c.is_eof() {
+        match c.current() {
+            b'\'' => {
+                c.bump();
+                return true;
+            }
+            b'\n' | b'\r' => return false,
+            b'\\' => {
+                c.bump();
+                if !c.is_eof() && c.current() != b'\n' {
+                    c.bump_char();
+                }
+            }
+            _ => c.bump_char(),
+        }
+    }
+    false
+}
+
 /// Scan a numeric literal (integer or real).
 fn scan_number(c: &mut Cursor<'_>) -> SyntaxKind {
     while !c.is_eof() && is_digit(c.current()) {
@@ -226,6 +252,16 @@ fn scan_token<'a>(c: &mut Cursor<'a>) -> (SyntaxKind, &'a str) {
         b'"' => {
             scan_string(c);
             SyntaxKind::STRING_LIT
+        }
+
+        // Unrestricted name `'Application Layer'` (KerML). It is a NAME, so it
+        // lexes as IDENT and every name position accepts it unchanged.
+        b'\'' => {
+            if scan_unrestricted_name(c) {
+                SyntaxKind::IDENT
+            } else {
+                SyntaxKind::ERROR
+            }
         }
 
         // Numeric literal
@@ -551,5 +587,38 @@ mod tests {
         // SysML v2 is case-sensitive: `Package` is not a keyword
         let tokens = lex("Package");
         assert_eq!(tokens[0].0, SyntaxKind::IDENT);
+    }
+
+    // REQ-SYSML2-VISIBILITY-001: KerML unrestricted names.
+    #[test]
+    fn lex_unrestricted_name_is_one_ident() {
+        let toks = lex("'Application Layer'");
+        assert_eq!(toks, vec![(SyntaxKind::IDENT, "'Application Layer'")]);
+    }
+
+    #[test]
+    fn lex_unrestricted_name_honours_escaped_quote() {
+        let toks = lex(r"'it\'s'");
+        assert_eq!(toks, vec![(SyntaxKind::IDENT, r"'it\'s'")]);
+    }
+
+    /// An unclosed name costs ONE error token ending at the line break; the
+    /// next line lexes normally instead of vanishing into the error.
+    #[test]
+    fn lex_unterminated_unrestricted_name_stops_at_newline() {
+        let toks = lex("'abc\npart");
+        assert_eq!(
+            toks,
+            vec![
+                (SyntaxKind::ERROR, "'abc"),
+                (SyntaxKind::WHITESPACE, "\n"),
+                (SyntaxKind::PART_KW, "part"),
+            ]
+        );
+        // A backslash does not escape the line break either.
+        let toks = lex("'ab\\\nx'");
+        assert_eq!(toks[0], (SyntaxKind::ERROR, "'ab\\"));
+        // Nor does one at end of input run past it.
+        assert_eq!(lex("'ab\\"), vec![(SyntaxKind::ERROR, "'ab\\")]);
     }
 }

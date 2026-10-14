@@ -40,10 +40,16 @@ const CORPUS: &str = "test-data/sysml2/official";
 /// OSATE agreement gate: a win that is not locked in is slack that quietly
 /// leaks back out.
 ///
-/// Measured 2026-08-26 against the corpus pinned at `29a3d2ac`. The path to
-/// moving it is `REQ-SYSML2-VISIBILITY-001` — quoted names and visibility
-/// modifiers alone account for 258 of the 309 failures.
-const OFFICIAL_PARSING: usize = 1;
+/// Measured 2026-08-26 against the corpus pinned at `29a3d2ac`: 1.
+///
+/// Raised to 16 on 2026-10-14 by `REQ-SYSML2-VISIBILITY-001` (visibility
+/// modifiers, quoted names, `alias`, recursive `::**` import). The 2026-08-26
+/// estimate that those constructs "account for 258 of the 309 failures" counted
+/// files whose FIRST error was one of them; behind it most files carry further
+/// unsupported constructs, so clearing the first error freed 15, not 258. The
+/// remaining first errors are a long tail (`perform action` 9, `metadata def`
+/// 8, `library package` 7, KerML `class` 7, `first start` 6, ...).
+const OFFICIAL_PARSING: usize = 16;
 
 /// Guards against the corpus vanishing. An empty walk parses nothing and
 /// nothing fails; the count would read as a catastrophic regression rather than
@@ -153,17 +159,21 @@ fn the_parse_predicate_discriminates() {
 }
 
 /// The corpus is the point of this file, but a gate over 310 files says nothing
-/// about *which* constructs are missing. These pin the four grammar gaps that
-/// account for the failures, so closing one shows up as a named test flipping
-/// rather than only as a number moving. Each is currently expected to FAIL —
-/// when `REQ-SYSML2-VISIBILITY-001` lands, these invert and say so loudly.
+/// about *which* constructs are missing. These pin named grammar gaps that are
+/// still open, so closing one shows up as a named test flipping rather than
+/// only as a number moving. Each is currently expected to FAIL. Quoted names
+/// and visibility on import were on this list until `REQ-SYSML2-VISIBILITY-001`
+/// closed them; they are now pinned as PARSING by
+/// `closed_grammar_gaps_stay_closed` below.
 #[test]
 fn the_known_grammar_gaps_are_the_ones_we_think_they_are() {
     let gaps: &[(&str, &str)] = &[
-        ("quoted name", "package 'Application Layer' { }"),
+        // The next blocker in the specification's Annex A vehicle model
+        // (`SysML v2 Spec Annex A SimpleVehicleModel.sysml:35`), once
+        // visibility and quoted names stopped it at lines 3 and 17.
         (
-            "visibility on import",
-            "package P { private import Objects::*; }",
+            "perform action",
+            "part def P { perform action providePower; }",
         ),
         ("KerML class", "package P { class ShoppingCart; }"),
         (

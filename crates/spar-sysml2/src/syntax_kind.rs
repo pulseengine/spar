@@ -238,6 +238,8 @@ pub enum SyntaxKind {
     PACKAGE,
     /// `import Pkg::*;`
     IMPORT_DECL,
+    /// `alias Name for Pkg::Target;`
+    ALIAS_DECL,
     /// Namespace body: list of members inside `{ ... }`
     NAMESPACE_BODY,
 

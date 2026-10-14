@@ -49,25 +49,33 @@ use Expect::*;
 
 /// The named files, their expected verdict, and why.
 ///
-/// Measured 2026-08-26 against `f395518`. Five of the seven fail on the very
+/// Measured 2026-08-26 against `f395518`. Five of the seven failed on the very
 /// first construct in the file — a quoted package name at 1:9 — which is why
-/// the corpus-wide count is 1 of 310 rather than something gentler.
+/// the corpus-wide count was 1 of 310 rather than something gentler.
+///
+/// Re-measured 2026-10-14 after `REQ-SYSML2-VISIBILITY-001` (visibility,
+/// quoted names, `alias`, `::**`): three now parse, and every remaining
+/// failure has moved PAST the construct it was recorded against — so each
+/// reason below is its new first error, not the old one.
 const CASES: &[(&str, Expect)] = &[
+    ("Package_Example.sysml", Parses),
+    ("Part_Definition_Example.sysml", Parses),
+    ("Port_Example.sysml", Parses),
     (
-        "Package_Example.sysml",
-        Fails("1:9 quoted name — `package 'Package Example' {`"),
+        "Parts_Example.sysml",
+        Fails("10:22 multiplicity after a type — `part cyl : Cylinder[4..6];`"),
     ),
-    ("Part_Definition_Example.sysml", Fails("1:9 quoted name")),
-    ("Parts_Example.sysml", Fails("1:9 quoted name")),
-    ("Connections_Example.sysml", Fails("1:9 quoted name")),
-    ("Port_Example.sysml", Fails("1:9 quoted name")),
+    (
+        "Connections_Example.sysml",
+        Fails("21:29 multiplicity after a type — `part wheel : WheelAssembly[1] {`"),
+    ),
     (
         "VehicleUsages.sysml",
-        Fails("7:2 visibility modifier on a member"),
+        Fails("14:5 unit expression — `T1 = 10.0 [N * m];`"),
     ),
     (
         "SysML_v2_Spec_Annex_A_SimpleVehicleModel.sysml",
-        Fails("3:5 `public import Definitions::*;` — visibility on import"),
+        Fails("35:17 `perform action providePower;`"),
     ),
 ];
 

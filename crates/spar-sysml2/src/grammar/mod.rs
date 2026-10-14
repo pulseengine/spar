@@ -23,6 +23,8 @@ pub fn source_file(p: &mut Parser) {
         match p.current() {
             SyntaxKind::PACKAGE_KW => packages::package(p),
             SyntaxKind::IMPORT_KW => packages::import_decl(p),
+            SyntaxKind::ALIAS_KW => packages::alias_decl(p),
+            k if is_visibility(k) => visibility(p),
             SyntaxKind::SATISFY_KW => requirements::satisfy_req(p),
             SyntaxKind::VERIFY_KW => requirements::verify_req(p),
             SyntaxKind::REFINE_KW => requirements::refine_req(p),
@@ -36,6 +38,26 @@ pub fn source_file(p: &mut Parser) {
         }
     }
     m.complete(p, SyntaxKind::SOURCE_FILE);
+}
+
+/// `public` / `private` / `protected` — KerML visibility.
+pub(crate) fn is_visibility(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::PUBLIC_KW | SyntaxKind::PRIVATE_KW | SyntaxKind::PROTECTED_KW
+    )
+}
+
+/// Consume a visibility prefix. It qualifies the member that follows, which
+/// the caller's loop then parses as usual; a prefix with no member after it,
+/// or a second prefix, is an error rather than silently accepted.
+pub(crate) fn visibility(p: &mut Parser) {
+    p.bump_any();
+    if is_visibility(p.current()) {
+        p.error("duplicate visibility");
+    } else if p.at(SyntaxKind::R_CURLY) || p.at_end() {
+        p.error("expected member after visibility");
+    }
 }
 
 /// Returns true if the current token can start a namespace member
@@ -86,8 +108,9 @@ pub(crate) fn qualified_name(p: &mut Parser) -> bool {
         if p.at(SyntaxKind::IDENT) || p.current().is_keyword() {
             bump_as_ident(p);
         } else if p.at(SyntaxKind::STAR) {
-            // wildcard import: `Pkg::*`
+            // wildcard import `Pkg::*`, or recursive import `Pkg::**`
             p.bump(SyntaxKind::STAR);
+            p.eat(SyntaxKind::STAR);
         } else {
             p.error("expected identifier after `::`");
             break;
