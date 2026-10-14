@@ -7048,7 +7048,7 @@ artifacts:
 
   - id: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
     type: requirement
-    title: A flow element naming a thread inside a process shall resolve to that thread, not to the enclosing process
+    title: A system-level end-to-end flow through a subcomponent's flow specification shall descend into that flow's implementation, so thread timing inside a process reaches the latency
     description: >
       #455 item (3), RE-CONFIRMED against the PUBLISHED v0.45.0 binary on
       2026-10-14 rather than carried over from the report.
@@ -7080,18 +7080,37 @@ artifacts:
       without descent. The two are independent fixes and the budget one must not
       wait on this.
 
-      ORACLE: the reported two-thread-in-a-process model. Pre-fix it emits
-      `app, app` and no derived figure; post-fix the flow's latency must be
-      derived from the threads' Compute_Execution_Time, and the duplicate-name
-      warning must be gone. A test asserting only "no warning" would pass a
-      build that stopped emitting the warning without fixing resolution, so the
-      derived FIGURE is the assertion.
+      SPLIT ON 2026-10-14, AFTER THE GRAMMAR WAS READ. The NESTED spelling above
+      is not AADL: osate2@87468992 `Aadl2.xtext:2043-2048` allows one
+      `subcomponent.` level for a flow element and a bare identifier for a
+      connection. Rejecting it is REQ-ANALYSIS-FLOW-SEGMENT-LEGALITY-001, a
+      prerequisite, NOT this requirement. Rejection alone leaves the capability
+      #455 asked for undelivered: the LEGAL route to thread timing from system
+      level still does not reach it.
 
-      NOT CLAIMED: that AADL requires this spelling to be legal. If spar's
-      position is that a system-level flow may not name a thread nested inside a
-      process, then the correct fix is to REJECT the flow with a diagnostic
-      saying so — what is not acceptable is resolving it silently to the wrong
-      component and reporting the consequence as missing properties.
+      MEASURED on the legality fix's branch (f287147), the legal spelling — a
+      `flow path` on process `App`, implemented in `App.impl` as
+      `pin -> c_in -> caller.lock_flow -> c_hand -> consumer.consumer_flow ->
+      c_out -> pout`, used at system level as
+      `s.src -> c1 -> app.proc_flow -> c2 -> k.snk`:
+
+        [ERROR]   latency: end-to-end flow 'req_to_done' latency: not computed
+        [WARNING] ... components without timing properties: s, app, k
+        exit 1
+
+      The analysis stops at `app`; it never expands `proc_flow` into its
+      implementation.
+
+      ORACLE: that legal model (crates/spar-cli/tests/flow_nested_segment.rs,
+      PATH_DESCENT). Post-fix the flow's latency must be DERIVED from the
+      threads' Compute_Execution_Time: `[12.000 ms .. 22.000 ms]` (BCET 5+7,
+      WCET 10+12), which is exactly what the same threads give with the flow
+      written inside `App.impl` (measured on the same branch, exit 0) — provided
+      the four extra connections contribute nothing, as `c_hand` contributes
+      nothing in that control. The derived FIGURE is the assertion, not the
+      absence of a warning. Until then the test PINS today's `not computed` and
+      exit 1, so it fails the moment descent lands — the signal to promote this
+      requirement.
     status: proposed
     release: v0.46.0
     tags: [analysis, latency, hir, flows, bug]
@@ -7332,3 +7351,27 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SYSML2-VISIBILITY-001
+
+  - id: REQ-ANALYSIS-FLOW-SEGMENT-LEGALITY-001
+    type: requirement
+    title: A flow element reaching inside a subcomponent shall be rejected as not AADL, never resolved to the enclosing component
+    status: verified
+    description: |-
+      Split from REQ-ANALYSIS-FLOW-THREAD-DESCENT-001 (#455 item 3) as its prerequisite. #455 item (3), RE-CONFIRMED against the PUBLISHED v0.45.0 binary on 2026-10-14 rather than carried over from the report.
+      A system-level end-to-end flow written as `app.caller.lock_flow -> app.c_hand -> app.consumer.consumer_flow`, where `caller` and `consumer` are threads inside process `app` and BOTH declare `Compute_Execution_Time`, produced on v0.45.0 (exit 1):
+
+        [ERROR]   latency: end-to-end flow 'req_to_done' latency: not computed
+        [WARNING] latency: end-to-end flow 'req_to_done': components without timing properties: app, app
+
+      The DOUBLED `app, app` is the diagnostic, exactly as #455 named it: every analysis that walks a flow kept only the FIRST dotted part of a segment (`split('.').next()` in latency.rs twice and flow_rules.rs), so both thread references resolved to the enclosing PROCESS. And flow_check's unknown-connection warning explicitly exempted a segment containing a dot, so `app.c_hand` passed silently too.
+      ADJUDICATION — REJECT, NOT RESOLVE, decided from the grammar rather than by judgement. osate2@87468992 `Aadl2.xtext:2043-2048`: `ETESubcomponentFlow: (context=[Subcomponent|ID] '.')? flowElement=[EndToEndFlowElement|ID]` — ONE level — and `ETEConnectionFlow: flowElement=[Connection|ID]` — a bare identifier. Both nested segments are not AADL; resolving them would make spar accept models OSATE rejects, against the interop-conformance gates. This is the branch the original text named as acceptable: reject with a diagnostic saying so, never resolve silently to the wrong component.
+      THE FIX. `EndToEndFlowInstance::nested_segment()` (spar-hir-def) is the single legality predicate: a flow-position segment with more than one dot, or a connection-position segment with any dot. flow_check reports the first such segment as an ERROR naming the segment, its kind (flow/connection), its position, and the one spelling measured to work today (the end-to-end flow written in the subcomponent's implementation), and says the flow is not analysed. latency skips a rejected flow, so it no longer reports on components the flow never named. flow_rules and latency's processor-crossing walk are deliberately NOT given the skip: on a rejected flow they resolve to the enclosing component and emit nothing a user could act on wrongly, so a skip there would be code no test can observe.
+      POSITIVE CONTROL, run on v0.45.0 BEFORE the fix was designed: the same threads with the flow written inside `App.impl` as `caller.lock_flow -> c_hand -> consumer.consumer_flow` derive `[22.000 ms .. 22.000 ms]`, exit 0. So the spelling the rejection recommends works.
+      ORACLE (a PAIR, crates/spar-cli/tests/flow_nested_segment.rs, through the real parser): NESTED must exit != 0 with the flow_check Error naming `app.caller.lock_flow` at position 0, and must contain neither `app, app` nor `not computed`; LEGAL must exit 0 with a `22.000 ms]` worst case and no flow_check finding. Against v0.45.0's output NESTED fails all three content assertions and LEGAL passes — a build rejecting every flow fails LEGAL, one that stopped warning without rejecting fails NESTED. Unit level: `nested_segment_follows_the_aadl_end_to_end_flow_grammar` (legal and illegal rows, including a finding past position 0), `e2e_nested_segment_is_an_error_naming_kind_and_position` (flow AND connection), and `latency_skips_a_flow_reaching_inside_a_subcomponent`, which with the skip deleted by hand fails on exactly `app, app` + `not computed`.
+      MUTATION: before any test was written, 15 of 21 in-diff mutants were MISSED (including `nested_segment -> Some(0, ..)`, which rejects every flow — cargo-mutants runs only the mutated crate's tests and spar-hir-def had none for it); after, 0 missed.
+      NOT CLAIMED: that thread timing inside a process is reachable from system level by ANY spelling. It is not yet: the legal route — a flow specification on the process, implemented in its implementation — still reports `not computed`, because latency does not descend into a flow implementation. That capability is REQ-ANALYSIS-FLOW-THREAD-DESCENT-001, which this requirement traces to and does NOT discharge. The rejection message therefore recommends only the spelling measured to work: writing the end-to-end flow in the subcomponent's implementation. The MCP tool `spar.check_chain` matches a thread name against ANY dotted part of a segment and its tests use the nested spelling (`app.producer.f1`); those tests assert only tool-level success and still pass, but on such a model the tool now surfaces this Error. Whether check_chain should steer agents to the legal spelling is a separate question, not settled here.
+    release: v0.46.0
+    tags: [analysis, latency, hir, flows, bug]
+    links:
+      - type: traces-to
+        target: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001

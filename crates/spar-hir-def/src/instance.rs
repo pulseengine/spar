@@ -170,6 +170,25 @@ pub struct EndToEndFlowInstance {
     pub properties: PropertyMap,
 }
 
+impl EndToEndFlowInstance {
+    /// The first segment whose reference AADL's grammar does not allow, as
+    /// `(position, segment)`.
+    ///
+    /// A flow element is `[subcomponent '.'] flow` — ONE level — and a
+    /// connection element is a bare identifier (osate2@87468992,
+    /// `Aadl2.xtext` rules `ETESubcomponentFlow` / `ETEConnectionFlow`). So
+    /// `app.caller.lock_flow` and `app.c_hand`, written on a system to reach
+    /// threads inside process `app`, are not AADL. Analyses used to keep only
+    /// the first dotted part and silently resolve both to `app` (#455 item 3);
+    /// this is the single place that decides a flow is not analysable that way.
+    pub fn nested_segment(&self) -> Option<(usize, &Name)> {
+        self.segments.iter().enumerate().find(|(i, seg)| {
+            let dots = seg.as_str().matches('.').count();
+            if i % 2 == 0 { dots > 1 } else { dots > 0 }
+        })
+    }
+}
+
 /// A mode instance created from a mode declaration in a component type or implementation.
 #[derive(Debug)]
 pub struct ModeInstance {
@@ -4777,5 +4796,48 @@ end P;
         let inst = instantiate_aadl(src, "P", "S", "i");
         assert!(inst.emv2_for(inst.root).is_empty());
         assert!(inst.emv2_models.is_empty());
+    }
+
+    /// #455 item 3: the legality predicate every analysis relies on. Each row
+    /// is chosen to kill a specific mis-implementation: the legal rows reject a
+    /// predicate that flags too much (a one-dot flow element, a bare
+    /// connection, a dotless flow element), the illegal rows one that flags too
+    /// little, and the position-2 row one that only ever inspects the first
+    /// segment or mislabels flow/connection positions.
+    #[test]
+    fn nested_segment_follows_the_aadl_end_to_end_flow_grammar() {
+        fn e2e(segs: &[&str]) -> EndToEndFlowInstance {
+            EndToEndFlowInstance {
+                name: Name::new("f"),
+                owner: Idx::from_raw(la_arena::RawIdx::from(0u32)),
+                segments: segs.iter().map(|s| Name::new(s)).collect(),
+                properties: Default::default(),
+            }
+        }
+        let at = |segs: &[&str]| e2e(segs).nested_segment().map(|(i, s)| (i, s.to_string()));
+
+        // Legal: `subcomponent.flow` and bare connection names.
+        assert_eq!(
+            at(&["sensor.src", "c1", "ctrl.path", "c2", "act.sink"]),
+            None
+        );
+        // Legal: a flow element may omit the subcomponent (a local flow).
+        assert_eq!(at(&["src", "c1", "sink"]), None);
+
+        // Illegal: a flow element two levels deep.
+        assert_eq!(
+            at(&["app.caller.lock_flow", "c_hand", "b.sink"]),
+            Some((0, "app.caller.lock_flow".to_string()))
+        );
+        // Illegal: a dotted connection element.
+        assert_eq!(
+            at(&["a.src", "app.c_hand", "b.sink"]),
+            Some((1, "app.c_hand".to_string()))
+        );
+        // Illegal, found past the first segment.
+        assert_eq!(
+            at(&["a.src", "c1", "app.consumer.sink"]),
+            Some((2, "app.consumer.sink".to_string()))
+        );
     }
 }

@@ -52,6 +52,9 @@ impl Analysis for LatencyAnalysis {
             if e2e.segments.is_empty() {
                 continue; // flow_check already reports this
             }
+            if e2e.nested_segment().is_some() {
+                continue; // flow_check rejects it: not AADL, would resolve to the wrong component
+            }
 
             // Walk segments: odd indices are connections, even indices are
             // subcomponent flow references ("subcomp.flow_name")
@@ -807,6 +810,59 @@ mod tests {
             infos[0].message.contains("34.000 ms"),
             "worst case should be 34ms: {}",
             infos[0].message
+        );
+    }
+
+    /// #455 item 3: a flow that reaches inside a subcomponent
+    /// (`app.caller.lock_flow`) is rejected by flow_check, so latency must
+    /// say NOTHING about it. Before, only the first dotted part was kept and
+    /// both thread references resolved to process `app`, giving the doubled
+    /// `components without timing properties: app, app` warning and a
+    /// `not computed` Error about components the flow never named. A legal
+    /// flow on the same instance is still reported, so this cannot pass by
+    /// the analysis going quiet altogether.
+    #[test]
+    fn latency_skips_a_flow_reaching_inside_a_subcomponent() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let app = b.add_component("app", ComponentCategory::Process, Some(root));
+        let caller = b.add_component("caller", ComponentCategory::Thread, Some(app));
+        let consumer = b.add_component("consumer", ComponentCategory::Thread, Some(app));
+        let src = b.add_component("src", ComponentCategory::Device, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::Device, Some(root));
+        b.set_children(app, vec![caller, consumer]);
+        b.set_children(root, vec![app, src, dst]);
+        b.add_connection_inst("c1", root);
+        for (c, t) in [
+            (caller, "5 ms .. 10 ms"),
+            (consumer, "7 ms .. 12 ms"),
+            (src, "1 ms"),
+            (dst, "2 ms"),
+        ] {
+            b.set_property(c, "Timing_Properties", "Compute_Execution_Time", t);
+        }
+        b.add_e2e(
+            "nested",
+            root,
+            vec![
+                "app.caller.lock_flow",
+                "app.c_hand",
+                "app.consumer.consumer_flow",
+            ],
+        );
+        b.add_e2e("legal", root, vec!["src.f", "c1", "dst.f"]);
+
+        let diags = LatencyAnalysis.analyze(&b.build(root));
+
+        assert!(
+            diags.iter().all(|d| !d.message.contains("'nested'")),
+            "latency must not report on a rejected flow: {diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("'legal'") && d.message.contains("3.000 ms")),
+            "the legal flow must still be reported: {diags:?}"
         );
     }
 
