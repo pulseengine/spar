@@ -27,6 +27,21 @@ struct AnalyzeJsonOutput {
     diagnostics: Vec<spar_analysis::AnalysisDiagnostic>,
 }
 
+/// JSON output for `spar instance --format json --analyze` (#472).
+///
+/// Carries the instance tree PLUS the analysis diagnostics, so the structured
+/// arm renders the same verdict the text arm prints. The top-level
+/// `diagnostics` here are the ANALYSIS diagnostics (matching `AnalyzeJsonOutput`
+/// and the `analyze --format json` payload rivet consumes); the instance tree's
+/// own per-node `diagnostics` remain the instantiation diagnostics. Without
+/// `--analyze`, `instance --format json` still emits the bare instance tree,
+/// byte-identical to before this struct existed.
+#[derive(Serialize)]
+struct InstanceAnalyzeJsonOutput {
+    instance: spar_hir::InstanceNode,
+    diagnostics: Vec<spar_analysis::AnalysisDiagnostic>,
+}
+
 /// Report an unresolvable `--root` and exit non-zero, listing what IS available.
 ///
 /// #417: `Database::instantiate` used to return a fabricated root for any string,
@@ -647,17 +662,10 @@ fn cmd_instance(args: &[String]) {
         die_unresolvable_root(&root, &hir_db);
     };
 
-    // JSON output path: use spar-hir facade for clean serialization
-    if format.as_deref() == Some("json") {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&instance.to_serializable()).unwrap()
-        );
-        return;
-    }
-    drop(instance);
-
-    // Parse root reference: Package::Type.Impl
+    // Build the HIR-def instance used for analysis and the text hierarchy.
+    // Needed whenever `--analyze` is set (in EVERY format) and for the text
+    // tree, so it is built unconditionally here rather than only on the text
+    // path as before.
     let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
 
     let db = spar_hir_def::HirDefDatabase::default();
@@ -678,29 +686,79 @@ fn cmd_instance(args: &[String]) {
         &spar_hir_def::Name::new(&impl_name),
     );
 
-    // Print instance hierarchy
-    println!("Instance model: {}::{}.", pkg_name, type_name);
-    println!("{} component instances", inst.component_count());
-    println!();
-    print_instance_tree(&inst, inst.root, 0);
+    // #472: run the analysis ONCE when `--analyze` is set, regardless of format,
+    // and compute the verdict here before any format dispatch, so text and json
+    // return the same exit code for the same model. Previously the JSON arm
+    // `return`ed before the analyze block, so `spar instance --format json
+    // --analyze` never ran the analysis, silently dropped `--analyze`, and
+    // exited 0 on a model whose analysis emits Error. Same class as #469
+    // (fixed for `analyze` in #471): "fixing one path and not the other would
+    // have fixed the instance and left the class" (#417).
+    let diagnostics = if run_analysis {
+        run_all_analyses(&inst)
+    } else {
+        Vec::new()
+    };
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == spar_analysis::Severity::Error);
 
-    // Print instantiation diagnostics
-    if !inst.diagnostics.is_empty() {
-        eprintln!();
-        for diag in &inst.diagnostics {
-            let path: Vec<_> = diag.path.iter().map(|n| n.as_str()).collect();
-            eprintln!("warning: {} (at {})", diag.message, path.join("/"));
+    match format.as_deref() {
+        Some("json") => {
+            if run_analysis {
+                // Instance tree PLUS analysis diagnostics, so the structured
+                // arm actually carries the `--analyze` result.
+                let output = InstanceAnalyzeJsonOutput {
+                    instance: instance.to_serializable(),
+                    diagnostics: diagnostics.clone(),
+                };
+                println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            } else {
+                // Bare instance tree, byte-identical to the pre-#472 output.
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&instance.to_serializable()).unwrap()
+                );
+            }
+        }
+        None | Some("text") => {
+            // Print instance hierarchy
+            println!("Instance model: {}::{}.", pkg_name, type_name);
+            println!("{} component instances", inst.component_count());
+            println!();
+            print_instance_tree(&inst, inst.root, 0);
+
+            // Print instantiation diagnostics
+            if !inst.diagnostics.is_empty() {
+                eprintln!();
+                for diag in &inst.diagnostics {
+                    let path: Vec<_> = diag.path.iter().map(|n| n.as_str()).collect();
+                    eprintln!("warning: {} (at {})", diag.message, path.join("/"));
+                }
+            }
+
+            // Render analysis diagnostics (the verdict is taken from
+            // `has_errors` above; the shared gate below is the single source).
+            if run_analysis {
+                eprintln!();
+                print_diagnostics(&diagnostics);
+            }
+        }
+        Some(other) => {
+            // #472/#469: an unrecognised --format must FAIL, not silently fall
+            // through to the text renderer and exit 0 (a typo'd `--format jsonn`
+            // would otherwise print text and a clean model would exit 0). Exit
+            // 1, matching every other argument error in this command.
+            eprintln!("Unknown --format: {other} (expected text|json)");
+            process::exit(1);
         }
     }
 
-    // Run analysis if requested
-    if run_analysis {
-        eprintln!();
-        let diagnostics = run_all_analyses(&inst);
-        let has_errors = print_diagnostics(&diagnostics);
-        if has_errors {
-            process::exit(1);
-        }
+    // The single, shared verdict gate (#472): one model, one exit code, in
+    // every format. A model carrying Error diagnostics exits non-zero whether
+    // it was rendered as text or json.
+    if has_errors {
+        process::exit(1);
     }
 }
 
