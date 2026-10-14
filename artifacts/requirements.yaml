@@ -7108,10 +7108,37 @@ artifacts:
       written inside `App.impl` (measured on the same branch, exit 0) — provided
       the four extra connections contribute nothing, as `c_hand` contributes
       nothing in that control. The derived FIGURE is the assertion, not the
-      absence of a warning. Until then the test PINS today's `not computed` and
-      exit 1, so it fails the moment descent lands — the signal to promote this
-      requirement.
-    status: proposed
+      absence of a warning.
+
+      DELIVERED. Instantiation now keeps each flow specification's
+      implementation segments (`FlowInstance.impl_segments`, inherited through
+      `extends`, an extension's own implementation overriding); latency's
+      `expand_flow_steps` replaces `sub.flow` by that implementation's steps,
+      resolving its components and connections in the CHILD's scope, so
+      `c_hand` is looked up in `app`. Both the latency walk and the
+      processor-crossing walk use the expansion. A child with no
+      implementation of the flow, or one naming no component, is a leaf as
+      before. MEASURED: the legal model above now gives
+      `[12.000 ms .. 22.000 ms]`, exit 0, missing timing `s, k` only. The pin
+      that asserted `not computed` was converted to this oracle
+      (`the_flow_specification_route_descends_into_the_process`).
+
+      BOUNDARY CONNECTIONS ARE NOT COUNTED TWICE. `c1 : s.o -> app.pin` and
+      `c_in : pin -> caller.i` are two legs of ONE semantic connection; the
+      leg touching the process's own feature is skipped. Counting it would
+      reset the WCTT suppression set by a bound `c1`, re-adding the sampling
+      period on top of the network bound. Descent depth is capped at 16
+      (descent only moves to a child, so no cycle exists).
+
+      MUTATION: in-diff, 38 mutants; 20 MISSED after the implementation and
+      before its unit tests, 0 missed after (31 caught, 7 unviable),
+      re-derived independently of the implementer's report.
+
+      NOT CLAIMED: a network-hop bound declared ONLY on a boundary leg
+      (`c_in`/`c_out`, inside the process) — it is dropped with the leg; a
+      binding belongs on the system-level connection. Modal flow
+      implementations (`in modes`) are not filtered.
+    status: verified
     release: v0.46.0
     tags: [analysis, latency, hir, flows, bug]
 
@@ -7365,11 +7392,11 @@ artifacts:
 
       The DOUBLED `app, app` is the diagnostic, exactly as #455 named it: every analysis that walks a flow kept only the FIRST dotted part of a segment (`split('.').next()` in latency.rs twice and flow_rules.rs), so both thread references resolved to the enclosing PROCESS. And flow_check's unknown-connection warning explicitly exempted a segment containing a dot, so `app.c_hand` passed silently too.
       ADJUDICATION — REJECT, NOT RESOLVE, decided from the grammar rather than by judgement. osate2@87468992 `Aadl2.xtext:2043-2048`: `ETESubcomponentFlow: (context=[Subcomponent|ID] '.')? flowElement=[EndToEndFlowElement|ID]` — ONE level — and `ETEConnectionFlow: flowElement=[Connection|ID]` — a bare identifier. Both nested segments are not AADL; resolving them would make spar accept models OSATE rejects, against the interop-conformance gates. This is the branch the original text named as acceptable: reject with a diagnostic saying so, never resolve silently to the wrong component.
-      THE FIX. `EndToEndFlowInstance::nested_segment()` (spar-hir-def) is the single legality predicate: a flow-position segment with more than one dot, or a connection-position segment with any dot. flow_check reports the first such segment as an ERROR naming the segment, its kind (flow/connection), its position, and the one spelling measured to work today (the end-to-end flow written in the subcomponent's implementation), and says the flow is not analysed. latency skips a rejected flow, so it no longer reports on components the flow never named. flow_rules and latency's processor-crossing walk are deliberately NOT given the skip: on a rejected flow they resolve to the enclosing component and emit nothing a user could act on wrongly, so a skip there would be code no test can observe.
+      THE FIX. `EndToEndFlowInstance::nested_segment()` (spar-hir-def) is the single legality predicate: a flow-position segment with more than one dot, or a connection-position segment with any dot. flow_check reports the first such segment as an ERROR naming the segment, its kind (flow/connection), its position, and the two legal routes (a flow specification on the subcomponent implemented there, or the end-to-end flow written in the subcomponent's implementation), and says the flow is not analysed. latency skips a rejected flow, so it no longer reports on components the flow never named. flow_rules and latency's processor-crossing walk are deliberately NOT given the skip: on a rejected flow they resolve to the enclosing component and emit nothing a user could act on wrongly, so a skip there would be code no test can observe.
       POSITIVE CONTROL, run on v0.45.0 BEFORE the fix was designed: the same threads with the flow written inside `App.impl` as `caller.lock_flow -> c_hand -> consumer.consumer_flow` derive `[22.000 ms .. 22.000 ms]`, exit 0. So the spelling the rejection recommends works.
       ORACLE (a PAIR, crates/spar-cli/tests/flow_nested_segment.rs, through the real parser): NESTED must exit != 0 with the flow_check Error naming `app.caller.lock_flow` at position 0, and must contain neither `app, app` nor `not computed`; LEGAL must exit 0 with a `22.000 ms]` worst case and no flow_check finding. Against v0.45.0's output NESTED fails all three content assertions and LEGAL passes — a build rejecting every flow fails LEGAL, one that stopped warning without rejecting fails NESTED. Unit level: `nested_segment_follows_the_aadl_end_to_end_flow_grammar` (legal and illegal rows, including a finding past position 0), `e2e_nested_segment_is_an_error_naming_kind_and_position` (flow AND connection), and `latency_skips_a_flow_reaching_inside_a_subcomponent`, which with the skip deleted by hand fails on exactly `app, app` + `not computed`.
       MUTATION: before any test was written, 15 of 21 in-diff mutants were MISSED (including `nested_segment -> Some(0, ..)`, which rejects every flow — cargo-mutants runs only the mutated crate's tests and spar-hir-def had none for it); after, 0 missed.
-      NOT CLAIMED: that thread timing inside a process is reachable from system level by ANY spelling. It is not yet: the legal route — a flow specification on the process, implemented in its implementation — still reports `not computed`, because latency does not descend into a flow implementation. That capability is REQ-ANALYSIS-FLOW-THREAD-DESCENT-001, which this requirement traces to and does NOT discharge. The rejection message therefore recommends only the spelling measured to work: writing the end-to-end flow in the subcomponent's implementation. The MCP tool `spar.check_chain` matches a thread name against ANY dotted part of a segment and its tests use the nested spelling (`app.producer.f1`); those tests assert only tool-level success and still pass, but on such a model the tool now surfaces this Error. Whether check_chain should steer agents to the legal spelling is a separate question, not settled here.
+      NOT CLAIMED: reaching thread timing from system level — that is REQ-ANALYSIS-FLOW-THREAD-DESCENT-001, which this requirement traces to and does not itself discharge. When this requirement was first pushed descent did not exist and the message briefly recommended only the in-implementation spelling; with descent delivered both legal routes are advised, and both are measured to derive a figure. The MCP tool `spar.check_chain` matches a thread name against ANY dotted part of a segment and its tests use the nested spelling (`app.producer.f1`); those tests assert only tool-level success and still pass, but on such a model the tool now surfaces this Error. Whether check_chain should steer agents to the legal spelling is a separate question, not settled here.
     release: v0.46.0
     tags: [analysis, latency, hir, flows, bug]
     links:

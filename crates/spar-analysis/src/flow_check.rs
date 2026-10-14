@@ -167,10 +167,10 @@ impl Analysis for FlowCheckAnalysis {
                         "end-to-end flow '{}': {} segment '{}' at position {} reaches \
                          inside subcomponent '{}', which AADL does not allow — a flow \
                          element is `subcomponent.flow` and a connection element is a \
-                         bare name; write the end-to-end flow in the implementation of \
-                         '{}' (spar does not yet descend through a flow specification \
-                         on '{}' into its implementation, so that route would report \
-                         no latency); this flow is not analysed",
+                         bare name; declare a flow specification on '{}' and implement \
+                         it there (latency descends into that implementation), or write \
+                         the end-to-end flow in the implementation of '{}'; this flow \
+                         is not analysed",
                         e2e.name, kind, seg, i, head, head, head
                     ),
                     path: path.clone(),
@@ -286,6 +286,7 @@ mod tests {
                 name: Name::new(name),
                 kind,
                 owner,
+                impl_segments: None,
             });
             self.components[owner].flows.push(idx);
         }
@@ -684,8 +685,8 @@ mod tests {
                 "want `{want}` in {diags:?}"
             );
             assert!(errors[0].message.contains("not analysed"), "{diags:?}");
-            // The advice names only the spelling measured to work today; the
-            // flow-specification route is flagged as not yet descended.
+            // Both legal routes are advised, and both are measured to derive
+            // a figure (tests/flow_nested_segment.rs).
             assert!(
                 errors[0]
                     .message
@@ -693,7 +694,9 @@ mod tests {
                 "{diags:?}"
             );
             assert!(
-                errors[0].message.contains("does not yet descend"),
+                errors[0]
+                    .message
+                    .contains("declare a flow specification on 'app' and implement it there"),
                 "{diags:?}"
             );
         }

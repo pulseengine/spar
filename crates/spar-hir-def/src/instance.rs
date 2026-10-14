@@ -150,6 +150,14 @@ pub struct FlowInstance {
     pub kind: FlowKind,
     /// The component instance that owns this flow.
     pub owner: ComponentInstanceIdx,
+    /// Segments of the flow IMPLEMENTATION of this flow specification, when the
+    /// owner's implementation (or one it `extends`) declares one — alternating
+    /// `sub.flow` references and connection names, optionally bracketed by the
+    /// owner's own features. `None` for a flow with no implementation (a type-only
+    /// component, or a spec the implementation does not implement). Lets latency
+    /// descend from `app.proc_flow` into the threads inside `app`
+    /// (REQ-ANALYSIS-FLOW-THREAD-DESCENT-001).
+    pub impl_segments: Option<Vec<crate::item_tree::FlowSegment>>,
 }
 
 /// An end-to-end flow instance from a component implementation.
@@ -1417,6 +1425,9 @@ struct ImplChainResult {
         Option<ConnectionEnd>,
         Vec<Name>,
     )>,
+    /// Flow implementations in grandparent → parent → self order, so a later
+    /// entry of the same name overrides an inherited one.
+    flow_impls: Vec<(Name, Vec<crate::item_tree::FlowSegment>)>,
     /// (name, segments, item-tree index, the flow's own property associations)
     e2e_flows: Vec<(
         Name,
@@ -1566,6 +1577,19 @@ impl<'a> Builder<'a> {
                 let conn_data = impl_chain.connections;
                 let call_map = impl_chain.call_map;
                 let e2e_data = impl_chain.e2e_flows;
+                // Attach each flow implementation to the flow-spec instance it
+                // implements (later = more derived overrides an inherited one).
+                for (fname, fsegs) in impl_chain.flow_impls {
+                    let target = self.components[idx].flows.iter().copied().find(|&f| {
+                        self.flow_instances[f]
+                            .name
+                            .as_str()
+                            .eq_ignore_ascii_case(fname.as_str())
+                    });
+                    if let Some(f) = target {
+                        self.flow_instances[f].impl_segments = Some(fsegs);
+                    }
+                }
                 let impl_mode_data = impl_chain.modes;
                 let impl_mt_data = impl_chain.mode_transitions;
 
@@ -1941,6 +1965,16 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // Collect own flow implementations
+        for &fi_idx in &ci.flow_impls {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let fimpl = &tree.flow_impls[fi_idx];
+                result
+                    .flow_impls
+                    .push((fimpl.name.clone(), fimpl.segments.clone()));
+            }
+        }
+
         // Collect own modes
         for &mode_idx in &ci.modes {
             if let Some(tree) = self.scope.tree(loc.tree) {
@@ -2221,6 +2255,7 @@ impl<'a> Builder<'a> {
                 name,
                 kind,
                 owner: idx,
+                impl_segments: None,
             });
             flow_indices.push(fi);
         }
@@ -4839,5 +4874,125 @@ end P;
             at(&["a.src", "c1", "app.consumer.sink"]),
             Some((2, "app.consumer.sink".to_string()))
         );
+    }
+
+    /// REQ-ANALYSIS-FLOW-THREAD-DESCENT-001: a flow implementation is kept on
+    /// the flow-spec instance it implements, a flow spec without one has
+    /// `None`, and an `extends` child's implementation overrides the parent's
+    /// of the same name while an inherited one it does not redeclare survives.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn flow_implementations_attach_to_their_flow_spec_and_inherit() {
+        let src = r#"
+package p
+public
+    data D
+    end D;
+    thread T
+        features
+            i: in data port D;
+            o: out data port D;
+        flows
+            f: flow path i -> o;
+    end T;
+    process P
+        features
+            pin: in data port D;
+            pout: out data port D;
+        flows
+            fa: flow path pin -> pout;
+            fb: flow path pin -> pout;
+            fc: flow path pin -> pout;
+    end P;
+    process implementation P.Base
+        subcomponents
+            t1: thread T;
+            t2: thread T;
+        connections
+            c0: port pin -> t1.i;
+            c1: port t1.o -> t2.i;
+            c2: port t2.o -> pout;
+        flows
+            fa: flow path pin -> c0 -> t1.f -> c1 -> t2.f -> c2 -> pout;
+            fb: flow path pin -> c0 -> t1.f -> c1 -> t2.f -> c2 -> pout;
+    end P.Base;
+    process implementation P.Derived extends P.Base
+        flows
+            fb: flow path pin -> c0 -> t1.f -> c2 -> pout;
+    end P.Derived;
+    system S
+    end S;
+    system implementation S.Impl
+        subcomponents
+            app: process P.Derived;
+    end S.Impl;
+end p;
+"#;
+        let db = crate::HirDefDatabase::default();
+        let tree = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "p.aadl".to_string(), src.to_string()),
+        );
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("p"),
+            &Name::new("S"),
+            &Name::new("Impl"),
+        );
+        let (app_idx, _) = inst
+            .all_components()
+            .find(|(_, c)| c.name.as_str() == "app")
+            .unwrap_or_else(|| {
+                panic!(
+                    "app instantiated: {:?} {:?}",
+                    inst.diagnostics,
+                    inst.all_components()
+                        .map(|(_, c)| c.name.to_string())
+                        .collect::<Vec<_>>()
+                )
+            });
+        let seg_of = |flow: &str| {
+            let f = inst
+                .component(app_idx)
+                .flows
+                .iter()
+                .map(|&f| &inst.flow_instances[f])
+                .find(|f| f.name.as_str() == flow)
+                .unwrap_or_else(|| panic!("flow spec {flow} on app"));
+            f.impl_segments
+                .as_ref()
+                .map(|v| v.iter().map(|s| s.element.to_string()).collect::<Vec<_>>())
+        };
+        // Inherited, not redeclared.
+        assert_eq!(
+            seg_of("fa"),
+            Some(
+                ["pin", "c0", "f", "c1", "f", "c2", "pout"]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        // Redeclared in the derived impl: the derived one wins.
+        assert_eq!(
+            seg_of("fb"),
+            Some(["pin", "c0", "f", "c2", "pout"].map(String::from).to_vec())
+        );
+        // A spec nothing implements.
+        assert_eq!(seg_of("fc"), None);
+        // The segment keeps its subcomponent qualifier.
+        let fa = inst
+            .component(app_idx)
+            .flows
+            .iter()
+            .map(|&f| &inst.flow_instances[f])
+            .find(|f| f.name.as_str() == "fa")
+            .unwrap();
+        let segs = fa.impl_segments.as_ref().unwrap();
+        assert_eq!(
+            segs[2].subcomponent.as_ref().map(|n| n.as_str()),
+            Some("t1")
+        );
+        assert_eq!(segs[0].subcomponent, None);
     }
 }

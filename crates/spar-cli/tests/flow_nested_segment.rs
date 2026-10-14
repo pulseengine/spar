@@ -1,5 +1,5 @@
 //! Integration test for spar#455 item 3: REQ-ANALYSIS-FLOW-SEGMENT-LEGALITY-001
-//! (verified), plus a pin for REQ-ANALYSIS-FLOW-THREAD-DESCENT-001 (proposed).
+//! (verified), plus the oracle for REQ-ANALYSIS-FLOW-THREAD-DESCENT-001.
 //!
 //! A system-level end-to-end flow written as
 //! `app.caller.lock_flow -> app.c_hand -> app.consumer.consumer_flow`, where
@@ -125,8 +125,8 @@ end Descent;
 /// The LEGAL route to thread timing from system level: a flow path on the
 /// process, implemented in `App.impl` through both threads, used as
 /// `s.src -> c1 -> app.proc_flow -> c2 -> k.snk`. Every segment is AADL.
-/// Latency does not yet descend into `proc_flow`'s implementation
-/// (REQ-ANALYSIS-FLOW-THREAD-DESCENT-001, proposed).
+/// Latency descends into `proc_flow`'s implementation
+/// (REQ-ANALYSIS-FLOW-THREAD-DESCENT-001).
 const PATH_DESCENT_MODEL: &str = r#"
 package Descent
 public
@@ -264,14 +264,14 @@ fn the_legal_spelling_derives_latency_from_the_threads() {
     assert!(!out.contains("flow_check"), "no flow_check finding:\n{out}");
 }
 
-/// PIN, not a goal: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001 is NOT delivered.
-/// The legal flow-specification route stops at `app` and reports no figure.
-/// When descent lands this test FAILS — that is its purpose: replace it with
-/// the requirement's oracle, the derived `[12.000 ms .. 22.000 ms]` (BCET
-/// 5 + 7, WCET 10 + 12, the figure the in-implementation spelling gives), and
-/// promote the requirement.
+/// REQ-ANALYSIS-FLOW-THREAD-DESCENT-001: the legal flow-specification route
+/// descends into the flow IMPLEMENTATION on `app` (`proc_flow`, implemented in
+/// `App.impl` through both threads), so the threads' execution times reach the
+/// latency: BCET 5 + 7 = 12 ms, WCET 10 + 12 = 22 ms, the figure the
+/// in-implementation spelling gives. The devices `s` / `k` carry no timing and
+/// may be reported; `app` must not be, because its threads supplied it.
 #[test]
-fn the_flow_specification_route_does_not_yet_descend_into_the_process() {
+fn the_flow_specification_route_descends_into_the_process() {
     let path = write_model("path_descent", PATH_DESCENT_MODEL);
     let (code, out) = analyze(&path);
     let _ = fs::remove_file(&path);
@@ -281,13 +281,26 @@ fn the_flow_specification_route_does_not_yet_descend_into_the_process() {
         "every segment is legal AADL, so nothing may reject it:\n{out}"
     );
     assert!(
-        out.contains("end-to-end flow 'req_to_done' latency: not computed"),
-        "descent has landed? promote REQ-ANALYSIS-FLOW-THREAD-DESCENT-001 and \
-         assert the derived figure instead:\n{out}"
+        !out.contains("not computed"),
+        "descent derives a figure, so nothing is 'not computed':\n{out}"
     );
+    let line = out
+        .lines()
+        .find(|l| l.contains("end-to-end flow 'req_to_done' latency:"))
+        .unwrap_or_else(|| panic!("no latency figure for req_to_done:\n{out}"));
     assert!(
-        out.contains("components without timing properties: s, app, k"),
-        "the walk stops at the process:\n{out}"
+        line.contains("latency: [12.000 ms .. 22.000 ms]"),
+        "BCET 5 + 7, WCET 10 + 12 from the threads inside the process:\n{line}"
     );
-    assert_ne!(code, 0, "an underived latency is an Error:\n{out}");
+    if let Some(missing) = out
+        .lines()
+        .find(|l| l.contains("components without timing properties"))
+    {
+        let list = missing.split("properties:").nth(1).unwrap_or("");
+        assert!(
+            !list.contains("app"),
+            "app's threads supplied its timing, it is not missing:\n{missing}"
+        );
+    }
+    assert_eq!(code, 0, "a derived latency analyses clean:\n{out}");
 }

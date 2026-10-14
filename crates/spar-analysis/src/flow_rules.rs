@@ -449,6 +449,7 @@ mod tests {
                 name: Name::new(name),
                 kind,
                 owner,
+                impl_segments: None,
             });
             self.components[owner].flows.push(idx);
         }
