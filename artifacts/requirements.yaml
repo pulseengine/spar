@@ -5946,7 +5946,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -6051,7 +6051,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6077,7 +6077,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6108,7 +6108,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6133,7 +6133,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6577,7 +6577,7 @@ artifacts:
 
       NOT CLAIMED: that every reported binding error is this cause.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [aadl, analysis, properties, bug, interop]
 
   - id: REQ-RELEASE-COMPLIANCE-PIN-001
@@ -7112,7 +7112,7 @@ artifacts:
       surviving before its case was written, each now killed by exactly one
       test: best-takes-max (the original bug), worst-takes-min (optimistic),
       no-fallback, and the compute hop reporting its minimum.
-    status: implemented
+    status: verified
     release: v0.46.0
     tags: [analysis, latency, provenance, bug]
 
@@ -7262,7 +7262,7 @@ artifacts:
       the output. The evaluator did not test a switch or a NETCONF session and
       neither has this triage. Schema-valid is necessary, not sufficient.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [tsn, yang, interop, bug, deployment]
 
   - id: REQ-TSN-CLI-SURFACE-001
@@ -7292,7 +7292,7 @@ artifacts:
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [tsn, cli, synthesis, interop]
 
   - id: REQ-DBC-CYCLE-TIME-001
@@ -7315,7 +7315,7 @@ artifacts:
       time present in the source reaches the model, and that its ABSENCE is
       reported rather than silently yielding an unrated frame.
     status: proposed
-    release: v0.46.0
+    release: v0.47.0
     tags: [dbc, can, ingest, interop]
   - id: REQ-TSN-WCTT-PROVENANCE-001
     type: requirement
