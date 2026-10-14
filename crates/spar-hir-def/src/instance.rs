@@ -1770,6 +1770,18 @@ impl<'a> Builder<'a> {
                         }
                     }
 
+                    // `fg.member` where `fg` is a feature group of THIS
+                    // component (not a subcomponent): the endpoint is the
+                    // component's own feature `fg.member`.
+                    for endpoint in [&mut src, &mut dst].into_iter().flatten() {
+                        self.fixup_own_feature_group_endpoint(
+                            idx,
+                            &conn_name,
+                            &child_names,
+                            endpoint,
+                        );
+                    }
+
                     let ci = self.connections.alloc(ConnectionInstance {
                         name: conn_name,
                         kind: conn_kind,
@@ -2094,6 +2106,68 @@ impl<'a> Builder<'a> {
     /// bytes (REQ-CODEGEN-WIT-TYPES). Returns `None` when the classifier
     /// does not resolve to a `data` component type, declares no `Data_Size`,
     /// or the value does not parse as a size.
+    /// Rewrite a connection endpoint `fg.member` — where `fg` names a feature
+    /// group of the containing component `owner` and NOT a subcomponent — to
+    /// the owner's own feature `fg.member` (`subcomponent: None`,
+    /// `feature: "fg.member"`, the dotted form `expand_feature_group_connections`
+    /// also uses).
+    ///
+    /// A subcomponent of the same name takes precedence (left untouched). If
+    /// the group's type resolves but declares no member called `member`, the
+    /// endpoint is still rewritten (the first part is not a subcomponent, so
+    /// "unresolved subcomponent" would mislead) and a precise diagnostic is
+    /// recorded instead. Members are matched on their leaf name; nested-group
+    /// prefixes are not interpreted.
+    fn fixup_own_feature_group_endpoint(
+        &mut self,
+        owner: ComponentInstanceIdx,
+        conn_name: &Name,
+        child_names: &[Name],
+        endpoint: &mut ConnectionEnd,
+    ) {
+        let Some(first) = endpoint.subcomponent.clone() else {
+            return;
+        };
+        let is_child = child_names.iter().any(|n| {
+            n.as_str().eq_ignore_ascii_case(first.as_str())
+                || (!first.as_str().contains('[')
+                    && base_name_of(n.as_str()).eq_ignore_ascii_case(first.as_str()))
+        });
+        if is_child {
+            return;
+        }
+        let fg_classifier = self.components[owner].features.iter().find_map(|&fi| {
+            let f = &self.features[fi];
+            (f.kind == FeatureKind::FeatureGroup && f.name.eq_ci(&first))
+                .then(|| f.classifier.clone())
+        });
+        let Some(classifier) = fg_classifier else {
+            return;
+        };
+
+        if let Some(cls_ref) = classifier {
+            let pkg = cls_ref
+                .package
+                .clone()
+                .unwrap_or_else(|| self.components[owner].package.clone());
+            let members = expand_feature_group(self.scope, &pkg, &cls_ref.type_name, false);
+            // An empty expansion means the group type did not resolve; that
+            // is reported elsewhere, so do not claim the member is missing.
+            if !members.is_empty() && !members.iter().any(|m| m.name.eq_ci(&endpoint.feature)) {
+                let owner_name = self.components[owner].name.clone();
+                self.diagnostics.push(InstanceDiagnostic {
+                    message: format!(
+                        "connection '{}': feature group '{}' has no member '{}'",
+                        conn_name, first, endpoint.feature,
+                    ),
+                    path: vec![owner_name, conn_name.clone()],
+                });
+            }
+        }
+        endpoint.feature = Name::new(&format!("{}.{}", first, endpoint.feature));
+        endpoint.subcomponent = None;
+    }
+
     fn resolve_data_size_bytes(
         &self,
         from_package: &Name,
@@ -4994,5 +5068,189 @@ end p;
             Some("t1")
         );
         assert_eq!(segs[0].subcomponent, None);
+    }
+
+    // ── REQ-HIR-FEATUREGROUP-PATH-001: `fg.member` connection endpoints ──
+
+    const FG_MODEL: &str = r#"package P
+public
+  feature group FG
+    features
+      a : out data port;
+      b : in data port;
+  end FG;
+
+  system Leaf
+    features
+      i : in data port;
+      o : out data port;
+  end Leaf;
+  system implementation Leaf.impl
+  end Leaf.impl;
+
+  system S
+    features
+      g : feature group FG;
+  end S;
+  system implementation S.impl
+    subcomponents
+      x : system Leaf.impl;
+    connections
+      CONNS
+  end S.impl;
+end P;
+"#;
+
+    fn fg_instance(conns: &str) -> SystemInstance {
+        instantiate_aadl(&FG_MODEL.replace("CONNS", conns), "P", "S", "impl")
+    }
+
+    fn unresolved(inst: &SystemInstance) -> Vec<String> {
+        inst.diagnostics
+            .iter()
+            .filter(|d| d.message.contains("unresolved"))
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    fn end_of(e: &Option<ConnectionEnd>) -> (Option<String>, String) {
+        let e = e.as_ref().expect("endpoint present");
+        (
+            e.subcomponent.as_ref().map(|n| n.as_str().to_string()),
+            e.feature.as_str().to_string(),
+        )
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn fg_member_as_connection_source_resolves() {
+        let inst = fg_instance("c1 : port g.a -> x.i;");
+        assert_eq!(unresolved(&inst), Vec::<String>::new());
+        let conn = inst.connections.iter().next().unwrap().1;
+        assert_eq!(end_of(&conn.src), (None, "g.a".to_string()));
+        assert_eq!(end_of(&conn.dst), (Some("x".to_string()), "i".to_string()));
+        // Down connection at the root: a semantic connection is produced whose
+        // source is the root's own feature-group member.
+        assert_eq!(inst.semantic_connections.len(), 1);
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.ultimate_source.0, inst.root);
+        assert_eq!(sc.ultimate_source.1.as_str(), "g.a");
+        assert_eq!(sc.ultimate_destination.1.as_str(), "i");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn fg_member_as_connection_destination_resolves() {
+        let inst = fg_instance("c1 : port x.o -> g.b;");
+        assert_eq!(unresolved(&inst), Vec::<String>::new());
+        let conn = inst.connections.iter().next().unwrap().1;
+        assert_eq!(end_of(&conn.src), (Some("x".to_string()), "o".to_string()));
+        assert_eq!(end_of(&conn.dst), (None, "g.b".to_string()));
+        assert_eq!(inst.semantic_connections.len(), 1);
+        let sc = &inst.semantic_connections[0];
+        assert_eq!(sc.ultimate_destination.0, inst.root);
+        assert_eq!(sc.ultimate_destination.1.as_str(), "g.b");
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn fg_name_match_is_case_insensitive() {
+        let inst = fg_instance("c1 : port G.a -> x.i;");
+        assert_eq!(unresolved(&inst), Vec::<String>::new());
+        let conn = inst.connections.iter().next().unwrap().1;
+        assert_eq!(conn.src.as_ref().unwrap().subcomponent, None);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn genuinely_unknown_endpoint_is_still_unresolved() {
+        // `nope` is neither a subcomponent nor a feature group.
+        let inst = fg_instance("c1 : port nope.a -> x.i;");
+        let u = unresolved(&inst);
+        assert_eq!(u.len(), 1, "{u:?}");
+        assert!(
+            u[0].contains("unresolved source subcomponent 'nope'"),
+            "{u:?}"
+        );
+        let conn = inst.connections.iter().next().unwrap().1;
+        // Left exactly as written — not rewritten.
+        assert_eq!(
+            end_of(&conn.src),
+            (Some("nope".to_string()), "a".to_string())
+        );
+        // Same for the destination side.
+        let inst = fg_instance("c1 : port x.o -> nope.b;");
+        let u = unresolved(&inst);
+        assert_eq!(u.len(), 1, "{u:?}");
+        assert!(
+            u[0].contains("unresolved destination subcomponent 'nope'"),
+            "{u:?}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn fg_present_but_member_missing_reports_the_member_not_the_subcomponent() {
+        // `g` IS a feature group of S; `zzz` is not one of its members. The
+        // error must name the missing member (the first part is not a
+        // subcomponent, so "unresolved subcomponent" would mislead) and must
+        // appear exactly once.
+        let inst = fg_instance("c1 : port g.zzz -> x.i;");
+        assert_eq!(unresolved(&inst), Vec::<String>::new());
+        let msgs: Vec<_> = inst
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("has no member"))
+            .collect();
+        assert_eq!(msgs.len(), 1);
+        assert!(
+            msgs[0]
+                .message
+                .contains("connection 'c1': feature group 'g' has no member 'zzz'"),
+            "{}",
+            msgs[0].message
+        );
+        // A member that exists produces no such diagnostic.
+        let ok = fg_instance("c1 : port g.a -> x.i;");
+        assert!(
+            ok.diagnostics
+                .iter()
+                .all(|d| !d.message.contains("no member"))
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn subcomponent_of_the_same_name_wins_over_a_feature_group() {
+        // `g` is both a subcomponent and a feature group of S: the
+        // subcomponent reading must be kept, as before.
+        let src = FG_MODEL
+            .replace("x : system Leaf.impl;", "g : system Leaf.impl;")
+            .replace("CONNS", "c1 : port g.o -> g.i;");
+        let inst = instantiate_aadl(&src, "P", "S", "impl");
+        let conn = inst.connections.iter().next().unwrap().1;
+        assert_eq!(end_of(&conn.src), (Some("g".to_string()), "o".to_string()));
+        assert_eq!(end_of(&conn.dst), (Some("g".to_string()), "i".to_string()));
+        assert!(
+            inst.diagnostics
+                .iter()
+                .all(|d| !d.message.contains("no member"))
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn array_subcomponent_base_name_wins_over_a_feature_group() {
+        let src = FG_MODEL
+            .replace("x : system Leaf.impl;", "g : system Leaf.impl [2];")
+            .replace("CONNS", "c1 : port g.o -> g.i;");
+        let inst = instantiate_aadl(&src, "P", "S", "impl");
+        let conn = inst.connections.iter().next().unwrap().1;
+        assert_eq!(end_of(&conn.src), (Some("g".to_string()), "o".to_string()));
+        assert!(
+            inst.diagnostics
+                .iter()
+                .all(|d| !d.message.contains("no member"))
+        );
     }
 }
