@@ -6525,9 +6525,55 @@ artifacts:
       other inherit property, and would have to be re-derived the next time one
       is reported.
 
-      The EPL-2.0 predeclared property sets are open material and carry the
-      `inherit` declarations directly, so the fix has a citable source that
-      does not depend on the unverified §10.6 reading.
+      The predeclared property sets carry the `inherit` declarations directly,
+      so the fix has a citable source that does not depend on the unverified
+      §10.6 reading.
+
+      CORRECTION, 2026-10-14: this text previously described those sets as
+      "EPL-2.0 ... open material". That was asserted, not measured. Measured:
+      the OSATE copies carry NO licence text in the files, and GitHub reports
+      the osate/osate2 repository licence as `NOASSERTION`. Nothing has been
+      vendored. Only property names and line numbers are cited below, and
+      vendoring the files needs the licence settled first.
+
+      ADJUDICATED, 2026-10-14 — the question #460 was filed without. osate2 @
+      87468992ee0d4c4cc856a72bd542899953f088f3,
+      core/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/
+      Deployment_Properties.aadl:41:
+
+        Actual_Processor_Binding: inherit list of reference (processor,
+            virtual processor, system, device, abstract) applies to (thread,
+            thread group, process, system, virtual processor, device);
+
+      `inherit`: a component declaring no value takes its CONTAINING
+      component's. So a thread in a process bound with `applies to app` IS
+      bound, and the binding_rules errors on it are FALSE POSITIVES — three of
+      them on this repo's own test-data/parser/complex_system.aadl. That model
+      is pinned only by a PARSER test (`check_file_no_errors`), so no analysis
+      gate counts those errors and the eventual fix moves no declared constant.
+
+      SCOPE, MEASURED: 34 `inherit` properties across the eight predeclared
+      sets — Deployment 15 (every Actual_/Allowed_ binding, virtual-bus and QoS
+      pairs, Actual_Function_Binding, Scheduling_Protocol), Timing 8, Thread 5,
+      Programming 3, Modeling 3. TIMING IS AMONG THEM: `Period`, `Deadline`,
+      `Dispatch_Offset` and `Priority` are all `inherit`. A keyword-scoped fix
+      therefore changes scheduling, RTA, latency and WCTT results on any model
+      that declares timing above thread level. That is the standard's semantics
+      and is the right end state, but it must land with a before/after diff of
+      every analysis over the corpus, not as a binding fix.
+
+      BLOCKER, MEASURED: reference resolution is CONTEXT-FREE.
+      `SystemInstance::resolve_dotted_path(&self, name: &str)` takes only a
+      name; both its branches scan every component and keep the DEEPEST match;
+      all five callers (binding_rules, binding_check, overlay x2, moves) pass
+      only a name. So the declaring component already resolves its own
+      `reference (cpu)` globally, and wherever names repeat at depth it can
+      bind a different `cpu` than the one its declaring context names.
+      Inheritance does not resolve references differently — it propagates the
+      same string to every inheriting thread — but it would extend that silent
+      mis-binding to all of them, replacing today's loud (false) error with a
+      silent wrong binding in exactly those models. A declaring-context index
+      must be threaded through resolve_dotted_path and its callers first.
 
       NOT CLAIMED: that every reported binding error is this cause.
     status: proposed
