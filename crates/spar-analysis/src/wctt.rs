@@ -63,6 +63,7 @@ use spar_network::tsn::{
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
+use crate::property_accessors::get_timing_property;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
 const SPAR_NETWORK: &str = "Spar_Network";
@@ -849,18 +850,89 @@ impl WcttAnalysis {
                 });
             }
 
-            diags.push(AnalysisDiagnostic {
-                severity: Severity::Info,
-                message: format!(
-                    "WcttBound: stream '{}' end-to-end WCTT {} ps ({} hop{})",
-                    stream_name,
-                    total_delay_ps,
-                    stream.hops.len(),
-                    if stream.hops.len() == 1 { "" } else { "s" },
-                ),
-                path: stream_path.clone(),
-                analysis: self.name().to_string(),
-            });
+            // Step 6b: PROVENANCE (#478). `hops_counted` is the number of hops
+            // that actually contributed to `total_delay_ps`. When it is zero the
+            // walk fell through every hop — the TSN dispatch defers when a
+            // stream carries no readable Class_of_Service, and the deferred arm
+            // `continue`s with zero contribution. Emitting
+            // `WcttBound ... 0 ps (N hops)` there asserts coverage of N hops
+            // while containing the contribution of none, at severity Info and
+            // exit 0 — and `0 < budget` then passes the only numeric gate.
+            //
+            // The discriminator is the CONTRIBUTION COUNT, not whether the sum
+            // is zero: a flow whose hops genuinely add nothing stays reportable.
+            // Same repair REQ-ANALYSIS-LATENCY-PROVENANCE-001 made for latency:
+            // a figure the analysis could not derive must not render as one.
+            let hop_total = stream.hops.len() as u64;
+            if hops_counted == 0 {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "WcttNotComputed: stream '{}' end-to-end WCTT not computed — none \
+                         of its {} hop{} contributed a delay term, so no bound could be \
+                         derived. A Class_of_Service unreadable at the source defers every \
+                         TSN hop; see the WcttDeferred diagnostics above",
+                        stream_name,
+                        hop_total,
+                        if hop_total == 1 { "" } else { "s" },
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            } else {
+                // A PARTIAL walk is still a real bound, but it must not claim the
+                // hops it skipped. Label it with the contributing count and say so.
+                if hops_counted < hop_total {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Warning,
+                        message: format!(
+                            "WcttPartialBound: stream '{}' bound covers {} of {} hops; the \
+                             remaining {} contributed nothing and are NOT in the figure below",
+                            stream_name,
+                            hops_counted,
+                            hop_total,
+                            hop_total - hops_counted,
+                        ),
+                        path: stream_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "WcttBound: stream '{}' end-to-end WCTT {} ps ({} hop{})",
+                        stream_name,
+                        total_delay_ps,
+                        hops_counted,
+                        if hops_counted == 1 { "" } else { "s" },
+                    ),
+                    path: stream_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+
+                // Step 6c: DEADLINE (#478 / #455 root shape). `Timing_Properties::
+                // Deadline` on the source end station is the stream's own declared
+                // budget. It had ZERO occurrences in this file: the only numeric
+                // gate was `Spar_Network::WCTT_Budget` on a bus, so a stream 9x over
+                // its stated deadline exited 0 in every output format. Compared only
+                // on a derived bound — an undeclared deadline is not a violation, and
+                // an underivable bound already errored above.
+                if let Some(deadline_ps) =
+                    get_timing_property(instance.properties_for(stream.src_idx), "Deadline")
+                    && total_delay_ps > deadline_ps
+                {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "WcttExceedsDeadline: stream '{}' predicted end-to-end WCTT {} ps \
+                             > declared Timing_Properties::Deadline {} ps",
+                            stream_name, total_delay_ps, deadline_ps,
+                        ),
+                        path: stream_path.clone(),
+                        analysis: self.name().to_string(),
+                    });
+                }
+            }
 
             // v0.9.2 sensitivity output (NC reviewer top-5 #13 — pure
             // post-processing on closed-form derivatives). For each
@@ -3095,6 +3167,334 @@ end Net;
             .find(|d| d.message.starts_with("WcttDeferred"))
             .unwrap_or_else(|| panic!("expected WcttDeferred: {:#?}", diags));
         assert!(deferred.severity == Severity::Info);
+    }
+
+    // ── #478: provenance + deadline, as a declared matrix ───────────
+    //
+    // The PAIR is the point. A test on only the no-CoS model would pass a
+    // build that always emitted `WcttNotComputed`; a test on only the
+    // CoS model would pass the 0 ps bug itself. Both arms must disagree.
+    //
+    // The template varies exactly one line per row, so a row's verdict is
+    // attributable to that line and nothing else.
+    fn provenance_model(cos: Option<u8>, deadline: Option<&str>) -> String {
+        let mut props = String::new();
+        if let Some(c) = cos {
+            props.push_str(&format!("        Spar_TSN::Class_of_Service => {c};\n"));
+        }
+        if let Some(d) = deadline {
+            props.push_str(&format!("        Timing_Properties::Deadline => {d};\n"));
+        }
+        format!(
+            r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 100000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+    properties
+      Spar_Network::Output_Rate => 1000000 bitsps;
+{props}  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      a  : device d.impl;
+      b  : device d.impl;
+      sw : bus eth.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#
+        )
+    }
+
+    /// A stream crossing one CONTRIBUTING hop and one DEFERRING hop.
+    ///
+    /// `provenance_model` above is single-bus, so it can only produce "all
+    /// hops contributed" or "none did" — the two extremes. The middle case
+    /// needs a mixed chain: a FIFO switch, which always contributes a delay
+    /// term, in series with a TSN switch, which defers when
+    /// `Class_of_Service` is unreadable at the source.
+    fn mixed_chain_model(cos: Option<u8>) -> String {
+        let props = match cos {
+            Some(c) => format!("      Spar_TSN::Class_of_Service => {c};\n"),
+            None => String::new(),
+        };
+        format!(
+            r#"
+package Net
+public
+
+  bus fifo_eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+  end fifo_eth;
+  bus implementation fifo_eth.impl
+  end fifo_eth.impl;
+
+  bus tsn_eth
+    properties
+      Spar_Network::Switch_Type        => TSN;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+      Spar_TSN::Gate_Control_List      => "0:5000:0x80;5000:5000:0x7F";
+  end tsn_eth;
+  bus implementation tsn_eth.impl
+  end tsn_eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+    properties
+      Spar_Network::Output_Rate => 1000000 bitsps;
+{props}  end d;
+  device implementation d.impl
+  end d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw1 : bus fifo_eth.impl;
+      sw2 : bus tsn_eth.impl;
+      a   : device d.impl;
+      b   : device d.impl;
+    connections
+      c_sw1_a : bus access sw1 -> a.net;
+      c_sw2_b : bus access sw2 -> b.net;
+      data1   : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw1), reference (sw2));
+  end Sys.impl;
+end Net;
+"#
+        )
+    }
+
+    fn mixed_chain_diags(cos: Option<u8>) -> Vec<AnalysisDiagnostic> {
+        let src = mixed_chain_model(cos);
+        let inst = instantiate(&src, "Net", "Sys", "impl");
+        WcttAnalysis::default().analyze(&inst)
+    }
+
+    fn provenance_diags(cos: Option<u8>, deadline: Option<&str>) -> Vec<AnalysisDiagnostic> {
+        let src = provenance_model(cos, deadline);
+        let inst = instantiate(&src, "Net", "Sys", "impl");
+        WcttAnalysis::default().analyze(&inst)
+    }
+
+    fn has(diags: &[AnalysisDiagnostic], prefix: &str) -> bool {
+        diags.iter().any(|d| d.message.starts_with(prefix))
+    }
+
+    /// The MIDDLE case, and the one `codecov/patch` caught this PR shipping
+    /// untested: some hops contributed, others did not.
+    ///
+    /// `WcttPartialBound` existed in this PR's first revision with ZERO tests
+    /// reaching it — a diagnostic branch that emitted nothing any oracle read,
+    /// in the PR whose own thesis is that "nothing happened" must render
+    /// differently from "it worked". The non-required coverage check was the
+    /// only thing that noticed.
+    ///
+    /// The label on the BOUND is the load-bearing assertion, not the warning:
+    /// the original #478 bug was a figure claiming `(2 hops)` while carrying
+    /// the contribution of none. Here one hop of two contributes, so the bound
+    /// must say `(1 hop)` — the count it actually covers.
+    #[test]
+    fn a_partial_bound_warns_and_labels_the_hops_it_actually_covers() {
+        let d = mixed_chain_diags(None);
+        let partial = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttPartialBound"))
+            .unwrap_or_else(|| panic!("expected WcttPartialBound: {d:#?}"));
+        assert_eq!(
+            partial.severity,
+            Severity::Warning,
+            "a partial bound must outrank an ordinary one: at Info it is \
+             indistinguishable from the complete bound printed beside it"
+        );
+        assert!(
+            partial.message.contains("covers 1 of 2 hops"),
+            "the warning must name both counts: {}",
+            partial.message
+        );
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("(1 hop)"),
+            "the bound must be labelled with the hops that CONTRIBUTED: {}",
+            bound.message
+        );
+        assert!(
+            !bound.message.contains("(2 hops)"),
+            "claiming 2 hops while one contributed nothing is the #478 bug: {}",
+            bound.message
+        );
+    }
+
+    /// The other arm, and without it the test above would pass a build that
+    /// emitted `WcttPartialBound` unconditionally and always under-labelled
+    /// the hop count. Same chain, CoS now readable, so BOTH hops contribute.
+    #[test]
+    fn a_complete_bound_on_the_same_chain_carries_no_partial_warning() {
+        let d = mixed_chain_diags(Some(6));
+        assert!(
+            !has(&d, "WcttPartialBound"),
+            "every hop contributed; a partial warning here would be false: {d:#?}"
+        );
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("(2 hops)"),
+            "both hops contributed, so the label must say so: {}",
+            bound.message
+        );
+    }
+
+    #[test]
+    fn a_bound_no_hop_contributed_to_is_an_error_not_a_zero() {
+        // No CoS => every TSN hop defers => zero contributions. Before #478
+        // this printed `WcttBound ... 0 ps (1 hop)` at severity Info, exit 0,
+        // which passed WCTT_Budget and `spar verify`.
+        let d = provenance_diags(None, None);
+        assert!(
+            has(&d, "WcttNotComputed"),
+            "a bound no hop contributed to must be an Error: {d:#?}"
+        );
+        assert!(
+            !has(&d, "WcttBound"),
+            "it must NOT also emit a bound figure — that is the defect: {d:#?}"
+        );
+        let e = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttNotComputed"))
+            .unwrap();
+        assert_eq!(
+            e.severity,
+            Severity::Error,
+            "Info would leave it invisible to every gate"
+        );
+    }
+
+    #[test]
+    fn the_provenance_gate_discriminates() {
+        // THE OTHER ARM. With a CoS the TAS dispatch contributes, so a real
+        // bound must appear and the error must not. Without this case a build
+        // that emitted WcttNotComputed unconditionally would pass the test
+        // above.
+        let d = provenance_diags(Some(7), None);
+        assert!(has(&d, "WcttBound"), "expected a derived bound: {d:#?}");
+        assert!(
+            !has(&d, "WcttNotComputed"),
+            "a derived bound must not be reported as not computed: {d:#?}"
+        );
+    }
+
+    /// THE BOUNDARY, which the over/under pair could not reach.
+    ///
+    /// `cargo-mutants` found the survivor this closes: replacing `>` with `>=`
+    /// in the deadline comparison survived the whole suite. The over-deadline
+    /// case uses a bound far above its deadline and the within-deadline case
+    /// one far below, so neither can distinguish `>` from `>=` — only a bound
+    /// EXACTLY equal to its deadline can.
+    ///
+    /// And the semantics are not arbitrary: a deadline is MET when completion
+    /// is at or before it, so an exactly-on-time stream conforms. `>=` would
+    /// report a conforming stream as a violation — a false positive on the
+    /// most safety-relevant boundary there is, since a system tuned right to
+    /// its deadline is exactly what a designer aims for.
+    ///
+    /// The literal is this fixture's measured bound. If the fixture's timing
+    /// changes, this test fails loudly rather than silently ceasing to sit on
+    /// the boundary — which is the failure mode of a boundary test written
+    /// against a value that drifted.
+    #[test]
+    fn a_bound_exactly_equal_to_its_deadline_is_met_not_exceeded() {
+        let d = provenance_diags(Some(6), Some("366440000 ps"));
+        let bound = d
+            .iter()
+            .find(|x| x.message.starts_with("WcttBound"))
+            .unwrap_or_else(|| panic!("expected WcttBound: {d:#?}"));
+        assert!(
+            bound.message.contains("366440000 ps"),
+            "this test only sits on the boundary while the fixture's bound IS the \
+             declared deadline; the bound has moved, so re-derive the literal: {}",
+            bound.message
+        );
+        assert!(
+            !has(&d, "WcttExceedsDeadline"),
+            "a bound EQUAL to its deadline meets it — `>=` here would fail a \
+             conforming stream: {d:#?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_over_its_declared_deadline_is_an_error() {
+        // `Timing_Properties::Deadline` had ZERO occurrences in this file
+        // before #478: the only numeric gate was WCTT_Budget on a bus, read
+        // from the first hop only.
+        let d = provenance_diags(Some(7), Some("1 ns"));
+        assert!(
+            has(&d, "WcttExceedsDeadline"),
+            "a bound over its own declared deadline must fail: {d:#?}"
+        );
+    }
+
+    #[test]
+    fn a_bound_within_its_deadline_is_not_flagged() {
+        // The discriminating half: a checker that flagged every declared
+        // deadline would pass the test above and be useless.
+        let d = provenance_diags(Some(7), Some("10 sec"));
+        assert!(
+            !has(&d, "WcttExceedsDeadline"),
+            "a met deadline must not be flagged: {d:#?}"
+        );
+        assert!(has(&d, "WcttBound"), "and the bound still reports: {d:#?}");
+    }
+
+    #[test]
+    fn an_undeclared_deadline_is_not_a_violation() {
+        // Absence of a declared deadline is not a breach of one. Without this
+        // case, defaulting the deadline to zero would pass both rows above.
+        let d = provenance_diags(Some(7), None);
+        assert!(
+            !has(&d, "WcttExceedsDeadline"),
+            "no declared deadline means nothing to exceed: {d:#?}"
+        );
     }
 
     // ── Test 15: TSN preemption shrinks the per-hop blocking term ────
