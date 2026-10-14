@@ -6929,10 +6929,10 @@ artifacts:
       separate defect with its own confirmation below and needs the HIR flow
       resolution changed, not the comparison.
 
-      IMPLEMENTED 2026-10-14 — PARTIALLY, and the status says so. Three of the
-      four clauses shipped (range, standard property set, Error severity, and
-      then the flow's own association); the below-minimum check did not, and
-      the requirement stays `implemented` rather than `verified` until it does.
+      COMPLETE 2026-10-14. All clauses shipped, in order: the range and the
+      standard property set, the Error severity, the flow's own association,
+      and finally the below-minimum check — which had to wait for
+      REQ-ANALYSIS-LATENCY-BEST-CASE-001 to make the best case real.
 
       SHIPPED. `get_latency_budget` reads `Latency` as a RANGE (a scalar is an
       upper bound only, never `min == max`), and searches the property set the
@@ -6964,15 +6964,28 @@ artifacts:
       silent; flow breached + owner met fires), because either case alone
       passes a wrong precedence.
 
-      NOT SHIPPED, AND DELIBERATELY: the below-MINIMUM check. `best_case_ps` is
-      not a best case — it sums `get_execution_time`, documented as the
-      WORST-case execution time, which is why a flow of two 20..40 ms devices
-      reports `[80.000 ms .. 80.000 ms]` rather than 40..80. A minimum check
-      over that figure compares an INFLATED lower bound, so it would stay
-      silent on real violations whenever the inflated sum cleared the minimum:
-      unsound in exactly the direction #455's kill-criterion needs. Blocked on
-      REQ-ANALYSIS-LATENCY-BEST-CASE-001. A test pins that no below-minimum
-      diagnostic ships in the meantime.
+      THE BELOW-MINIMUM CHECK, SHIPPED LAST AND ON PURPOSE. It was withheld
+      while `best_case_ps` summed WORST-case execution times: a minimum check
+      over that inflated figure would have stayed silent on real violations,
+      unsound in exactly the direction #455's kill-criterion needs. A test
+      pinned that no below-minimum diagnostic shipped meanwhile, and it FAILED
+      the moment the check was added — which was its job. Once the best case
+      was real it was retired, not weakened.
+
+      The diagnostic says what the analysis can actually know. `best_case_ps`
+      is a LOWER bound on any realised latency, so `best >= min` GUARANTEES the
+      minimum is met and `best < min` means the flow CAN complete faster than
+      its budget allows — worded as "can", not "does". A scalar budget has no
+      minimum. End to end, two 20..40 ms devices (best case 40 ms):
+
+        { Latency => 50 ms .. 500 ms; }   exit 0 -> exit 1  [ERROR] below the declared minimum
+        { Latency => 40 ms .. 500 ms; }   exit 0 -> exit 0  (exactly at the minimum meets it)
+        { Latency => 30 ms .. 500 ms; }   exit 0 -> exit 0
+
+      Four mutants of the new check, each SURVIVING the suite without its case
+      and each now killed by exactly one test: never-fires, `<` -> `<=`, a
+      scalar's maximum used as a minimum (which would fail every scalar-budgeted
+      flow against its own "minimum"), and Error downgraded to Warning.
 
       ORACLE. Nine tests; every mutant of the shipped behaviour is killed, most
       by exactly one test. Two existing negative tests became VACUOUS the moment
@@ -6981,7 +6994,7 @@ artifacts:
       assumed: `>` -> `>=` SURVIVED the at-bound test before the fix and is
       caught by it after. `scalar-becomes-min` survived the whole analysis suite
       because nothing consumes `min_ps` yet, so it is pinned at the accessor.
-    status: implemented
+    status: verified
     release: v0.46.0
     tags: [analysis, latency, budget, bug, provenance]
 

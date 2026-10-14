@@ -363,17 +363,38 @@ impl Analysis for LatencyAnalysis {
             // models that are over budget today and were told so only at
             // Warning.
             //
-            // UPPER BOUND ONLY, deliberately. A declared minimum is read but
-            // not checked, because `best_case_ps` is not a best case: it sums
-            // `get_execution_time`, which is the WORST-case execution time. A
-            // below-minimum test against that figure compares an inflated lower
-            // bound and would miss real violations — unsound in exactly the
-            // direction the check exists for. It needs a true best case first.
+            // BOTH ENDS. The minimum became checkable once `best_case_ps`
+            // became a real best case (REQ-ANALYSIS-LATENCY-BEST-CASE-001);
+            // before that it summed WORST-case execution times and a minimum
+            // check over it would have stayed silent on real violations.
+            // `best_case_ps` is a LOWER bound on any realised latency, so
+            // `best >= min` GUARANTEES the minimum is met, while `best < min`
+            // means the flow CAN complete faster than its budget allows. A
+            // scalar budget has no minimum and is never checked below.
             //
-            // `>` not `>=`: a flow whose worst case equals its budget meets it.
+            // `>` / `<`, not `>=` / `<=`: a flow that lands exactly on a
+            // bound meets it.
             let owner_props = instance.properties_for(e2e.owner);
-            if let Some(budget) =
-                get_latency_budget(&e2e.properties).or_else(|| get_latency_budget(owner_props))
+            let budget =
+                get_latency_budget(&e2e.properties).or_else(|| get_latency_budget(owner_props));
+            if let Some(budget) = budget
+                && let Some(min_ps) = budget.min_ps
+                && best_case_ps < min_ps
+            {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "end-to-end flow '{}' best-case latency {:.3} ms is below the declared \
+                         minimum {:.3} ms — the flow can complete faster than its budget allows",
+                        e2e.name,
+                        best_ms,
+                        min_ps as f64 / 1_000_000_000.0,
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+            if let Some(budget) = budget
                 && worst_case_ps > budget.max_ps
             {
                 let bound_ms = budget.max_ps as f64 / 1_000_000_000.0;
@@ -1669,25 +1690,58 @@ mod tests {
         assert!(reported_range(&d).contains("[40.000 ms .. 40.000 ms]"));
     }
 
-    /// The declared MINIMUM is read but deliberately NOT enforced, and this
-    /// pins that decision so it cannot be reversed without the reason below
-    /// being addressed. `best_case_ps` sums `get_execution_time`, which is the
-    /// WORST-case execution time, so it is not a best case. Here it reads
-    /// 10 ms against a declared minimum of 50 ms: a below-minimum check over
-    /// that figure would fire here, and — worse — would stay silent on real
-    /// violations whenever the inflated figure happened to clear the minimum.
-    /// Unsound in exactly the direction it exists for. It needs a true best
-    /// case first.
+    fn below_minimum(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|x| x.message.contains("below the declared minimum"))
+            .collect()
+    }
+
+    /// The minimum is now enforced. It was withheld while `best_case_ps` was a
+    /// sum of WORST-case execution times — a test pinned that no below-minimum
+    /// diagnostic shipped until that changed, and it failed the moment this
+    /// check was added, which is what it was for. Fixture: best case 5 + 5 =
+    /// 10 ms against a declared minimum of 50 ms.
     #[test]
-    fn a_declared_minimum_is_not_checked_against_a_sum_of_wcets() {
+    fn a_flow_that_can_beat_its_declared_minimum_is_an_error() {
         let d = budget_fixture("Timing_Properties", Some("50 ms .. 100 ms"));
+        let b = below_minimum(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "best case 10 ms is under the 50 ms minimum: {d:#?}"
+        );
+        assert_eq!(b[0].severity, Severity::Error);
         assert!(
-            breaches(&d).is_empty(),
-            "30 ms is within the 100 ms maximum: {d:#?}"
+            b[0].message.contains("minimum 50.000 ms"),
+            "{}",
+            b[0].message
         );
         assert!(
-            !d.iter().any(|x| x.message.contains("below")),
-            "no below-minimum diagnostic may ship over an inflated best case: {d:#?}"
+            breaches(&d).is_empty(),
+            "worst case 30 ms is within 100 ms: {d:#?}"
+        );
+    }
+
+    /// The boundary: a best case EXACTLY at the minimum meets it. Without this
+    /// a `<=` would pass every other test.
+    #[test]
+    fn a_flow_exactly_at_its_declared_minimum_meets_it() {
+        let d = budget_fixture("Timing_Properties", Some("10 ms .. 100 ms"));
+        assert!(
+            below_minimum(&d).is_empty(),
+            "best case 10 ms meets a 10 ms minimum: {d:#?}"
+        );
+    }
+
+    /// A scalar budget is an upper bound only and has NO minimum. Read as
+    /// `min == max`, every flow under a scalar budget would fail its own
+    /// "minimum" — here 10 ms against 100 ms.
+    #[test]
+    fn a_scalar_budget_has_no_minimum_to_breach() {
+        let d = budget_fixture("Timing_Properties", Some("100 ms"));
+        assert!(
+            below_minimum(&d).is_empty(),
+            "a scalar budget sets no minimum: {d:#?}"
         );
     }
     #[test]
