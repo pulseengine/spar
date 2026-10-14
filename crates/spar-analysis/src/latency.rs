@@ -585,6 +585,29 @@ fn expand_flow_steps(
     out
 }
 
+/// The components an end-to-end flow passes through, in order, resolved exactly
+/// as `LatencyAnalysis` resolves them: a `sub.flow` segment whose child carries
+/// an implementation of `flow` is replaced by the components that
+/// implementation names (descending), anything else contributes the child
+/// itself. Segments that resolve to no child are omitted.
+///
+/// Callers must first reject a flow with [`EndToEndFlowInstance::nested_segment`]
+/// (latency skips such a flow); on one this would resolve the wrong component.
+///
+/// [`EndToEndFlowInstance::nested_segment`]: spar_hir_def::instance::EndToEndFlowInstance::nested_segment
+pub fn flow_components(
+    instance: &SystemInstance,
+    e2e: &spar_hir_def::instance::EndToEndFlowInstance,
+) -> Vec<ComponentInstanceIdx> {
+    expand_flow_steps(instance, e2e.owner, &e2e.segments)
+        .into_iter()
+        .filter_map(|s| match s {
+            FlowStep::Comp { idx, .. } => idx,
+            FlowStep::Conn { .. } => None,
+        })
+        .collect()
+}
+
 fn push_comp_step(
     instance: &SystemInstance,
     ctx: ComponentInstanceIdx,
@@ -3078,6 +3101,34 @@ mod tests {
             .unwrap_or_else(|| panic!("no missing-timing warning: {diags:?}"))
             .message
             .clone()
+    }
+
+    /// `flow_components` resolves a flow as latency does: through `app`'s flow
+    /// implementation to the threads (not `app`), in order; a leaf `app` (no
+    /// implementation) stays itself.
+    #[test]
+    fn flow_components_descends_like_latency() {
+        let m = descent_model(Some(full_impl()));
+        let (root, app) = (m.root, m.app);
+        let inst = m.b.build(root);
+        let e2e = inst.end_to_end_flows.iter().next().unwrap().1;
+        let comps = flow_components(&inst, e2e);
+        let names: Vec<&str> = comps
+            .iter()
+            .map(|&c| inst.component(c).name.as_str())
+            .collect();
+        assert_eq!(names, ["s", "caller", "consumer", "k"]);
+        assert!(!comps.contains(&app));
+
+        let m = descent_model(None);
+        let root = m.root;
+        let inst = m.b.build(root);
+        let e2e = inst.end_to_end_flows.iter().next().unwrap().1;
+        let names: Vec<&str> = flow_components(&inst, e2e)
+            .iter()
+            .map(|&c| inst.component(c).name.as_str())
+            .collect();
+        assert_eq!(names, ["s", "app", "k"]);
     }
 
     #[test]

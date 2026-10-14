@@ -93,6 +93,9 @@ public
     features
       out_p: out data port;
       in_p:  in data port;
+    flows
+      src_flow: flow source out_p;
+      sink_flow: flow sink in_p;
   end Proc;
 
   process implementation Proc.Impl
@@ -102,6 +105,9 @@ public
     connections
       c_out: port producer.out_p -> out_p;
       c_in:  port in_p -> consumer.in_p;
+    flows
+      src_flow: flow source producer.f1 -> c_out -> out_p;
+      sink_flow: flow sink in_p -> c_in -> consumer.f2;
   end Proc.Impl;
 
   system Sys
@@ -115,7 +121,7 @@ public
     connections
       loop_back: port app.out_p -> app.in_p;
     flows
-      chain: end to end flow app.producer.f1 -> loop_back -> app.consumer.f2;
+      chain: end to end flow app.src_flow -> loop_back -> app.sink_flow;
     properties
       Actual_Processor_Binding => (reference (cpu1)) applies to app.producer;
       Actual_Processor_Binding => (reference (cpu2)) applies to app.consumer;
@@ -124,13 +130,9 @@ end Chain;
 ";
 
 // A flat latency chain: source and sink are DIRECT subcomponents of the
-// flow's owner, each carrying `Compute_Execution_Time`, so the latency pass
-// resolves both ends and derives a real figure. CHAIN_MODEL nests the threads
-// inside a `process`, where the end-to-end flow segments resolve to the
-// enclosing process (which has no timing) until process descent lands
-// (spar#455 item 3) — so CHAIN_MODEL yields a "not computed" latency today,
-// not a derived breakdown. This model exercises the breakdown capability that
-// exists now, without depending on that unimplemented descent.
+// flow's owner, each carrying `Compute_Execution_Time`. CHAIN_MODEL reaches
+// timed threads inside a `process` through flow specifications on the process
+// (descent); this one needs no descent at all.
 const LATENCY_CHAIN_MODEL: &str = "\
 package LatChain
 public
@@ -245,10 +247,8 @@ fn enumerate_tool_lists_all_processors_no_allowed_targets() {
 
 #[test]
 fn check_chain_tool_returns_latency_breakdown() {
-    // Uses the flat LATENCY_CHAIN_MODEL so both flow ends resolve to timed
-    // components and a real breakdown is derived. The nested CHAIN_MODEL would
-    // report "latency: not computed" here because its segments resolve to the
-    // enclosing process until process descent lands (spar#455 item 3).
+    // The flat LATENCY_CHAIN_MODEL: both flow ends are direct subcomponents,
+    // so a real breakdown is derived without any flow-implementation descent.
     let path = write_model("lat_chain", LATENCY_CHAIN_MODEL);
     let args = json!({
         "model": path.to_string_lossy(),
@@ -547,5 +547,178 @@ pub(crate) fn unwrap_ok(r: ToolResult) -> Value {
     match r {
         ToolResult::Ok(v) => v,
         ToolResult::Error { code, message } => panic!("expected Ok, got Error[{code}] {message}"),
+    }
+}
+
+// ── check_chain resolves flows the way latency does (#455) ───────────
+
+const LEGAL_DECL: &str = "chain: end to end flow app.src_flow -> loop_back -> app.sink_flow;";
+const NESTED_DECL: &str = "chain: end to end flow app.producer.f1 -> loop_back -> app.consumer.f2;";
+
+/// CHAIN_MODEL with its single end-to-end flow declaration replaced.
+fn chain_model_with(decls: &str) -> String {
+    let model = CHAIN_MODEL.replace(LEGAL_DECL, decls);
+    assert_ne!(model, CHAIN_MODEL, "declaration not found");
+    model
+}
+
+fn chain_args(path: &std::path::Path, source: &str, sink: &str) -> Value {
+    json!({
+        "model": path.to_string_lossy(),
+        "root":  "Chain::Sys.Impl",
+        "source_thread": source,
+        "sink_thread":   sink,
+    })
+}
+
+fn ok_payload(result: ToolResult) -> Value {
+    match result {
+        ToolResult::Ok(v) => v,
+        ToolResult::Error { code, message } => panic!("expected Ok, got Error[{code}] {message}"),
+    }
+}
+
+fn error_of(result: ToolResult) -> (&'static str, String) {
+    match result {
+        ToolResult::Error { code, message } => (code, message),
+        ToolResult::Ok(v) => panic!("expected an Error, got Ok({v})"),
+    }
+}
+
+/// A flow reaching the threads through the process's flow implementation
+/// (`app.src_flow` / `app.sink_flow`) reports the THREADS it passes through.
+#[test]
+fn check_chain_reports_threads_reached_through_a_flow_implementation() {
+    let path = write_model("legal_threads", CHAIN_MODEL);
+    for (source, sink) in [
+        ("producer", "consumer"),
+        ("app.producer", "app.consumer"),
+        ("PRODUCER", "Consumer"),
+    ] {
+        let p = ok_payload(check_chain::call(&chain_args(&path, source, sink)));
+        assert_eq!(p["flow_name"].as_str(), Some("chain"), "{p}");
+        assert!(
+            p["source_thread"]
+                .as_str()
+                .unwrap()
+                .ends_with("/app/producer"),
+            "{p}"
+        );
+        assert!(
+            p["sink_thread"]
+                .as_str()
+                .unwrap()
+                .ends_with("/app/consumer"),
+            "{p}"
+        );
+        // The figure is derived from the threads' Compute_Execution_Time.
+        let diags = p["diagnostics"].as_array().unwrap();
+        assert!(
+            diags.iter().any(|d| {
+                let m = d["message"].as_str().unwrap();
+                m.contains("'chain' latency:") && !m.contains("not computed")
+            }),
+            "{p}"
+        );
+        assert_eq!(p["has_errors"].as_bool(), Some(false), "{p}");
+    }
+    cleanup(&path);
+}
+
+/// Source and sink are the FIRST and LAST component reached, not any
+/// component or any dotted part of a segment.
+#[test]
+fn check_chain_matches_first_and_last_component_only() {
+    let path = write_model("first_last", CHAIN_MODEL);
+    for (source, sink) in [
+        ("consumer", "producer"), // reversed
+        ("producer", "producer"), // sink is not the last component
+        ("consumer", "consumer"), // source is not the first component
+    ] {
+        let (code, _) = error_of(check_chain::call(&chain_args(&path, source, sink)));
+        assert_eq!(code, "CHAIN_NOT_FOUND", "{source:?} -> {sink:?}");
+    }
+    cleanup(&path);
+}
+
+/// The old matcher accepted any `.`-separated part of a segment, so the
+/// subcomponent `app` (a process, never a chain end) and the flow names
+/// `src_flow` / `sink_flow` matched. They name no component the flow reaches.
+#[test]
+fn check_chain_no_longer_matches_any_dotted_part_of_a_segment() {
+    let path = write_model("dotted_part", CHAIN_MODEL);
+    for (source, sink) in [
+        ("app", "app"),
+        ("src_flow", "sink_flow"),
+        ("app.src_flow", "app.sink_flow"),
+    ] {
+        let (code, _) = error_of(check_chain::call(&chain_args(&path, source, sink)));
+        assert_eq!(code, "CHAIN_NOT_FOUND", "{source:?} -> {sink:?}");
+    }
+    cleanup(&path);
+}
+
+/// A nested (`app.producer.f1`) segment is not AADL: the tool reports the
+/// flow as invalid with flow_check's reason, instead of matching a thread.
+#[test]
+fn check_chain_reports_a_nested_segment_flow_as_invalid() {
+    let path = write_model("nested", &chain_model_with(NESTED_DECL));
+    let (code, message) = error_of(check_chain::call(&chain_args(
+        &path, "producer", "consumer",
+    )));
+    assert_eq!(code, "CHAIN_INVALID");
+    for want in [
+        "end-to-end flow `chain`",
+        "segment 'app.producer.f1' at position 0 reaches inside subcomponent 'app'",
+        "not analysed",
+    ] {
+        assert!(message.contains(want), "want `{want}` in {message}");
+    }
+    cleanup(&path);
+}
+
+/// Only the requested flow's rejection is reported, and both names must be
+/// mentioned for a rejected flow to be reported at all.
+#[test]
+fn check_chain_invalid_reports_only_the_named_flow() {
+    let decls = "bad: end to end flow app.producer.f1 -> loop_back -> app.consumer.f2;\n      \
+                 other: end to end flow app.consumer.f2 -> loop_back -> app.producer.f1;";
+    let path = write_model("nested_two", &chain_model_with(decls));
+    let (code, message) = error_of(check_chain::call(&chain_args(
+        &path, "producer", "consumer",
+    )));
+    assert_eq!(code, "CHAIN_INVALID");
+    assert!(message.contains("flow `bad`"), "{message}");
+    assert!(message.contains("flow 'bad'"), "{message}");
+    assert!(!message.contains("'other'"), "{message}");
+    // Case-insensitive mention.
+    let (code, _) = error_of(check_chain::call(&chain_args(
+        &path, "PRODUCER", "CONSUMER",
+    )));
+    assert_eq!(code, "CHAIN_INVALID");
+    // One name alone does not select a rejected flow.
+    for (source, sink) in [("producer", "nobody"), ("nobody", "consumer")] {
+        let (code, _) = error_of(check_chain::call(&chain_args(&path, source, sink)));
+        assert_eq!(code, "CHAIN_NOT_FOUND", "{source:?} -> {sink:?}");
+    }
+    cleanup(&path);
+}
+
+/// A valid flow wins over a rejected one that mentions the same names,
+/// whichever is declared first.
+#[test]
+fn check_chain_prefers_a_valid_flow_over_a_rejected_one() {
+    let bad = "bad: end to end flow app.producer.f1 -> loop_back -> app.consumer.f2;";
+    let good = "good: end to end flow app.src_flow -> loop_back -> app.sink_flow;";
+    for decls in [
+        format!("{bad}\n      {good}"),
+        format!("{good}\n      {bad}"),
+    ] {
+        let path = write_model("both", &chain_model_with(&decls));
+        let p = ok_payload(check_chain::call(&chain_args(
+            &path, "producer", "consumer",
+        )));
+        assert_eq!(p["flow_name"].as_str(), Some("good"), "{p}");
+        cleanup(&path);
     }
 }
