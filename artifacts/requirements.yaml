@@ -6734,6 +6734,79 @@ artifacts:
     release: v0.45.0
     tags: [cli, analysis, exit-code, sarif, json, defect, ci, v0450]
 
+  - id: REQ-CLI-INSTANCE-EXITCODE-001
+    type: requirement
+    title: The instance --analyze exit code shall reflect the analysis verdict in every output format
+    description: >
+      Reported 2026-10-10 (#472), spotted while fixing #469 and named as an
+      explicit out-of-scope sibling by REQ-CLI-ANALYZE-EXITCODE-001 itself:
+      "the `instance` path is a known, out-of-scope sibling for a successor
+      issue". This is that successor. It closes the class that requirement left
+      alive next door.
+
+      `spar instance --analyze` exited 0 on a model carrying analysis ERRORS
+      whenever `--format json` was selected; only `--format text` exited 1.
+      This is a STRONGER defect than #469's in `analyze`. In `analyze` the
+      structured arms ran the analysis and the Error reached the emitted
+      document — only the exit code was lost. In `instance` the JSON arm
+      `return`ed BEFORE the `--analyze` block, so with `--format json` the
+      analysis was never run at all: `--analyze` was silently dropped, the JSON
+      payload carried neither the diagnostics nor the verdict, and the command
+      exited 0. A caller checking the exit code read an erroring model as
+      analysed-clean, and a caller parsing the payload found nothing to parse.
+      As in pre-#471 `analyze`, an unrecognised `--format` fell through to the
+      text renderer, where a typo'd format on a clean model exited 0.
+
+      THE REQUIREMENT, identical in shape to REQ-CLI-ANALYZE-EXITCODE-001. The
+      exit code is a property of the analysis RESULT, not of how the result is
+      rendered. `spar instance` shall, when `--analyze` is set, run the analysis
+      ONCE and compute the verdict — a model carrying any `Severity::Error`
+      diagnostic — before any format dispatch, and return the SAME code for the
+      same model in text and json: zero when clean, non-zero (1) when it carries
+      errors. With `--analyze`, the json document shall CARRY the analysis
+      diagnostics. An unrecognised `--format` shall FAIL (exit 1, nothing on
+      stdout), not fall through to the text renderer.
+
+      WHERE. `crates/spar-cli/src/main.rs::cmd_instance`: the HIR-def instance is
+      built unconditionally (it is needed for analysis in every format, not only
+      the text path); `diagnostics` and `has_errors` are computed once before a
+      `match` on `--format` that prints per-format and falls through to one
+      shared exit gate, replacing the early `return` in the json arm. The new
+      `InstanceAnalyzeJsonOutput` wraps the instance tree plus the analysis
+      diagnostics for `--format json --analyze`; without `--analyze`,
+      `instance --format json` still emits the bare instance tree,
+      byte-identical to before (verified: the top-level keys are unchanged).
+
+      ORACLE, non-vacuous — `crates/spar-cli/tests/instance_exit_code_formats.rs`.
+      The oracle is the MATRIX the issue demands: {text, json} × {clean model,
+      error model} = four exit-code assertions, every row passing `--analyze`
+      (the gate only exists when an analysis runs). A test that only checked the
+      error model would pass a build that exited 1 unconditionally; one that only
+      checked a single format would miss the defect. The clean rows (exit 0) and
+      the error rows (exit != 0) disagree on every format, so a build constant in
+      either direction fails half the matrix. The error case additionally
+      asserts the json document STILL CARRIES the `not computed` diagnostic,
+      rejecting both a "fix" that exits 1 by dropping the payload and the pre-fix
+      state where `--analyze` was dropped entirely. The unknown-format case
+      asserts failure plus empty stdout on BOTH a clean and an error model.
+      Non-vacuity verified against the pre-fix binary: 4 of 5 tests red pre-fix
+      (the clean row alone green), all 5 green post-fix. The CLEAN/ERROR model
+      bodies are the same pair `analyze_exit_code_formats` uses — only the
+      package names differ (renamed to disambiguate the two test files), so the
+      analysis-relevant content is identical and the two sibling commands are
+      pinned against the same inputs.
+
+      NOT CLAIMED: that any consumer is currently mis-reporting because of this.
+      spar's own CI does not shell out to `spar instance --analyze --format
+      json`, and no live consumer was inspected. The defect is in spar
+      regardless of who relies on it. Also not claimed: that the analysis
+      figures `instance --analyze` reports are correct — this requirement
+      verifies that a non-zero VERDICT is not lost in a structured format, the
+      same property as its `analyze` sibling, not analysis accuracy.
+    status: verified
+    release: v0.46.0
+    tags: [cli, analysis, exit-code, json, defect, ci, v0460]
+
   - id: REQ-GUARD-CLOSING-KEYWORD-001
     type: requirement
     title: A closing keyword shall not reach a merge, in a PR body or a commit message
