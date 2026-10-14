@@ -284,6 +284,7 @@ mod tests {
                 name: Name::new(name),
                 owner,
                 segments: segments.into_iter().map(Name::new).collect(),
+                properties: Default::default(),
             });
         }
 

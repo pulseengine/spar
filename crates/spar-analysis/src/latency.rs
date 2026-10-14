@@ -334,10 +334,11 @@ impl Analysis for LatencyAnalysis {
                 }
             }
 
-            // Compare against the declared budget (#455). This reads the
-            // OWNER component's `Latency`; the flow's own `{ Latency => .. }`
-            // association is dropped at instantiation and is not reachable
-            // here yet (REQ-ANALYSIS-LATENCY-BUDGET-001, clause b).
+            // Compare against the declared budget (#455). The flow's OWN
+            // `{ Latency => .. }` association is read first — that is where
+            // AADL puts a flow's budget — and the OWNER component's `Latency`
+            // only when the flow declares none, which keeps models written
+            // against the old owner-only lookup working.
             //
             // ERROR, not Warning: a budget breach that exits 0 is a budget
             // nobody can gate on, the same defect REQ-CLI-ANALYZE-EXITCODE-001
@@ -354,7 +355,8 @@ impl Analysis for LatencyAnalysis {
             //
             // `>` not `>=`: a flow whose worst case equals its budget meets it.
             let owner_props = instance.properties_for(e2e.owner);
-            if let Some(budget) = get_latency_budget(owner_props)
+            if let Some(budget) =
+                get_latency_budget(&e2e.properties).or_else(|| get_latency_budget(owner_props))
                 && worst_case_ps > budget.max_ps
             {
                 let bound_ms = budget.max_ps as f64 / 1_000_000_000.0;
@@ -637,6 +639,30 @@ mod tests {
                 name: Name::new(name),
                 owner,
                 segments: segments.into_iter().map(Name::new).collect(),
+                properties: Default::default(),
+            });
+        }
+
+        /// Put a property on an END-TO-END FLOW itself — the
+        /// `{ Latency => .. }` block — rather than on a component.
+        fn set_e2e_property(&mut self, flow: &str, set: &str, name: &str, value: &str) {
+            let (_, f) = self
+                .end_to_end_flows
+                .iter_mut()
+                .find(|(_, f)| f.name.as_str() == flow)
+                .unwrap_or_else(|| panic!("no flow {flow}"));
+            f.properties.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
             });
         }
 
@@ -1416,6 +1442,15 @@ mod tests {
     // Each test varies ONE dimension of the budget declaration, so a mutant of
     // that dimension is attributable to exactly one test.
     fn budget_fixture(set: &str, value: Option<&str>) -> Vec<AnalysisDiagnostic> {
+        budget_fixture_with_flow(set, value, None)
+    }
+
+    /// As `budget_fixture`, plus an optional budget on the FLOW's own block.
+    fn budget_fixture_with_flow(
+        set: &str,
+        owner_value: Option<&str>,
+        flow_value: Option<&str>,
+    ) -> Vec<AnalysisDiagnostic> {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
         let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
@@ -1436,8 +1471,11 @@ mod tests {
         b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
         b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "5 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
-        if let Some(v) = value {
+        if let Some(v) = owner_value {
             b.set_property(root, set, "Latency", v);
+        }
+        if let Some(v) = flow_value {
+            b.set_e2e_property("e2e_flow", "", "Latency", v);
         }
         let inst = b.build(root);
         LatencyAnalysis.analyze(&inst)
@@ -1505,6 +1543,47 @@ mod tests {
         assert!(
             breaches(&d).is_empty(),
             "no budget declared, nothing to breach: {d:#?}"
+        );
+    }
+
+    /// Clause (b): a budget on the FLOW's own block — where AADL puts it, and
+    /// exactly how #455 declared `300 ns .. 250 us` — is read. With no owner
+    /// budget at all, only the flow's can have fired.
+    #[test]
+    fn a_budget_on_the_flow_itself_is_read() {
+        let d = budget_fixture_with_flow("Timing_Properties", None, Some("1 ms .. 10 ms"));
+        let b = breaches(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "30 ms against the flow's own 10 ms must breach: {d:#?}"
+        );
+        assert_eq!(b[0].severity, Severity::Error);
+    }
+
+    /// The flow's own budget WINS over the owner's — in both directions,
+    /// because either one alone is passable by a wrong precedence. Here the
+    /// flow is met and the owner would breach: reading the owner first fires.
+    #[test]
+    fn the_flows_own_budget_takes_precedence_when_it_is_met() {
+        let d = budget_fixture_with_flow("Timing_Properties", Some("1 ms"), Some("1 ms .. 100 ms"));
+        assert!(
+            breaches(&d).is_empty(),
+            "the flow's own 100 ms is met; the owner's 1 ms must not override it: {d:#?}"
+        );
+    }
+
+    /// ...and here the flow breaches while the owner would be met: reading the
+    /// owner first stays silent on a real violation.
+    #[test]
+    fn the_flows_own_budget_takes_precedence_when_it_is_breached() {
+        let d = budget_fixture_with_flow("Timing_Properties", Some("500 ms"), Some("10 ms"));
+        let b = breaches(&d);
+        assert_eq!(b.len(), 1, "the flow's own 10 ms is breached: {d:#?}");
+        assert!(
+            b[0].message.contains("exceeds bound 10.000 ms"),
+            "{}",
+            b[0].message
         );
     }
 

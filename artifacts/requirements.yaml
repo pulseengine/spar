@@ -6929,9 +6929,10 @@ artifacts:
       separate defect with its own confirmation below and needs the HIR flow
       resolution changed, not the comparison.
 
-      IMPLEMENTED 2026-10-14 — PARTIALLY, and the status says so. Two of the
-      requirement's clauses shipped; two did not, and it stays `implemented`
-      rather than `verified` until they do.
+      IMPLEMENTED 2026-10-14 — PARTIALLY, and the status says so. Three of the
+      four clauses shipped (range, standard property set, Error severity, and
+      then the flow's own association); the below-minimum check did not, and
+      the requirement stays `implemented` rather than `verified` until it does.
 
       SHIPPED. `get_latency_budget` reads `Latency` as a RANGE (a scalar is an
       upper bound only, never `min == max`), and searches the property set the
@@ -6949,11 +6950,19 @@ artifacts:
         range budget that is MET               exit 0 -> exit 0
         no budget at all                       exit 0 -> exit 0
 
-      NOT SHIPPED (b): the flow's OWN `{ Latency => .. }` association. The item
-      tree carries `property_associations` on an end-to-end flow, but
-      `EndToEndFlowInstance` has no properties at all — they are dropped at
-      instantiation. Reading them needs a HIR change and a side-table like
-      `connection_property_maps`.
+      CLAUSE (b) SHIPPED in a follow-up: the flow's OWN `{ Latency => .. }`
+      association is now read, first, with the owner component's `Latency` as
+      the fallback. The item tree always lowered it — verified by probe, both
+      the bare and the qualified spelling — and instantiation dropped it, so
+      `EndToEndFlowInstance` gained a `properties` field. A side-table on
+      `SystemInstance` was the first design and was rejected on measurement:
+      ~70 exhaustive struct literals across a dozen crates, against 4
+      construction sites for the flow instance. End to end through the CLI,
+      #455's own declaration form — the budget inside the flow's braces — goes
+      exit 0 -> exit 1 in both spellings, and a met flow budget stays at 0.
+      Precedence is pinned in BOTH directions (flow met + owner breached is
+      silent; flow breached + owner met fires), because either case alone
+      passes a wrong precedence.
 
       NOT SHIPPED, AND DELIBERATELY: the below-MINIMUM check. `best_case_ps` is
       not a best case — it sums `get_execution_time`, documented as the

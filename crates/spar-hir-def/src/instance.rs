@@ -160,6 +160,14 @@ pub struct EndToEndFlowInstance {
     pub owner: ComponentInstanceIdx,
     /// Segments: alternating subcomponent and connection names.
     pub segments: Vec<Name>,
+    /// Property associations written on the flow itself —
+    /// `e2e : end to end flow a.s -> h -> b.k { Latency => 1 ms .. 10 ms; };`.
+    ///
+    /// The item tree always lowered these, and instantiation used to drop
+    /// them, so an analysis could only ever see the OWNER component's
+    /// properties. That is where AADL does NOT put a flow's latency budget, so
+    /// a budget declared the standard way was never compared (#455).
+    pub properties: PropertyMap,
 }
 
 /// A mode instance created from a mode declaration in a component type or implementation.
@@ -1390,7 +1398,13 @@ struct ImplChainResult {
         Option<ConnectionEnd>,
         Vec<Name>,
     )>,
-    e2e_flows: Vec<(Name, Vec<Name>)>,
+    /// (name, segments, item-tree index, the flow's own property associations)
+    e2e_flows: Vec<(
+        Name,
+        Vec<Name>,
+        usize,
+        Vec<crate::item_tree::PropertyAssociationIdx>,
+    )>,
     modes: Vec<(Name, bool)>,
     mode_transitions: Vec<(Option<Name>, Name, Name, Vec<Name>)>,
     call_map: FxHashMap<String, Name>,
@@ -1729,12 +1743,30 @@ impl<'a> Builder<'a> {
                 // STPA-REQ-010: Validate array index bounds in connection endpoints.
                 self.validate_connection_array_indices(idx, &conn_indices);
 
-                // Instantiate end-to-end flows
-                for (e2e_name, segments) in e2e_data {
+                // Instantiate end-to-end flows, carrying the flow's OWN
+                // property associations rather than dropping them (#455).
+                for (e2e_name, segments, tree_idx, pa_indices) in e2e_data {
+                    let mut properties = PropertyMap::new();
+                    // A flow-local block has no business carrying `applies to`;
+                    // anything routed there is collected and discarded rather
+                    // than re-targeted at the owner component.
+                    let mut ignored_applies_to = Vec::new();
+                    if let Some(tree) = self.scope.tree(tree_idx) {
+                        for pa_idx in pa_indices {
+                            let pa = &tree.property_associations[pa_idx];
+                            Self::push_property_association(
+                                pa,
+                                idx,
+                                &mut properties,
+                                &mut ignored_applies_to,
+                            );
+                        }
+                    }
                     self.end_to_end_flows.alloc(EndToEndFlowInstance {
                         name: e2e_name,
                         owner: idx,
                         segments,
+                        properties,
                     });
                 }
 
@@ -1881,9 +1913,12 @@ impl<'a> Builder<'a> {
         for &e2e_idx in &ci.end_to_end_flows {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let e2e = &tree.end_to_end_flows[e2e_idx];
-                result
-                    .e2e_flows
-                    .push((e2e.name.clone(), e2e.segments.clone()));
+                result.e2e_flows.push((
+                    e2e.name.clone(),
+                    e2e.segments.clone(),
+                    loc.tree,
+                    e2e.property_associations.clone(),
+                ));
             }
         }
 
@@ -4583,6 +4618,72 @@ end p;
         let tree = crate::file_item_tree(&db, file);
         let scope = GlobalScope::from_trees(vec![tree]);
         SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(ty), &Name::new(imp))
+    }
+
+    /// #455, REQ-ANALYSIS-LATENCY-BUDGET-001 clause (b): an end-to-end flow's
+    /// OWN property associations survive instantiation.
+    ///
+    /// The item tree always lowered them; instantiation dropped them, so every
+    /// analysis saw only the owner component. That is where AADL does not put
+    /// a flow's latency budget. A flow with no block must stay empty, so a
+    /// build that copied the owner's properties onto every flow cannot pass.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_end_to_end_flows_own_properties_survive_instantiation() {
+        let src = r#"package P
+public
+  device dv
+    features
+      o : out event data port;
+      i : in event data port;
+    flows
+      s : flow source o;
+      k : flow sink i;
+  end dv;
+  device implementation dv.impl
+  end dv.impl;
+  system S
+  end S;
+  system implementation S.impl
+    subcomponents
+      a : device dv.impl;
+      b : device dv.impl;
+    connections
+      h : port a.o -> b.i;
+    flows
+      ranged : end to end flow a.s -> h -> b.k { Latency => 1 ms .. 10 ms; };
+      qualified : end to end flow a.s -> h -> b.k { Communication_Properties::Latency => 2 ms; };
+      bare : end to end flow a.s -> h -> b.k;
+    properties
+      Latency => 500 ms;
+  end S.impl;
+end P;
+"#;
+        let inst = instantiate_aadl(src, "P", "S", "impl");
+        let flow = |n: &str| {
+            inst.end_to_end_flows
+                .iter()
+                .map(|(_, f)| f)
+                .find(|f| f.name.as_str() == n)
+                .unwrap_or_else(|| panic!("flow {n} not instantiated"))
+        };
+        assert_eq!(
+            flow("ranged").properties.get("", "Latency"),
+            Some("1 ms .. 10 ms"),
+            "the flow's own range must reach the instance"
+        );
+        assert_eq!(
+            flow("qualified")
+                .properties
+                .get("Communication_Properties", "Latency"),
+            Some("2 ms"),
+            "the qualified spelling must reach the instance under its own set"
+        );
+        assert!(
+            flow("bare").properties.get("", "Latency").is_none(),
+            "a flow with no block must not inherit the OWNER's 500 ms — that would \
+             make the owner-fallback indistinguishable from the flow's own budget"
+        );
     }
 
     #[test]
