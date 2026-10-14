@@ -6803,6 +6803,120 @@ artifacts:
     release: v0.45.0
     tags: [process, guardrail, ci, tooling, traceability]
 
+  - id: REQ-ANALYSIS-LATENCY-BUDGET-001
+    type: requirement
+    title: A declared end-to-end latency budget shall be compared, in the form AADL actually uses, and shall be able to fail
+    description: >
+      #455 items (2) and (3), which v0.45.0 did NOT ship. Item (1) did — and was
+      re-verified against the PUBLISHED v0.45.0 binary, which now says
+      "latency: not computed — no element on the flow carries timing properties"
+      at Error with exit 1, where v0.40.0 printed
+      "[INFO] latency: [0.000 ms .. 0.000 ms]".
+
+      THE COMPARISON IS NOT MISSING. latency.rs:338 already has it. It is
+      reachable only through a spelling nobody writes, and even then it cannot
+      fail the build. Measured 2026-10-14 against the published v0.45.0 binary
+      over a 4-way matrix — two devices summing 40..80 ms against a 1 ms budget,
+      so any firing check must trip:
+
+        budget on OWNER component, SCALAR `1 ms`     -> FIRES (Warning), exit 0
+        budget on OWNER component, RANGE `300ns..1ms` -> silent,          exit 0
+        budget in the FLOW's own `{ }`, SCALAR        -> silent,          exit 0
+        budget in the FLOW's own `{ }`, RANGE         -> silent,          exit 0
+
+      THREE INDEPENDENT DEFECTS, each on its own sufficient to make an 80x
+      overrun invisible:
+
+      (a) ONLY A SCALAR IS READ. `get_timing_property(owner_props, "Latency")`
+      wants a single Time. A Time_Range is ignored — and a range is how a
+      latency budget is written, including #455's own `300 ns .. 250 us`. So the
+      reported case could not have fired whatever else was true.
+
+      (b) ONLY THE OWNER COMPONENT'S PROPERTIES ARE READ, never the flow's own
+      `{ Latency => ... }` association, which is where AADL puts a flow's
+      budget. The source comment says "if set on the E2E flow" and then reads
+      `instance.properties_for(e2e.owner)` — the comment describes the intent
+      and the code does something else.
+
+      (c) IT IS A WARNING AND ONE-SIDED. Even in the one firing combination the
+      run exits 0, so a CI gate reading the exit code sees success at 80x over
+      budget. And the predicate is `worst_case_ps > latency_bound` only: a
+      computed value BELOW a declared minimum is never checked, which is why a
+      one-sided `computed > max` test cannot defeat the reporter's
+      kill-criterion.
+
+      ORACLE IS THE MATRIX ABOVE, and the pair in each dimension is the point.
+      A fix tested only on (owner, scalar) would pass today's build. A fix
+      tested only on an over-budget flow would pass a build that flags
+      everything. Required rows: over-budget FIRES in all four placements;
+      within-budget stays silent in all four; a computed value below a declared
+      MINIMUM fires; and an absent budget is not a violation, so defaulting a
+      missing bound to zero cannot pass.
+
+      SEVERITY IS A DELIBERATE DECISION, not an oversight to sweep: promoting
+      this to Error changes the exit code for existing models that are over
+      budget today and silent about it. That is the intent —
+      REQ-CLI-ANALYZE-EXITCODE-001 made the exit code mean something, and a
+      budget nobody can gate on is the same defect class one layer up. It must
+      be called out in the release notes as a behaviour change.
+
+      NOT CLAIMED: that item (3), process descent, is covered here. It is a
+      separate defect with its own confirmation below and needs the HIR flow
+      resolution changed, not the comparison.
+    status: proposed
+    release: v0.46.0
+    tags: [analysis, latency, budget, bug, provenance]
+
+  - id: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
+    type: requirement
+    title: A flow element naming a thread inside a process shall resolve to that thread, not to the enclosing process
+    description: >
+      #455 item (3), RE-CONFIRMED against the PUBLISHED v0.45.0 binary on
+      2026-10-14 rather than carried over from the report.
+
+      A system-level end-to-end flow written as
+      `app.caller.lock_flow -> app.c_hand -> app.consumer.consumer_flow`, where
+      `caller` and `consumer` are threads inside process `app` and BOTH declare
+      `Compute_Execution_Time`, produces:
+
+        [WARNING] latency: end-to-end flow 'req_to_done': components without
+                  timing properties: app, app
+
+      The DOUBLED `app, app` is the diagnostic, exactly as #455 named it: both
+      nested element references resolved to the enclosing PROCESS, not to the
+      threads they name. The threads' 5..10 ms and 7..12 ms are never read, so
+      there is no spelling of the flow that reaches thread timing.
+
+      WHAT CHANGED IN v0.45.0 AND WHAT DID NOT. The consequence is no longer a
+      silent `0.000 ms` at Info — REQ-ANALYSIS-LATENCY-PROVENANCE-001 turned it
+      into "not computed" at Error, exit 1. So the UNSAFE rendering is gone and
+      a user is now told the figure does not exist. The resolution defect itself
+      is untouched: the analysis still cannot see the threads.
+
+      THIS MASKS REQ-ANALYSIS-LATENCY-BUDGET-001 ON THE REPORTED MODEL, which
+      is worth recording because it changes the test order: on a flow that
+      descends into a process there is no computed figure to compare, so the
+      budget check cannot be exercised there at all. The budget requirement's
+      oracle therefore uses DEVICE subcomponents, whose timing is reachable
+      without descent. The two are independent fixes and the budget one must not
+      wait on this.
+
+      ORACLE: the reported two-thread-in-a-process model. Pre-fix it emits
+      `app, app` and no derived figure; post-fix the flow's latency must be
+      derived from the threads' Compute_Execution_Time, and the duplicate-name
+      warning must be gone. A test asserting only "no warning" would pass a
+      build that stopped emitting the warning without fixing resolution, so the
+      derived FIGURE is the assertion.
+
+      NOT CLAIMED: that AADL requires this spelling to be legal. If spar's
+      position is that a system-level flow may not name a thread nested inside a
+      process, then the correct fix is to REJECT the flow with a diagnostic
+      saying so — what is not acceptable is resolving it silently to the wrong
+      component and reporting the consequence as missing properties.
+    status: proposed
+    release: v0.46.0
+    tags: [analysis, latency, hir, flows, bug]
+
   - id: REQ-TSN-YANG-DEPLOYABLE-001
     type: requirement
     title: An emitted switch configuration shall be activatable, or the export shall fail
