@@ -155,6 +155,30 @@ impl Analysis for FlowCheckAnalysis {
                 });
             }
 
+            // A nested segment is not AADL, and every analysis that walks the
+            // flow would resolve it to the wrong component (#455 item 3).
+            // Reject it here, once; latency skips a flow rejected here.
+            if let Some((i, seg)) = e2e.nested_segment() {
+                let kind = if i % 2 == 0 { "flow" } else { "connection" };
+                let head = seg.as_str().split('.').next().unwrap_or("");
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "end-to-end flow '{}': {} segment '{}' at position {} reaches \
+                         inside subcomponent '{}', which AADL does not allow — a flow \
+                         element is `subcomponent.flow` and a connection element is a \
+                         bare name; declare a flow specification on '{}' and implement \
+                         it there (latency descends into that implementation), or write \
+                         the end-to-end flow in the implementation of '{}'; this flow \
+                         is not analysed",
+                        e2e.name, kind, seg, i, head, head, head
+                    ),
+                    path: path.clone(),
+                    analysis: self.name().to_string(),
+                });
+                continue;
+            }
+
             // Validate that odd-indexed segments (connections) reference
             // actual connection names in the owner component
             for (i, seg) in e2e.segments.iter().enumerate() {
@@ -262,6 +286,7 @@ mod tests {
                 name: Name::new(name),
                 kind,
                 owner,
+                impl_segments: None,
             });
             self.components[owner].flows.push(idx);
         }
@@ -284,6 +309,7 @@ mod tests {
                 name: Name::new(name),
                 owner,
                 segments: segments.into_iter().map(Name::new).collect(),
+                properties: Default::default(),
             });
         }
 
@@ -619,5 +645,60 @@ mod tests {
             .filter(|d| d.message.contains("lacks both"))
             .collect();
         assert_eq!(warnings.len(), 1, "path needs both directions: {:?}", diags);
+    }
+
+    /// #455 item 3: a segment reaching inside a subcomponent is rejected as an
+    /// ERROR naming the segment, its kind, and its position — for a nested
+    /// FLOW element and for a dotted CONNECTION element (which the
+    /// unknown-connection check below used to exempt for containing a dot).
+    #[test]
+    fn e2e_nested_segment_is_an_error_naming_kind_and_position() {
+        for (segs, kind, pos, seg) in [
+            (
+                vec!["app.caller.lock_flow", "c_hand", "app.consumer.f"],
+                "flow",
+                0,
+                "app.caller.lock_flow",
+            ),
+            (
+                vec!["a.src", "app.c_hand", "b.sink"],
+                "connection",
+                1,
+                "app.c_hand",
+            ),
+        ] {
+            let mut b = TestBuilder::new();
+            let root = b.add_component("root", ComponentCategory::System, None);
+            let app = b.add_component("app", ComponentCategory::Process, Some(root));
+            b.set_children(root, vec![app]);
+            b.add_e2e("req_to_done", root, segs);
+            let diags = FlowCheckAnalysis.analyze(&b.build(root));
+
+            let errors: Vec<_> = diags
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .collect();
+            assert_eq!(errors.len(), 1, "{diags:?}");
+            let want = format!("{kind} segment '{seg}' at position {pos} reaches inside");
+            assert!(
+                errors[0].message.contains(&want),
+                "want `{want}` in {diags:?}"
+            );
+            assert!(errors[0].message.contains("not analysed"), "{diags:?}");
+            // Both legal routes are advised, and both are measured to derive
+            // a figure (tests/flow_nested_segment.rs).
+            assert!(
+                errors[0]
+                    .message
+                    .contains("write the end-to-end flow in the implementation of 'app'"),
+                "{diags:?}"
+            );
+            assert!(
+                errors[0]
+                    .message
+                    .contains("declare a flow specification on 'app' and implement it there"),
+                "{diags:?}"
+            );
+        }
     }
 }

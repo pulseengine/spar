@@ -21,11 +21,12 @@
 //! existing scalar `Bus_Properties::Latency` / `Transmission_Time` path
 //! and produce byte-identical output to v0.7.0.
 
-use spar_hir_def::instance::SystemInstance;
-use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::item_tree::{ComponentCategory, FlowSegment};
 
 use crate::property_accessors::{
-    get_execution_time, get_latency_budget, get_processor_binding, get_timing_property,
+    get_execution_time, get_execution_time_range, get_latency_budget, get_processor_binding,
+    get_timing_property,
 };
 use crate::wctt::compute_network_hop_latency;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -46,10 +47,12 @@ impl Analysis for LatencyAnalysis {
 
         for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
             let owner_path = component_path(instance, e2e.owner);
-            let owner = instance.component(e2e.owner);
 
             if e2e.segments.is_empty() {
                 continue; // flow_check already reports this
+            }
+            if e2e.nested_segment().is_some() {
+                continue; // flow_check rejects it: not AADL, would resolve to the wrong component
             }
 
             // Walk segments: odd indices are connections, even indices are
@@ -94,11 +97,16 @@ impl Analysis for LatencyAnalysis {
             // double-count the network contribution.
             let mut suppress_next_legacy_overhead = false;
 
-            for (i, seg) in e2e.segments.iter().enumerate() {
-                if i % 2 == 1 {
+            // Expand the flow into resolved steps, descending into the flow
+            // IMPLEMENTATION of any `sub.flow` that has one
+            // (REQ-ANALYSIS-FLOW-THREAD-DESCENT-001).
+            let steps = expand_flow_steps(instance, e2e.owner, &e2e.segments);
+
+            for step in &steps {
+                if let FlowStep::Conn { ctx, name } = step {
                     // Connection segment.
                     connection_count += 1;
-                    let conn_name = seg.as_str();
+                    let conn_name = name.as_str();
 
                     // Try the WCTT-derived bound first. When the
                     // connection has no `Actual_Connection_Binding` to a
@@ -106,9 +114,7 @@ impl Analysis for LatencyAnalysis {
                     // None and we fall through to the legacy
                     // sampling-delay + inter-processor-overhead path on
                     // the next component segment.
-                    if let Some(hop_lat) =
-                        compute_network_hop_latency(instance, e2e.owner, conn_name)
-                    {
+                    if let Some(hop_lat) = compute_network_hop_latency(instance, *ctx, conn_name) {
                         if hop_lat.unservable {
                             // Mirror wctt.rs's `WcttUnservable` Error and
                             // stop aggregating this chain — we cannot
@@ -143,31 +149,41 @@ impl Analysis for LatencyAnalysis {
                     continue;
                 }
 
-                // Flow segment: "subcomponent.flow_name" or just a name
-                let seg_str = seg.as_str();
-                let subcomp_name = seg_str.split('.').next().unwrap_or(seg_str);
+                let FlowStep::Comp {
+                    idx: child,
+                    name: subcomp_name,
+                } = step
+                else {
+                    continue;
+                };
 
-                // Find the subcomponent in the owner's children
-                let child = owner.children.iter().find(|&&child_idx| {
-                    instance
-                        .component(child_idx)
-                        .name
-                        .as_str()
-                        .eq_ignore_ascii_case(subcomp_name)
-                });
-
-                if let Some(&child_idx) = child {
+                if let Some(child_idx) = *child {
                     let child_comp = instance.component(child_idx);
                     let child_props = instance.properties_for(child_idx);
 
-                    // Get execution time contribution
-                    let exec_ps = get_execution_time(child_props);
+                    // Execution-time contribution: the BEST case takes the
+                    // range's MINIMUM, the worst case its maximum
+                    // (REQ-ANALYSIS-LATENCY-BEST-CASE-001). This used to add
+                    // `get_execution_time` — the worst case — to BOTH, so a
+                    // flow of two `20 ms .. 40 ms` components reported
+                    // `[80 .. 80]` instead of `[40 .. 80]`: a lower bound that
+                    // was really an upper bound, which no below-minimum check
+                    // could be built on.
+                    //
+                    // The worst case is unchanged bit for bit — both accessors
+                    // read the same property and parse the maximum identically
+                    // — so every upper-bound and budget comparison is untouched.
+                    // If a range's MINIMUM fails to parse, fall back to the
+                    // worst case for both ends rather than lose an execution
+                    // time this flow has today.
+                    let exec_range = get_execution_time_range(child_props)
+                        .or_else(|| get_execution_time(child_props).map(|w| (w, w)));
                     // Get period for sampling delay
                     let period_ps = get_timing_property(child_props, "Period");
 
-                    if let Some(exec) = exec_ps {
-                        best_case_ps = best_case_ps.saturating_add(exec);
-                        worst_case_ps = worst_case_ps.saturating_add(exec);
+                    if let Some((bcet, wcet)) = exec_range {
+                        best_case_ps = best_case_ps.saturating_add(bcet);
+                        worst_case_ps = worst_case_ps.saturating_add(wcet);
                         saw_exec = true;
                     } else {
                         missing_timing.push(child_comp.name.as_str().to_string());
@@ -212,7 +228,8 @@ impl Analysis for LatencyAnalysis {
                     if !crossed_boundary && prev_processor.is_some() {
                         compute_hops.push(ComputeHopAnnotation {
                             component_name: child_comp.name.as_str().to_string(),
-                            exec_ps: exec_ps.unwrap_or(0),
+                            // the WORST case, exactly as before this change
+                            exec_ps: exec_range.map(|(_, wcet)| wcet).unwrap_or(0),
                         });
                     }
 
@@ -220,7 +237,7 @@ impl Analysis for LatencyAnalysis {
                         prev_processor = cur_binding;
                     }
                 } else {
-                    missing_timing.push(subcomp_name.to_string());
+                    missing_timing.push(subcomp_name.clone());
                 }
 
                 // Reset the WCTT-suppression latch now that the next
@@ -334,10 +351,11 @@ impl Analysis for LatencyAnalysis {
                 }
             }
 
-            // Compare against the declared budget (#455). This reads the
-            // OWNER component's `Latency`; the flow's own `{ Latency => .. }`
-            // association is dropped at instantiation and is not reachable
-            // here yet (REQ-ANALYSIS-LATENCY-BUDGET-001, clause b).
+            // Compare against the declared budget (#455). The flow's OWN
+            // `{ Latency => .. }` association is read first — that is where
+            // AADL puts a flow's budget — and the OWNER component's `Latency`
+            // only when the flow declares none, which keeps models written
+            // against the old owner-only lookup working.
             //
             // ERROR, not Warning: a budget breach that exits 0 is a budget
             // nobody can gate on, the same defect REQ-CLI-ANALYZE-EXITCODE-001
@@ -345,16 +363,38 @@ impl Analysis for LatencyAnalysis {
             // models that are over budget today and were told so only at
             // Warning.
             //
-            // UPPER BOUND ONLY, deliberately. A declared minimum is read but
-            // not checked, because `best_case_ps` is not a best case: it sums
-            // `get_execution_time`, which is the WORST-case execution time. A
-            // below-minimum test against that figure compares an inflated lower
-            // bound and would miss real violations — unsound in exactly the
-            // direction the check exists for. It needs a true best case first.
+            // BOTH ENDS. The minimum became checkable once `best_case_ps`
+            // became a real best case (REQ-ANALYSIS-LATENCY-BEST-CASE-001);
+            // before that it summed WORST-case execution times and a minimum
+            // check over it would have stayed silent on real violations.
+            // `best_case_ps` is a LOWER bound on any realised latency, so
+            // `best >= min` GUARANTEES the minimum is met, while `best < min`
+            // means the flow CAN complete faster than its budget allows. A
+            // scalar budget has no minimum and is never checked below.
             //
-            // `>` not `>=`: a flow whose worst case equals its budget meets it.
+            // `>` / `<`, not `>=` / `<=`: a flow that lands exactly on a
+            // bound meets it.
             let owner_props = instance.properties_for(e2e.owner);
-            if let Some(budget) = get_latency_budget(owner_props)
+            let budget =
+                get_latency_budget(&e2e.properties).or_else(|| get_latency_budget(owner_props));
+            if let Some(budget) = budget
+                && let Some(min_ps) = budget.min_ps
+                && best_case_ps < min_ps
+            {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "end-to-end flow '{}' best-case latency {:.3} ms is below the declared \
+                         minimum {:.3} ms — the flow can complete faster than its budget allows",
+                        e2e.name,
+                        best_ms,
+                        min_ps as f64 / 1_000_000_000.0,
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            }
+            if let Some(budget) = budget
                 && worst_case_ps > budget.max_ps
             {
                 let bound_ms = budget.max_ps as f64 / 1_000_000_000.0;
@@ -390,27 +430,21 @@ impl Analysis for LatencyAnalysis {
 
         if has_multi_processors {
             for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
-                let owner = instance.component(e2e.owner);
                 let owner_path = component_path(instance, e2e.owner);
 
                 // Collect processor bindings for each flow segment component
                 let mut prev_binding: Option<String> = None;
                 let mut crosses_boundary = false;
 
-                for (i, seg) in e2e.segments.iter().enumerate() {
-                    if i % 2 == 1 {
-                        continue; // skip connection segments
-                    }
-                    let subcomp_name = seg.as_str().split('.').next().unwrap_or(seg.as_str());
-                    let child = owner.children.iter().find(|&&child_idx| {
-                        instance
-                            .component(child_idx)
-                            .name
-                            .as_str()
-                            .eq_ignore_ascii_case(subcomp_name)
-                    });
-
-                    if let Some(&child_idx) = child {
+                for step in expand_flow_steps(instance, e2e.owner, &e2e.segments) {
+                    // Component steps only; connections carry no binding. The
+                    // expansion is the one the latency walk above used, so a
+                    // crossing it applied is the crossing this note reports.
+                    if let FlowStep::Comp {
+                        idx: Some(child_idx),
+                        ..
+                    } = step
+                    {
                         let child_props = instance.properties_for(child_idx);
                         let binding = get_processor_binding(child_props);
 
@@ -472,6 +506,144 @@ impl Analysis for LatencyAnalysis {
 
         diags
     }
+}
+
+/// Deepest chain of `sub.flow` -> flow implementation -> `sub.flow` descents
+/// followed. Descent only ever moves to a CHILD, so the instance hierarchy
+/// already bounds it (a cycle is impossible); this is a defensive ceiling
+/// against a pathologically deep model, past which a flow is read as a leaf.
+const MAX_FLOW_DESCENT_DEPTH: usize = 16;
+
+/// One resolved element of an end-to-end flow, after descent.
+#[derive(Debug, PartialEq, Eq)]
+enum FlowStep {
+    /// A connection, looked up in `ctx` (the component whose scope declares it:
+    /// the flow's owner, or the component whose flow implementation named it).
+    Conn {
+        ctx: ComponentInstanceIdx,
+        name: String,
+    },
+    /// A component whose own timing is read; `idx` is `None` when the name
+    /// resolves to no child.
+    Comp {
+        idx: Option<ComponentInstanceIdx>,
+        name: String,
+    },
+}
+
+fn find_child(
+    instance: &SystemInstance,
+    ctx: ComponentInstanceIdx,
+    name: &str,
+) -> Option<ComponentInstanceIdx> {
+    instance.component(ctx).children.iter().copied().find(|&c| {
+        instance
+            .component(c)
+            .name
+            .as_str()
+            .eq_ignore_ascii_case(name)
+    })
+}
+
+/// Segments of `comp`'s implementation of flow spec `flow`, if it has one.
+fn flow_impl_segments<'a>(
+    instance: &'a SystemInstance,
+    comp: ComponentInstanceIdx,
+    flow: &str,
+) -> Option<&'a [FlowSegment]> {
+    instance
+        .component(comp)
+        .flows
+        .iter()
+        .map(|&f| &instance.flow_instances[f])
+        .find(|f| f.name.as_str().eq_ignore_ascii_case(flow))
+        .and_then(|f| f.impl_segments.as_deref())
+}
+
+/// Flatten an end-to-end flow's segments (alternating `sub.flow` / connection)
+/// into steps. A `sub.flow` whose child carries an implementation of `flow` is
+/// replaced by that implementation's steps, resolved in the CHILD's scope; the
+/// child's own timing is then not read (its threads' is). A child with no
+/// implementation of the flow, or whose implementation names no component, is a
+/// leaf and keeps the pre-descent behaviour.
+fn expand_flow_steps(
+    instance: &SystemInstance,
+    owner: ComponentInstanceIdx,
+    segments: &[spar_hir_def::name::Name],
+) -> Vec<FlowStep> {
+    let mut out = Vec::new();
+    for (i, seg) in segments.iter().enumerate() {
+        if i % 2 == 1 {
+            out.push(FlowStep::Conn {
+                ctx: owner,
+                name: seg.as_str().to_string(),
+            });
+        } else {
+            push_comp_step(instance, owner, seg.as_str(), 0, &mut out);
+        }
+    }
+    out
+}
+
+fn push_comp_step(
+    instance: &SystemInstance,
+    ctx: ComponentInstanceIdx,
+    seg: &str,
+    depth: usize,
+    out: &mut Vec<FlowStep>,
+) {
+    let (sub, flow) = match seg.split_once('.') {
+        Some((s, f)) => (s, Some(f)),
+        None => (seg, None),
+    };
+    let child = find_child(instance, ctx, sub);
+    if let (Some(child_idx), Some(flow)) = (child, flow)
+        && depth < MAX_FLOW_DESCENT_DEPTH
+        && let Some(segs) = flow_impl_segments(instance, child_idx, flow)
+    {
+        let before = out.len();
+        let last = segs.len().saturating_sub(1);
+        for (k, fs) in segs.iter().enumerate() {
+            match &fs.subcomponent {
+                Some(inner) => push_comp_step(
+                    instance,
+                    child_idx,
+                    &format!("{}.{}", inner, fs.element),
+                    depth + 1,
+                    out,
+                ),
+                None => {
+                    // An unqualified element is the component's own feature at
+                    // either end (`pin`, `pout`), contributing nothing; in the
+                    // interior it is a connection of the child. The
+                    // connection touching an own feature is the inner leg of
+                    // the connection the enclosing flow already counted
+                    // (`c1 : s.o -> app.pin` and `c_in : pin -> caller.i` are
+                    // one semantic hop), so it is not counted a second time.
+                    let is_end = k == 0 || k == last;
+                    let boundary = (k == 1 && segs[0].subcomponent.is_none())
+                        || (k + 1 == last && segs[last].subcomponent.is_none());
+                    if !is_end && !boundary {
+                        out.push(FlowStep::Conn {
+                            ctx: child_idx,
+                            name: fs.element.as_str().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+        if out[before..]
+            .iter()
+            .any(|s| matches!(s, FlowStep::Comp { .. }))
+        {
+            return;
+        }
+        out.truncate(before);
+    }
+    out.push(FlowStep::Comp {
+        idx: child,
+        name: sub.to_string(),
+    });
 }
 
 /// Per-hop bookkeeping for chains that mix WCET and WCTT contributions.
@@ -637,6 +809,30 @@ mod tests {
                 name: Name::new(name),
                 owner,
                 segments: segments.into_iter().map(Name::new).collect(),
+                properties: Default::default(),
+            });
+        }
+
+        /// Put a property on an END-TO-END FLOW itself — the
+        /// `{ Latency => .. }` block — rather than on a component.
+        fn set_e2e_property(&mut self, flow: &str, set: &str, name: &str, value: &str) {
+            let (_, f) = self
+                .end_to_end_flows
+                .iter_mut()
+                .find(|(_, f)| f.name.as_str() == flow)
+                .unwrap_or_else(|| panic!("no flow {flow}"));
+            f.properties.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
             });
         }
 
@@ -743,6 +939,59 @@ mod tests {
             infos[0].message.contains("34.000 ms"),
             "worst case should be 34ms: {}",
             infos[0].message
+        );
+    }
+
+    /// #455 item 3: a flow that reaches inside a subcomponent
+    /// (`app.caller.lock_flow`) is rejected by flow_check, so latency must
+    /// say NOTHING about it. Before, only the first dotted part was kept and
+    /// both thread references resolved to process `app`, giving the doubled
+    /// `components without timing properties: app, app` warning and a
+    /// `not computed` Error about components the flow never named. A legal
+    /// flow on the same instance is still reported, so this cannot pass by
+    /// the analysis going quiet altogether.
+    #[test]
+    fn latency_skips_a_flow_reaching_inside_a_subcomponent() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let app = b.add_component("app", ComponentCategory::Process, Some(root));
+        let caller = b.add_component("caller", ComponentCategory::Thread, Some(app));
+        let consumer = b.add_component("consumer", ComponentCategory::Thread, Some(app));
+        let src = b.add_component("src", ComponentCategory::Device, Some(root));
+        let dst = b.add_component("dst", ComponentCategory::Device, Some(root));
+        b.set_children(app, vec![caller, consumer]);
+        b.set_children(root, vec![app, src, dst]);
+        b.add_connection_inst("c1", root);
+        for (c, t) in [
+            (caller, "5 ms .. 10 ms"),
+            (consumer, "7 ms .. 12 ms"),
+            (src, "1 ms"),
+            (dst, "2 ms"),
+        ] {
+            b.set_property(c, "Timing_Properties", "Compute_Execution_Time", t);
+        }
+        b.add_e2e(
+            "nested",
+            root,
+            vec![
+                "app.caller.lock_flow",
+                "app.c_hand",
+                "app.consumer.consumer_flow",
+            ],
+        );
+        b.add_e2e("legal", root, vec!["src.f", "c1", "dst.f"]);
+
+        let diags = LatencyAnalysis.analyze(&b.build(root));
+
+        assert!(
+            diags.iter().all(|d| !d.message.contains("'nested'")),
+            "latency must not report on a rejected flow: {diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("'legal'") && d.message.contains("3.000 ms")),
+            "the legal flow must still be reported: {diags:?}"
         );
     }
 
@@ -1416,6 +1665,15 @@ mod tests {
     // Each test varies ONE dimension of the budget declaration, so a mutant of
     // that dimension is attributable to exactly one test.
     fn budget_fixture(set: &str, value: Option<&str>) -> Vec<AnalysisDiagnostic> {
+        budget_fixture_with_flow(set, value, None)
+    }
+
+    /// As `budget_fixture`, plus an optional budget on the FLOW's own block.
+    fn budget_fixture_with_flow(
+        set: &str,
+        owner_value: Option<&str>,
+        flow_value: Option<&str>,
+    ) -> Vec<AnalysisDiagnostic> {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
         let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
@@ -1436,8 +1694,11 @@ mod tests {
         b.set_property(sensor, "Timing_Properties", "Period", "10 ms");
         b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", "5 ms");
         b.set_property(ctrl, "Timing_Properties", "Period", "20 ms");
-        if let Some(v) = value {
+        if let Some(v) = owner_value {
             b.set_property(root, set, "Latency", v);
+        }
+        if let Some(v) = flow_value {
+            b.set_e2e_property("e2e_flow", "", "Latency", v);
         }
         let inst = b.build(root);
         LatencyAnalysis.analyze(&inst)
@@ -1508,25 +1769,164 @@ mod tests {
         );
     }
 
-    /// The declared MINIMUM is read but deliberately NOT enforced, and this
-    /// pins that decision so it cannot be reversed without the reason below
-    /// being addressed. `best_case_ps` sums `get_execution_time`, which is the
-    /// WORST-case execution time, so it is not a best case. Here it reads
-    /// 10 ms against a declared minimum of 50 ms: a below-minimum check over
-    /// that figure would fire here, and — worse — would stay silent on real
-    /// violations whenever the inflated figure happened to clear the minimum.
-    /// Unsound in exactly the direction it exists for. It needs a true best
-    /// case first.
+    /// Clause (b): a budget on the FLOW's own block — where AADL puts it, and
+    /// exactly how #455 declared `300 ns .. 250 us` — is read. With no owner
+    /// budget at all, only the flow's can have fired.
     #[test]
-    fn a_declared_minimum_is_not_checked_against_a_sum_of_wcets() {
-        let d = budget_fixture("Timing_Properties", Some("50 ms .. 100 ms"));
+    fn a_budget_on_the_flow_itself_is_read() {
+        let d = budget_fixture_with_flow("Timing_Properties", None, Some("1 ms .. 10 ms"));
+        let b = breaches(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "30 ms against the flow's own 10 ms must breach: {d:#?}"
+        );
+        assert_eq!(b[0].severity, Severity::Error);
+    }
+
+    /// The flow's own budget WINS over the owner's — in both directions,
+    /// because either one alone is passable by a wrong precedence. Here the
+    /// flow is met and the owner would breach: reading the owner first fires.
+    #[test]
+    fn the_flows_own_budget_takes_precedence_when_it_is_met() {
+        let d = budget_fixture_with_flow("Timing_Properties", Some("1 ms"), Some("1 ms .. 100 ms"));
         assert!(
             breaches(&d).is_empty(),
-            "30 ms is within the 100 ms maximum: {d:#?}"
+            "the flow's own 100 ms is met; the owner's 1 ms must not override it: {d:#?}"
+        );
+    }
+
+    /// ...and here the flow breaches while the owner would be met: reading the
+    /// owner first stays silent on a real violation.
+    #[test]
+    fn the_flows_own_budget_takes_precedence_when_it_is_breached() {
+        let d = budget_fixture_with_flow("Timing_Properties", Some("500 ms"), Some("10 ms"));
+        let b = breaches(&d);
+        assert_eq!(b.len(), 1, "the flow's own 10 ms is breached: {d:#?}");
+        assert!(
+            b[0].message.contains("exceeds bound 10.000 ms"),
+            "{}",
+            b[0].message
+        );
+    }
+
+    // ── REQ-ANALYSIS-LATENCY-BEST-CASE-001 ──────────────────────────────
+    //
+    // Before this, NO test used a RANGED execution time, so the whole suite
+    // was blind to both ends of the reported range: a mutant that made the
+    // WORST case take the minimum — an optimistic, unsafe bound on every model
+    // with a ranged execution time — survived all 944 analysis tests.
+
+    /// Two components, no Period (so no sampling term), each a ranged CET.
+    fn range_fixture(cet: &str) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(sensor, "Timing_Properties", "Compute_Execution_Time", cet);
+        b.set_property(ctrl, "Timing_Properties", "Compute_Execution_Time", cet);
+        let inst = b.build(root);
+        LatencyAnalysis.analyze(&inst)
+    }
+
+    fn reported_range(d: &[AnalysisDiagnostic]) -> String {
+        d.iter()
+            .find(|x| x.severity == Severity::Info && x.message.contains("latency: ["))
+            .map(|x| x.message.clone())
+            .unwrap_or_else(|| panic!("no derived latency reported: {d:#?}"))
+    }
+
+    /// The LOWER end is a best case: 20 + 20, not the 40 + 40 the old code
+    /// summed. Without this the lower bound was an upper bound, and no
+    /// below-minimum check could be built on it.
+    #[test]
+    fn a_ranged_execution_time_gives_a_real_best_case() {
+        let r = reported_range(&range_fixture("20 ms .. 40 ms"));
+        assert!(r.contains("[40.000 ms .."), "best case is 20 + 20 ms: {r}");
+    }
+
+    /// The UPPER end is untouched — this is the safety property of the change.
+    /// Pinned separately because a mutant that made the worst case take the
+    /// MINIMUM is optimistic, and it survived the entire suite before this.
+    #[test]
+    fn the_worst_case_is_still_the_sum_of_maxima() {
+        let r = reported_range(&range_fixture("20 ms .. 40 ms"));
+        assert!(r.contains(".. 80.000 ms]"), "worst case is 40 + 40 ms: {r}");
+    }
+
+    /// A range whose MINIMUM does not parse must not cost the flow its
+    /// execution time. The old accessor read only the maximum and so accepted
+    /// it; falling back to that keeps every model that computed a latency
+    /// before still computing one — here at [40 .. 40], not "not computed".
+    #[test]
+    fn a_malformed_minimum_does_not_lose_the_execution_time() {
+        let d = range_fixture("garbage .. 20 ms");
+        assert!(
+            !d.iter().any(|x| x.message.contains("not computed")),
+            "the maximum still parses, so the latency is still derivable: {d:#?}"
+        );
+        assert!(reported_range(&d).contains("[40.000 ms .. 40.000 ms]"));
+    }
+
+    fn below_minimum(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|x| x.message.contains("below the declared minimum"))
+            .collect()
+    }
+
+    /// The minimum is now enforced. It was withheld while `best_case_ps` was a
+    /// sum of WORST-case execution times — a test pinned that no below-minimum
+    /// diagnostic shipped until that changed, and it failed the moment this
+    /// check was added, which is what it was for. Fixture: best case 5 + 5 =
+    /// 10 ms against a declared minimum of 50 ms.
+    #[test]
+    fn a_flow_that_can_beat_its_declared_minimum_is_an_error() {
+        let d = budget_fixture("Timing_Properties", Some("50 ms .. 100 ms"));
+        let b = below_minimum(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "best case 10 ms is under the 50 ms minimum: {d:#?}"
+        );
+        assert_eq!(b[0].severity, Severity::Error);
+        assert!(
+            b[0].message.contains("minimum 50.000 ms"),
+            "{}",
+            b[0].message
         );
         assert!(
-            !d.iter().any(|x| x.message.contains("below")),
-            "no below-minimum diagnostic may ship over an inflated best case: {d:#?}"
+            breaches(&d).is_empty(),
+            "worst case 30 ms is within 100 ms: {d:#?}"
+        );
+    }
+
+    /// The boundary: a best case EXACTLY at the minimum meets it. Without this
+    /// a `<=` would pass every other test.
+    #[test]
+    fn a_flow_exactly_at_its_declared_minimum_meets_it() {
+        let d = budget_fixture("Timing_Properties", Some("10 ms .. 100 ms"));
+        assert!(
+            below_minimum(&d).is_empty(),
+            "best case 10 ms meets a 10 ms minimum: {d:#?}"
+        );
+    }
+
+    /// A scalar budget is an upper bound only and has NO minimum. Read as
+    /// `min == max`, every flow under a scalar budget would fail its own
+    /// "minimum" — here 10 ms against 100 ms.
+    #[test]
+    fn a_scalar_budget_has_no_minimum_to_breach() {
+        let d = budget_fixture("Timing_Properties", Some("100 ms"));
+        assert!(
+            below_minimum(&d).is_empty(),
+            "a scalar budget sets no minimum: {d:#?}"
         );
     }
     #[test]
@@ -2066,6 +2466,69 @@ mod tests {
     /// (canonical AADL behaviour — bindings inherit unless overridden
     /// per-connection), so both are network hops; actuator on the
     /// same CPU as controller is a compute hop. We therefore expect
+    /// The `[compute hop]` figure is a WORST case, and must stay one after
+    /// REQ-ANALYSIS-LATENCY-BEST-CASE-001 split the range into its two ends.
+    ///
+    /// Pinned because, before this, the printed millisecond value had NEVER
+    /// been asserted — `compute_then_network_then_compute` checks only the hop
+    /// COUNT, and every compute-hop fixture used a scalar execution time where
+    /// minimum and maximum coincide. A mutant reporting the hop's MINIMUM
+    /// survived the whole suite. Same chain as that test, but the compute hop
+    /// (the actuator, sharing cpu2 with the controller) runs `1 ms .. 3 ms`.
+    #[test]
+    fn a_compute_hop_reports_its_worst_case_execution_time() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let _cpu1 = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let _cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+        let sw = b.add_component("sw", ComponentCategory::Bus, Some(root));
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        let actuator = b.add_component("actuator", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![_cpu1, _cpu2, sw, sensor, ctrl, actuator]);
+        b.add_connection_with_endpoints("c1", root, "sensor", "out_p", "controller", "in_p");
+        b.add_connection_with_endpoints("c2", root, "controller", "out_p", "actuator", "in_p");
+        b.add_e2e(
+            "e2e_cross",
+            root,
+            vec!["sensor.src", "c1", "controller.pass", "c2", "actuator.sink"],
+        );
+        for (comp, cpu, cet) in [
+            (sensor, "cpu1", "1 ms"),
+            (ctrl, "cpu2", "1 ms"),
+            (actuator, "cpu2", "1 ms .. 3 ms"),
+        ] {
+            b.set_property(comp, "Timing_Properties", "Compute_Execution_Time", cet);
+            b.set_property(comp, "Timing_Properties", "Period", "10 ms");
+            b.set_property(
+                comp,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                &format!("reference ({})", cpu),
+            );
+        }
+        b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+        let inst = b.build(root);
+        let diags = LatencyAnalysis.analyze(&inst);
+        let hop = diags
+            .iter()
+            .find(|d| d.message.contains("'actuator' [compute hop]"))
+            .unwrap_or_else(|| panic!("expected the actuator compute hop: {diags:#?}"));
+        assert!(
+            hop.message.contains("[compute hop] 3.000 ms"),
+            "a compute hop is charged its WORST case, 3 ms, not its 1 ms minimum: {}",
+            hop.message
+        );
+    }
+
     /// `2 network hop` + `1 compute hop` in the LatencyHopMixed marker.
     /// This is the canonical "WCET+WCTT alternation is live" model.
     #[test]
@@ -2507,5 +2970,478 @@ mod tests {
                 d.message
             );
         }
+    }
+
+    // ── REQ-ANALYSIS-FLOW-THREAD-DESCENT-001 ────────────────────────────
+    //
+    // A system-level flow through `app.proc_flow` descends into the flow
+    // IMPLEMENTATION on `app`, so the threads' execution times, not `app`'s
+    // absent one, reach the latency.
+
+    fn seg(sub: Option<&str>, element: &str) -> FlowSegment {
+        FlowSegment {
+            subcomponent: sub.map(Name::new),
+            element: Name::new(element),
+        }
+    }
+
+    fn add_flow_spec(
+        b: &mut TestBuilder,
+        owner: ComponentInstanceIdx,
+        name: &str,
+        impl_segments: Option<Vec<FlowSegment>>,
+    ) {
+        let idx = b.flow_instances.alloc(FlowInstance {
+            name: Name::new(name),
+            kind: FlowKind::Path,
+            owner,
+            impl_segments,
+        });
+        b.components[owner].flows.push(idx);
+    }
+
+    struct Descent {
+        b: TestBuilder,
+        root: ComponentInstanceIdx,
+        app: ComponentInstanceIdx,
+        caller: ComponentInstanceIdx,
+        consumer: ComponentInstanceIdx,
+    }
+
+    /// root { s, app { caller 5..10, consumer 7..12 }, k };
+    /// `s.src -> c1 -> app.proc_flow -> c2 -> k.snk`. `s` and `k` carry no
+    /// timing (devices), exactly as in the CLI oracle.
+    fn descent_model(impl_segments: Option<Vec<FlowSegment>>) -> Descent {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let s = b.add_component("s", ComponentCategory::Device, Some(root));
+        let app = b.add_component("app", ComponentCategory::Process, Some(root));
+        let k = b.add_component("k", ComponentCategory::Device, Some(root));
+        let caller = b.add_component("caller", ComponentCategory::Thread, Some(app));
+        let consumer = b.add_component("consumer", ComponentCategory::Thread, Some(app));
+        b.set_children(root, vec![s, app, k]);
+        b.set_children(app, vec![caller, consumer]);
+        b.add_connection_inst("c1", root);
+        b.add_connection_inst("c2", root);
+        b.add_connection_inst("c_in", app);
+        b.add_connection_with_endpoints("c_hand", app, "caller", "req", "consumer", "inp");
+        b.add_connection_inst("c_out", app);
+        b.set_property(
+            caller,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "5 ms .. 10 ms",
+        );
+        b.set_property(
+            consumer,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "7 ms .. 12 ms",
+        );
+        add_flow_spec(&mut b, app, "proc_flow", impl_segments);
+        b.add_e2e(
+            "req_to_done",
+            root,
+            vec!["s.src", "c1", "app.proc_flow", "c2", "k.snk"],
+        );
+        Descent {
+            b,
+            root,
+            app,
+            caller,
+            consumer,
+        }
+    }
+
+    fn full_impl() -> Vec<FlowSegment> {
+        vec![
+            seg(None, "pin"),
+            seg(None, "c_in"),
+            seg(Some("caller"), "lock_flow"),
+            seg(None, "c_hand"),
+            seg(Some("consumer"), "consumer_flow"),
+            seg(None, "c_out"),
+            seg(None, "pout"),
+        ]
+    }
+
+    fn has_latency(diags: &[AnalysisDiagnostic], range: &str) -> bool {
+        diags
+            .iter()
+            .any(|d| d.severity == Severity::Info && d.message.ends_with(range))
+    }
+
+    fn missing_line(diags: &[AnalysisDiagnostic]) -> String {
+        diags
+            .iter()
+            .find(|d| d.message.contains("without timing properties"))
+            .unwrap_or_else(|| panic!("no missing-timing warning: {diags:?}"))
+            .message
+            .clone()
+    }
+
+    #[test]
+    fn descent_derives_the_figure_from_the_threads_inside_the_process() {
+        let m = descent_model(Some(full_impl()));
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+
+        assert!(
+            has_latency(&diags, "'req_to_done' latency: [12.000 ms .. 22.000 ms]"),
+            "BCET 5+7, WCET 10+12: {diags:?}"
+        );
+        assert!(
+            missing_line(&diags).ends_with("properties: s, k"),
+            "exactly the two devices, in order, and not `app`: {diags:?}"
+        );
+        assert!(
+            diags.iter().all(|d| !d.message.contains("not computed")),
+            "{diags:?}"
+        );
+    }
+
+    /// Names are matched case-insensitively everywhere else in this file.
+    #[test]
+    fn descent_matches_subcomponent_and_flow_names_case_insensitively() {
+        let mut m = descent_model(Some(full_impl()));
+        for (_, e) in m.b.end_to_end_flows.iter_mut() {
+            e.segments = ["S.src", "c1", "APP.PROC_FLOW", "c2", "K.snk"]
+                .iter()
+                .map(|s| Name::new(s))
+                .collect();
+        }
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(has_latency(&diags, "[12.000 ms .. 22.000 ms]"), "{diags:?}");
+    }
+
+    /// The sampling delay of a thread inside the process is added exactly as
+    /// for the in-implementation spelling: once per thread reached after a
+    /// connection. Worst = 22 + 3 (caller, after c1) + 100 (consumer, after
+    /// c_hand).
+    #[test]
+    fn descent_adds_sampling_delay_for_threads_after_connections() {
+        let mut m = descent_model(Some(full_impl()));
+        m.b.set_property(m.caller, "Timing_Properties", "Period", "3 ms");
+        m.b.set_property(m.consumer, "Timing_Properties", "Period", "100 ms");
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            has_latency(&diags, "[12.000 ms .. 125.000 ms]"),
+            "{diags:?}"
+        );
+    }
+
+    /// A flow that STARTS at the process has no connection before its first
+    /// thread, so that thread adds no sampling delay; the second (after the
+    /// interior `c_hand`) does. The boundary `c_in` / `c_out` are not counted.
+    #[test]
+    fn descent_from_the_first_segment_counts_only_interior_connections() {
+        let mut m = descent_model(Some(full_impl()));
+        m.b.set_property(m.caller, "Timing_Properties", "Period", "3 ms");
+        m.b.set_property(m.consumer, "Timing_Properties", "Period", "100 ms");
+        for (_, e) in m.b.end_to_end_flows.iter_mut() {
+            e.segments = vec![Name::new("app.proc_flow")];
+        }
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            has_latency(&diags, "[12.000 ms .. 122.000 ms]"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn a_child_without_a_flow_implementation_is_read_as_a_leaf_as_before() {
+        // The flow spec exists but nothing implements it.
+        let mut m = descent_model(None);
+        m.b.set_property(m.app, "Timing_Properties", "Compute_Execution_Time", "4 ms");
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            has_latency(&diags, "[4.000 ms .. 4.000 ms]"),
+            "app's own 4 ms, threads not read: {diags:?}"
+        );
+        assert!(
+            missing_line(&diags).ends_with("properties: s, k"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn a_child_with_no_flow_spec_at_all_is_read_as_a_leaf_as_before() {
+        let mut m = descent_model(Some(full_impl()));
+        m.b.components[m.app].flows.clear();
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            missing_line(&diags).ends_with("properties: s, app, k"),
+            "walk stops at app: {diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.severity == Severity::Error && d.message.contains("not computed")),
+            "{diags:?}"
+        );
+    }
+
+    /// An implementation that names no component (only own features and a
+    /// connection) gives descent nothing to read: fall back to the child's own
+    /// timing rather than silently contributing 0.
+    #[test]
+    fn an_implementation_naming_no_component_falls_back_to_the_child() {
+        let imp = vec![seg(None, "pin"), seg(None, "c_hand"), seg(None, "pout")];
+        let mut m = descent_model(Some(imp));
+        m.b.set_property(m.app, "Timing_Properties", "Compute_Execution_Time", "4 ms");
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(has_latency(&diags, "[4.000 ms .. 4.000 ms]"), "{diags:?}");
+    }
+
+    /// An implementation segment naming a thread that is not a child of the
+    /// process is reported missing, by the inner name, rather than dropped.
+    #[test]
+    fn an_unresolved_inner_component_is_reported_missing() {
+        let imp = vec![
+            seg(None, "pin"),
+            seg(None, "c_in"),
+            seg(Some("ghost"), "f"),
+            seg(None, "c_hand"),
+            seg(Some("consumer"), "consumer_flow"),
+            seg(None, "pout"),
+        ];
+        let m = descent_model(Some(imp));
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            missing_line(&diags).ends_with("properties: s, ghost, k"),
+            "{diags:?}"
+        );
+    }
+
+    /// Descent follows nested flow implementations: `app.f` -> `inner.f` ->
+    /// thread. `inner` and `app` carry (wrong) 99 / 98 ms that must never be
+    /// read.
+    #[test]
+    fn descent_recurses_through_nested_flow_implementations() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let app = b.add_component("app", ComponentCategory::Process, Some(root));
+        let inner = b.add_component("inner", ComponentCategory::Process, Some(app));
+        let t = b.add_component("t", ComponentCategory::Thread, Some(inner));
+        b.set_children(root, vec![app]);
+        b.set_children(app, vec![inner]);
+        b.set_children(inner, vec![t]);
+        b.set_property(
+            t,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "2 ms .. 3 ms",
+        );
+        b.set_property(
+            inner,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "99 ms",
+        );
+        b.set_property(app, "Timing_Properties", "Compute_Execution_Time", "98 ms");
+        add_flow_spec(&mut b, app, "f", Some(vec![seg(Some("inner"), "f")]));
+        add_flow_spec(&mut b, inner, "f", Some(vec![seg(Some("t"), "g")]));
+        b.add_e2e("e", root, vec!["app.f"]);
+        let diags = LatencyAnalysis.analyze(&b.build(root));
+        assert!(has_latency(&diags, "[2.000 ms .. 3.000 ms]"), "{diags:?}");
+    }
+
+    /// The descent ceiling: a 20-deep chain of flow implementations is followed
+    /// to `MAX_FLOW_DESCENT_DEPTH` and the component reached there is read as a
+    /// leaf. Component `n<i>` has exec `i` ms, so which one was read is visible.
+    #[test]
+    fn descent_stops_at_the_depth_ceiling_and_reads_a_leaf() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let mut parent = root;
+        let mut ids = Vec::new();
+        for i in 1..=20 {
+            let c = b.add_component(&format!("n{i}"), ComponentCategory::Process, Some(parent));
+            b.set_children(parent, vec![c]);
+            b.set_property(
+                c,
+                "Timing_Properties",
+                "Compute_Execution_Time",
+                &format!("{i} ms"),
+            );
+            ids.push(c);
+            parent = c;
+        }
+        for (i, &id) in ids.iter().enumerate().take(19) {
+            add_flow_spec(
+                &mut b,
+                id,
+                "f",
+                Some(vec![seg(Some(&format!("n{}", i + 2)), "f")]),
+            );
+        }
+        b.add_e2e("deep", root, vec!["n1.f"]);
+        let diags = LatencyAnalysis.analyze(&b.build(root));
+        // n1 (depth 0) .. n16 (depth 15) descend; n17 (depth 16) is the leaf.
+        assert!(has_latency(&diags, "[17.000 ms .. 17.000 ms]"), "{diags:?}");
+    }
+
+    /// Make `sw` a switched bus and have `app` (the process, NOT the flow's
+    /// owner) bind its connections to it. Only a connection looked up in
+    /// `app`'s scope can find them.
+    fn bind_app_connections_to_switch(m: &mut Descent) {
+        let sw =
+            m.b.add_component("sw", ComponentCategory::Bus, Some(m.root));
+        m.b.components[m.root].children.push(sw);
+        m.b.set_property(sw, "Spar_Network", "Switch_Type", "FIFO");
+        m.b.set_property(sw, "Spar_Network", "Output_Rate", "1000000000 bitsps");
+        m.b.set_property(sw, "Spar_Network", "Forwarding_Latency", "0 us .. 0 us");
+        m.b.set_property(sw, "Spar_Network", "Queue_Depth", "1");
+        m.b.set_property(
+            m.app,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (sw))",
+        );
+    }
+
+    fn network_hop_connections(diags: &[AnalysisDiagnostic]) -> Vec<String> {
+        diags
+            .iter()
+            .filter(|d| d.message.contains("[network hop]"))
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    /// `c_hand` is declared in the PROCESS and bound there. The flow's owner
+    /// (`root`) has no `c_hand`, so a lookup in the owner finds nothing. The
+    /// boundary connections `c_in` / `c_out` are bound too, but they are the
+    /// inner legs of `c1` / `c2` and must not be counted a second time.
+    #[test]
+    fn a_connection_inside_the_process_is_looked_up_in_the_process() {
+        let mut m = descent_model(Some(full_impl()));
+        bind_app_connections_to_switch(&mut m);
+        let root = m.root;
+        let inst = m.b.build(root);
+        let hop = compute_network_hop_latency(&inst, m.app, "c_hand")
+            .expect("precondition: c_hand binds to sw in app's scope");
+        let diags = LatencyAnalysis.analyze(&inst);
+        let net = network_hop_connections(&diags);
+        assert_eq!(net.len(), 1, "only the interior connection: {diags:?}");
+        assert!(net[0].contains("connection 'c_hand'"), "{net:?}");
+        let ms = hop.max_ps as f64 / 1_000_000_000.0;
+        assert!(net[0].contains(&format!("{ms:.3} ms")), "{net:?}");
+        // 22 ms of execution plus exactly the one interior hop's bound.
+        let worst = (22_000_000_000 + hop.max_ps) as f64 / 1_000_000_000.0;
+        assert!(
+            has_latency(&diags, &format!(".. {worst:.3} ms]")),
+            "{diags:?}"
+        );
+    }
+
+    /// With no leading or trailing own feature, EVERY connection of the
+    /// implementation is interior, including the ones next to the ends.
+    #[test]
+    fn without_own_features_every_connection_in_the_implementation_counts() {
+        let imp = vec![
+            seg(Some("caller"), "lock_flow"),
+            seg(None, "c_hand"),
+            seg(Some("consumer"), "consumer_flow"),
+        ];
+        let mut m = descent_model(Some(imp));
+        bind_app_connections_to_switch(&mut m);
+        let root = m.root;
+        let diags = LatencyAnalysis.analyze(&m.b.build(root));
+        let net = network_hop_connections(&diags);
+        assert_eq!(net.len(), 1, "{diags:?}");
+        assert!(net[0].contains("connection 'c_hand'"), "{net:?}");
+    }
+
+    /// Own features at only ONE end: the connection touching that end is a
+    /// boundary leg and is skipped; the other end's neighbour is interior.
+    #[test]
+    fn a_boundary_connection_is_skipped_at_either_end_independently() {
+        // Leading feature only: `c_in` skipped, `c_out` (trailing, next to a
+        // component) counted.
+        let lead = vec![
+            seg(None, "pin"),
+            seg(None, "c_in"),
+            seg(Some("caller"), "lock_flow"),
+            seg(None, "c_out"),
+            seg(Some("consumer"), "consumer_flow"),
+        ];
+        let mut m = descent_model(Some(lead));
+        bind_app_connections_to_switch(&mut m);
+        let root = m.root;
+        let diags = LatencyAnalysis.analyze(&m.b.build(root));
+        let net = network_hop_connections(&diags);
+        assert_eq!(net.len(), 1, "{diags:?}");
+        assert!(net[0].contains("connection 'c_out'"), "{net:?}");
+
+        // Trailing feature only: `c_out` skipped, `c_in` counted.
+        let trail = vec![
+            seg(Some("caller"), "lock_flow"),
+            seg(None, "c_in"),
+            seg(Some("consumer"), "consumer_flow"),
+            seg(None, "c_out"),
+            seg(None, "pout"),
+        ];
+        let mut m = descent_model(Some(trail));
+        bind_app_connections_to_switch(&mut m);
+        let root = m.root;
+        let diags = LatencyAnalysis.analyze(&m.b.build(root));
+        let net = network_hop_connections(&diags);
+        assert_eq!(net.len(), 1, "{diags:?}");
+        assert!(net[0].contains("connection 'c_in'"), "{net:?}");
+    }
+
+    /// The processor-crossing note walks the SAME expansion: threads inside the
+    /// process on different processors cross a boundary the latency walk
+    /// applied, so the note must fire (no overhead property is set).
+    #[test]
+    fn the_processor_crossing_note_sees_threads_inside_the_process() {
+        let mut m = descent_model(Some(full_impl()));
+        let cpu1 =
+            m.b.add_component("cpu1", ComponentCategory::Processor, Some(m.root));
+        let cpu2 =
+            m.b.add_component("cpu2", ComponentCategory::Processor, Some(m.root));
+        m.b.components[m.root].children.push(cpu1);
+        m.b.components[m.root].children.push(cpu2);
+        for (t, cpu) in [(m.caller, "cpu1"), (m.consumer, "cpu2")] {
+            m.b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                &format!("reference ({cpu})"),
+            );
+        }
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            diags.iter().any(|d| d
+                .message
+                .contains("'req_to_done' crosses processor boundaries")),
+            "{diags:?}"
+        );
+    }
+
+    /// ...and a flow whose inner threads share a processor does not.
+    #[test]
+    fn the_processor_crossing_note_is_silent_when_inner_threads_share_a_processor() {
+        let mut m = descent_model(Some(full_impl()));
+        let cpu1 =
+            m.b.add_component("cpu1", ComponentCategory::Processor, Some(m.root));
+        let cpu2 =
+            m.b.add_component("cpu2", ComponentCategory::Processor, Some(m.root));
+        m.b.components[m.root].children.push(cpu1);
+        m.b.components[m.root].children.push(cpu2);
+        for t in [m.caller, m.consumer] {
+            m.b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+        let diags = LatencyAnalysis.analyze(&m.b.build(m.root));
+        assert!(
+            diags
+                .iter()
+                .all(|d| !d.message.contains("crosses processor boundaries")),
+            "{diags:?}"
+        );
     }
 }

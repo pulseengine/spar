@@ -449,6 +449,7 @@ mod tests {
                 name: Name::new(name),
                 kind,
                 owner,
+                impl_segments: None,
             });
             self.components[owner].flows.push(idx);
         }
@@ -485,6 +486,7 @@ mod tests {
                 name: Name::new(name),
                 owner,
                 segments: segments.into_iter().map(Name::new).collect(),
+                properties: Default::default(),
             });
         }
 

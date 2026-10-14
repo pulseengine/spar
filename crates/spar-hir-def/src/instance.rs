@@ -150,6 +150,14 @@ pub struct FlowInstance {
     pub kind: FlowKind,
     /// The component instance that owns this flow.
     pub owner: ComponentInstanceIdx,
+    /// Segments of the flow IMPLEMENTATION of this flow specification, when the
+    /// owner's implementation (or one it `extends`) declares one — alternating
+    /// `sub.flow` references and connection names, optionally bracketed by the
+    /// owner's own features. `None` for a flow with no implementation (a type-only
+    /// component, or a spec the implementation does not implement). Lets latency
+    /// descend from `app.proc_flow` into the threads inside `app`
+    /// (REQ-ANALYSIS-FLOW-THREAD-DESCENT-001).
+    pub impl_segments: Option<Vec<crate::item_tree::FlowSegment>>,
 }
 
 /// An end-to-end flow instance from a component implementation.
@@ -160,6 +168,33 @@ pub struct EndToEndFlowInstance {
     pub owner: ComponentInstanceIdx,
     /// Segments: alternating subcomponent and connection names.
     pub segments: Vec<Name>,
+    /// Property associations written on the flow itself —
+    /// `e2e : end to end flow a.s -> h -> b.k { Latency => 1 ms .. 10 ms; };`.
+    ///
+    /// The item tree always lowered these, and instantiation used to drop
+    /// them, so an analysis could only ever see the OWNER component's
+    /// properties. That is where AADL does NOT put a flow's latency budget, so
+    /// a budget declared the standard way was never compared (#455).
+    pub properties: PropertyMap,
+}
+
+impl EndToEndFlowInstance {
+    /// The first segment whose reference AADL's grammar does not allow, as
+    /// `(position, segment)`.
+    ///
+    /// A flow element is `[subcomponent '.'] flow` — ONE level — and a
+    /// connection element is a bare identifier (osate2@87468992,
+    /// `Aadl2.xtext` rules `ETESubcomponentFlow` / `ETEConnectionFlow`). So
+    /// `app.caller.lock_flow` and `app.c_hand`, written on a system to reach
+    /// threads inside process `app`, are not AADL. Analyses used to keep only
+    /// the first dotted part and silently resolve both to `app` (#455 item 3);
+    /// this is the single place that decides a flow is not analysable that way.
+    pub fn nested_segment(&self) -> Option<(usize, &Name)> {
+        self.segments.iter().enumerate().find(|(i, seg)| {
+            let dots = seg.as_str().matches('.').count();
+            if i % 2 == 0 { dots > 1 } else { dots > 0 }
+        })
+    }
 }
 
 /// A mode instance created from a mode declaration in a component type or implementation.
@@ -1390,7 +1425,16 @@ struct ImplChainResult {
         Option<ConnectionEnd>,
         Vec<Name>,
     )>,
-    e2e_flows: Vec<(Name, Vec<Name>)>,
+    /// Flow implementations in grandparent → parent → self order, so a later
+    /// entry of the same name overrides an inherited one.
+    flow_impls: Vec<(Name, Vec<crate::item_tree::FlowSegment>)>,
+    /// (name, segments, item-tree index, the flow's own property associations)
+    e2e_flows: Vec<(
+        Name,
+        Vec<Name>,
+        usize,
+        Vec<crate::item_tree::PropertyAssociationIdx>,
+    )>,
     modes: Vec<(Name, bool)>,
     mode_transitions: Vec<(Option<Name>, Name, Name, Vec<Name>)>,
     call_map: FxHashMap<String, Name>,
@@ -1533,6 +1577,19 @@ impl<'a> Builder<'a> {
                 let conn_data = impl_chain.connections;
                 let call_map = impl_chain.call_map;
                 let e2e_data = impl_chain.e2e_flows;
+                // Attach each flow implementation to the flow-spec instance it
+                // implements (later = more derived overrides an inherited one).
+                for (fname, fsegs) in impl_chain.flow_impls {
+                    let target = self.components[idx].flows.iter().copied().find(|&f| {
+                        self.flow_instances[f]
+                            .name
+                            .as_str()
+                            .eq_ignore_ascii_case(fname.as_str())
+                    });
+                    if let Some(f) = target {
+                        self.flow_instances[f].impl_segments = Some(fsegs);
+                    }
+                }
                 let impl_mode_data = impl_chain.modes;
                 let impl_mt_data = impl_chain.mode_transitions;
 
@@ -1729,12 +1786,30 @@ impl<'a> Builder<'a> {
                 // STPA-REQ-010: Validate array index bounds in connection endpoints.
                 self.validate_connection_array_indices(idx, &conn_indices);
 
-                // Instantiate end-to-end flows
-                for (e2e_name, segments) in e2e_data {
+                // Instantiate end-to-end flows, carrying the flow's OWN
+                // property associations rather than dropping them (#455).
+                for (e2e_name, segments, tree_idx, pa_indices) in e2e_data {
+                    let mut properties = PropertyMap::new();
+                    // A flow-local block has no business carrying `applies to`;
+                    // anything routed there is collected and discarded rather
+                    // than re-targeted at the owner component.
+                    let mut ignored_applies_to = Vec::new();
+                    if let Some(tree) = self.scope.tree(tree_idx) {
+                        for pa_idx in pa_indices {
+                            let pa = &tree.property_associations[pa_idx];
+                            Self::push_property_association(
+                                pa,
+                                idx,
+                                &mut properties,
+                                &mut ignored_applies_to,
+                            );
+                        }
+                    }
                     self.end_to_end_flows.alloc(EndToEndFlowInstance {
                         name: e2e_name,
                         owner: idx,
                         segments,
+                        properties,
                     });
                 }
 
@@ -1881,9 +1956,22 @@ impl<'a> Builder<'a> {
         for &e2e_idx in &ci.end_to_end_flows {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let e2e = &tree.end_to_end_flows[e2e_idx];
+                result.e2e_flows.push((
+                    e2e.name.clone(),
+                    e2e.segments.clone(),
+                    loc.tree,
+                    e2e.property_associations.clone(),
+                ));
+            }
+        }
+
+        // Collect own flow implementations
+        for &fi_idx in &ci.flow_impls {
+            if let Some(tree) = self.scope.tree(loc.tree) {
+                let fimpl = &tree.flow_impls[fi_idx];
                 result
-                    .e2e_flows
-                    .push((e2e.name.clone(), e2e.segments.clone()));
+                    .flow_impls
+                    .push((fimpl.name.clone(), fimpl.segments.clone()));
             }
         }
 
@@ -2167,6 +2255,7 @@ impl<'a> Builder<'a> {
                 name,
                 kind,
                 owner: idx,
+                impl_segments: None,
             });
             flow_indices.push(fi);
         }
@@ -4585,6 +4674,72 @@ end p;
         SystemInstance::instantiate(&scope, &Name::new(pkg), &Name::new(ty), &Name::new(imp))
     }
 
+    /// #455, REQ-ANALYSIS-LATENCY-BUDGET-001 clause (b): an end-to-end flow's
+    /// OWN property associations survive instantiation.
+    ///
+    /// The item tree always lowered them; instantiation dropped them, so every
+    /// analysis saw only the owner component. That is where AADL does not put
+    /// a flow's latency budget. A flow with no block must stay empty, so a
+    /// build that copied the owner's properties onto every flow cannot pass.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_end_to_end_flows_own_properties_survive_instantiation() {
+        let src = r#"package P
+public
+  device dv
+    features
+      o : out event data port;
+      i : in event data port;
+    flows
+      s : flow source o;
+      k : flow sink i;
+  end dv;
+  device implementation dv.impl
+  end dv.impl;
+  system S
+  end S;
+  system implementation S.impl
+    subcomponents
+      a : device dv.impl;
+      b : device dv.impl;
+    connections
+      h : port a.o -> b.i;
+    flows
+      ranged : end to end flow a.s -> h -> b.k { Latency => 1 ms .. 10 ms; };
+      qualified : end to end flow a.s -> h -> b.k { Communication_Properties::Latency => 2 ms; };
+      bare : end to end flow a.s -> h -> b.k;
+    properties
+      Latency => 500 ms;
+  end S.impl;
+end P;
+"#;
+        let inst = instantiate_aadl(src, "P", "S", "impl");
+        let flow = |n: &str| {
+            inst.end_to_end_flows
+                .iter()
+                .map(|(_, f)| f)
+                .find(|f| f.name.as_str() == n)
+                .unwrap_or_else(|| panic!("flow {n} not instantiated"))
+        };
+        assert_eq!(
+            flow("ranged").properties.get("", "Latency"),
+            Some("1 ms .. 10 ms"),
+            "the flow's own range must reach the instance"
+        );
+        assert_eq!(
+            flow("qualified")
+                .properties
+                .get("Communication_Properties", "Latency"),
+            Some("2 ms"),
+            "the qualified spelling must reach the instance under its own set"
+        );
+        assert!(
+            flow("bare").properties.get("", "Latency").is_none(),
+            "a flow with no block must not inherit the OWNER's 500 ms — that would \
+             make the owner-fallback indistinguishable from the flow's own budget"
+        );
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn emv2_projected_onto_impl_root_from_type() {
@@ -4676,5 +4831,168 @@ end P;
         let inst = instantiate_aadl(src, "P", "S", "i");
         assert!(inst.emv2_for(inst.root).is_empty());
         assert!(inst.emv2_models.is_empty());
+    }
+
+    /// #455 item 3: the legality predicate every analysis relies on. Each row
+    /// is chosen to kill a specific mis-implementation: the legal rows reject a
+    /// predicate that flags too much (a one-dot flow element, a bare
+    /// connection, a dotless flow element), the illegal rows one that flags too
+    /// little, and the position-2 row one that only ever inspects the first
+    /// segment or mislabels flow/connection positions.
+    #[test]
+    fn nested_segment_follows_the_aadl_end_to_end_flow_grammar() {
+        fn e2e(segs: &[&str]) -> EndToEndFlowInstance {
+            EndToEndFlowInstance {
+                name: Name::new("f"),
+                owner: Idx::from_raw(la_arena::RawIdx::from(0u32)),
+                segments: segs.iter().map(|s| Name::new(s)).collect(),
+                properties: Default::default(),
+            }
+        }
+        let at = |segs: &[&str]| e2e(segs).nested_segment().map(|(i, s)| (i, s.to_string()));
+
+        // Legal: `subcomponent.flow` and bare connection names.
+        assert_eq!(
+            at(&["sensor.src", "c1", "ctrl.path", "c2", "act.sink"]),
+            None
+        );
+        // Legal: a flow element may omit the subcomponent (a local flow).
+        assert_eq!(at(&["src", "c1", "sink"]), None);
+
+        // Illegal: a flow element two levels deep.
+        assert_eq!(
+            at(&["app.caller.lock_flow", "c_hand", "b.sink"]),
+            Some((0, "app.caller.lock_flow".to_string()))
+        );
+        // Illegal: a dotted connection element.
+        assert_eq!(
+            at(&["a.src", "app.c_hand", "b.sink"]),
+            Some((1, "app.c_hand".to_string()))
+        );
+        // Illegal, found past the first segment.
+        assert_eq!(
+            at(&["a.src", "c1", "app.consumer.sink"]),
+            Some((2, "app.consumer.sink".to_string()))
+        );
+    }
+
+    /// REQ-ANALYSIS-FLOW-THREAD-DESCENT-001: a flow implementation is kept on
+    /// the flow-spec instance it implements, a flow spec without one has
+    /// `None`, and an `extends` child's implementation overrides the parent's
+    /// of the same name while an inherited one it does not redeclare survives.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn flow_implementations_attach_to_their_flow_spec_and_inherit() {
+        let src = r#"
+package p
+public
+    data D
+    end D;
+    thread T
+        features
+            i: in data port D;
+            o: out data port D;
+        flows
+            f: flow path i -> o;
+    end T;
+    process P
+        features
+            pin: in data port D;
+            pout: out data port D;
+        flows
+            fa: flow path pin -> pout;
+            fb: flow path pin -> pout;
+            fc: flow path pin -> pout;
+    end P;
+    process implementation P.Base
+        subcomponents
+            t1: thread T;
+            t2: thread T;
+        connections
+            c0: port pin -> t1.i;
+            c1: port t1.o -> t2.i;
+            c2: port t2.o -> pout;
+        flows
+            fa: flow path pin -> c0 -> t1.f -> c1 -> t2.f -> c2 -> pout;
+            fb: flow path pin -> c0 -> t1.f -> c1 -> t2.f -> c2 -> pout;
+    end P.Base;
+    process implementation P.Derived extends P.Base
+        flows
+            fb: flow path pin -> c0 -> t1.f -> c2 -> pout;
+    end P.Derived;
+    system S
+    end S;
+    system implementation S.Impl
+        subcomponents
+            app: process P.Derived;
+    end S.Impl;
+end p;
+"#;
+        let db = crate::HirDefDatabase::default();
+        let tree = crate::file_item_tree(
+            &db,
+            spar_base_db::SourceFile::new(&db, "p.aadl".to_string(), src.to_string()),
+        );
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("p"),
+            &Name::new("S"),
+            &Name::new("Impl"),
+        );
+        let (app_idx, _) = inst
+            .all_components()
+            .find(|(_, c)| c.name.as_str() == "app")
+            .unwrap_or_else(|| {
+                panic!(
+                    "app instantiated: {:?} {:?}",
+                    inst.diagnostics,
+                    inst.all_components()
+                        .map(|(_, c)| c.name.to_string())
+                        .collect::<Vec<_>>()
+                )
+            });
+        let seg_of = |flow: &str| {
+            let f = inst
+                .component(app_idx)
+                .flows
+                .iter()
+                .map(|&f| &inst.flow_instances[f])
+                .find(|f| f.name.as_str() == flow)
+                .unwrap_or_else(|| panic!("flow spec {flow} on app"));
+            f.impl_segments
+                .as_ref()
+                .map(|v| v.iter().map(|s| s.element.to_string()).collect::<Vec<_>>())
+        };
+        // Inherited, not redeclared.
+        assert_eq!(
+            seg_of("fa"),
+            Some(
+                ["pin", "c0", "f", "c1", "f", "c2", "pout"]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        // Redeclared in the derived impl: the derived one wins.
+        assert_eq!(
+            seg_of("fb"),
+            Some(["pin", "c0", "f", "c2", "pout"].map(String::from).to_vec())
+        );
+        // A spec nothing implements.
+        assert_eq!(seg_of("fc"), None);
+        // The segment keeps its subcomponent qualifier.
+        let fa = inst
+            .component(app_idx)
+            .flows
+            .iter()
+            .map(|&f| &inst.flow_instances[f])
+            .find(|f| f.name.as_str() == "fa")
+            .unwrap();
+        let segs = fa.impl_segments.as_ref().unwrap();
+        assert_eq!(
+            segs[2].subcomponent.as_ref().map(|n| n.as_str()),
+            Some("t1")
+        );
+        assert_eq!(segs[0].subcomponent, None);
     }
 }
