@@ -3330,6 +3330,7 @@ end Net;
     /// the original #478 bug was a figure claiming `(2 hops)` while carrying
     /// the contribution of none. Here one hop of two contributes, so the bound
     /// must say `(1 hop)` — the count it actually covers.
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn a_partial_bound_warns_and_labels_the_hops_it_actually_covers() {
         let d = mixed_chain_diags(None);
@@ -3367,6 +3368,7 @@ end Net;
     /// The other arm, and without it the test above would pass a build that
     /// emitted `WcttPartialBound` unconditionally and always under-labelled
     /// the hop count. Same chain, CoS now readable, so BOTH hops contribute.
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn a_complete_bound_on_the_same_chain_carries_no_partial_warning() {
         let d = mixed_chain_diags(Some(6));
@@ -3410,6 +3412,7 @@ end Net;
         );
     }
 
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn the_provenance_gate_discriminates() {
         // THE OTHER ARM. With a CoS the TAS dispatch contributes, so a real
@@ -3462,6 +3465,7 @@ end Net;
         );
     }
 
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn a_bound_over_its_declared_deadline_is_an_error() {
         // `Timing_Properties::Deadline` had ZERO occurrences in this file
@@ -3474,6 +3478,7 @@ end Net;
         );
     }
 
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn a_bound_within_its_deadline_is_not_flagged() {
         // The discriminating half: a checker that flagged every declared
@@ -3486,6 +3491,7 @@ end Net;
         assert!(has(&d, "WcttBound"), "and the bound still reports: {d:#?}");
     }
 
+    // rivet: verifies REQ-TSN-WCTT-PROVENANCE-001
     #[test]
     fn an_undeclared_deadline_is_not_a_violation() {
         // Absence of a declared deadline is not a breach of one. Without this

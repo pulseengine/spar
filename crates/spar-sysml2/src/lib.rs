@@ -387,6 +387,7 @@ requirement def LatencyReq {
     // PACKAGE node existed, with a comment conceding the visibility keyword
     // "may cause a parse error" — so they passed while it did. They now
     // require a clean parse.
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn parse_private_import() {
         let source = r#"
@@ -405,6 +406,7 @@ package Pkg {
         );
     }
 
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn parse_public_import() {
         let parse =
@@ -414,6 +416,7 @@ package Pkg {
 
     /// Visibility is KerML core: it prefixes a member at file level, in a
     /// package body, and in a definition body, on every member kind.
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn visibility_prefixes_a_member_at_every_level() {
         for src in [
@@ -431,6 +434,7 @@ package Pkg {
 
     /// A visibility keyword qualifies the member after it; with none, it is an
     /// error — at the end of a body and at the end of the file.
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn dangling_or_duplicate_visibility_is_an_error() {
         for (src, want) in [
@@ -450,6 +454,7 @@ package Pkg {
         }
     }
 
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn alias_declares_a_name_for_a_qualified_target() {
         // At file level as well as inside a package.
@@ -471,12 +476,14 @@ package Pkg {
         );
     }
 
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn recursive_import_parses() {
         let parse = parse("package P { public import MetadataDefinitions::**; }");
         assert!(parse.ok(), "errors: {:?}", parse.errors());
     }
 
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn quoted_names_are_names() {
         let parse = parse("package 'Application Layer' { part def 'Fuel Pump'; }");

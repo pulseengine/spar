@@ -5121,6 +5121,7 @@ end P;
         )
     }
 
+    // rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn fg_member_as_connection_source_resolves() {
@@ -5138,6 +5139,7 @@ end P;
         assert_eq!(sc.ultimate_destination.1.as_str(), "i");
     }
 
+    // rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn fg_member_as_connection_destination_resolves() {
@@ -5152,6 +5154,7 @@ end P;
         assert_eq!(sc.ultimate_destination.1.as_str(), "g.b");
     }
 
+    // rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn fg_name_match_is_case_insensitive() {
@@ -5161,6 +5164,7 @@ end P;
         assert_eq!(conn.src.as_ref().unwrap().subcomponent, None);
     }
 
+    // rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn genuinely_unknown_endpoint_is_still_unresolved() {
@@ -5188,6 +5192,7 @@ end P;
         );
     }
 
+    // rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
     fn fg_present_but_member_missing_reports_the_member_not_the_subcomponent() {

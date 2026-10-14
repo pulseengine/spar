@@ -57,6 +57,7 @@ severity = "error"
 max_count = 0
 "#;
 
+// rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
 #[test]
 fn analyze_no_longer_reports_feature_group_source_as_unresolved() {
     for root in [ROOT_PLATFORM, ROOT_FMC] {
@@ -73,6 +74,7 @@ fn analyze_no_longer_reports_feature_group_source_as_unresolved() {
     }
 }
 
+// rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
 #[test]
 fn verify_completeness_requirement_passes_on_the_showcase_model() {
     let req = tmp("req_pass.toml");
@@ -93,6 +95,7 @@ fn verify_completeness_requirement_passes_on_the_showcase_model() {
     }
 }
 
+// rivet: verifies REQ-HIR-FEATUREGROUP-PATH-001
 #[test]
 fn a_truly_unresolvable_endpoint_still_fails_the_same_requirement() {
     // Same showcase model, with the feature-group name replaced by a name that

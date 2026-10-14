@@ -93,6 +93,7 @@ fn read(name: &str) -> String {
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
 }
 
+// rivet: verifies REQ-SYSML2-VISIBILITY-001
 #[test]
 fn every_named_file_gets_the_verdict_it_claims() {
     let mut wrong = Vec::new();

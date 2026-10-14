@@ -154,6 +154,7 @@ fn run(root: &str, format: &str, path: &Path) -> (i32, String, String) {
     )
 }
 
+// rivet: verifies REQ-CLI-INSTANCE-EXITCODE-001
 #[test]
 fn clean_model_exits_zero_in_every_format() {
     let path = write_model("clean_ok", CLEAN_MODEL);
@@ -167,6 +168,7 @@ fn clean_model_exits_zero_in_every_format() {
     let _ = fs::remove_file(&path);
 }
 
+// rivet: verifies REQ-CLI-INSTANCE-EXITCODE-001
 #[test]
 fn error_model_exits_nonzero_in_every_format() {
     let path = write_model("error_nonzero", ERROR_MODEL);
@@ -181,6 +183,7 @@ fn error_model_exits_nonzero_in_every_format() {
     let _ = fs::remove_file(&path);
 }
 
+// rivet: verifies REQ-CLI-INSTANCE-EXITCODE-001
 #[test]
 fn text_and_json_agree_on_the_same_model() {
     // The discriminating pair, stated as one invariant: for a fixed model, the
@@ -213,6 +216,7 @@ fn text_and_json_agree_on_the_same_model() {
     let _ = fs::remove_file(&error);
 }
 
+// rivet: verifies REQ-CLI-INSTANCE-EXITCODE-001
 #[test]
 fn json_error_document_still_carries_the_diagnostic() {
     // A fix that exited non-zero by DROPPING the error from the payload (or
@@ -238,6 +242,7 @@ fn json_error_document_still_carries_the_diagnostic() {
     let _ = fs::remove_file(&path);
 }
 
+// rivet: verifies REQ-CLI-INSTANCE-EXITCODE-001
 #[test]
 fn unrecognised_format_fails_and_prints_nothing() {
     // An unknown --format must FAIL on EVERY model — not fall through to the
