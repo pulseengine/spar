@@ -330,13 +330,24 @@ MUTANTS: list[Mutant] = [
     Mutant(
         tool="check_closing_keywords.py",
         id="ck-strip-whole-line",
-        old='scannable = _CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line)',
-        new='scannable = "" if "`" in line else line',
+        old='blanked.append(_CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line))',
+        new='blanked.append(" " * len(line) if "`" in line else line)',
         note="the BOUND on the code-span exemption. Blanking any line containing a "
              "backtick would hide a live keyword that merely shares a line with "
              "quoted text — `\x60Refs #1\x60 is right, Fixes #2 is wrong`. Confirmed "
              "load-bearing: with that one case removed the mutant SURVIVES, so "
              "nothing else catches it.",
+    ),
+    Mutant(
+        tool="check_closing_keywords.py",
+        id="ck-per-line-scan",
+        old='scannable = "\\n".join(blanked)',
+        new='scannable = "\\x00".join(blanked)',
+        note="the #493 hole: a NUL is not `\\s`, so this restores the per-line scan "
+             "that passed the v0.46.0 squash cf0c082 — headline ending `fix`, blank "
+             "line, paragraph opening `#460` — which GitHub read as `fix #460` and "
+             "used to close #460 with its fix deferred. Caught by the BLANK LINE and "
+             "single-line-break cases.",
     ),
     Mutant(
         tool="check_closing_keywords.py",

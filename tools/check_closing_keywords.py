@@ -89,20 +89,32 @@ def findings(text: str, where: str) -> list[tuple[str, str, str]]:
     """(where, keyword+ref, the line it sat on) for each closing keyword.
 
     Code spans and fenced blocks are skipped — see `_CODE_SPAN`.
+
+    The match runs over the WHOLE text, not line by line: GitHub's `\\s`
+    between keyword and reference crosses newlines, so `…the fix` + blank
+    line + `#460 was…` closed #460 from the v0.46.0 squash (#493) while a
+    per-line scan passed it. Blanking is per line and length-preserving, so
+    newlines survive and an offset still maps back to its line.
     """
-    out = []
+    lines = text.splitlines()
+    blanked = []
     in_fence = False
-    for line in text.splitlines():
+    for line in lines:
         if _FENCE.match(line):
             in_fence = not in_fence
+            blanked.append(" " * len(line))
             continue
         if in_fence:
+            blanked.append(" " * len(line))
             continue
         # Blank out inline code BEFORE matching, so a keyword quoted for
         # documentation is inert here exactly as it is to GitHub.
-        scannable = _CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line)
-        for m in CLOSING.finditer(scannable):
-            out.append((where, m.group(0), line.strip()))
+        blanked.append(_CODE_SPAN.sub(lambda m: " " * len(m.group(0)), line))
+    scannable = "\n".join(blanked)
+    out = []
+    for m in CLOSING.finditer(scannable):
+        line = lines[scannable.count("\n", 0, m.start())]
+        out.append((where, " ".join(m.group(0).split()), line.strip()))
     return out
 
 
@@ -267,6 +279,29 @@ CASES: list[tuple[str, str, int, str]] = [
         "the whole line that contains any backtick) would hide live keywords",
     ),
     (
+        "a keyword and its reference split by a BLANK LINE are rejected",
+        "record what blocks the fix\n\n#460 was filed UNADJUDICATED on purpose",
+        1,
+        "THE v0.46.0 instance (#493): a commit headline ending in `fix`, a blank "
+        "line, a paragraph opening with `#460`. GitHub's `\\s` crosses newlines; "
+        "the squash cf0c082 closed #460 with its fix deferred. A per-line scan "
+        "passed it",
+    ),
+    (
+        "a keyword and its reference split by a single line break are rejected",
+        "this closes\n#7 for good",
+        1,
+        "the same hole without the blank line — the wrap point of any prose",
+    ),
+    (
+        "a WORD between keyword and reference across a line break stays inert",
+        "the fix\nfor #7 is deferred",
+        0,
+        "THE BOUND on the cross-line scan: only whitespace may separate them, as "
+        "for GitHub. Joining lines must not turn ordinary wrapped prose into a "
+        "finding, or the gate cries wolf",
+    ),
+    (
         "a word merely containing a keyword is not one",
         "This prefixes #1 and closeness #2 and affixed #3",
         0,
@@ -276,6 +311,7 @@ CASES: list[tuple[str, str, int, str]] = [
 ]
 
 
+# rivet: verifies REQ-GUARD-CLOSING-KEYWORD-CROSSLINE-001
 def self_test() -> int:
     import tempfile
     from pathlib import Path
@@ -287,6 +323,16 @@ def self_test() -> int:
         failures += not ok
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {got} finding(s) (want {want})")
         print(f"       proves: {proves}")
+
+    # The reported line, not just the count: the whole-text scan maps a match
+    # offset back to a line, and an author fixes the line the gate names.
+    got = [f[2] for f in findings("intro\n\nrecord the fix\n\n#7 was filed", "t")]
+    ok = got == ["record the fix"]
+    failures += not ok
+    print(f"[{'PASS' if ok else 'FAIL'}] a cross-line finding names the keyword's "
+          f"line: {got}")
+    print("       proves: the offset-to-line mapping points at the keyword, not "
+          "the first line or the reference")
 
     # Exit codes, not just counts.
     rc_clean = check("Refs #1", None, out=open("/dev/null", "w"))

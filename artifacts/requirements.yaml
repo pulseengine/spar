@@ -7472,3 +7472,18 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
+
+  - id: REQ-GUARD-CLOSING-KEYWORD-CROSSLINE-001
+    type: requirement
+    title: The closing-keyword gate shall match a keyword and its reference across a line break, as GitHub does
+    status: verified
+    description: "GitHub's closing-keyword matcher accepts any whitespace between the keyword and the reference, newlines included. The v0.46.0 release squash cf0c082 carried a commit headline ending '...record what blocks the fix', a blank line, then a paragraph opening '#460 was filed...'. GitHub read it as 'fix #460' and closed #460, whose fix is deferred to v0.47.0 (reopened). check_closing_keywords.py, a required gate, passed it, because findings() matched per line and its \\s+ could never cross a newline: the gate checked a narrower language than the parser it guards (#493). The match now runs over the whole text, after per-line, length-preserving blanking of fenced blocks and code spans, so offsets map back to the keyword's line. VALIDATED AGAINST REALITY: the fixed gate rejects the real cf0c082 message (rc=1, 'fix #460'), and over v0.20.0..main (174 commits) its only new finding versus the old gate is that true positive, so no false positive is added. Self-test: a blank-line case and a single-break case (both FAILED on the old code before the fix), a bound case (a word between keyword and reference across a break stays inert), and a check that the reported line is the keyword's. Mutants: per-line join (NUL separator), no fence blanking, empty separator and two line-attribution mutants are all caught; the line-attribution mutant SURVIVED until its check was written. ck-per-line-scan is enrolled in check_self_test_potency.py and ck-strip-whole-line was re-derived after the meta-guard flagged its drift. NOT CLAIMED: multi-line code spans (blanking is per line)."
+    tags: [process, guardrail, ci, tooling]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-CLOSING-KEYWORD-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-15T10:50:40Z
+    release: v0.47.0
