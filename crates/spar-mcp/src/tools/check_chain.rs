@@ -34,12 +34,20 @@
 //!
 //! # Matching
 //!
-//! The tool matches on the *name* of an end-to-end flow whose first
-//! segment names a subcomponent corresponding to the source thread
-//! FQN and whose last component segment matches the sink thread FQN.
-//! Models without an explicit end-to-end flow declaration return a
-//! `CHAIN_NOT_FOUND` error so the agent can fall back to enumerating
-//! flows or asking a human.
+//! The components a flow passes through are resolved the way the latency
+//! pass resolves them ([`spar_analysis::latency::flow_components`]): a
+//! `sub.flow` segment is replaced by the components named in `sub`'s
+//! implementation of `flow` (so threads inside a process are reached through
+//! a flow specification on the process, not by writing `proc.thread.flow`).
+//! `source_thread` must name the FIRST component the flow reaches and
+//! `sink_thread` the LAST, each as a bare instance name or a dotted/`/`
+//! path suffix (`producer`, `app.producer`).
+//!
+//! An end-to-end flow with a segment reaching more than one level inside a
+//! subcomponent is not AADL and is rejected by the `flow_check` analysis; a
+//! request that would name such a flow gets `CHAIN_INVALID` carrying that
+//! rejection, never a chain. Models without any matching end-to-end flow
+//! return `CHAIN_NOT_FOUND`.
 //!
 //! # Why the latency pass and not a custom walk?
 //!
@@ -53,8 +61,10 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use spar_analysis::{Analysis, AnalysisDiagnostic, Severity, latency::LatencyAnalysis};
-use spar_hir_def::instance::SystemInstance;
+use spar_analysis::flow_check::FlowCheckAnalysis;
+use spar_analysis::latency::{LatencyAnalysis, flow_components};
+use spar_analysis::{Analysis, AnalysisDiagnostic, Severity};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ItemTree;
 
 use super::{ToolResult, optional_string, required_string};
@@ -183,8 +193,29 @@ pub fn call(arguments: &Value) -> ToolResult {
 
     // Find a matching end-to-end flow.
     let (flow_name, src_fqn, sink_fqn) = match find_chain(&instance, &source_thread, &sink_thread) {
-        Some(t) => t,
-        None => {
+        ChainMatch::Found {
+            flow_name,
+            source,
+            sink,
+        } => (flow_name, source, sink),
+        ChainMatch::Rejected { flow_name } => {
+            let prefix = format!("end-to-end flow '{flow_name}': ");
+            let reasons: Vec<String> = FlowCheckAnalysis
+                .analyze(&instance)
+                .into_iter()
+                .filter(|d| d.severity == Severity::Error && d.message.starts_with(&prefix))
+                .map(|d| d.message)
+                .collect();
+            return ToolResult::Error {
+                code: "CHAIN_INVALID",
+                message: format!(
+                    "end-to-end flow `{flow_name}` between `{source_thread}` and \
+                     `{sink_thread}` is not valid AADL and is not analysed: {}",
+                    reasons.join("; "),
+                ),
+            };
+        }
+        ChainMatch::NotFound => {
             return ToolResult::Error {
                 code: "CHAIN_NOT_FOUND",
                 message: format!(
@@ -291,63 +322,76 @@ fn parse_root_ref(s: &str) -> Result<(String, String, String), ToolResult> {
     Ok((pkg, type_impl[0].to_string(), type_impl[1].to_string()))
 }
 
-/// Locate an end-to-end flow whose first / last component segments
-/// match the source / sink thread names (case-insensitive bare-name or
-/// suffix match). Returns `(flow_name, source_fqn, sink_fqn)` on a hit.
-///
-/// Flow segments alternate component-flow refs ("subcomp.flow_name")
-/// and connection names. We compare on the subcomponent prefix only.
-fn find_chain(
-    instance: &SystemInstance,
-    source: &str,
-    sink: &str,
-) -> Option<(String, String, String)> {
-    let src_lower = source.to_ascii_lowercase();
-    let sink_lower = sink.to_ascii_lowercase();
+/// Outcome of looking for the end-to-end flow a request names.
+enum ChainMatch {
+    /// A valid flow whose first reached component is the source and last is
+    /// the sink; `source` / `sink` are instance paths (`root/app/producer`).
+    Found {
+        flow_name: String,
+        source: String,
+        sink: String,
+    },
+    /// No valid flow matches, but a flow `flow_check` rejects (a segment
+    /// reaching inside a subcomponent) mentions both names.
+    Rejected {
+        flow_name: String,
+    },
+    NotFound,
+}
 
+/// Locate the end-to-end flow from `source` to `sink`. A valid flow is
+/// matched on the components it passes through (see the module docs); a
+/// valid match always wins over a rejected flow.
+fn find_chain(instance: &SystemInstance, source: &str, sink: &str) -> ChainMatch {
+    let mut rejected: Option<String> = None;
     for (_idx, e2e) in instance.end_to_end_flows.iter() {
-        let segs: Vec<&str> = e2e.segments.iter().map(|s| s.as_str()).collect();
-        if segs.is_empty() {
+        let (Some(first_seg), Some(last_seg)) = (e2e.segments.first(), e2e.segments.last()) else {
+            continue;
+        };
+        if e2e.nested_segment().is_some() {
+            // Not analysable: resolving it would pick the wrong component.
+            // Remember it only so the request gets the rejection, not a
+            // misleading "not found".
+            if rejected.is_none()
+                && segment_mentions(first_seg, source)
+                && segment_mentions(last_seg, sink)
+            {
+                rejected = Some(e2e.name.as_str().to_string());
+            }
             continue;
         }
-        let first = segs.first().copied().unwrap_or("");
-        let last = segs.last().copied().unwrap_or("");
-
-        if segment_contains_thread(first, &src_lower) && segment_contains_thread(last, &sink_lower)
+        let comps = flow_components(instance, e2e);
+        if let (Some(&first), Some(&last)) = (comps.first(), comps.last())
+            && component_matches(instance, first, source)
+            && component_matches(instance, last, sink)
         {
-            // Best-effort FQN: keep the dotted path the segment
-            // already carries (it's `subcomp.flow_name` or
-            // `path.subcomp.flow`), strip the trailing flow component,
-            // and prepend the owner's name for context.
-            let owner = instance.component(e2e.owner);
-            let owner_name = owner.name.as_str();
-            let src_fqn = format!("{owner_name}/{}", strip_trailing_flow(first));
-            let sink_fqn = format!("{owner_name}/{}", strip_trailing_flow(last));
-            return Some((e2e.name.as_str().to_string(), src_fqn, sink_fqn));
+            return ChainMatch::Found {
+                flow_name: e2e.name.as_str().to_string(),
+                source: instance.component_instance_path(first),
+                sink: instance.component_instance_path(last),
+            };
         }
     }
-    None
+    match rejected {
+        Some(flow_name) => ChainMatch::Rejected { flow_name },
+        None => ChainMatch::NotFound,
+    }
 }
 
-/// True when `needle_lower` appears as a `.`-separated path component
-/// of `segment` (case-insensitive). Used to match an agent-supplied
-/// thread name against a flow segment of the form `subcomp.flow_name`
-/// or `enclosing.subcomp.flow_name`.
-fn segment_contains_thread(segment: &str, needle_lower: &str) -> bool {
-    if needle_lower.is_empty() {
-        return false;
-    }
-    let seg_lower = segment.to_ascii_lowercase();
-    seg_lower.split('.').any(|part| part == needle_lower)
-        || seg_lower.split('/').any(|part| part == needle_lower)
+/// True when `needle` names component `idx`: its bare instance name, or a
+/// `.` / `/` path suffix of its instance path (case-insensitive).
+fn component_matches(instance: &SystemInstance, idx: ComponentInstanceIdx, needle: &str) -> bool {
+    let needle = needle.replace('.', "/").to_ascii_lowercase();
+    let path = instance.component_instance_path(idx).to_ascii_lowercase();
+    path == needle || path.ends_with(&format!("/{needle}"))
 }
 
-/// Drop the last `.`-separated component of a flow-segment name. This
-/// is the trailing `flow_name` of a `subcomp.flow_name` segment so we
-/// can form an FQN that points at the *thread*, not the flow spec.
-fn strip_trailing_flow(segment: &str) -> String {
-    match segment.rsplit_once('.') {
-        Some((head, _tail)) => head.to_string(),
-        None => segment.to_string(),
-    }
+/// True when `needle` is one of the `.`-separated parts of `segment`
+/// (case-insensitive). Used only to point a request at a flow that
+/// `flow_check` rejects; never to resolve a chain.
+fn segment_mentions(segment: &spar_hir_def::Name, needle: &str) -> bool {
+    segment
+        .as_str()
+        .split('.')
+        .any(|part| part.eq_ignore_ascii_case(needle))
 }

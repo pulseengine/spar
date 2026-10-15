@@ -89,6 +89,9 @@ public
     features
       out_p: out data port;
       in_p:  in data port;
+    flows
+      src_flow: flow source out_p;
+      sink_flow: flow sink in_p;
   end Proc;
 
   process implementation Proc.Impl
@@ -98,6 +101,9 @@ public
     connections
       c_out: port producer.out_p -> out_p;
       c_in:  port in_p -> consumer.in_p;
+    flows
+      src_flow: flow source producer.f1 -> c_out -> out_p;
+      sink_flow: flow sink in_p -> c_in -> consumer.f2;
   end Proc.Impl;
 
   system Sys
@@ -111,7 +117,7 @@ public
     connections
       loop_back: port app.out_p -> app.in_p;
     flows
-      chain: end to end flow app.producer.f1 -> loop_back -> app.consumer.f2;
+      chain: end to end flow app.src_flow -> loop_back -> app.sink_flow;
     properties
       Actual_Processor_Binding => (reference (cpu1)) applies to app.producer;
       Actual_Processor_Binding => (reference (cpu2)) applies to app.consumer;
