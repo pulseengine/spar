@@ -7514,3 +7514,19 @@ artifacts:
     links:
       - type: depends-on
         target: REQ-AADL-REF-CONTEXT-001
+  - id: REQ-ANALYSIS-WCTT-PMOO-SKIP-VISIBLE-001
+    type: requirement
+    title: An opt-in --pmoo run that declines at a hop the LP cannot model shall say so, not fall back to SFA silently
+    status: verified
+    description: |-
+      #482, one of the #476 TSN-evaluation gaps, re-verified against main on 2026-10-13. `--pmoo` opts into the PMOO/LUDB linear-program bound (REQ-NETWORK-014). `pmoo_or_sfa` returned `None` at its first eligibility check — `wctt.rs`, the FIFO/Priority switch-type gate — for any hop whose switch is TSN, and the caller's `if self.pmoo && let Some(..)` emitted nothing on `None`. The SFA bound stood and the run was byte-identical with and without the flag.
+      WHY IT MATTERS. `--pmoo` is the flag a user reaches for when a bound looks too loose, and TSN is exactly where bounds are loosest (a deferred TSN hop contributes a conservative term). So the one configuration where the user most wants tightening is the one where the flag is silently inert, and they conclude "PMOO does not help here" when the truth is "PMOO never ran". This is the same provenance defect class the latency-provenance repair and #478 address one layer out: the absence of a computation must not render identically to a computation that found nothing.
+      KILL-CRITERION (from the issue). A TSN model run with `--pmoo`: pre-fix its stdout is byte-identical with and without the flag; that byte-identity IS the bug.
+      THE REQUIREMENT. When `--pmoo` is requested and the PMOO/LUDB path declines because a hop is not a plain FIFO/Priority switch — the two shapes the LP topology models — the analysis shall emit a `WcttPmooSkipped` Info diagnostic naming the offending hop and its switch type and stating that the SFA bound is reported instead. `pmoo_or_sfa` now returns a typed `PmooOutcome` (`Applied` / `DeclinedNonFifoHop` / `DeclinedPrecondition`) so the caller distinguishes the one decline the user needs to see from the preconditions where SFA is the right answer.
+      NON-VACUITY. Three executed oracles in `wctt.rs` tests, `--features milp-solver`. (1) `pmoo_flag_on_tsn_hop_emits_skip_not_silence`: the PMOO-eligible FIFO fixture under exactly one substitution (switch type FIFO -> TSN, so the ONLY changed variable is the switch type) emits `WcttPmooSkipped` naming hop 'sw' and type `Tsn`, emits NO `WcttPmooBound`, and its `--pmoo` message list DIFFERS from its flag-off list — the kill-criterion byte-identity, asserted as `assert_ne!`. (2) `pmoo_flag_on_emits_pmoo_diagnostic_for_eligible_streams` additionally asserts the eligible FIFO fixture acquires NO skip note (kills the unconditional-skip mutant). (3) `pmoo_flag_on_precondition_decline_stays_silent`: a single-stream FIFO model declines on the "< 2 competitors" precondition and must emit neither a bound nor a skip (kills the skip-on-any-decline mutant, proving the note is specific to the non-FIFO/Priority hop). The silence mutant (arm emits nothing, the pre-fix behaviour) and the over-broad mutant (skip emitted on `DeclinedPrecondition` too) were each applied by hand and each flipped exactly its oracle red before this was committed.
+      NOT CLAIMED. The remaining PMOO declines stay silent by design — an empty tandem, a zero-rate service curve, a non-contiguous competitor, fewer than two competitors (PMOO == SFA, no signal), or an infeasible LP — all cases where SFA is the right answer and #482 does not ask to surface them. Extending PMOO to model TSN-shaped service curves is the separate Phase-2 question and is out of scope. The default (flag-off) path is byte-identical to before: `WcttPmoo*` fires only under `--pmoo`.
+    tags: [analysis, network, wctt, pmoo, defect]
+    links:
+      - type: traces-to
+        target: REQ-NETWORK-014
+    release: v0.47.0

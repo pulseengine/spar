@@ -34,6 +34,10 @@
 //!   arrival rate exceeds the switch port's service rate (>1 utilisation).
 //! - [`Severity::Info`] `WcttDeferred`: a TSN switch was encountered;
 //!   Phase 2 is required for TAS/CBS-shaped service curves.
+//! - [`Severity::Info`] `WcttPmooSkipped`: `--pmoo` was requested but the
+//!   PMOO/LUDB path declined at a non-FIFO/Priority (e.g. TSN) hop, whose
+//!   service shape the LP does not model, so the SFA bound is reported
+//!   unchanged. Makes the otherwise-silent inert `--pmoo` visible (#482).
 //!
 //! # Non-regression
 //!
@@ -804,29 +808,69 @@ impl WcttAnalysis {
             #[cfg(feature = "milp-solver")]
             {
                 let sfa_delay_ps = total_delay_ps;
-                if self.pmoo
-                    && let Some((pmoo_delay_ps, pmoo_solve_us)) =
-                        pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus)
-                {
-                    let tightening_pct = if sfa_delay_ps > 0 {
-                        100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
-                    } else {
-                        0.0
-                    };
-                    diags.push(AnalysisDiagnostic {
-                        severity: Severity::Info,
-                        message: format!(
-                            "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps vs SFA \
-                         {} ps (tightening {:.1}%, LP solve {} us)",
-                            stream_name, pmoo_delay_ps, sfa_delay_ps, tightening_pct, pmoo_solve_us,
-                        ),
-                        path: stream_path.clone(),
-                        analysis: self.name().to_string(),
-                    });
-                    // The PMOO bound is no looser than SFA on the LP's
-                    // canonical topology (Bondorf et al.); guard with a
-                    // min just in case f64 rounding flips that.
-                    total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+                if self.pmoo {
+                    match pmoo_or_sfa(stream, &streams, &switch_type, &service_for_bus) {
+                        PmooOutcome::Applied {
+                            delay_ps: pmoo_delay_ps,
+                            solve_us: pmoo_solve_us,
+                        } => {
+                            let tightening_pct = if sfa_delay_ps > 0 {
+                                100.0 * (1.0 - (pmoo_delay_ps as f64 / sfa_delay_ps as f64))
+                            } else {
+                                0.0
+                            };
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttPmooBound: stream '{}' (method=ludb): PMOO delay {} ps \
+                                     vs SFA {} ps (tightening {:.1}%, LP solve {} us)",
+                                    stream_name,
+                                    pmoo_delay_ps,
+                                    sfa_delay_ps,
+                                    tightening_pct,
+                                    pmoo_solve_us,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                            // The PMOO bound is no looser than SFA on the LP's
+                            // canonical topology (Bondorf et al.); guard with a
+                            // min just in case f64 rounding flips that.
+                            total_delay_ps = total_delay_ps.min(pmoo_delay_ps);
+                        }
+                        // #482: `--pmoo` is reached for exactly the TSN topology
+                        // where bounds are loosest and a user most wants
+                        // tightening, yet the LP models FIFO/Priority only. A
+                        // silent fallback here rendered identically to "PMOO ran
+                        // and found no improvement"; name the hop and its switch
+                        // type so "PMOO never ran" is distinguishable from it.
+                        PmooOutcome::DeclinedNonFifoHop {
+                            hop,
+                            switch_type: st,
+                        } => {
+                            diags.push(AnalysisDiagnostic {
+                                severity: Severity::Info,
+                                message: format!(
+                                    "WcttPmooSkipped: stream '{}' — PMOO declined at hop '{}' \
+                                     (switch type {:?}); the LP topology supports Fifo and \
+                                     Priority only, so the SFA bound is reported",
+                                    stream_name,
+                                    graph
+                                        .node(hop)
+                                        .map(|n| n.name.as_str())
+                                        .unwrap_or("<unknown>"),
+                                    st,
+                                ),
+                                path: stream_path.clone(),
+                                analysis: self.name().to_string(),
+                            });
+                        }
+                        // The remaining declines are correct PMOO preconditions
+                        // where SFA is the right answer, so they stay silent as
+                        // before. NOT CLAIMED: surfacing those — #482 scopes
+                        // visibility to the non-FIFO/Priority hop decline only.
+                        PmooOutcome::DeclinedPrecondition => {}
+                    }
                 }
             } // end #[cfg(milp-solver)] PMOO branch
 
@@ -1447,21 +1491,50 @@ pub fn compute_network_hop_latency(
     })
 }
 
+/// Outcome of the PMOO/LUDB dispatch for one stream.
+///
+/// Replaces an earlier `Option<(u64, u64)>`: a bare `None` collapsed
+/// every decline into the same silent fallback, so `--pmoo` on a TSN
+/// model rendered byte-identically to no flag at all (#482). The variants
+/// let the caller tell the one decline a user needs to see — a hop the LP
+/// cannot model — apart from the declines where SFA is simply the right
+/// answer.
+#[cfg(feature = "milp-solver")]
+enum PmooOutcome {
+    /// PMOO/LUDB produced a bound. `delay_ps` is the PMOO delay, `solve_us`
+    /// the LP solve time.
+    Applied { delay_ps: u64, solve_us: u64 },
+    /// Declined because a hop is not a plain FIFO/Priority switch (the LP
+    /// models those two shapes only). Carries the first offending hop and
+    /// its switch type for a user-facing diagnostic — this is the decline
+    /// #482 makes visible.
+    DeclinedNonFifoHop {
+        hop: ComponentInstanceIdx,
+        switch_type: SwitchType,
+    },
+    /// Declined for a reason that is a correct PMOO precondition and where
+    /// the SFA bound is the right answer: an empty tandem, a zero-rate
+    /// service curve, a non-contiguous competitor, fewer than two
+    /// competitors (PMOO ≡ SFA, no signal), or an infeasible LP. The caller
+    /// keeps the SFA bound silently, exactly as before.
+    DeclinedPrecondition,
+}
+
 /// Try the PMOO/LUDB delay for a stream when the topology is
-/// tree-shaped, falling back to `None` when the precondition is not
-/// met. Returns `Some((pmoo_delay_ps, lp_solve_us))` on success.
+/// tree-shaped. Returns [`PmooOutcome::Applied`] on success, and a
+/// `Declined*` variant otherwise — see [`PmooOutcome`] for how the caller
+/// distinguishes a hop the LP cannot model from the preconditions where
+/// SFA is the right answer.
 ///
 /// **Eligibility criteria** (all must hold):
-/// - Every hop on the tagged stream's tandem is a `SwitchType::Fifo`
-///   switch — TSN/CBS/TAS dispatch shapes the per-hop service curve in
-///   ways the present LP doesn't model, so we conservatively skip.
+/// - Every hop on the tagged stream's tandem is a `SwitchType::Fifo` or
+///   `SwitchType::Priority` switch — TSN/CBS/TAS dispatch shapes the
+///   per-hop service curve in ways the present LP doesn't model, so a
+///   non-FIFO/Priority hop yields [`PmooOutcome::DeclinedNonFifoHop`].
 /// - At least 2 other streams cross at least one of the tagged
 ///   stream's hops (otherwise PMOO == SFA trivially, no signal).
 /// - Each competing stream's contact path with the tagged tandem is a
 ///   contiguous sub-path of `tagged.hops` (PMOO precondition).
-///
-/// On any failure (eligibility, LP infeasible, malformed inputs) we
-/// return `None` so the caller transparently keeps the SFA bound.
 ///
 /// Compiled only with the `milp-solver` feature (the good_lp/HiGHS backend);
 /// the wasm build omits it (#259).
@@ -1471,20 +1544,25 @@ fn pmoo_or_sfa(
     all_streams: &[Stream],
     switch_type: &FxHashMap<ComponentInstanceIdx, SwitchType>,
     service_for_bus: &FxHashMap<ComponentInstanceIdx, ServiceCurve>,
-) -> Option<(u64, u64)> {
+) -> PmooOutcome {
     use spar_network::pmoo::{
         CompetingFlow as PmooCompetingFlow, TaggedFlow as PmooTaggedFlow, ludb_bound,
     };
 
     if tagged.hops.is_empty() {
-        return None;
+        return PmooOutcome::DeclinedPrecondition;
     }
 
-    // 1. All hops must be FIFO; PMOO doesn't model TAS/CBS shapes.
+    // 1. All hops must be FIFO/Priority; PMOO doesn't model TAS/CBS shapes.
+    //    This is the decline #482 surfaces: name the first offending hop
+    //    and its type so the caller can say *why* `--pmoo` was inert.
     for h in &tagged.hops {
         let st = switch_type.get(h).copied().unwrap_or(SwitchType::Fifo);
         if !matches!(st, SwitchType::Fifo | SwitchType::Priority) {
-            return None;
+            return PmooOutcome::DeclinedNonFifoHop {
+                hop: *h,
+                switch_type: st,
+            };
         }
     }
 
@@ -1506,7 +1584,7 @@ fn pmoo_or_sfa(
         })
         .collect();
     if services.iter().any(|s| s.rate_bps == 0) {
-        return None;
+        return PmooOutcome::DeclinedPrecondition;
     }
 
     // 3. Build competing-flow set: every other stream that crosses any
@@ -1533,7 +1611,7 @@ fn pmoo_or_sfa(
         local_path.sort_unstable();
         for w in local_path.windows(2) {
             if w[1] != w[0] + 1 {
-                return None;
+                return PmooOutcome::DeclinedPrecondition;
             }
         }
         competing.push(PmooCompetingFlow {
@@ -1543,7 +1621,7 @@ fn pmoo_or_sfa(
     }
 
     if competing.len() < 2 {
-        return None;
+        return PmooOutcome::DeclinedPrecondition;
     }
 
     let pmoo_input = PmooTaggedFlow {
@@ -1552,8 +1630,11 @@ fn pmoo_or_sfa(
     };
 
     match ludb_bound(&pmoo_input, &competing, &services) {
-        Ok(b) => Some((b.delay_ps, b.solve_time_us)),
-        Err(_) => None,
+        Ok(b) => PmooOutcome::Applied {
+            delay_ps: b.delay_ps,
+            solve_us: b.solve_time_us,
+        },
+        Err(_) => PmooOutcome::DeclinedPrecondition,
     }
 }
 
@@ -3970,6 +4051,172 @@ end Net;
                 d.message
             );
         }
+        // Non-vacuity (#482): an eligible FIFO stream must NOT acquire a
+        // skip note. This fails the mutant that emits `WcttPmooSkipped`
+        // unconditionally.
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttPmooSkipped")),
+            "WcttPmooSkipped must NOT fire for PMOO-eligible FIFO streams: {:#?}",
+            diags
+        );
+    }
+
+    // ── #482: `--pmoo` must not be a silent no-op on a TSN model ──────
+    //
+    // A single-FIFO-stream model: PMOO declines because there are fewer
+    // than two competing flows — a correct precondition where SFA is the
+    // right answer. It must stay SILENT (no skip note), so that the skip
+    // note below is proven specific to the non-FIFO/Priority hop decline
+    // and not to "any PMOO decline".
+    #[cfg(feature = "milp-solver")]
+    fn pmoo_single_stream_fifo_aadl() -> &'static str {
+        r#"
+package Net
+public
+
+  bus eth
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 0 us .. 0 us;
+      Spar_Network::Queue_Depth        => 1;
+  end eth;
+  bus implementation eth.impl
+  end eth.impl;
+
+  device d
+    features
+      net : requires bus access;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+
+  device src_d
+    features
+      net : requires bus access;
+      out_p : out data port;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;
+      Spar_Network::Queue_Depth => 1;
+  end src_d;
+  device implementation src_d.impl
+  end src_d.impl;
+
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw : bus eth.impl;
+      a  : device src_d.impl;
+      b  : device d.impl;
+    connections
+      c_sw_a : bus access sw -> a.net;
+      c_sw_b : bus access sw -> b.net;
+      data1  : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (sw));
+  end Sys.impl;
+end Net;
+"#
+    }
+
+    #[cfg(feature = "milp-solver")]
+    // rivet: verifies REQ-ANALYSIS-WCTT-PMOO-SKIP-VISIBLE-001
+    #[test]
+    fn pmoo_flag_on_precondition_decline_stays_silent() {
+        // Single FIFO stream, so PMOO declines on the "< 2 competitors"
+        // precondition. SFA is the right answer and it must stay silent:
+        // neither a bound nor a skip note. This is the negative control
+        // that makes the TSN skip note (next test) non-vacuous.
+        let inst = instantiate(pmoo_single_stream_fifo_aadl(), "Net", "Sys", "impl");
+        let diags = WcttAnalysis::with_pmoo().analyze(&inst);
+        assert!(
+            !diags.iter().any(|d| d.message.starts_with("WcttPmooBound")),
+            "a single-stream FIFO model has no PMOO signal: {:#?}",
+            diags
+        );
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttPmooSkipped")),
+            "a PMOO precondition decline (< 2 competitors) must stay silent, \
+             not emit a skip note: {:#?}",
+            diags
+        );
+    }
+
+    #[cfg(feature = "milp-solver")]
+    // rivet: verifies REQ-ANALYSIS-WCTT-PMOO-SKIP-VISIBLE-001
+    #[test]
+    fn pmoo_flag_on_tsn_hop_emits_skip_not_silence() {
+        // THE #482 ORACLE. The PMOO-eligible FIFO fixture differs from
+        // this one by exactly one substitution — the switch type — so the
+        // ONLY reason PMOO declines here is the non-FIFO/Priority hop.
+        let tsn_src = pmoo_fixture_aadl().replace("=> FIFO;", "=> TSN;");
+        assert!(
+            tsn_src.contains("Switch_Type        => TSN;"),
+            "fixture substitution must flip the switch type to TSN"
+        );
+        let inst = instantiate(&tsn_src, "Net", "Sys", "impl");
+
+        let off = WcttAnalysis::default().analyze(&inst);
+        let on = WcttAnalysis::with_pmoo().analyze(&inst);
+
+        // Pre-fix, `--pmoo` was byte-identical to no flag on this model —
+        // that byte-identity WAS the bug. Post-fix the two must differ,
+        // and the difference is the skip note.
+        let off_msgs: Vec<&str> = off.iter().map(|d| d.message.as_str()).collect();
+        let on_msgs: Vec<&str> = on.iter().map(|d| d.message.as_str()).collect();
+        assert_ne!(
+            off_msgs, on_msgs,
+            "`--pmoo` must not be byte-identical to no flag on a TSN model (#482)"
+        );
+
+        let skips: Vec<&AnalysisDiagnostic> = on
+            .iter()
+            .filter(|d| d.message.starts_with("WcttPmooSkipped"))
+            .collect();
+        assert!(
+            !skips.is_empty(),
+            "a TSN hop must emit WcttPmooSkipped under --pmoo: {:#?}",
+            on
+        );
+        // The note must name the offending hop ('sw') and its switch type,
+        // and say the SFA bound stands — so the user can tell "PMOO never
+        // ran" from "PMOO ran and found no improvement".
+        for d in &skips {
+            assert!(
+                d.message.contains("hop 'sw'"),
+                "skip note must name the TSN hop 'sw': {}",
+                d.message
+            );
+            assert!(
+                d.message.contains("Tsn"),
+                "skip note must name the switch type Tsn: {}",
+                d.message
+            );
+            assert!(
+                d.message.contains("SFA bound is reported"),
+                "skip note must say the SFA bound stands: {}",
+                d.message
+            );
+            assert_eq!(d.severity, Severity::Info);
+        }
+        // A declined stream gets NO bound from the LP.
+        assert!(
+            !on.iter().any(|d| d.message.starts_with("WcttPmooBound")),
+            "a TSN hop declines PMOO, so no WcttPmooBound may fire: {:#?}",
+            on
+        );
+        // The flag-off run must be silent on both PMOO diagnostics.
+        assert!(
+            !off.iter().any(|d| d.message.starts_with("WcttPmoo")),
+            "no WcttPmoo* diagnostic may fire with the flag off: {:#?}",
+            off
+        );
     }
 
     // ── REQ-NC-BRIDGE-001: network-wide TFA/PLP arm ─────────────────
