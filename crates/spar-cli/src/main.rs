@@ -723,7 +723,7 @@ fn cmd_instance(args: &[String]) {
         }
         None | Some("text") => {
             // Print instance hierarchy
-            println!("Instance model: {}::{}.", pkg_name, type_name);
+            println!("Instance model: {}::{}.{}", pkg_name, type_name, impl_name);
             println!("{} component instances", inst.component_count());
             println!();
             print_instance_tree(&inst, inst.root, 0);
@@ -884,9 +884,10 @@ fn cmd_analyze(args: &[String]) {
     );
 
     eprintln!(
-        "Instantiated {}::{}. ({} components)",
+        "Instantiated {}::{}.{} ({} components)",
         pkg_name,
         type_name,
+        impl_name,
         inst.component_count()
     );
     eprintln!();
@@ -1054,9 +1055,10 @@ fn cmd_allocate(args: &[String]) {
     );
 
     eprintln!(
-        "Instantiated {}::{}. ({} components)",
+        "Instantiated {}::{}.{} ({} components)",
         pkg_name,
         type_name,
+        impl_name,
         inst.component_count()
     );
 
@@ -2015,9 +2017,10 @@ fn cmd_verify(args: &[String]) {
     );
 
     eprintln!(
-        "Instantiated {}::{}. ({} components)",
+        "Instantiated {}::{}.{} ({} components)",
         pkg_name,
         type_name,
+        impl_name,
         inst.component_count()
     );
     eprintln!();

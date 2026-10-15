@@ -5993,7 +5993,31 @@ artifacts:
       is scoped to endpoint resolution in connections; feature-group inverse,
       refinement and nesting semantics are not in scope and are not asserted to
       work.
-    status: proposed
+
+      DELIVERED. `Builder::fixup_own_feature_group_endpoint` (spar-hir-def
+      instance.rs) rewrites an endpoint `fg.member`, whose first part names a
+      FEATURE GROUP of the containing component and no subcomponent, to the
+      owner's own feature `fg.member` — the dotted shape
+      `expand_feature_group_connections` already produces. A subcomponent (or
+      array base name) of the same name takes precedence. A group whose type
+      resolves but has no such member gets a precise error ("feature group 'g'
+      has no member 'm'") rather than "unresolved subcomponent"; an unresolved
+      group type stays silent here (reported elsewhere). The banner now prints
+      the implementation name in analyze, allocate, verify and instance.
+
+      MEASURED on complex_system.aadl, --root Avionics_Platform.deployed:
+      `6 error(s)` -> `4 error(s)`, the two `unresolved source subcomponent
+      'sensor_input'` errors gone and nothing else changed (ANSI-stripped
+      diff); banner `Avionics_Platform.` -> `Avionics_Platform.deployed`.
+      ORACLE: crates/spar-cli/tests/feature_group_endpoint.rs (incl. a NEGATIVE
+      control: renaming the group to an unknown name must still fail a
+      zero-completeness-error `verify`) and seven instance.rs unit tests.
+      MUTATION in-diff: 11 of 14 MISSED before the tests; 13 caught, 1
+      unviable, 0 missed after — re-derived independently.
+
+      NOT CLAIMED: three-part endpoints `sub.fg.member` — item-tree lowering
+      drops the middle part, unchanged here.
+    status: verified
     release: v0.46.0
     tags: [hir, instance, aadl, defect]
 
