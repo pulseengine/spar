@@ -225,6 +225,7 @@ fn analyze(path: &Path) -> (i32, String) {
     (out.status.code().unwrap_or(-1), text)
 }
 
+// rivet: verifies REQ-ANALYSIS-FLOW-SEGMENT-LEGALITY-001
 #[test]
 fn nested_flow_segment_is_rejected_not_resolved_to_the_process() {
     let path = write_model("nested", NESTED_MODEL);
@@ -246,6 +247,7 @@ fn nested_flow_segment_is_rejected_not_resolved_to_the_process() {
     );
 }
 
+// rivet: verifies REQ-ANALYSIS-FLOW-SEGMENT-LEGALITY-001
 #[test]
 fn the_legal_spelling_derives_latency_from_the_threads() {
     let path = write_model("legal", LEGAL_MODEL);
@@ -270,6 +272,7 @@ fn the_legal_spelling_derives_latency_from_the_threads() {
 /// latency: BCET 5 + 7 = 12 ms, WCET 10 + 12 = 22 ms, the figure the
 /// in-implementation spelling gives. The devices `s` / `k` carry no timing and
 /// may be reported; `app` must not be, because its threads supplied it.
+// rivet: verifies REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
 #[test]
 fn the_flow_specification_route_descends_into_the_process() {
     let path = write_model("path_descent", PATH_DESCENT_MODEL);

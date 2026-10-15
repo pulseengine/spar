@@ -1251,3 +1251,17 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CLAIM-LEDGER-001
+
+  - id: DEC-RELEASE-V046-SCOPE-001
+    type: design-decision
+    title: "v0.46.0 ships the #455 latency fixes now; nine unstarted requirements move to v0.47.0"
+    status: accepted
+    description: "Decided 2026-10-14 by the maintainer (partial re-scope, chosen over keeping the full scope). KEPT: REQ-HIR-FEATUREGROUP-PATH-001, a bounded defect on the repo's own showcase model. PROMOTED: REQ-ANALYSIS-LATENCY-BEST-CASE-001, implemented and tested in #488. DEFERRED TO v0.47.0, none started: REQ-AADL-PROPERTY-INHERIT-001 (not small: 34 inherit properties incl. Period/Deadline/Priority change scheduling, RTA, latency and WCTT corpus-wide, and it is blocked on the context-free resolve_dotted_path, see #460), REQ-CLAIM-LEDGER-001, REQ-DBC-CYCLE-TIME-001, REQ-FINDINGS-LAYER-001, REQ-RENDER-COMPOUND-001, REQ-RENDER-GOLDEN-001, REQ-RENDER-METRICS-001, REQ-TSN-CLI-SURFACE-001, REQ-TSN-YANG-DEPLOYABLE-001."
+    tags: [release, planning]
+    fields:
+      rationale: "#455 was reported downstream (gale) and closes only on a PUBLISHED release; its items 2 and 3 are merged. Holding them behind nine unstarted, partly multi-day requirements would leave a merged safety-relevant fix unreleased for weeks. Readiness is a query, not a calendar: move scope out explicitly rather than ship it unverified."
+    links:
+      - type: satisfies
+        target: REQ-ANALYSIS-LATENCY-BUDGET-001
+      - type: satisfies
+        target: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001

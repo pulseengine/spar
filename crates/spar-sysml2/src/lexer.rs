@@ -590,12 +590,14 @@ mod tests {
     }
 
     // REQ-SYSML2-VISIBILITY-001: KerML unrestricted names.
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn lex_unrestricted_name_is_one_ident() {
         let toks = lex("'Application Layer'");
         assert_eq!(toks, vec![(SyntaxKind::IDENT, "'Application Layer'")]);
     }
 
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn lex_unrestricted_name_honours_escaped_quote() {
         let toks = lex(r"'it\'s'");
@@ -604,6 +606,7 @@ mod tests {
 
     /// An unclosed name costs ONE error token ending at the line break; the
     /// next line lexes normally instead of vanishing into the error.
+    // rivet: verifies REQ-SYSML2-VISIBILITY-001
     #[test]
     fn lex_unterminated_unrestricted_name_stops_at_newline() {
         let toks = lex("'abc\npart");

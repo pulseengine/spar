@@ -1736,6 +1736,7 @@ mod tests {
     /// A RANGE budget is how `Latency` is declared — the standard types it
     /// `Time_Range` — and the previous scalar-only lookup read it as "no budget
     /// declared". #455's own `300 ns .. 250 us` could not have fired.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_range_budget_is_read_and_a_breach_is_an_error() {
         let d = budget_fixture("Timing_Properties", Some("1 ms .. 10 ms"));
@@ -1759,6 +1760,7 @@ mod tests {
 
     /// The pair for the test above: without it, a build that flagged every
     /// ranged budget would pass.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_range_budget_that_is_met_is_silent() {
         let d = budget_fixture("Timing_Properties", Some("1 ms .. 100 ms"));
@@ -1771,6 +1773,7 @@ mod tests {
     /// `Latency` is a `Communication_Properties` property. The old lookup
     /// searched `Timing_Properties` and then the empty set, so the CORRECTLY
     /// qualified spelling was the one spelling that could never be found.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_budget_under_its_standard_property_set_is_found() {
         let d = budget_fixture("Communication_Properties", Some("10 ms"));
@@ -1783,6 +1786,7 @@ mod tests {
 
     /// An absent budget is not a violation. Pinned because the cheapest wrong
     /// fix — defaulting a missing bound to zero — would flag every flow.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn an_absent_budget_is_not_a_violation() {
         let d = budget_fixture("Timing_Properties", None);
@@ -1795,6 +1799,7 @@ mod tests {
     /// Clause (b): a budget on the FLOW's own block — where AADL puts it, and
     /// exactly how #455 declared `300 ns .. 250 us` — is read. With no owner
     /// budget at all, only the flow's can have fired.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_budget_on_the_flow_itself_is_read() {
         let d = budget_fixture_with_flow("Timing_Properties", None, Some("1 ms .. 10 ms"));
@@ -1810,6 +1815,7 @@ mod tests {
     /// The flow's own budget WINS over the owner's — in both directions,
     /// because either one alone is passable by a wrong precedence. Here the
     /// flow is met and the owner would breach: reading the owner first fires.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn the_flows_own_budget_takes_precedence_when_it_is_met() {
         let d = budget_fixture_with_flow("Timing_Properties", Some("1 ms"), Some("1 ms .. 100 ms"));
@@ -1821,6 +1827,7 @@ mod tests {
 
     /// ...and here the flow breaches while the owner would be met: reading the
     /// owner first stays silent on a real violation.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn the_flows_own_budget_takes_precedence_when_it_is_breached() {
         let d = budget_fixture_with_flow("Timing_Properties", Some("500 ms"), Some("10 ms"));
@@ -1869,6 +1876,7 @@ mod tests {
     /// The LOWER end is a best case: 20 + 20, not the 40 + 40 the old code
     /// summed. Without this the lower bound was an upper bound, and no
     /// below-minimum check could be built on it.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-001
     #[test]
     fn a_ranged_execution_time_gives_a_real_best_case() {
         let r = reported_range(&range_fixture("20 ms .. 40 ms"));
@@ -1878,6 +1886,7 @@ mod tests {
     /// The UPPER end is untouched — this is the safety property of the change.
     /// Pinned separately because a mutant that made the worst case take the
     /// MINIMUM is optimistic, and it survived the entire suite before this.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-001
     #[test]
     fn the_worst_case_is_still_the_sum_of_maxima() {
         let r = reported_range(&range_fixture("20 ms .. 40 ms"));
@@ -1888,6 +1897,7 @@ mod tests {
     /// execution time. The old accessor read only the maximum and so accepted
     /// it; falling back to that keeps every model that computed a latency
     /// before still computing one — here at [40 .. 40], not "not computed".
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-001
     #[test]
     fn a_malformed_minimum_does_not_lose_the_execution_time() {
         let d = range_fixture("garbage .. 20 ms");
@@ -1909,6 +1919,7 @@ mod tests {
     /// diagnostic shipped until that changed, and it failed the moment this
     /// check was added, which is what it was for. Fixture: best case 5 + 5 =
     /// 10 ms against a declared minimum of 50 ms.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_flow_that_can_beat_its_declared_minimum_is_an_error() {
         let d = budget_fixture("Timing_Properties", Some("50 ms .. 100 ms"));
@@ -1932,6 +1943,7 @@ mod tests {
 
     /// The boundary: a best case EXACTLY at the minimum meets it. Without this
     /// a `<=` would pass every other test.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_flow_exactly_at_its_declared_minimum_meets_it() {
         let d = budget_fixture("Timing_Properties", Some("10 ms .. 100 ms"));
@@ -1944,6 +1956,7 @@ mod tests {
     /// A scalar budget is an upper bound only and has NO minimum. Read as
     /// `min == max`, every flow under a scalar budget would fail its own
     /// "minimum" — here 10 ms against 100 ms.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BUDGET-001
     #[test]
     fn a_scalar_budget_has_no_minimum_to_breach() {
         let d = budget_fixture("Timing_Properties", Some("100 ms"));
