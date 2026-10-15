@@ -38,6 +38,12 @@ pub struct PropertyValue {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PropertyMap {
     props: FxHashMap<(CiName, CiName), Vec<PropertyValue>>,
+    /// The component a key's `reference (...)` values resolve from, when
+    /// that is not the component holding this map — i.e. when the value
+    /// arrived through `applies to` (REQ-AADL-REF-CONTEXT-001). Absent means
+    /// the holder itself, which is OSATE's context for every association
+    /// that has no `applies to`.
+    ref_ctx: FxHashMap<(CiName, CiName), crate::instance::ComponentInstanceIdx>,
 }
 
 impl PropertyMap {
@@ -71,9 +77,50 @@ impl PropertyMap {
         if prop.is_append {
             self.props.entry(key).or_default().push(prop);
         } else {
-            // Override: replace all existing values
+            // Override: replace all existing values. The replaced values'
+            // reference context goes with them, so a context can never
+            // outlive the value it was recorded for.
+            self.ref_ctx.remove(&key);
             self.props.insert(key, vec![prop]);
         }
+    }
+
+    /// Add a property value whose `reference (...)` terms resolve from
+    /// `ctx` rather than from the component holding this map.
+    ///
+    /// OSATE resolves a contained association's references "in the context
+    /// of the contained PA's owner" (osate2 @ 87468992,
+    /// CacheContainedPropertyAssociationsSwitch), so a value attached through
+    /// `applies to` records the declaring component here.
+    pub fn add_with_reference_context(
+        &mut self,
+        prop: PropertyValue,
+        ctx: crate::instance::ComponentInstanceIdx,
+    ) {
+        let key = (
+            match &prop.name.property_set {
+                Some(ps) => CiName::new(ps),
+                None => CiName::from_str(""),
+            },
+            CiName::new(&prop.name.property_name),
+        );
+        let had_value = !prop.value.trim().is_empty();
+        self.add(prop);
+        if had_value {
+            self.ref_ctx.insert(key, ctx);
+        }
+    }
+
+    /// The component the value at `(set, name)` resolves its references
+    /// from, if it is not the holder of this map.
+    pub fn reference_context(
+        &self,
+        set: &str,
+        name: &str,
+    ) -> Option<crate::instance::ComponentInstanceIdx> {
+        self.ref_ctx
+            .get(&(CiName::from_str(set), CiName::from_str(name)))
+            .copied()
     }
 
     /// Look up a property value by property set and name.

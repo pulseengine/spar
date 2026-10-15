@@ -412,9 +412,12 @@ impl SystemInstance {
     ///
     /// Returns `None` if no component matches.
     ///
-    /// This is the canonical resolver used by both `Actual_*_Binding`
-    /// reference values in [`crate::overlay`] and by the
-    /// `spar moves` CLI surface.
+    /// This resolves USER INPUT, which has no declaring context: the
+    /// `spar moves` CLI surface, and the name lists of spar's own
+    /// `Spar_Migration::Allowed_Targets`. A property's `reference (...)`
+    /// value is resolved by [`Self::resolve_reference`] from its declaring
+    /// component instead — the deepest match anywhere is not what an AADL
+    /// reference names (#460, REQ-AADL-REF-CONTEXT-001).
     pub fn resolve_dotted_path(&self, name: &str) -> Option<ComponentInstanceIdx> {
         let needle = name.replace('.', "/");
         let needle_lower = needle.to_ascii_lowercase();
@@ -448,6 +451,86 @@ impl SystemInstance {
             }
         }
         best.map(|(idx, _)| idx)
+    }
+
+    /// The component from which `comp`'s value of `(set, name)` resolves its
+    /// `reference (...)` terms: the declaring component when the value came
+    /// through `applies to`, otherwise `comp` itself.
+    ///
+    /// Callers read a property under its qualified key and fall back to its
+    /// bare key only when the qualified key holds NO VALUE. The context is
+    /// taken from whichever key the value was read from — the two keys are
+    /// separate entries, and a qualified local value beside a bare
+    /// `applies to` value must not borrow the latter's context.
+    pub fn reference_context(
+        &self,
+        comp: ComponentInstanceIdx,
+        set: &str,
+        name: &str,
+    ) -> ComponentInstanceIdx {
+        let props = self.properties_for(comp);
+        let key_set = if props.get(set, name).is_some() {
+            set
+        } else {
+            ""
+        };
+        props.reference_context(key_set, name).unwrap_or(comp)
+    }
+
+    /// Resolve a property's `reference (a.b.c)` term from `ctx`, the
+    /// component its association was declared on.
+    ///
+    /// Each segment names a CHILD subcomponent of the previous one, starting
+    /// at `ctx` — exactly OSATE's `findInstanceObjects` walk from the context
+    /// (osate2 @ 87468992, ReferenceValueImpl.instantiate). There is no
+    /// suffix match and no deepest-match tie-break: `resolve_dotted_path`
+    /// picks the deepest component of that name ANYWHERE in the hierarchy,
+    /// which binds a different `cpu` than the one the declaring context
+    /// names whenever names repeat at depth (#460).
+    ///
+    /// One spar extension is kept: a path that begins with the root
+    /// instance's name (`Top.impl.cpu`, or `ee_system.poc.cvc.soc.a53` on a
+    /// root named `ee_system`), and does not resolve from `ctx`, is walked
+    /// from the root. That is an absolute path, so it is unambiguous; it is
+    /// not a global search. OSATE has no such form.
+    ///
+    /// Matching is case-insensitive, as AADL identifiers are. Returns `None`
+    /// when the path does not name a component — the caller reports it.
+    pub fn resolve_reference(
+        &self,
+        ctx: ComponentInstanceIdx,
+        path: &str,
+    ) -> Option<ComponentInstanceIdx> {
+        let segments: Vec<&str> = path
+            .split(['.', '/'])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if segments.is_empty() {
+            return None;
+        }
+        walk_children(self, ctx, &segments).or_else(|| {
+            // The root's name is `Type.impl` — it contains a dot — so it is
+            // matched as a PREFIX of the written path, not as one segment.
+            let root_name = self.components[self.root].name.as_str();
+            let written = path.trim().replace('/', ".");
+            let head = written.get(..root_name.len());
+            let tail = written
+                .get(root_name.len()..)
+                .and_then(|t| t.strip_prefix('.'));
+            if let (Some(head), Some(tail)) = (head, tail)
+                && head.eq_ignore_ascii_case(root_name)
+            {
+                let rest: Vec<&str> = tail
+                    .split('.')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                walk_children(self, self.root, &rest)
+            } else {
+                None
+            }
+        })
     }
 
     /// Get the mode instances for a given component.
@@ -1195,6 +1278,33 @@ impl SystemInstance {
 ///
 /// The result is `fg_name.prefix.feature_name` or `fg_name.feature_name`
 /// depending on whether the expanded feature has a group prefix.
+/// Walk `segs` down through child subcomponents of `from`, one segment per
+/// level (REQ-AADL-REF-CONTEXT-001).
+///
+/// In a legal model sibling names are unique and this is a plain walk. It
+/// tries EVERY same-named child, latest first, because the instance can hold
+/// a stale sibling (#496): `hw: refined to system platform.single` currently
+/// instantiates beside the original `hw: system platform` instead of
+/// replacing it (test-data/osate2/resourcebudgets.aadl), and the original
+/// has no `cpu`. The refinement is declared later, so it is preferred. Every
+/// candidate is still a child of the declaring context — this is not a
+/// search of the model.
+fn walk_children(
+    inst: &SystemInstance,
+    from: ComponentInstanceIdx,
+    segs: &[&str],
+) -> Option<ComponentInstanceIdx> {
+    let Some((seg, rest)) = segs.split_first() else {
+        return Some(from);
+    };
+    inst.components[from]
+        .children
+        .iter()
+        .rev()
+        .filter(|&&c| inst.components[c].name.as_str().eq_ignore_ascii_case(seg))
+        .find_map(|&c| walk_children(inst, c, rest))
+}
+
 fn make_expanded_name(fg_name: &Name, prefix: &Option<Name>, feature_name: &Name) -> Name {
     match prefix {
         Some(p) => Name::new(&format!("{}.{}.{}", fg_name, p, feature_name)),
@@ -2686,7 +2796,13 @@ impl<'a> Builder<'a> {
     ) {
         match self.resolve_applies_to_path(owner, path) {
             AppliesTarget::Component(target) => {
-                self.property_maps.entry(target).or_default().add(prop);
+                // The value's `reference (...)` terms resolve from `owner`,
+                // the component that declared the association, not from
+                // `target` (REQ-AADL-REF-CONTEXT-001).
+                self.property_maps
+                    .entry(target)
+                    .or_default()
+                    .add_with_reference_context(prop, owner);
             }
             AppliesTarget::Feature(feature) => {
                 // Last segment named a feature (AS5506D §11.3). Store on the
@@ -5256,6 +5372,300 @@ end P;
             inst.diagnostics
                 .iter()
                 .all(|d| !d.message.contains("no member"))
+        );
+    }
+
+    // ── #460: a reference resolves from its declaring component ─────────
+    //
+    // REQ-AADL-REF-CONTEXT-001. Two components are named `cpu`: a processor
+    // where the declaring implementation names it, and a MEMORY deeper in
+    // the tree. The old resolver took the deepest match anywhere, so the
+    // binding silently bound the memory.
+
+    const CTX_MODEL: &str = r#"
+package C
+public
+  processor Cpu
+  end Cpu;
+  memory Mem
+  end Mem;
+  thread T
+  end T;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread T;
+  end P.impl;
+  system Sub
+  end Sub;
+  system implementation Sub.impl
+    subcomponents
+      app : process P.impl;
+      cpu : memory Mem;
+  end Sub.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      cpu : processor Cpu;
+      sub : system Sub.impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to sub.app;
+  end Top.impl;
+end C;
+"#;
+
+    fn by_path(inst: &SystemInstance, path: &str) -> ComponentInstanceIdx {
+        inst.all_components()
+            .map(|(i, _)| i)
+            .find(|&i| inst.component_instance_path(i) == path)
+            .unwrap_or_else(|| panic!("no component at {path}"))
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn applies_to_reference_resolves_from_the_declarer_not_the_deepest() {
+        let inst = instantiate_aadl(CTX_MODEL, "C", "Top", "impl");
+        let app = by_path(&inst, "Top.impl/sub/app");
+        let top_cpu = by_path(&inst, "Top.impl/cpu");
+        let deep_cpu = by_path(&inst, "Top.impl/sub/cpu");
+
+        let ctx = inst.reference_context(app, "Deployment_Properties", "Actual_Processor_Binding");
+        assert_eq!(
+            ctx, inst.root,
+            "an `applies to` value resolves from its declarer"
+        );
+        assert_eq!(inst.resolve_reference(ctx, "cpu"), Some(top_cpu));
+        // The negative control: the old resolver's answer.
+        assert_eq!(inst.resolve_dotted_path("cpu"), Some(deep_cpu));
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_value_without_applies_to_resolves_from_its_holder() {
+        // `app : process P.impl { Actual_Processor_Binding => (reference (cpu)); }`
+        // inside Sub.impl names a SIBLING. OSATE resolves an association with
+        // no `applies to` from the instance that receives it
+        // (CachePropertyAssociationsSwitch.instantiateReferenceValues(newVal,
+        // io)) — `app` — where there is no `cpu`: "Referenced element does
+        // not exist in the instance model". The old resolver found a `cpu`
+        // somewhere in the model and called the binding fine.
+        let src = CTX_MODEL
+            .replace(
+                "      app : process P.impl;",
+                "      app : process P.impl { Actual_Processor_Binding => (reference (cpu)); };",
+            )
+            .replace(
+                "      Actual_Processor_Binding => (reference (cpu)) applies to sub.app;\n",
+                "",
+            );
+        assert_ne!(src, CTX_MODEL);
+        let inst = instantiate_aadl(&src, "C", "Top", "impl");
+        let app = by_path(&inst, "Top.impl/sub/app");
+        assert!(
+            inst.properties_for(app)
+                .get("", "Actual_Processor_Binding")
+                .or_else(|| inst
+                    .properties_for(app)
+                    .get("Deployment_Properties", "Actual_Processor_Binding"))
+                .is_some(),
+            "the subcomponent-level binding must be on `app`, or this test proves nothing"
+        );
+        let ctx = inst.reference_context(app, "Deployment_Properties", "Actual_Processor_Binding");
+        assert_eq!(ctx, app, "no `applies to`: the holder is the context");
+        assert_eq!(inst.resolve_reference(ctx, "cpu"), None);
+        assert!(
+            inst.resolve_dotted_path("cpu").is_some(),
+            "the old search found one"
+        );
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_path_is_walked_exactly_and_never_searched() {
+        let inst = instantiate_aadl(CTX_MODEL, "C", "Top", "impl");
+        let root = inst.root;
+        assert_eq!(
+            inst.resolve_reference(root, "sub.app.t"),
+            Some(by_path(&inst, "Top.impl/sub/app/t"))
+        );
+        // `app` is a grandchild, not a child: a suffix does not resolve.
+        assert_eq!(inst.resolve_reference(root, "app"), None);
+        assert_eq!(inst.resolve_reference(root, "app.t"), None);
+        // An unknown head must not fall through to a root-relative walk of
+        // the remainder (that would find `Top.impl/cpu`).
+        assert_eq!(inst.resolve_reference(root, "nosuch.cpu"), None);
+        assert_eq!(inst.resolve_reference(root, ""), None);
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_root_anchored_path_walks_from_the_root() {
+        let inst = instantiate_aadl(CTX_MODEL, "C", "Top", "impl");
+        let app = by_path(&inst, "Top.impl/sub/app");
+        // From `app`, `Top.impl.cpu` is not a child path; the root's full
+        // name — which contains a dot — anchors it.
+        assert_eq!(
+            inst.resolve_reference(app, "Top.impl.cpu"),
+            Some(by_path(&inst, "Top.impl/cpu"))
+        );
+        assert_eq!(
+            inst.resolve_reference(app, "top.IMPL.sub.cpu"),
+            Some(by_path(&inst, "Top.impl/sub/cpu"))
+        );
+        // The root's name alone, or a name that only shares a prefix with
+        // it, is not an anchored path.
+        assert_eq!(inst.resolve_reference(app, "Top.impl"), None);
+        assert_eq!(inst.resolve_reference(app, "Top.implx.cpu"), None);
+        assert_eq!(inst.resolve_reference(app, "Top.cpu"), None);
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_refined_subcomponent_is_preferred_over_its_stale_sibling() {
+        // `hw: refined to system Plat.single` currently instantiates BESIDE
+        // the original `hw: system Plat` instead of replacing it; only the
+        // refinement has a `cpu`. Shape of test-data/osate2/resourcebudgets.aadl.
+        let src = r#"
+package R
+public
+  processor Cpu
+  end Cpu;
+  thread T
+  end T;
+  system Plat
+  end Plat;
+  system implementation Plat.single
+    subcomponents
+      cpu : processor Cpu;
+  end Plat.single;
+  system D
+  end D;
+  system implementation D.base
+    subcomponents
+      hw : system Plat;
+      t : thread T;
+  end D.base;
+  system implementation D.bound extends D.base
+    subcomponents
+      hw : refined to system Plat.single;
+    properties
+      Actual_Processor_Binding => (reference (hw.cpu)) applies to t;
+  end D.bound;
+end R;
+"#;
+        let inst = instantiate_aadl(src, "R", "D", "bound");
+        let t = by_path(&inst, "D.bound/t");
+        let ctx = inst.reference_context(t, "Deployment_Properties", "Actual_Processor_Binding");
+        let got = inst
+            .resolve_reference(ctx, "hw.cpu")
+            .expect("hw.cpu resolves through the refinement");
+        assert_eq!(inst.component(got).category, ComponentCategory::Processor);
+
+        // When BOTH the stale sibling and the refinement have a `cpu`, the
+        // refinement — declared later — must win: it is what AADL means.
+        let both = src
+            .replace(
+                "  system implementation Plat.single",
+                "  memory Mem\n  end Mem;\n  system implementation Plat.old\n    subcomponents\n      cpu : memory Mem;\n  end Plat.old;\n  system implementation Plat.single",
+            )
+            .replace("hw : system Plat;", "hw : system Plat.old;");
+        let inst = instantiate_aadl(&both, "R", "D", "bound");
+        let t = by_path(&inst, "D.bound/t");
+        let ctx = inst.reference_context(t, "Deployment_Properties", "Actual_Processor_Binding");
+        let got = inst
+            .resolve_reference(ctx, "hw.cpu")
+            .expect("hw.cpu resolves");
+        assert_eq!(
+            inst.component(got).category,
+            ComponentCategory::Processor,
+            "the refinement's cpu, not the stale original's memory"
+        );
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn the_context_follows_the_key_the_value_was_read_from() {
+        // A QUALIFIED local value (context: the holder) beside an
+        // UNQUALIFIED `applies to` value from the root. Callers read the
+        // qualified key first, so the context must be the qualified key's —
+        // the holder — and not the bare key's root.
+        use crate::properties::PropertyValue;
+        let mut inst = instantiate_aadl(CTX_MODEL, "C", "Top", "impl");
+        let sub = by_path(&inst, "Top.impl/sub");
+        let root = inst.root;
+        let pv = |set: Option<&str>, v: &str| PropertyValue {
+            name: crate::name::PropertyRef {
+                property_set: set.map(Name::new),
+                property_name: Name::new("Actual_Processor_Binding"),
+            },
+            value: v.to_string(),
+            typed_expr: None,
+            is_append: false,
+        };
+        let map = inst.property_maps.entry(sub).or_default();
+        map.add(pv(Some("Deployment_Properties"), "reference (cpu)"));
+        map.add_with_reference_context(pv(None, "reference (cpu)"), root);
+        assert_eq!(
+            inst.reference_context(sub, "Deployment_Properties", "Actual_Processor_Binding"),
+            sub,
+            "the qualified value is the one read, and it has no applies-to context"
+        );
+        // With only the bare key present, its recorded context is used.
+        let only_bare = by_path(&inst, "Top.impl/sub/app/t");
+        inst.property_maps
+            .entry(only_bare)
+            .or_default()
+            .add_with_reference_context(pv(None, "reference (cpu)"), root);
+        assert_eq!(
+            inst.reference_context(
+                only_bare,
+                "Deployment_Properties",
+                "Actual_Processor_Binding"
+            ),
+            root
+        );
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    fn an_overriding_value_drops_the_overridden_values_context() {
+        use crate::properties::{PropertyMap, PropertyValue};
+        let mut arena: la_arena::Arena<()> = la_arena::Arena::default();
+        let declarer = ComponentInstanceIdx::from_raw(arena.alloc(()).into_raw());
+        let pv = |v: &str| PropertyValue {
+            name: crate::name::PropertyRef {
+                property_set: Some(Name::new("Deployment_Properties")),
+                property_name: Name::new("Actual_Processor_Binding"),
+            },
+            value: v.to_string(),
+            typed_expr: None,
+            is_append: false,
+        };
+        let mut map = PropertyMap::new();
+        map.add_with_reference_context(pv("reference (a)"), declarer);
+        assert_eq!(
+            map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
+            Some(declarer)
+        );
+        map.add(pv("reference (b)"));
+        assert_eq!(
+            map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
+            None,
+            "a context must not outlive the value it was recorded for"
+        );
+        // An empty value is skipped by `add`, so it records no context either.
+        map.add_with_reference_context(pv("   "), declarer);
+        assert_eq!(
+            map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
+            None
         );
     }
 }

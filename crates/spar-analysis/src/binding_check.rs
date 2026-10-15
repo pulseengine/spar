@@ -171,7 +171,7 @@ impl BindingCheckAnalysis {
 /// model. If found, it checks the category.
 fn validate_binding_target(
     instance: &SystemInstance,
-    _comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
+    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
     binding_name: &str,
     binding_val: &str,
     allowed_categories: &[ComponentCategory],
@@ -188,7 +188,10 @@ fn validate_binding_target(
     // subcomponent references like `cvc.soc.helix_linux`) as well as by
     // bare name. A bare-name-only match silently skips category
     // validation for any nested-path binding. See REQ-BINDING-002.
-    if let Some(idx) = instance.resolve_dotted_path(target_name) {
+    // Resolved from the declaring component, as OSATE does (#460,
+    // REQ-AADL-REF-CONTEXT-001); see `SystemInstance::resolve_reference`.
+    let ctx = instance.reference_context(comp_idx, "Deployment_Properties", binding_name);
+    if let Some(idx) = instance.resolve_reference(ctx, target_name) {
         let comp = instance.component(idx);
         if !allowed_categories.contains(&comp.category) {
             diags.push(AnalysisDiagnostic {
@@ -288,6 +291,39 @@ mod tests {
                 typed_expr: None,
                 is_append: false,
             });
+        }
+
+        /// Set a property as an `applies to` association declared on `ctx`
+        /// would: its `reference (...)` terms resolve from `ctx`, not from
+        /// `comp` (REQ-AADL-REF-CONTEXT-001). A binding to a component
+        /// elsewhere in the tree is written this way in real AADL —
+        /// `Actual_Processor_Binding => (reference (cpu)) applies to worker;`
+        /// in the enclosing implementation.
+        fn set_property_from(
+            &mut self,
+            ctx: ComponentInstanceIdx,
+            comp: ComponentInstanceIdx,
+            set: &str,
+            name: &str,
+            value: &str,
+        ) {
+            let map = self.property_maps.entry(comp).or_default();
+            map.add_with_reference_context(
+                PropertyValue {
+                    name: PropertyRef {
+                        property_set: if set.is_empty() {
+                            None
+                        } else {
+                            Some(Name::new(set))
+                        },
+                        property_name: Name::new(name),
+                    },
+                    value: value.to_string(),
+                    typed_expr: None,
+                    is_append: false,
+                },
+                ctx,
+            );
         }
 
         fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
@@ -538,7 +574,8 @@ mod tests {
         let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
         b.set_children(root, vec![mem, thread]);
         // Bind thread to memory (wrong — should be processor)
-        b.set_property(
+        b.set_property_from(
+            root,
             thread,
             "Deployment_Properties",
             "Actual_Processor_Binding",
