@@ -97,6 +97,7 @@ impl Analysis for BindingRuleAnalysis {
             {
                 check_binding_target(
                     instance,
+                    comp_idx,
                     binding_val,
                     "Actual_Processor_Binding",
                     &[
@@ -114,6 +115,7 @@ impl Analysis for BindingRuleAnalysis {
             {
                 check_binding_target(
                     instance,
+                    comp_idx,
                     binding_val,
                     "Actual_Memory_Binding",
                     &[
@@ -135,6 +137,7 @@ impl Analysis for BindingRuleAnalysis {
 /// target exists and has an appropriate category.
 fn check_binding_target(
     instance: &SystemInstance,
+    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
     binding_val: &str,
     binding_name: &str,
     allowed_categories: &[ComponentCategory],
@@ -151,7 +154,12 @@ fn check_binding_target(
     // bare-name-only match wrongly reports multi-level subcomponent
     // references as "does not exist" — they name a component by its
     // containment path, not a top-level identifier. See REQ-BINDING-002.
-    match instance.resolve_dotted_path(target_name) {
+    // Resolved from the component that DECLARED the association, walking
+    // child subcomponents exactly, as OSATE does — never the deepest
+    // same-named component anywhere in the model (#460,
+    // REQ-AADL-REF-CONTEXT-001).
+    let ctx = instance.reference_context(comp_idx, "Deployment_Properties", binding_name);
+    match instance.resolve_reference(ctx, target_name) {
         Some(idx) => {
             // BIND-TARGET-CATEGORY: Check that the category is appropriate
             let comp = instance.component(idx);
@@ -261,6 +269,39 @@ mod tests {
                 typed_expr: None,
                 is_append: false,
             });
+        }
+
+        /// Set a property as an `applies to` association declared on `ctx`
+        /// would: its `reference (...)` terms resolve from `ctx`, not from
+        /// `comp` (REQ-AADL-REF-CONTEXT-001). A binding to a component
+        /// elsewhere in the tree is written this way in real AADL —
+        /// `Actual_Processor_Binding => (reference (cpu)) applies to worker;`
+        /// in the enclosing implementation.
+        fn set_property_from(
+            &mut self,
+            ctx: ComponentInstanceIdx,
+            comp: ComponentInstanceIdx,
+            set: &str,
+            name: &str,
+            value: &str,
+        ) {
+            let map = self.property_maps.entry(comp).or_default();
+            map.add_with_reference_context(
+                PropertyValue {
+                    name: PropertyRef {
+                        property_set: if set.is_empty() {
+                            None
+                        } else {
+                            Some(Name::new(set))
+                        },
+                        property_name: Name::new(name),
+                    },
+                    value: value.to_string(),
+                    typed_expr: None,
+                    is_append: false,
+                },
+                ctx,
+            );
         }
 
         fn build(self, root: ComponentInstanceIdx) -> SystemInstance {
@@ -456,7 +497,8 @@ mod tests {
         let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
         let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
         b.set_children(root, vec![cpu, thread]);
-        b.set_property(
+        b.set_property_from(
+            root,
             thread,
             "Deployment_Properties",
             "Actual_Processor_Binding",
@@ -568,7 +610,8 @@ mod tests {
         let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
         let thread = b.add_component("worker", ComponentCategory::Thread, Some(root));
         b.set_children(root, vec![mem, cpu, thread]);
-        b.set_property(
+        b.set_property_from(
+            root,
             thread,
             "Deployment_Properties",
             "Actual_Processor_Binding",
@@ -634,7 +677,8 @@ mod tests {
         let worker = b.add_component("worker", ComponentCategory::Thread, Some(root));
         let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
         b.set_children(root, vec![mem, worker, proc]);
-        b.set_property(
+        b.set_property_from(
+            root,
             proc,
             "Deployment_Properties",
             "Actual_Memory_Binding",
@@ -719,7 +763,8 @@ mod tests {
         b.set_children(cvc, vec![soc]);
         b.set_children(soc, vec![helix]);
         b.set_children(proc, vec![thread]);
-        b.set_property(
+        b.set_property_from(
+            root,
             thread,
             "Deployment_Properties",
             "Actual_Processor_Binding",
@@ -751,7 +796,8 @@ mod tests {
         b.set_children(root, vec![cvc, proc]);
         b.set_children(cvc, vec![mem]);
         b.set_children(proc, vec![thread]);
-        b.set_property(
+        b.set_property_from(
+            root,
             thread,
             "Deployment_Properties",
             "Actual_Processor_Binding",

@@ -593,10 +593,11 @@ fn format_severity(s: SerSeverity) -> &'static str {
 /// Resolve a user-supplied component name (FQN, dotted path, or bare
 /// name) to a [`ComponentInstanceIdx`].
 ///
-/// Thin wrapper over [`SystemInstance::resolve_dotted_path`] — the
-/// canonical resolver shared with the HIR-level overlay surface so
-/// `--component cvc.soc.a53` and `Actual_Processor_Binding =>
-/// (reference (cvc.soc.a53))` use identical matching semantics.
+/// Thin wrapper over [`SystemInstance::resolve_dotted_path`], for CLI
+/// input such as `--component cvc.soc.a53`, which has no declaring
+/// context. An `Actual_Processor_Binding => (reference (...))` value does
+/// NOT resolve this way: it is walked from the component that declared it
+/// (`SystemInstance::resolve_reference`, #460).
 pub fn resolve_component(instance: &SystemInstance, name: &str) -> Option<ComponentInstanceIdx> {
     instance.resolve_dotted_path(name)
 }

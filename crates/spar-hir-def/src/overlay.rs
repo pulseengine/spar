@@ -225,6 +225,12 @@ impl BindingOverlay {
             if !target_in_allowed {
                 let allowed_idx: Vec<ComponentInstanceIdx> = allowed_names
                     .iter()
+                    // NOT the declarer-relative resolver: Allowed_Targets is
+                    // spar's own property, and its documented use declares
+                    // it on a THREAD TYPE naming processors elsewhere in the
+                    // model (test-data/move_oracle_demo.aadl). From the
+                    // thread, an exact walk resolves none of them. It stays a
+                    // name lookup (REQ-AADL-REF-CONTEXT-001, NOT CLAIMED).
                     .filter_map(|n| instance.resolve_dotted_path(n))
                     .collect();
                 out.push(AllowedTargetsViolation {
@@ -248,18 +254,21 @@ impl BindingOverlay {
 ///    *not* consulted in this case.
 /// 2. Otherwise, read the declared `Actual_Processor_Binding` from
 ///    the component's property map. The reference target is resolved
-///    case-insensitively via [`SystemInstance::resolve_dotted_path`],
-///    which handles both bare names (e.g. `cpu1`) and multi-level
-///    dotted paths (e.g. `cvc.soc.a53` or fully-qualified
-///    `ee_system.poc.cvc.soc.a53`).
+///    case-insensitively via [`SystemInstance::resolve_reference`], from
+///    the component that declared the association: a bare child name
+///    (`cpu1`), a multi-level path (`cvc.soc.a53`), or a root-anchored
+///    path (`ee_system.poc.cvc.soc.a53`) (#460, REQ-AADL-REF-CONTEXT-001).
 /// 3. Returns `None` when no binding is declared and the overlay is
 ///    silent for this component, or when the declared binding's
 ///    target name does not resolve to a known component.
 ///
-/// This is the load-bearing accessor for the overlay surface. Commit
-/// 3 (`spar moves verify`) and commits 4–5 (`spar moves enumerate`)
-/// route every analysis lookup through this function so that an empty
-/// overlay is a strict no-op.
+/// This is the load-bearing accessor for the overlay surface. As of
+/// v0.47.0 its only production caller is the solver's
+/// `compute_total_load`: scheduling, RTA, latency, the budgets, WCTT,
+/// ARINC 653 and codegen still read the binding STRING and match names
+/// on their own (audited for #460; unifying them is
+/// REQ-AADL-BINDING-CONSUMERS-001). An empty overlay is a no-op here,
+/// not across every analysis.
 pub fn actual_processor_binding_with_overlay(
     instance: &SystemInstance,
     comp: ComponentInstanceIdx,
@@ -276,7 +285,8 @@ pub fn actual_processor_binding_with_overlay(
     // `(reference (cvc.soc.a53))` or fully-qualified
     // `(reference (ee_system.poc.cvc.soc.a53))` resolve correctly.
     // Single-level bare names still resolve as before.
-    instance.resolve_dotted_path(&target_name)
+    let ctx = instance.reference_context(comp, "Deployment_Properties", "Actual_Processor_Binding");
+    instance.resolve_reference(ctx, &target_name)
 }
 
 // ── helpers (private) ────────────────────────────────────────────────
@@ -479,6 +489,35 @@ mod tests {
         });
     }
 
+    /// `set_typed` for a REFERENCE-valued property, declared as the root
+    /// implementation's `... applies to <comp>;` would declare it: the
+    /// references resolve from the root, not from `comp`
+    /// (REQ-AADL-REF-CONTEXT-001). That is how a model binds a thread to a
+    /// processor elsewhere in the tree.
+    fn set_typed_from_root(
+        instance: &mut SystemInstance,
+        comp: ComponentInstanceIdx,
+        set: &str,
+        name: &str,
+        value: &str,
+        expr: PropertyExpr,
+    ) {
+        let root = instance.root;
+        let map = instance.property_maps.entry(comp).or_default();
+        map.add_with_reference_context(
+            PropertyValue {
+                name: PropertyRef {
+                    property_set: Some(Name::new(set)),
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: Some(expr),
+                is_append: false,
+            },
+            root,
+        );
+    }
+
     /// Convenience: declare `Actual_Processor_Binding => reference (X)`
     /// on a component via typed expression.
     fn set_actual_processor_binding(
@@ -486,7 +525,7 @@ mod tests {
         comp: ComponentInstanceIdx,
         target_name: &str,
     ) {
-        set_typed(
+        set_typed_from_root(
             instance,
             comp,
             "Deployment_Properties",
@@ -950,50 +989,52 @@ mod tests {
 
     #[test]
     fn nested_binding_3_level_path_resolves() {
-        // `Actual_Processor_Binding => (reference (cvc.soc.a53))` on a
-        // thread declared up at the root level must resolve to the
-        // deeply nested a53 processor instance (the original user-
-        // reported bug). The 3-level dotted path is not a literal
-        // component name; it's a path through cvc → soc → a53.
+        // A multi-level `reference (poc.cvc.soc.a53)` resolves to the deeply
+        // nested a53 processor (the original user-reported bug: a dotted
+        // path is not a literal component name). The association is
+        // declared on `ee_system` — the only component that can bind `thr`
+        // to a processor under `poc` — so the path is written from there.
         let (mut instance, _ee_sys, _poc, _cvc, _soc, a53, thr) = make_nested_instance();
-        set_actual_processor_binding(&mut instance, thr, "cvc.soc.a53");
+        set_actual_processor_binding(&mut instance, thr, "poc.cvc.soc.a53");
 
         let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
         assert_eq!(
             resolved,
             Some(a53),
-            "3-level dotted binding path must resolve to the leaf processor"
+            "multi-level dotted binding path must resolve to the leaf processor"
         );
     }
 
     #[test]
-    fn nested_binding_full_path_resolves() {
-        // Fully-qualified `(reference (ee_system.poc.cvc.soc.a53))`
-        // must also resolve (suffix match against full instance path).
-        let (mut instance, _ee_sys, _poc, _cvc, _soc, a53, thr) = make_nested_instance();
-        set_actual_processor_binding(&mut instance, thr, "ee_system.poc.cvc.soc.a53");
+    fn a_suffix_of_the_path_no_longer_resolves() {
+        // #460 (REQ-AADL-REF-CONTEXT-001): `cvc.soc.a53` is NOT a path from
+        // `ee_system` — `cvc` is a child of `poc`. It used to resolve by
+        // suffix-matching every instance path in the model; OSATE reports
+        // "Referenced element does not exist in the instance model"
+        // (osate2 @ 87468992, CachePropertyAssociationsSwitch). Resolving
+        // it anyway is the search that bound a different `cpu` than the
+        // declarer named.
+        let (mut instance, _ee_sys, _poc, _cvc, _soc, _a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "cvc.soc.a53");
 
         let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
-        assert_eq!(
-            resolved,
-            Some(a53),
-            "fully-qualified binding path must resolve to the leaf processor"
-        );
+        assert_eq!(resolved, None, "a path suffix must not resolve by search");
     }
 
     #[test]
     fn single_level_binding_still_resolves() {
-        // Regression check: single-level `(reference (cvc))` must
-        // still resolve to the `cvc` component (a system, in this
+        // Regression check: single-level `(reference (poc))` must
+        // still resolve to the `poc` component (a system, in this
         // tree — semantic checks happen elsewhere, what we test here
         // is that the resolver doesn't regress to "path required").
-        let (mut instance, _ee_sys, _poc, cvc, _soc, _a53, thr) = make_nested_instance();
-        set_actual_processor_binding(&mut instance, thr, "cvc");
+        // `poc` is the declaring component's direct child.
+        let (mut instance, _ee_sys, poc, _cvc, _soc, _a53, thr) = make_nested_instance();
+        set_actual_processor_binding(&mut instance, thr, "poc");
 
         let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
         assert_eq!(
             resolved,
-            Some(cvc),
+            Some(poc),
             "single-level binding name must continue to resolve"
         );
     }
@@ -1016,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_suffix_match_picks_deepest() {
+    fn reference_resolves_from_the_declarer_not_the_deepest_suffix_match() {
         // Two components share the `cvc.soc.a53` suffix under
         // different roots. Policy: the deepest match wins (matches
         // `spar moves` resolver semantics) and the resolver never
@@ -1115,11 +1156,21 @@ mod tests {
         };
         set_actual_processor_binding(&mut instance, thr, "cvc.soc.a53");
 
+        // FLIPPED by #460 (REQ-AADL-REF-CONTEXT-001). This test used to pin
+        // `a53_deep` — `ee_system/poc/cvc/soc/a53`, the deepest component
+        // whose path ENDS in `cvc.soc.a53`. But the association is declared
+        // on `ee_system`, and from there `cvc.soc.a53` names
+        // `ee_system/cvc/soc/a53`: the path its author wrote. OSATE walks the
+        // reference from the declaring component exactly (osate2 @ 87468992,
+        // ReferenceValueImpl.instantiate). Preferring the deepest suffix
+        // match bound the thread to a processor its declarer never named,
+        // silently — the defect #460 is blocked on.
         let resolved = actual_processor_binding_with_overlay(&instance, thr, None);
         assert_eq!(
             resolved,
-            Some(a53_deep),
-            "ambiguous suffix match must prefer the deepest (most specific) path"
+            Some(_a53_shallow),
+            "a reference resolves from its declaring component, not to the deepest suffix match"
         );
+        assert_ne!(resolved, Some(a53_deep));
     }
 }
