@@ -16,7 +16,9 @@ use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::modal::is_component_active_in_som;
-use crate::property_accessors::{get_memory_binding, get_size_property};
+use crate::property_accessors::{
+    binding_names, extract_reference_target, get_memory_binding, get_size_property,
+};
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Resource budget analysis (memory, MIPS, bandwidth).
@@ -110,12 +112,17 @@ fn check_memory_budgets(
 
             // Check if this component is bound to this memory
             let binding = get_memory_binding(comp_props);
-            if let Some(ref target) = binding {
-                if !target.eq_ignore_ascii_case(mem_comp.name.as_str()) {
-                    continue;
-                }
-            } else {
-                continue;
+            // By identity, from the declaring component (#498).
+            match binding {
+                Some(ref target)
+                    if binding_names(
+                        instance,
+                        comp_idx,
+                        "Actual_Memory_Binding",
+                        target,
+                        mem_idx,
+                    ) => {}
+                _ => continue,
             }
 
             let demand = compute_memory_demand(comp_props);
@@ -207,10 +214,17 @@ fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDi
                 .get("Deployment_Properties", "Actual_Connection_Binding")
                 .or_else(|| comp_props.get("", "Actual_Connection_Binding"));
 
+            // By identity, from the declaring component (#498). This was a
+            // SUBSTRING match on the raw value, so `bus` matched `can_bus`.
             if let Some(binding_val) = binding
-                && binding_val
-                    .to_lowercase()
-                    .contains(&bus_comp.name.as_str().to_lowercase())
+                && binding_names(
+                    instance,
+                    comp_idx,
+                    "Actual_Connection_Binding",
+                    extract_reference_target(binding_val)
+                        .unwrap_or_else(|| binding_val.trim().trim_matches(['(', ')']).trim()),
+                    bus_idx,
+                )
             {
                 // This component's connections use this bus
                 if let Some(rate_raw) = comp_props

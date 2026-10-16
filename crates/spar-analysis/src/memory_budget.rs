@@ -14,7 +14,7 @@ use spar_hir_def::instance::{SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::modal::is_component_active_in_som;
-use crate::property_accessors::{get_memory_binding, get_size_property};
+use crate::property_accessors::{binding_names, get_memory_binding, get_size_property};
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Memory budget analysis.
@@ -100,7 +100,10 @@ impl MemoryBudgetAnalysis {
 
                 let binding = get_memory_binding(comp_props);
                 let bound_to_this = match binding {
-                    Some(ref target) => target.eq_ignore_ascii_case(mem_comp.name.as_str()),
+                    // By identity, from the declaring component (#498).
+                    Some(ref target) => {
+                        binding_names(instance, comp_idx, "Actual_Memory_Binding", target, mem_idx)
+                    }
                     None => false,
                 };
                 if !bound_to_this {
