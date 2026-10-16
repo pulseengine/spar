@@ -127,7 +127,16 @@ fn owning_partition(
         .or_else(|| props.get("", "Actual_Processor_Binding"))
         && let Some(target) = extract_reference_target(raw)
     {
-        // Look up the target by name and check if it's a virtual processor
+        // Resolved from the component that declared the binding, by identity
+        // (#498, REQ-AADL-REF-CONTEXT-001): a binding that names a processor
+        // is not a partition, whatever virtual processor shares its name.
+        let ctx =
+            instance.reference_context(idx, "Deployment_Properties", "Actual_Processor_Binding");
+        if let Some(bound) = instance.resolve_reference(ctx, target) {
+            return (instance.component(bound).category == ComponentCategory::VirtualProcessor)
+                .then_some(bound);
+        }
+        // Unresolved from the declarer: look the target up by name, as before.
         for (comp_idx, comp) in instance.all_components() {
             if comp.name.as_str().eq_ignore_ascii_case(target)
                 && comp.category == ComponentCategory::VirtualProcessor
