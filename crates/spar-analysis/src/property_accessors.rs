@@ -1636,3 +1636,29 @@ impl ProcessorGroups {
         self.resolved.get(key).copied()
     }
 }
+
+/// Whether `comp`'s binding property `prop` — whose reference target is
+/// `reference_name` (`hw.ram` in `reference (hw.ram)`) — names the component
+/// `target` (#498, REQ-AADL-BINDING-CONSUMERS-001).
+///
+/// The reference resolves from the component that declared the association,
+/// as binding_rules resolves it (REQ-AADL-REF-CONTEXT-001), and is compared by
+/// IDENTITY: two buses both named `bus` are different buses, and `hw.ram`
+/// names `ram`. A reference that does not resolve from its declarer falls back
+/// to a case-insensitive comparison of the whole name with `target`'s name, as
+/// before — never a substring.
+pub(crate) fn binding_names(
+    instance: &spar_hir_def::instance::SystemInstance,
+    comp: spar_hir_def::instance::ComponentInstanceIdx,
+    prop: &str,
+    reference_name: &str,
+    target: spar_hir_def::instance::ComponentInstanceIdx,
+) -> bool {
+    let ctx = instance.reference_context(comp, "Deployment_Properties", prop);
+    match instance.resolve_reference(ctx, reference_name) {
+        Some(idx) => idx == target,
+        None => reference_name
+            .trim()
+            .eq_ignore_ascii_case(instance.component(target).name.as_str()),
+    }
+}
