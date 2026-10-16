@@ -21,7 +21,8 @@ use spar_hir_def::instance::SystemOperationMode;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
-    get_execution_time, get_execution_time_range, get_processor_binding, get_timing_property,
+    ProcessorGroups, UNBOUND, get_execution_time, get_execution_time_range, get_processor_binding,
+    get_timing_property,
 };
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
@@ -47,6 +48,7 @@ impl Analysis for SchedulingAnalysis {
         // Collect thread timing info and group by processor binding.
         // Key: processor name (or "__unbound__" for threads without binding).
         let mut processor_threads: FxHashMap<String, Vec<ThreadInfo>> = FxHashMap::default();
+        let mut groups = ProcessorGroups::default();
 
         for (comp_idx, comp) in instance.all_components() {
             if comp.category != ComponentCategory::Thread {
@@ -152,7 +154,7 @@ impl Analysis for SchedulingAnalysis {
                 });
             }
 
-            let proc_key = binding.unwrap_or_else(|| "__unbound__".to_string());
+            let proc_key = groups.key(instance, comp_idx, binding.as_deref());
 
             if let (Some(period), Some(exec)) = (period_ps, exec_ps) {
                 processor_threads
@@ -168,8 +170,8 @@ impl Analysis for SchedulingAnalysis {
         }
 
         // For each processor, compute utilization and check RMA bound
-        for (proc_name, threads) in &processor_threads {
-            if proc_name == "__unbound__" {
+        for (proc_key, threads) in &processor_threads {
+            if proc_key == UNBOUND {
                 // Skip unbound threads for RMA check (already warned above)
                 continue;
             }
@@ -187,7 +189,11 @@ impl Analysis for SchedulingAnalysis {
             let rma_bound = rma_utilization_bound(n);
 
             // Find processor component for the path
-            let proc_path = find_processor_path(instance, proc_name);
+            let proc_name = groups.display(proc_key);
+            let proc_path = groups
+                .resolved(proc_key)
+                .map(|idx| component_path(instance, idx))
+                .unwrap_or_else(|| find_processor_path(instance, proc_name));
 
             if utilization > 1.0 {
                 diags.push(AnalysisDiagnostic {
@@ -259,8 +265,8 @@ impl Analysis for SchedulingAnalysis {
         // STPA-REQ-003: Sensitivity analysis — perturb execution times by +10% and
         // check if schedulability conclusion changes. This reveals fragile task sets
         // with thin margins.
-        for (proc_name, threads) in &processor_threads {
-            if proc_name == "__unbound__" || threads.is_empty() {
+        for (proc_key, threads) in &processor_threads {
+            if proc_key == UNBOUND || threads.is_empty() {
                 continue;
             }
 
@@ -272,7 +278,11 @@ impl Analysis for SchedulingAnalysis {
                 .sum();
             let perturbed_util = nominal_util * 1.1; // +10% perturbation
 
-            let proc_path = find_processor_path(instance, proc_name);
+            let proc_name = groups.display(proc_key);
+            let proc_path = groups
+                .resolved(proc_key)
+                .map(|idx| component_path(instance, idx))
+                .unwrap_or_else(|| find_processor_path(instance, proc_name));
 
             // If nominal passes RMA but +10% fails, the margin is thin
             if nominal_util <= rma_bound && perturbed_util > rma_bound {
@@ -416,6 +426,7 @@ impl ModalAnalysis for SchedulingAnalysis {
 
         // Collect threads active in this SOM, grouped by processor binding.
         let mut processor_threads: FxHashMap<String, Vec<ThreadInfo>> = FxHashMap::default();
+        let mut groups = ProcessorGroups::default();
 
         for (comp_idx, comp) in instance.all_components() {
             if comp.category != ComponentCategory::Thread {
@@ -431,7 +442,7 @@ impl ModalAnalysis for SchedulingAnalysis {
             let period_ps = get_timing_property(props, "Period");
             let exec_ps = get_execution_time(props);
             let binding = get_processor_binding(props);
-            let proc_key = binding.unwrap_or_else(|| "__unbound__".to_string());
+            let proc_key = groups.key(instance, comp_idx, binding.as_deref());
 
             if let (Some(period), Some(exec)) = (period_ps, exec_ps) {
                 processor_threads
@@ -447,8 +458,8 @@ impl ModalAnalysis for SchedulingAnalysis {
         }
 
         // Run RMA per processor for the threads active in this SOM.
-        for (proc_name, threads) in &processor_threads {
-            if proc_name == "__unbound__" || threads.is_empty() {
+        for (proc_key, threads) in &processor_threads {
+            if proc_key == UNBOUND || threads.is_empty() {
                 continue;
             }
 
@@ -458,7 +469,11 @@ impl ModalAnalysis for SchedulingAnalysis {
                 .map(|t| t.exec_ps as f64 / t.period_ps as f64)
                 .sum();
             let rma_bound = rma_utilization_bound(n);
-            let proc_path = find_processor_path(instance, proc_name);
+            let proc_name = groups.display(proc_key);
+            let proc_path = groups
+                .resolved(proc_key)
+                .map(|idx| component_path(instance, idx))
+                .unwrap_or_else(|| find_processor_path(instance, proc_name));
 
             if utilization > 1.0 {
                 diags.push(AnalysisDiagnostic {
@@ -1149,6 +1164,34 @@ mod tests {
             !util_slow.is_empty() && util_slow[0].message.contains("10.0%"),
             "slow mode should be 10%: {:?}",
             diags_slow
+        );
+    }
+
+    #[test]
+    fn per_som_unbound_threads_are_not_a_processor() {
+        // A thread with timing but no Actual_Processor_Binding goes in the
+        // UNBOUND group, which per-mode scheduling must skip. Scheduling it
+        // reports a "processor '__unbound__'" that does not exist.
+        use crate::ModalAnalysis;
+
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t = b.add_component("t", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![t]);
+        b.set_property(t, "Timing_Properties", "Period", "10 ms");
+        b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "2 ms");
+        let inst = b.build(root);
+
+        let som = SystemOperationMode {
+            name: "only".to_string(),
+            mode_selections: vec![],
+        };
+        let diags = SchedulingAnalysis.analyze_in_mode(&inst, &som);
+        assert!(
+            !diags.iter().any(|d| d.message.contains(UNBOUND)),
+            "unbound threads must not be scheduled as a processor: {diags:?}"
         );
     }
 
