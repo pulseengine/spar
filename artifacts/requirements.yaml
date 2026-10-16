@@ -7532,3 +7532,15 @@ artifacts:
       - type: traces-to
         target: REQ-NETWORK-014
     release: v0.47.0
+
+  - id: REQ-CONFIG-RIVET-YAML-001
+    type: requirement
+    title: spar shall read its own inputs (verify requirements, assertions, rivet artifact YAML) through rivet-yaml, not TOML or hand-rolled line readers
+    status: proposed
+    description: "Org policy (#499, maintainer 2026-10-13): a repository reads its OWN inputs through rivet's owned YAML stack. rivet v0.41.0 ships rivet-yaml (pulseengine/rivet#1085), a serde Deserializer over rivet's lossless parser, checked against the pinned yaml-test-suite. To migrate: requirements.toml, the spar verify input (spar-cli/src/verify.rs); assertion files (spar-cli/src/assertion, with the production loader to check); and two hand-rolled line-oriented readers of rivet artifact YAML, spar-sysml2/src/generate.rs parse_rivet_yaml and spar-mermaid/src/lib.rs parse_req_yaml. These are exactly the kind of reader that silently misreads valid YAML. Stays as is: exports and externally defined formats (variant-context JSON, LSP/MCP, SARIF, cargo metadata, LLDP/tc fixtures, generated aadl-contract.toml). rivet-yaml is a git dependency, pinned at the same rivet revision as etch so the tree carries one rivet revision; it needs a cargo-vet exemption. A format change to spar verify's input is user-visible, so it needs a migration path or a dual-read period, decided in the PR. Targeted v0.48.0: v0.47.0's open scope is the #460 chain."
+    tags: [tooling, config, supply-chain]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-16T03:14:13Z
+    release: v0.48.0
