@@ -1560,3 +1560,79 @@ mod tests {
         assert_eq!(get_interrupt_overhead(&props), None);
     }
 }
+
+// ── Processor grouping by resolved binding (#498) ─────────────────────
+
+/// Group key for threads with no processor binding.
+pub(crate) const UNBOUND: &str = "__unbound__";
+
+/// Groups threads (and ISRs) by the processor their binding RESOLVES to
+/// (REQ-AADL-BINDING-CONSUMERS-001).
+///
+/// The binding is resolved from the component that declared it, as
+/// binding_rules resolves it (REQ-AADL-REF-CONTEXT-001), so analyses agree
+/// with the validator about where a thread runs: `cpu` and `hw.cpu` naming
+/// one processor share a group, and two different processors named `cpu` do
+/// not. A binding that does not resolve keeps its string key, as before.
+/// Each group remembers the first binding text seen for it, which is what
+/// diagnostics print, so messages read as they did.
+#[derive(Default)]
+pub(crate) struct ProcessorGroups {
+    display: rustc_hash::FxHashMap<String, String>,
+    resolved: rustc_hash::FxHashMap<String, spar_hir_def::instance::ComponentInstanceIdx>,
+}
+
+impl ProcessorGroups {
+    /// The canonical key of a PROCESSOR instance: the key a binding that
+    /// resolves to it gets. A NUL cannot occur in an AADL name, so this never
+    /// collides with an unresolved binding string.
+    pub(crate) fn processor_key(
+        instance: &spar_hir_def::instance::SystemInstance,
+        idx: spar_hir_def::instance::ComponentInstanceIdx,
+    ) -> String {
+        format!("\0{}", instance.component_instance_path(idx))
+    }
+
+    /// The group key for `comp`'s processor binding, whose text is
+    /// `binding` (from [`get_processor_binding`]); [`UNBOUND`] when absent.
+    pub(crate) fn key(
+        &mut self,
+        instance: &spar_hir_def::instance::SystemInstance,
+        comp: spar_hir_def::instance::ComponentInstanceIdx,
+        binding: Option<&str>,
+    ) -> String {
+        let Some(binding) = binding else {
+            self.display
+                .entry(UNBOUND.to_string())
+                .or_insert_with(|| UNBOUND.to_string());
+            return UNBOUND.to_string();
+        };
+        let resolved =
+            spar_hir_def::overlay::actual_processor_binding_with_overlay(instance, comp, None);
+        let key = match resolved {
+            Some(idx) => {
+                let key = Self::processor_key(instance, idx);
+                self.resolved.insert(key.clone(), idx);
+                key
+            }
+            None => binding.to_string(),
+        };
+        self.display
+            .entry(key.clone())
+            .or_insert_with(|| binding.to_string());
+        key
+    }
+
+    /// The name diagnostics print for the group `key`.
+    pub(crate) fn display<'a>(&'a self, key: &'a str) -> &'a str {
+        self.display.get(key).map(String::as_str).unwrap_or(key)
+    }
+
+    /// The processor the group `key` resolved to, if it did.
+    pub(crate) fn resolved(
+        &self,
+        key: &str,
+    ) -> Option<spar_hir_def::instance::ComponentInstanceIdx> {
+        self.resolved.get(key).copied()
+    }
+}

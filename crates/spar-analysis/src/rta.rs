@@ -52,10 +52,11 @@ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::property_accessors::{
-    LockingProtocol, get_bottom_half_server, get_critical_section_blocking, get_dispatch_jitter,
-    get_dispatch_protocol, get_execution_time, get_execution_time_range,
-    get_interrupt_latency_bound, get_interrupt_overhead, get_isr_execution_time_range,
-    get_isr_priority, get_locking_protocol, get_processor_binding, get_timing_property,
+    LockingProtocol, ProcessorGroups, UNBOUND, get_bottom_half_server,
+    get_critical_section_blocking, get_dispatch_jitter, get_dispatch_protocol, get_execution_time,
+    get_execution_time_range, get_interrupt_latency_bound, get_interrupt_overhead,
+    get_isr_execution_time_range, get_isr_priority, get_locking_protocol, get_processor_binding,
+    get_timing_property,
 };
 use crate::scheduling_verified::{self, RtaResult};
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -84,6 +85,10 @@ impl Analysis for RtaAnalysis {
             FxHashMap::default();
         // Map processor name → Interrupt_Latency_Bound, if declared.
         let mut processor_latency: FxHashMap<String, u64> = FxHashMap::default();
+        // Threads and ISRs are grouped by the processor their binding
+        // RESOLVES to (#498); `processor_latency` holds both that canonical
+        // key and the bare name, the latter for bindings that do not resolve.
+        let mut groups = ProcessorGroups::default();
         // Map component *name* (for reference-string resolution) → idx.
         // Used to resolve `Bottom_Half_Server reference (handler_thread)`.
         let mut component_name_index: FxHashMap<String, ComponentInstanceIdx> =
@@ -97,6 +102,7 @@ impl Analysis for RtaAnalysis {
                 let props = instance.properties_for(idx);
                 if let Some(lat) = get_interrupt_latency_bound(props) {
                     processor_latency.insert(comp.name.as_str().to_string(), lat);
+                    processor_latency.insert(ProcessorGroups::processor_key(instance, idx), lat);
                 }
             }
         }
@@ -121,7 +127,8 @@ impl Analysis for RtaAnalysis {
                 // fall back to the first Processor parent by walking
                 // up the tree is not AADL-correct, so we simply
                 // require explicit binding.
-                let binding = get_processor_binding(props);
+                let binding =
+                    get_processor_binding(props).map(|b| groups.key(instance, idx, Some(&b)));
 
                 // ISR period: prefer Period, fall back to MIN inter-
                 // arrival time for sporadic (not yet modeled), else
@@ -263,7 +270,7 @@ impl Analysis for RtaAnalysis {
                 });
             }
 
-            let binding = get_processor_binding(props).unwrap_or("__unbound__".to_string());
+            let binding = groups.key(instance, idx, get_processor_binding(props).as_deref());
 
             let deadline_ps = get_timing_property(props, "Deadline").unwrap_or(period_ps);
             let priority = get_priority(props);
@@ -333,7 +340,7 @@ impl Analysis for RtaAnalysis {
         // Produce per-CPU diagnostics in sorted CPU order for
         // determinism.
         let mut cpu_names: Vec<String> = processor_isrs.keys().cloned().collect();
-        cpu_names.sort();
+        cpu_names.sort_by(|a, b| groups.display(a).cmp(groups.display(b)));
         for cpu in &cpu_names {
             let isrs = &processor_isrs[cpu];
             // U_isr (per CPU) in the form "sum of exec/period".
@@ -353,9 +360,11 @@ impl Analysis for RtaAnalysis {
                     severity: Severity::Error,
                     message: format!(
                         "processor '{}' is ISR-overloaded: utilization {}% >= threshold {}%",
-                        cpu, util_pct, DEFAULT_ISR_OVERLOAD_THRESHOLD_PCT,
+                        groups.display(cpu),
+                        util_pct,
+                        DEFAULT_ISR_OVERLOAD_THRESHOLD_PCT,
                     ),
-                    path: vec![cpu.clone()],
+                    path: vec![groups.display(cpu).to_string()],
                     analysis: self.name().to_string(),
                 });
             }
@@ -365,14 +374,15 @@ impl Analysis for RtaAnalysis {
 
         // Sort processor names for deterministic output order.
         let mut proc_names: Vec<_> = processor_threads.keys().cloned().collect();
-        proc_names.sort();
+        proc_names.sort_by(|a, b| groups.display(a).cmp(groups.display(b)));
 
-        for proc_name in proc_names {
-            if proc_name == "__unbound__" {
+        for proc_key in proc_names {
+            if proc_key == UNBOUND {
                 continue;
             }
+            let proc_name = groups.display(&proc_key).to_string();
 
-            let threads = processor_threads.get_mut(&proc_name).unwrap();
+            let threads = processor_threads.get_mut(&proc_key).unwrap();
 
             if threads.is_empty() {
                 continue;
@@ -389,7 +399,7 @@ impl Analysis for RtaAnalysis {
 
             // ISR interference terms for threads on this CPU.
             let isr_interference: Vec<(u64, u64)> = processor_isrs
-                .get(&proc_name)
+                .get(&proc_key)
                 .map(|v| v.iter().map(|i| (i.period_ps, i.exec_wcet_ps)).collect())
                 .unwrap_or_default();
 
