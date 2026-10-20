@@ -231,7 +231,10 @@ fn check_redundancy(
     }
 
     // Check that a sibling AI component exists on a different processor
-    let my_binding = get_processor_binding(props);
+    // Keyed by the processor each binding RESOLVES to (#498): two spellings
+    // of one processor are not redundancy; two processors sharing a name are.
+    let mut groups = crate::property_accessors::ProcessorGroups::default();
+    let my_binding = get_processor_binding(props).map(|b| groups.key(instance, comp_idx, Some(&b)));
     let parent = instance.component(comp_idx).parent;
     let Some(parent_idx) = parent else { return };
 
@@ -244,7 +247,8 @@ fn check_redundancy(
         if !is_ai_ml_component(sib_props) {
             return false;
         }
-        let sib_binding = get_processor_binding(sib_props);
+        let sib_binding =
+            get_processor_binding(sib_props).map(|b| groups.key(instance, sib_idx, Some(&b)));
         // Must be on a different processor
         match (&my_binding, &sib_binding) {
             (Some(mine), Some(theirs)) => !mine.eq_ignore_ascii_case(theirs),
