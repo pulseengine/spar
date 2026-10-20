@@ -373,7 +373,19 @@ fn threads_for_processor(
             .get("Deployment_Properties", "Actual_Processor_Binding")
             .or_else(|| props.get("", "Actual_Processor_Binding"))
         {
-            // Extract the reference target and compare the last component
+            // By identity first (#498): resolved from the component that
+            // declared the binding (REQ-AADL-REF-CONTEXT-001), so two
+            // processors that share a name each get only their own threads.
+            if let Some(bound) =
+                spar_hir_def::overlay::actual_processor_binding_with_overlay(inst, idx, None)
+            {
+                if bound == proc_idx {
+                    bound_threads.push(idx);
+                }
+                continue;
+            }
+            // Unresolved from the declarer: the name comparison below, as
+            // before. Extract the reference target and compare the last component
             // against the processor name (case-insensitive). Using
             // extract_reference_target avoids substring false-positives
             // (e.g. "CPU" matching "CPU_hot_spare").
@@ -715,5 +727,70 @@ mod tests {
             !last.eq_ignore_ascii_case(proc_name),
             "reference(sys.MyCPU) must NOT match processor CPU"
         );
+    }
+
+    // rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn each_same_named_processor_gets_exactly_its_own_thread() {
+        // #498: two different processors named `cpu`, one thread each. By
+        // name, each `cpu` collected BOTH threads; by identity, each gets the
+        // one its binding resolves to — checked by instance path, which the
+        // generated proof cannot show (both threads are `t`).
+        let src = r#"package TwoCpu
+public
+  processor Cpu
+  end Cpu;
+  thread W
+    properties
+      Dispatch_Protocol => Periodic;
+      Period => 10 ms;
+      Deadline => 10 ms;
+      Compute_Execution_Time => 6 ms .. 6 ms;
+  end W;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread W;
+  end P.impl;
+  system Node
+  end Node;
+  system implementation Node.impl
+    subcomponents
+      cpu : processor Cpu;
+      app : process P.impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to app.t;
+  end Node.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      left : system Node.impl;
+      right : system Node.impl;
+  end Top.impl;
+end TwoCpu;
+"#;
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "two.aadl".to_string(), src.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = spar_hir_def::resolver::GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &spar_hir_def::name::Name::new("TwoCpu"),
+            &spar_hir_def::name::Name::new("Top"),
+            &spar_hir_def::name::Name::new("impl"),
+        );
+        let at = |path: &str| {
+            inst.all_components()
+                .map(|(i, _)| i)
+                .find(|&i| inst.component_instance_path(i) == path)
+                .unwrap_or_else(|| panic!("no {path}"))
+        };
+        for side in ["left", "right"] {
+            let got = threads_for_processor(&inst, at(&format!("Top.impl/{side}/cpu")));
+            assert_eq!(got, vec![at(&format!("Top.impl/{side}/app/t"))], "{side}");
+        }
     }
 }
