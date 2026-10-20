@@ -25,8 +25,8 @@ use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, FlowSegment};
 
 use crate::property_accessors::{
-    get_execution_time, get_execution_time_range, get_latency_budget, get_processor_binding,
-    get_timing_property,
+    ProcessorGroups, get_execution_time, get_execution_time_range, get_latency_budget,
+    get_processor_binding, get_timing_property,
 };
 use crate::wctt::compute_network_hop_latency;
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
@@ -44,6 +44,7 @@ impl Analysis for LatencyAnalysis {
         //   Warning — component without timing properties, worst-case latency exceeds bound
         //   Info    — end-to-end flow latency range, modal awareness note
         let mut diags = Vec::new();
+        let mut groups = ProcessorGroups::default();
 
         for (_e2e_idx, e2e) in instance.end_to_end_flows.iter() {
             let owner_path = component_path(instance, e2e.owner);
@@ -202,7 +203,11 @@ impl Analysis for LatencyAnalysis {
                     }
 
                     // Track processor binding for inter-processor overhead.
-                    let cur_binding = get_processor_binding(child_props);
+                    // Keyed by the processor the binding RESOLVES to, so two
+                    // spellings of one processor are no crossing and two
+                    // processors sharing a name are one (#498).
+                    let cur_binding = get_processor_binding(child_props)
+                        .map(|b| groups.key(instance, child_idx, Some(&b)));
                     let mut crossed_boundary = false;
                     if let Some(ref cur) = cur_binding
                         && let Some(ref prev) = prev_processor
@@ -446,7 +451,9 @@ impl Analysis for LatencyAnalysis {
                     } = step
                     {
                         let child_props = instance.properties_for(child_idx);
-                        let binding = get_processor_binding(child_props);
+                        // The same key as the latency walk above (#498).
+                        let binding = get_processor_binding(child_props)
+                            .map(|b| groups.key(instance, child_idx, Some(&b)));
 
                         if let Some(ref cur) = binding
                             && let Some(ref prev) = prev_binding
