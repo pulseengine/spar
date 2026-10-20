@@ -477,6 +477,30 @@ impl SystemInstance {
         props.reference_context(key_set, name).unwrap_or(comp)
     }
 
+    /// The component from which connection `conn`'s value of `(set, name)`
+    /// resolves its `reference (...)` terms: the declaring component when the
+    /// value came through `applies to`, otherwise the component that OWNS the
+    /// connection — OSATE resolves a connection's own property values "in the
+    /// context of the connection's component instance" (osate2 @ 87468992,
+    /// CachePropertyAssociationsSwitch). Same key rule as
+    /// [`Self::reference_context`].
+    pub fn connection_reference_context(
+        &self,
+        conn: ConnectionInstanceIdx,
+        set: &str,
+        name: &str,
+    ) -> ComponentInstanceIdx {
+        let props = self.properties_for_connection(conn);
+        let key_set = if props.get(set, name).is_some() {
+            set
+        } else {
+            ""
+        };
+        props
+            .reference_context(key_set, name)
+            .unwrap_or(self.connections[conn].owner)
+    }
+
     /// Resolve a property's `reference (a.b.c)` term from `ctx`, the
     /// component its association was declared on.
     ///
@@ -2815,10 +2839,12 @@ impl<'a> Builder<'a> {
             }
             AppliesTarget::Connection(connection) => {
                 // Last segment named a connection — store per-connection (#237).
+                // Its `reference (...)` terms resolve from `owner`, the
+                // declarer (#498, REQ-AADL-REF-CONTEXT-001).
                 self.connection_property_maps
                     .entry(connection)
                     .or_default()
-                    .add(prop);
+                    .add_with_reference_context(prop, owner);
             }
             AppliesTarget::Unresolvable => {
                 // Unresolvable path: keep on owner (prior behavior) and
@@ -5631,6 +5657,88 @@ end R;
                 "Actual_Processor_Binding"
             ),
             root
+        );
+    }
+
+    // rivet: verifies REQ-AADL-REF-CONTEXT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_connection_value_resolves_from_its_declarer_or_its_owner() {
+        // #498: `Top.impl` binds a connection INSIDE `sub` with `applies to`,
+        // so its references resolve from Top.impl. A connection value with
+        // no recorded declarer resolves from the component owning the
+        // connection, as OSATE does.
+        let src = r#"
+package K
+public
+  bus B
+  end B;
+  device D
+    features
+      o : out data port;
+      i : in data port;
+  end D;
+  system Sub
+  end Sub;
+  system implementation Sub.impl
+    subcomponents
+      a : device D;
+      b : device D;
+    connections
+      c1 : port a.o -> b.i;
+      c2 : port b.o -> a.i;
+  end Sub.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      sw : bus B;
+      sub : system Sub.impl;
+    properties
+      Actual_Connection_Binding => (reference (sw)) applies to sub.c1;
+  end Top.impl;
+end K;
+"#;
+        let inst = instantiate_aadl(src, "K", "Top", "impl");
+        let sub = by_path(&inst, "Top.impl/sub");
+        let conn = |n: &str| {
+            inst.connections
+                .iter()
+                .find(|(_, c)| c.name.as_str() == n && c.owner == sub)
+                .map(|(i, _)| i)
+                .unwrap_or_else(|| panic!("connection {n}"))
+        };
+        let c1 = conn("c1");
+        assert!(
+            inst.properties_for_connection(c1)
+                .get("", "Actual_Connection_Binding")
+                .or_else(|| inst
+                    .properties_for_connection(c1)
+                    .get("Deployment_Properties", "Actual_Connection_Binding"))
+                .is_some(),
+            "the applies-to binding must land on c1, or this test proves nothing"
+        );
+        let ctx = inst.connection_reference_context(
+            c1,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+        );
+        assert_eq!(
+            ctx, inst.root,
+            "an applies-to value resolves from its declarer"
+        );
+        assert_eq!(
+            inst.resolve_reference(ctx, "sw"),
+            Some(by_path(&inst, "Top.impl/sw"))
+        );
+        assert_eq!(
+            inst.connection_reference_context(
+                conn("c2"),
+                "Deployment_Properties",
+                "Actual_Connection_Binding"
+            ),
+            sub,
+            "no recorded declarer: the connection's owner"
         );
     }
 
