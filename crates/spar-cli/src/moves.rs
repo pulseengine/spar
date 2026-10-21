@@ -923,6 +923,11 @@ pub fn cmd_moves(args: &[String]) -> i32 {
     match args[0].as_str() {
         "verify" => cmd_moves_verify(&args[1..]),
         "enumerate" => cmd_moves_enumerate(&args[1..]),
+        // #508: a request for help is not an unknown subcommand.
+        "--help" | "-h" => {
+            print_moves_usage();
+            0
+        }
         other => {
             eprintln!("Unknown moves subcommand: {other}");
             print_moves_usage();
