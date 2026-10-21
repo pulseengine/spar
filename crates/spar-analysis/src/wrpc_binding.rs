@@ -29,6 +29,7 @@ impl Analysis for WrpcBindingAnalysis {
     }
 
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        let mut groups = crate::property_accessors::ProcessorGroups::default();
         // Severity rationale (STPA-REQ-016):
         //   Warning — cross-processor connection missing Actual_Connection_Binding to a bus
         let mut diagnostics = Vec::new();
@@ -73,8 +74,8 @@ impl Analysis for WrpcBindingAnalysis {
             };
 
             // Get processor bindings for each endpoint.
-            let src_binding = get_processor_binding(instance, src_idx);
-            let dst_binding = get_processor_binding(instance, dst_idx);
+            let src_binding = get_processor_binding(instance, src_idx, &mut groups);
+            let dst_binding = get_processor_binding(instance, dst_idx, &mut groups);
 
             // If both have processor bindings and they differ, the connection
             // crosses a processor boundary.
@@ -175,7 +176,17 @@ fn find_child_by_name(
 ///
 /// Walks up the hierarchy: if a thread has a binding, use it; otherwise
 /// check its parent process, etc.
-fn get_processor_binding(instance: &SystemInstance, idx: ComponentInstanceIdx) -> Option<String> {
+///
+/// The result is the processor GROUP key (#498): the processor the binding
+/// resolves to from its declarer, or its target text when it does not
+/// resolve. It used to be the whole raw value, so `reference (cpu)` and
+/// `(reference (cpu))` counted as two processors, and `cpu` vs `hw.cpu`
+/// naming one processor as a crossing.
+fn get_processor_binding(
+    instance: &SystemInstance,
+    idx: ComponentInstanceIdx,
+    groups: &mut crate::property_accessors::ProcessorGroups,
+) -> Option<String> {
     let mut current = Some(idx);
     while let Some(ci) = current {
         let props = instance.properties_for(ci);
@@ -183,7 +194,9 @@ fn get_processor_binding(instance: &SystemInstance, idx: ComponentInstanceIdx) -
             .get("Deployment_Properties", "Actual_Processor_Binding")
             .or_else(|| props.get("", "Actual_Processor_Binding"))
         {
-            return Some(val.to_string());
+            let text = crate::property_accessors::get_processor_binding(props)
+                .unwrap_or_else(|| val.trim().to_string());
+            return Some(groups.key(instance, ci, Some(&text)));
         }
         current = instance.component(ci).parent;
     }
