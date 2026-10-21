@@ -1322,7 +1322,8 @@ pub fn compute_network_hop_latency(
     // `latency.rs` calls don't currently distinguish; we only check the
     // owner's properties (matches `collect_streams`'s behaviour).
     let owner_props = instance.properties_for(owner_idx);
-    let bound_buses = resolve_connection_binding(owner_props, conn.name.as_str(), &bus_by_name);
+    let owner_ctx = instance.reference_context(owner_idx, DEPLOYMENT, "Actual_Connection_Binding");
+    let bound_buses = resolve_connection_binding(owner_props, instance, owner_ctx, &bus_by_name);
 
     let hops: Vec<ComponentInstanceIdx> = bound_buses
         .into_iter()
@@ -1376,7 +1377,7 @@ pub fn compute_network_hop_latency(
             continue;
         }
         let other_buses =
-            resolve_connection_binding(owner_props, other_conn.name.as_str(), &bus_by_name);
+            resolve_connection_binding(owner_props, instance, owner_ctx, &bus_by_name);
         let other_src_idx = other_conn
             .src
             .as_ref()
@@ -1813,12 +1814,19 @@ pub(crate) fn collect_streams(
             // single-route models (every connection sharing one
             // `(reference (..))`) are byte-identical to before.
             let conn_props = instance.properties_for_connection(conn_idx);
+            let conn_ctx = instance.connection_reference_context(
+                conn_idx,
+                DEPLOYMENT,
+                "Actual_Connection_Binding",
+            );
             let mut bound_buses =
-                resolve_connection_binding(conn_props, conn.name.as_str(), bus_by_name);
+                resolve_connection_binding(conn_props, instance, conn_ctx, bus_by_name);
             if bound_buses.is_empty() {
                 let owner_props = instance.properties_for(owner_idx);
+                let owner_ctx =
+                    instance.reference_context(owner_idx, DEPLOYMENT, "Actual_Connection_Binding");
                 bound_buses =
-                    resolve_connection_binding(owner_props, conn.name.as_str(), bus_by_name);
+                    resolve_connection_binding(owner_props, instance, owner_ctx, bus_by_name);
             }
 
             // Filter to buses that the extractor classified as
@@ -1941,9 +1949,17 @@ pub(crate) fn collect_streams(
 /// [`ComponentInstanceIdx`]es. Accepts both single `reference (bus)` and
 /// list `(reference (bus1), reference (bus2))` forms; preserves order
 /// because that is the hop order the WCTT walk consumes.
+///
+/// Each reference resolves from `ctx` — the component that declared the
+/// binding (#498, REQ-AADL-REF-CONTEXT-001) — by identity, so a dotted
+/// `reference (net.sw1)` names its switch and two switches sharing a name
+/// stay distinct. A reference that resolves to a component that is not one
+/// of the extracted buses is dropped, as an unknown name always was. One that
+/// does not resolve from `ctx` falls back to the bare-name map, as before.
 fn resolve_connection_binding(
     props: &PropertyMap,
-    _conn_name: &str,
+    instance: &SystemInstance,
+    ctx: ComponentInstanceIdx,
     bus_by_name: &FxHashMap<String, ComponentInstanceIdx>,
 ) -> Vec<ComponentInstanceIdx> {
     // We rely on the raw string form because the existing typed
@@ -1967,10 +1983,14 @@ fn resolve_connection_binding(
             s = &s[open + 1..];
             if let Some(close) = s.find(')') {
                 let target = s[..close].trim();
-                if !target.is_empty()
-                    && let Some(idx) = bus_by_name.get(&target.to_ascii_lowercase())
-                {
-                    result.push(*idx);
+                if !target.is_empty() {
+                    let resolved = match instance.resolve_reference(ctx, target) {
+                        Some(idx) => bus_by_name.values().any(|&b| b == idx).then_some(idx),
+                        None => bus_by_name.get(&target.to_ascii_lowercase()).copied(),
+                    };
+                    if let Some(idx) = resolved {
+                        result.push(idx);
+                    }
                 }
                 s = &s[close + 1..];
             } else {
