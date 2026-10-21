@@ -47,7 +47,7 @@ use spar_hir_def::item_tree::PropertyExpr;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
-    extract_real, extract_reference_target, get_size_property, get_timing_property,
+    binding_names, extract_real, extract_reference_target, get_size_property, get_timing_property,
 };
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
@@ -138,15 +138,20 @@ impl BusBandwidthAnalysis {
                     .get("Deployment_Properties", "Actual_Connection_Binding")
                     .or_else(|| comp_props.get("", "Actual_Connection_Binding"));
 
+                // By identity, from the declaring component (#498). A value
+                // that is not a `reference (...)` is compared as a whole name;
+                // it used to be a SUBSTRING match, so `bus` matched `can_bus`.
                 let bound_to_this_bus = match binding {
                     Some(val) => {
-                        if let Some(target) = extract_reference_target(val) {
-                            target.eq_ignore_ascii_case(bus_comp.name.as_str())
-                        } else {
-                            // Fallback: substring match for non-reference format
-                            val.to_lowercase()
-                                .contains(&bus_comp.name.as_str().to_lowercase())
-                        }
+                        let name = extract_reference_target(val)
+                            .unwrap_or_else(|| val.trim().trim_matches(['(', ')']).trim());
+                        binding_names(
+                            instance,
+                            comp_idx,
+                            "Actual_Connection_Binding",
+                            name,
+                            bus_idx,
+                        )
                     }
                     None => false,
                 };
