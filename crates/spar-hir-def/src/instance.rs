@@ -615,12 +615,15 @@ impl SystemInstance {
         }
 
         // Check product size before computing to avoid unnecessary work.
-        let total: u64 = modal_components
+        // CHECKED: the product of mode counts overflows u64 on real models
+        // (test-data/osate2/multiModalPingPong.aadl) — a debug build panicked
+        // and a release build reported a wrapped count (4137309267128563259).
+        // `None` means "more than u64::MAX".
+        let total: Option<u64> = modal_components
             .iter()
-            .map(|(_, modes)| modes.len() as u64)
-            .product();
+            .try_fold(1u64, |acc, (_, modes)| acc.checked_mul(modes.len() as u64));
 
-        let truncated = total > Self::MAX_SOMS as u64;
+        let truncated = total.is_none_or(|t| t > Self::MAX_SOMS as u64);
 
         // Cartesian product via iterative expansion.
         // Start with one empty selection, then extend with each modal component's modes.
@@ -657,7 +660,7 @@ impl SystemInstance {
             self.diagnostics.push(InstanceDiagnostic {
                 message: format!(
                     "system operation mode count ({}) exceeds limit ({}); truncated",
-                    total,
+                    total.map_or_else(|| "more than 2^64".to_string(), |t| t.to_string()),
                     Self::MAX_SOMS
                 ),
                 path: vec![self.components[self.root].name.clone()],
@@ -5775,5 +5778,48 @@ end K;
             map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
             None
         );
+    }
+
+    // ── #520: the SOM count boundary ────────────────────────────────────
+
+    fn modal_model(extra_mode_on_d: bool) -> String {
+        let modes = |n: usize| {
+            (0..n)
+                .map(|i| {
+                    if i == 0 {
+                        "    m0 : initial mode;".to_string()
+                    } else {
+                        format!("    m{i} : mode;")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        format!(
+            "package Som\npublic\n  system M\n  modes\n{}\n  end M;\n  system M11\n  modes\n{}\n  end M11;\n  system Top\n  end Top;\n  system implementation Top.impl\n    subcomponents\n      a : system M;\n      b : system M;\n      c : system M;\n      d : system {};\n  end Top.impl;\nend Som;\n",
+            modes(10),
+            modes(11),
+            if extra_mode_on_d { "M11" } else { "M" }
+        )
+    }
+
+    fn truncated(inst: &SystemInstance) -> bool {
+        inst.diagnostics.iter().any(|d| {
+            d.message.contains("system operation mode count") && d.message.contains("truncated")
+        })
+    }
+
+    // rivet: verifies REQ-HIR-SOM-COUNT-CHECKED-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn exactly_the_som_limit_is_not_truncated_and_one_mode_more_is() {
+        // 10^4 = 10 000 = MAX_SOMS: every combination fits, nothing is cut.
+        let at = instantiate_aadl(&modal_model(false), "Som", "Top", "impl");
+        assert_eq!(at.system_operation_modes.len(), 10_000);
+        assert!(!truncated(&at), "the limit itself is not over the limit");
+        // 10^3 * 11 = 11 000 > MAX_SOMS: truncated to the cap and said so.
+        let over = instantiate_aadl(&modal_model(true), "Som", "Top", "impl");
+        assert_eq!(over.system_operation_modes.len(), 10_000);
+        assert!(truncated(&over), "over the limit is reported");
     }
 }
