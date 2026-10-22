@@ -1558,6 +1558,10 @@ struct ImplChainResult {
         Option<ConnectionEnd>,
         Option<ConnectionEnd>,
         Vec<Name>,
+        // Tree + item of the connection DECLARATION, so its inline property
+        // associations can be attached to the instance (#515).
+        usize,
+        crate::item_tree::ConnectionIdx,
     )>,
     /// Flow implementations in grandparent → parent → self order, so a later
     /// entry of the same name overrides an inherited one.
@@ -1867,7 +1871,17 @@ impl<'a> Builder<'a> {
                     .collect();
 
                 let mut conn_indices = Vec::new();
-                for (conn_name, conn_kind, bidi, mut src, mut dst, conn_in_modes) in conn_data {
+                for (
+                    conn_name,
+                    conn_kind,
+                    bidi,
+                    mut src,
+                    mut dst,
+                    conn_in_modes,
+                    conn_tree,
+                    conn_item,
+                ) in conn_data
+                {
                     // Fix up access connection endpoints.
                     if conn_kind == ConnectionKind::Access {
                         if let Some(ref mut s) = src {
@@ -1925,6 +1939,30 @@ impl<'a> Builder<'a> {
                         dst,
                         in_modes: conn_in_modes,
                     });
+                    // The connection's own `{ … }` property associations
+                    // (#515, REQ-HIR-CONNECTION-INLINE-PROPS-001). They were
+                    // never lowered: only `applies to <conn>` reached
+                    // connection_property_maps. Declared on the connection,
+                    // their references resolve from its owner — the default
+                    // of connection_reference_context. An `applies to` value
+                    // from an enclosing component is attached later, in
+                    // resolve_pending_applies_to, and so overrides these.
+                    if let Some(tree) = self.scope.tree(conn_tree) {
+                        let item = &tree.connections[conn_item];
+                        let mut map = PropertyMap::new();
+                        for &pa_idx in &item.property_associations {
+                            let pa = &tree.property_associations[pa_idx];
+                            Self::push_property_association(
+                                pa,
+                                idx,
+                                &mut map,
+                                &mut self.pending_applies_to,
+                            );
+                        }
+                        if !map.is_empty() {
+                            self.connection_property_maps.insert(ci, map);
+                        }
+                    }
                     conn_indices.push(ci);
                 }
                 self.components[idx].connections = conn_indices.clone();
@@ -2094,6 +2132,8 @@ impl<'a> Builder<'a> {
                     src,
                     dst,
                     conn.in_modes.clone(),
+                    loc.tree,
+                    conn_idx,
                 ));
             }
         }
@@ -5774,6 +5814,64 @@ end K;
         assert_eq!(
             map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
             None
+        );
+    }
+
+    // ── #515: a connection's own property associations reach its instance ──
+
+    // rivet: verifies REQ-HIR-CONNECTION-INLINE-PROPS-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_inline_connection_property_is_attached_and_applies_to_overrides_it() {
+        let src = r#"
+package Cp
+public
+  bus B
+  end B;
+  device D
+    features
+      o : out data port;
+      i : in data port;
+  end D;
+  system S
+  end S;
+  system implementation S.impl
+    subcomponents
+      a : device D;
+      b : device D;
+      net : bus B;
+      alt : bus B;
+    connections
+      c1 : port a.o -> b.i { Actual_Connection_Binding => (reference (net)); };
+      c2 : port b.o -> a.i { Actual_Connection_Binding => (reference (net)); };
+    properties
+      Actual_Connection_Binding => (reference (alt)) applies to c2;
+  end S.impl;
+end Cp;
+"#;
+        let inst = instantiate_aadl(src, "Cp", "S", "impl");
+        let conn = |n: &str| {
+            inst.connections
+                .iter()
+                .find(|(_, c)| c.name.as_str() == n)
+                .map(|(i, _)| i)
+                .unwrap()
+        };
+        let binding = |n: &str| {
+            let p = inst.properties_for_connection(conn(n));
+            p.get("Deployment_Properties", "Actual_Connection_Binding")
+                .or_else(|| p.get("", "Actual_Connection_Binding"))
+                .map(str::to_string)
+        };
+        assert_eq!(
+            binding("c1").as_deref(),
+            Some("(reference (net))"),
+            "inline value lowered"
+        );
+        assert_eq!(
+            binding("c2").as_deref(),
+            Some("(reference (alt))"),
+            "applies to overrides inline"
         );
     }
 }
