@@ -74,6 +74,31 @@ impl TestBuilder {
         });
     }
 
+    /// Set a property as an `applies to` association declared on `ctx`
+    /// would: its references resolve from `ctx` (REQ-AADL-REF-CONTEXT-001).
+    fn set_property_from(
+        &mut self,
+        ctx: ComponentInstanceIdx,
+        comp: ComponentInstanceIdx,
+        set: &str,
+        name: &str,
+        value: &str,
+    ) {
+        let map = self.property_maps.entry(comp).or_default();
+        map.add_with_reference_context(
+            PropertyValue {
+                name: spar_hir_def::name::PropertyRef {
+                    property_set: Some(Name::new(set)),
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
+            },
+            ctx,
+        );
+    }
+
     fn add_feature(
         &mut self,
         name: &str,
@@ -895,4 +920,60 @@ fn build_schedulable_system() -> SystemInstance {
     b.set_property(t2, "Timing_Properties", "Compute_Execution_Time", "3 ms");
 
     b.build(root)
+}
+
+// rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
+#[test]
+fn topology_resolves_a_dotted_bus_binding_from_its_declarer() {
+    // #498: `(reference (right.can))` declared at the top names right/can.
+    // The bare-name map never held `right.can`, so the binding was dropped
+    // and no edge existed; with two buses named `can`, a bare-name lookup
+    // could also pick the wrong one.
+    let mut b = TestBuilder::new();
+    let root = b.add_component("top", ComponentCategory::System, None);
+    let left = b.add_component("left", ComponentCategory::System, Some(root));
+    let right = b.add_component("right", ComponentCategory::System, Some(root));
+    let can_l = b.add_component("can", ComponentCategory::Bus, Some(left));
+    let can_r = b.add_component("can", ComponentCategory::Bus, Some(right));
+    let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+    b.set_children(root, vec![left, right, cpu]);
+    b.set_children(left, vec![can_l]);
+    b.set_children(right, vec![can_r]);
+    b.set_property_from(
+        root,
+        cpu,
+        "Deployment_Properties",
+        "Actual_Connection_Binding",
+        "reference (right.can)",
+    );
+    let instance = b.build(root);
+    let topo = TopologyGraph::from_instance(&instance);
+    let n = |i| topo.idx_map[&i];
+    assert!(
+        topo.are_connected(n(cpu), n(can_r)),
+        "cpu must reach right/can"
+    );
+    assert!(!topo.are_connected(n(cpu), n(can_l)), "not the other `can`");
+}
+
+// rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
+#[test]
+fn topology_binding_to_a_non_bus_adds_no_edge() {
+    // Negative control: the reference resolves, to a processor. No edge.
+    let mut b = TestBuilder::new();
+    let root = b.add_component("top", ComponentCategory::System, None);
+    let can = b.add_component("can", ComponentCategory::Bus, Some(root));
+    let cpu = b.add_component("cpu", ComponentCategory::Processor, Some(root));
+    let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
+    b.set_children(root, vec![can, cpu, cpu2]);
+    b.set_property_from(
+        root,
+        cpu,
+        "Deployment_Properties",
+        "Actual_Connection_Binding",
+        "reference (cpu2)",
+    );
+    let instance = b.build(root);
+    let topo = TopologyGraph::from_instance(&instance);
+    assert_eq!(topo.graph.edge_count(), 0);
 }

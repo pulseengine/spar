@@ -321,12 +321,10 @@ fn compute_total_load(
         else {
             continue;
         };
-        let bound_name = instance
-            .component(bound_idx)
-            .name
-            .as_str()
-            .to_ascii_lowercase();
-        if !target_names.iter().any(|t| t == &bound_name) {
+        // By identity (#498): a thread counts toward a candidate target only
+        // if its effective binding IS that processor. Comparing names put a
+        // thread on any processor that merely shares the target's name.
+        if !overlay.moves.values().any(|&target| target == bound_idx) {
             continue;
         }
         let props = instance.properties_for(idx);
@@ -689,6 +687,65 @@ mod tests {
         let mut all = vec![root];
         all.extend(child_idx);
         (instance, all)
+    }
+
+    // rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
+    #[test]
+    fn total_load_counts_only_threads_on_the_target_itself() {
+        // #498: two processors both named `cpu`. The overlay moves t1 to
+        // cpu_a; t2 is bound (from the root, `reference (cpu)`) to cpu_b —
+        // the exact walk takes the later same-named child. By NAME, t2 counted
+        // toward cpu_a's load; by identity it does not.
+        let (mut inst, idx) = make_instance_with_components(&[
+            ("cpu", ComponentCategory::Processor),
+            ("cpu", ComponentCategory::Processor),
+            ("t1", ComponentCategory::Thread),
+            ("t2", ComponentCategory::Thread),
+        ]);
+        let (root, cpu_a, cpu_b, t1, t2) = (idx[0], idx[1], idx[2], idx[3], idx[4]);
+        let timing = |p: &mut PropertyMap| {
+            for (n, v) in [("Period", "10 ms"), ("Compute_Execution_Time", "2 ms")] {
+                p.add(PropertyValue {
+                    name: PropertyRef {
+                        property_set: Some(Name::new("Timing_Properties")),
+                        property_name: Name::new(n),
+                    },
+                    value: v.to_string(),
+                    typed_expr: None,
+                    is_append: false,
+                });
+            }
+        };
+        for t in [t1, t2] {
+            timing(inst.property_maps.entry(t).or_default());
+        }
+        inst.property_maps
+            .entry(t2)
+            .or_default()
+            .add_with_reference_context(
+                PropertyValue {
+                    name: PropertyRef {
+                        property_set: Some(Name::new("Deployment_Properties")),
+                        property_name: Name::new("Actual_Processor_Binding"),
+                    },
+                    value: "reference (cpu)".to_string(),
+                    typed_expr: None,
+                    is_append: false,
+                },
+                root,
+            );
+        assert_eq!(
+            actual_processor_binding_with_overlay(&inst, t2, None),
+            Some(cpu_b),
+            "precondition: t2 resolves to cpu_b, not cpu_a"
+        );
+        let mut overlay = BindingOverlay::new();
+        overlay.add_move(t1, cpu_a);
+        let load = compute_total_load(&inst, &overlay, &["cpu".to_string()]);
+        assert!(
+            (load - 0.2).abs() < 1e-9,
+            "only t1 (2/10) is on cpu_a, got {load}"
+        );
     }
 
     #[test]
