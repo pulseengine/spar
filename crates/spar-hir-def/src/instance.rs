@@ -615,12 +615,15 @@ impl SystemInstance {
         }
 
         // Check product size before computing to avoid unnecessary work.
-        let total: u64 = modal_components
+        // CHECKED: the product of mode counts overflows u64 on real models
+        // (test-data/osate2/multiModalPingPong.aadl) — a debug build panicked
+        // and a release build reported a wrapped count (4137309267128563259).
+        // `None` means "more than u64::MAX".
+        let total: Option<u64> = modal_components
             .iter()
-            .map(|(_, modes)| modes.len() as u64)
-            .product();
+            .try_fold(1u64, |acc, (_, modes)| acc.checked_mul(modes.len() as u64));
 
-        let truncated = total > Self::MAX_SOMS as u64;
+        let truncated = total.is_none_or(|t| t > Self::MAX_SOMS as u64);
 
         // Cartesian product via iterative expansion.
         // Start with one empty selection, then extend with each modal component's modes.
@@ -657,7 +660,7 @@ impl SystemInstance {
             self.diagnostics.push(InstanceDiagnostic {
                 message: format!(
                     "system operation mode count ({}) exceeds limit ({}); truncated",
-                    total,
+                    total.map_or_else(|| "more than 2^64".to_string(), |t| t.to_string()),
                     Self::MAX_SOMS
                 ),
                 path: vec![self.components[self.root].name.clone()],
