@@ -7544,3 +7544,15 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-16T03:14:13Z
     release: v0.48.0
+
+  - id: REQ-CI-MUTANTS-IN-DIFF-001
+    type: requirement
+    title: Per-PR mutation testing shall mutate only the change, off the scarce runner pool, and shall fail when it selects nothing over changed source
+    status: implemented
+    description: "#400. The required Mutation Testing job ran the full spar-analysis crate (1755–1763 mutants, 85–240 min) on the 4-runner lean-mem pool for every PR and every rebase of a strict merge queue. Measured 2026-10-20…22: 1h34–3h13 per success, one run cancelled at the 240-min timeout. On 2026-10-22 spar held all four lean-mem runners at once (smithy). Per-PR runs shall use cargo mutants --in-diff, take the diff against the checked-out merge commit's first parent (git diff HEAD^1 HEAD), and run on rust-cpu. They shall test the whole workspace, because many kills come from CLI tests in another package. Zero survivors are allowed. Zero SELECTED shall FAIL unless the diff adds no mutable source line. MEASURED with cargo-mutants 27.1.0: a zero selection prints \"No mutants to filter\", exits 0 and writes NO report, so a gate that only reads the report cannot tell \"nothing to mutate\" from \"selected nothing over real source\"; the checker reads the same diff. An empty diff shall fail. A selection with nothing caught shall fail. The full-crate run with its exact 292 ratchet shall run off the PR path (push to main, workflow_dispatch for smithy's downtime dispatcher), still on lean-mem. It is the only gate that sees a change which WEAKENS tests without touching source: such a diff selects nothing, so in-diff cannot see it. The workflow declaration shall be audited (check_mutants_report.py --assert-workflow-threshold): exactly one in-diff gate, PR-only, and exactly one bounded ratchet, off-PR, neither neutered."
+    tags: [ci, guardrail, mutation, infrastructure]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-22T08:31:16Z
+    release: v0.47.0

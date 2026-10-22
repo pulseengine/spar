@@ -1265,3 +1265,19 @@ artifacts:
         target: REQ-ANALYSIS-LATENCY-BUDGET-001
       - type: satisfies
         target: REQ-ANALYSIS-FLOW-THREAD-DESCENT-001
+
+  - id: DEC-MUTANTS-IN-DIFF-001
+    type: design-decision
+    title: The per-PR mutation gate is '0 missed in the lines the change touches', strict even on lines that already carry a survivor
+    status: accepted
+    description: Per-PR form of the Mutation Testing gate (#400).
+    tags: [ci, mutation]
+    fields:
+      rationale: "#400 asked for this choice to be made deliberately rather than discovered on someone's PR. Options: (a) a survivor count per PR, which has no meaningful baseline, since the count depends on which lines the diff happens to touch; (b) exempt mutants that already survive in the full-crate baseline, which needs a baseline lookup and lets a change edit a known-weak predicate without strengthening it; (c) zero survivors among the selected mutants. Chosen: (c). It says something about THIS change, it is the form #479's measured run met (10 selected, 0 missed after one fix), and it ratchets in the right direction: touching one of the 292 survivor lines obliges the author to kill it. Cost, accepted: a PR that touches such a line goes red until a test kills the mutant. The full-crate ratchet (292, target 0, #382) stays the off-PR measure of the whole crate and the only gate that sees test-weakening-only changes. Its lean-mem cost moves from once per rebase to once per merge to main, plus smithy's downtime dispatches."
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-22T08:31:16Z
+    links:
+      - type: satisfies
+        target: REQ-CI-MUTANTS-IN-DIFF-001

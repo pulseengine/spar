@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import re
 import sys
 from pathlib import Path
 
@@ -86,6 +87,13 @@ from check_required_contexts import (  # noqa: E402  (path set above)
 DEFAULT_TIMEOUT_MINUTES = 360
 
 
+#: `${{ <condition> && <int> || <int> }}` — the one expression whose bounds are
+#: both readable at rest (#400).
+_CONDITIONAL_LITERALS = re.compile(
+    r"\$\{\{\s*[^{}]+?&&\s*(?P<a>\d+)\s*\|\|\s*(?P<b>\d+)\s*\}\}"
+)
+
+
 def validate_timeout(raw) -> str | None:
     """None if `raw` is a valid bound; otherwise the reason it is not.
 
@@ -98,10 +106,21 @@ def validate_timeout(raw) -> str | None:
         return "declares no `timeout-minutes`"
     s = str(raw).strip()
     if "${{" in s:
-        return (
-            f"sets `timeout-minutes: {s}`, a template expression rather than a "
-            f"static bound — a timeout you cannot read at rest is not one you can rely on"
-        )
+        # One expression shape is still readable at rest: `cond && A || B`
+        # with A and B integer LITERALS — both bounds are in the file (#400:
+        # Mutation Testing is 60 min on a PR, 240 off the PR path). Every
+        # bound it can take must itself be valid; anything else stays rejected.
+        m = _CONDITIONAL_LITERALS.fullmatch(s)
+        if m is None:
+            return (
+                f"sets `timeout-minutes: {s}`, a template expression rather than a "
+                f"static bound — a timeout you cannot read at rest is not one you can rely on"
+            )
+        for literal in (m.group("a"), m.group("b")):
+            reason = validate_timeout(literal)
+            if reason is not None:
+                return f"sets `timeout-minutes: {s}`; one of its bounds {reason.removeprefix('sets ')}"
+        return None
     try:
         minutes = int(s)
     except ValueError:
@@ -287,6 +306,22 @@ jobs:
     runs-on: ubuntu-latest
 """
 
+_COND_OK = """
+name: W
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  a:
+    name: Alpha
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 240 }}
+    runs-on: ubuntu-latest
+"""
+
+_COND_TOO_BIG = _COND_OK.replace("|| 240", "|| 400")
+
+_COND_NOT_LITERAL = _COND_OK.replace("&& 60 ||", "&& fromJSON(env.T) ||")
+
 SELF_TESTS = [
     (
         "gateable job with a valid timeout",
@@ -305,6 +340,24 @@ SELF_TESTS = [
         _TEMPLATED, 1,
         "a `${{ }}` timeout is not a static bound a reader can evaluate; it could "
         "resolve to nothing or to something huge, and the gate must not bless it",
+    ),
+    (
+        "a conditional timeout with two valid literal bounds",
+        _COND_OK, 0,
+        "#400: `cond && 60 || 240` is readable at rest — both bounds are in the "
+        "file — so it is a real bound; rejecting it would force one ceiling on two "
+        "very different runs",
+    ),
+    (
+        "a conditional timeout one of whose bounds is >= 360",
+        _COND_TOO_BIG, 1,
+        "every value the expression can take must itself be a valid bound, or the "
+        "conditional form becomes a way around the ceiling",
+    ),
+    (
+        "a conditional timeout with a non-literal operand",
+        _COND_NOT_LITERAL, 1,
+        "only integer LITERALS are readable at rest; `fromJSON(env.T)` is not",
     ),
     (
         "gateable job with timeout-minutes: 0",
