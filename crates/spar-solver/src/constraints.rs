@@ -83,7 +83,20 @@ impl ModelConstraints {
                     let period_ps = get_timing_property(props, "Period").unwrap_or(0);
                     let wcet_ps = get_execution_time(props).unwrap_or(0);
                     let deadline_ps = get_timing_property(props, "Deadline").unwrap_or(period_ps);
-                    let current_binding = get_processor_binding(props);
+                    // The processor the binding RESOLVES to, from its
+                    // declarer (#498, REQ-AADL-REF-CONTEXT-001), named the way
+                    // `processors` names it — the dot path — so allocate and
+                    // milp can match it. The raw target (`cpu1`) never equalled
+                    // a processor's path (`Top.impl.cpu1`), so every pre-bound
+                    // thread was treated as bound to an unknown processor. An
+                    // unresolved binding keeps its text, as before.
+                    let current_binding = get_processor_binding(props).map(|text| {
+                        spar_hir_def::overlay::actual_processor_binding_with_overlay(
+                            instance, idx, None,
+                        )
+                        .map(|p| component_path(instance, p))
+                        .unwrap_or(text)
+                    });
                     let priority = get_priority(props);
 
                     // SOLVER-REQ-020: warn on missing WCET for periodic threads
