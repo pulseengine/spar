@@ -264,6 +264,7 @@ impl SystemInstance {
             connection_property_maps: FxHashMap::default(),
             emv2_models: FxHashMap::default(),
             pending_applies_to: Vec::new(),
+            refined_origins: FxHashMap::default(),
             depth: 0,
             max_depth: 100,
         };
@@ -1303,16 +1304,15 @@ impl SystemInstance {
 /// The result is `fg_name.prefix.feature_name` or `fg_name.feature_name`
 /// depending on whether the expanded feature has a group prefix.
 /// Walk `segs` down through child subcomponents of `from`, one segment per
-/// level (REQ-AADL-REF-CONTEXT-001).
+/// level, matching names exactly and case-insensitively
+/// (REQ-AADL-REF-CONTEXT-001). Sibling names are unique in a legal model.
 ///
-/// In a legal model sibling names are unique and this is a plain walk. It
-/// tries EVERY same-named child, latest first, because the instance can hold
-/// a stale sibling (#496): `hw: refined to system platform.single` currently
-/// instantiates beside the original `hw: system platform` instead of
-/// replacing it (test-data/osate2/resourcebudgets.aadl), and the original
-/// has no `cpu`. The refinement is declared later, so it is preferred. Every
-/// candidate is still a child of the declaring context — this is not a
-/// search of the model.
+/// An earlier version tried every same-named child, latest first, to step
+/// around #496 — a refined subcomponent instantiated BESIDE the one it
+/// refined. #496 is fixed (REQ-AADL-SUBCOMPONENT-REFINE-001), and with it the
+/// only source of same-named siblings, so that allowance is gone: with it in
+/// place every test still passed with a first-match walk, i.e. nothing
+/// exercised it any more.
 fn walk_children(
     inst: &SystemInstance,
     from: ComponentInstanceIdx,
@@ -1321,12 +1321,12 @@ fn walk_children(
     let Some((seg, rest)) = segs.split_first() else {
         return Some(from);
     };
-    inst.components[from]
+    let child = inst.components[from]
         .children
         .iter()
-        .rev()
-        .filter(|&&c| inst.components[c].name.as_str().eq_ignore_ascii_case(seg))
-        .find_map(|&c| walk_children(inst, c, rest))
+        .copied()
+        .find(|&c| inst.components[c].name.as_str().eq_ignore_ascii_case(seg))?;
+    walk_children(inst, child, rest)
 }
 
 fn make_expanded_name(fg_name: &Name, prefix: &Option<Name>, feature_name: &Name) -> Name {
@@ -1594,6 +1594,15 @@ enum AppliesTarget {
 
 struct Builder<'a> {
     scope: &'a GlobalScope,
+    /// For a subcomponent that `refined to` another, the subcomponents it
+    /// refined away, oldest first, keyed by its own `(tree, idx)` (#496,
+    /// REQ-AADL-SUBCOMPONENT-REFINE-001). Their property associations apply
+    /// before its own, as OSATE's `SubcomponentImpl.getPropertyValueInternal`
+    /// consults the refinement and then each refined original.
+    refined_origins: FxHashMap<
+        (usize, crate::item_tree::SubcomponentIdx),
+        Vec<(usize, crate::item_tree::SubcomponentIdx)>,
+    >,
     components: Arena<ComponentInstance>,
     features: Arena<FeatureInstance>,
     connections: Arena<ConnectionInstance>,
@@ -2063,10 +2072,34 @@ impl<'a> Builder<'a> {
         for &sub_idx in &ci.subcomponents {
             if let Some(tree) = self.scope.tree(loc.tree) {
                 let sub = &tree.subcomponents[sub_idx];
+                // `x : refined to …` REPLACES the inherited `x` (#496): OSATE's
+                // ComponentImplementationOperations.getAllSubcomponents removes
+                // the refined original and appends the refinement, so it takes
+                // the end position. A refinement naming no classifier keeps the
+                // original's (SubcomponentImpl.getAllClassifier).
+                let mut classifier = sub.classifier.clone();
+                if sub.is_refined
+                    && let Some(pos) = result
+                        .subcomponents
+                        .iter()
+                        .position(|s| s.0.as_str().eq_ignore_ascii_case(sub.name.as_str()))
+                {
+                    let refined_away = result.subcomponents.remove(pos);
+                    if classifier.is_none() {
+                        classifier = refined_away.2.clone();
+                    }
+                    let mut origins = self
+                        .refined_origins
+                        .get(&(refined_away.3, refined_away.4))
+                        .cloned()
+                        .unwrap_or_default();
+                    origins.push((refined_away.3, refined_away.4));
+                    self.refined_origins.insert((loc.tree, sub_idx), origins);
+                }
                 result.subcomponents.push((
                     sub.name.clone(),
                     sub.category,
-                    sub.classifier.clone(),
+                    classifier,
                     loc.tree,
                     sub_idx,
                     sub.array_dimensions.clone(),
@@ -2636,19 +2669,42 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // 3. Subcomponent-level properties (override impl)
-        if let Some((tree_idx, sub_idx)) = subcomponent_loc
-            && let Some(tree) = self.scope.tree(tree_idx)
-        {
-            let sub = &tree.subcomponents[sub_idx];
-            for &pa_idx in &sub.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
-            }
+        // 3. Subcomponent-level properties (override impl), including those of
+        // any subcomponent this one refined away (#496).
+        if let Some((tree_idx, sub_idx)) = subcomponent_loc {
+            self.push_subcomponent_associations(idx, tree_idx, sub_idx, &mut map);
         }
 
         if !map.is_empty() {
             self.property_maps.insert(idx, map);
+        }
+    }
+
+    /// Push a subcomponent declaration's property associations into `map`:
+    /// those of every subcomponent it refined away first, oldest first, then
+    /// its own, so the refinement overrides and the originals supply the rest
+    /// (#496, REQ-AADL-SUBCOMPONENT-REFINE-001).
+    fn push_subcomponent_associations(
+        &mut self,
+        idx: ComponentInstanceIdx,
+        tree_idx: usize,
+        sub_idx: crate::item_tree::SubcomponentIdx,
+        map: &mut PropertyMap,
+    ) {
+        let mut decls = self
+            .refined_origins
+            .get(&(tree_idx, sub_idx))
+            .cloned()
+            .unwrap_or_default();
+        decls.push((tree_idx, sub_idx));
+        for (t, si) in decls {
+            if let Some(tree) = self.scope.tree(t) {
+                let sub = &tree.subcomponents[si];
+                for &pa_idx in &sub.property_associations {
+                    let pa = &tree.property_associations[pa_idx];
+                    Self::push_property_association(pa, idx, map, &mut self.pending_applies_to);
+                }
+            }
         }
     }
 
@@ -2682,14 +2738,8 @@ impl<'a> Builder<'a> {
             }
         }
 
-        // Subcomponent-level properties
-        if let Some(tree) = self.scope.tree(parent_tree_idx) {
-            let sub = &tree.subcomponents[sub_idx];
-            for &pa_idx in &sub.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
-            }
-        }
+        // Subcomponent-level properties, refined-away originals first (#496).
+        self.push_subcomponent_associations(idx, parent_tree_idx, sub_idx, &mut map);
 
         if !map.is_empty() {
             self.property_maps.insert(idx, map);
@@ -2705,13 +2755,8 @@ impl<'a> Builder<'a> {
     ) {
         let mut map = PropertyMap::new();
 
-        if let Some(tree) = self.scope.tree(tree_idx) {
-            let sub = &tree.subcomponents[sub_idx];
-            for &pa_idx in &sub.property_associations {
-                let pa = &tree.property_associations[pa_idx];
-                Self::push_property_association(pa, idx, &mut map, &mut self.pending_applies_to);
-            }
-        }
+        // Refined-away originals first, then this declaration (#496).
+        self.push_subcomponent_associations(idx, tree_idx, sub_idx, &mut map);
 
         if !map.is_empty() {
             self.property_maps.insert(idx, map);
@@ -5554,10 +5599,12 @@ end C;
     // rivet: verifies REQ-AADL-REF-CONTEXT-001
     #[test]
     #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
-    fn a_refined_subcomponent_is_preferred_over_its_stale_sibling() {
-        // `hw: refined to system Plat.single` currently instantiates BESIDE
-        // the original `hw: system Plat` instead of replacing it; only the
-        // refinement has a `cpu`. Shape of test-data/osate2/resourcebudgets.aadl.
+    fn a_reference_resolves_through_a_refined_subcomponent() {
+        // `hw: refined to system Plat.single` replaces the inherited
+        // `hw: system Plat` (#496), so `reference (hw.cpu)` reaches the
+        // refinement's `cpu`. This test once pinned a resolver allowance for
+        // the stale sibling #496 left behind; that sibling no longer exists.
+        // Shape of test-data/osate2/resourcebudgets.aadl.
         let src = r#"
 package R
 public
@@ -5594,8 +5641,9 @@ end R;
             .expect("hw.cpu resolves through the refinement");
         assert_eq!(inst.component(got).category, ComponentCategory::Processor);
 
-        // When BOTH the stale sibling and the refinement have a `cpu`, the
-        // refinement — declared later — must win: it is what AADL means.
+        // When the original's classifier ALSO has a `cpu` (a memory here),
+        // the reference must still reach the refinement's processor: the
+        // original is replaced, not kept beside it.
         let both = src
             .replace(
                 "  system implementation Plat.single",
@@ -5775,5 +5823,127 @@ end K;
             map.reference_context("Deployment_Properties", "Actual_Processor_Binding"),
             None
         );
+    }
+
+    // ── #496: a refined subcomponent replaces the one it refines ────────
+
+    const REFINE_MODEL: &str = r#"
+package Rf
+public
+  processor Cpu
+  end Cpu;
+  system Plat
+  end Plat;
+  system implementation Plat.single
+    subcomponents
+      cpu : processor Cpu;
+  end Plat.single;
+  system D
+  end D;
+  system implementation D.base
+    subcomponents
+      hw : system Plat { Code_Size => 4 KByte; Data_Size => 1 KByte; };
+  end D.base;
+  system implementation D.bound extends D.base
+    subcomponents
+      hw : refined to system Plat.single REFINED_PROPS;
+  end D.bound;
+end Rf;
+"#;
+
+    fn children_named(
+        inst: &SystemInstance,
+        parent: ComponentInstanceIdx,
+        name: &str,
+    ) -> Vec<ComponentInstanceIdx> {
+        inst.components[parent]
+            .children
+            .iter()
+            .copied()
+            .filter(|&c| inst.components[c].name.as_str().eq_ignore_ascii_case(name))
+            .collect()
+    }
+
+    // rivet: verifies REQ-AADL-SUBCOMPONENT-REFINE-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_refinement_replaces_the_subcomponent_it_refines() {
+        let inst = instantiate_aadl(
+            &REFINE_MODEL.replace(" REFINED_PROPS", ""),
+            "Rf",
+            "D",
+            "bound",
+        );
+        let hw = children_named(&inst, inst.root, "hw");
+        assert_eq!(
+            hw.len(),
+            1,
+            "one hw, not the original beside its refinement"
+        );
+        let hw = hw[0];
+        assert_eq!(
+            inst.components[hw].impl_name.as_ref().map(|n| n.as_str()),
+            Some("single")
+        );
+        assert_eq!(
+            children_named(&inst, hw, "cpu").len(),
+            1,
+            "the refinement's own subcomponents"
+        );
+    }
+
+    // rivet: verifies REQ-AADL-SUBCOMPONENT-REFINE-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_refinement_inherits_and_overrides_the_originals_properties() {
+        // The original declares Code_Size and Data_Size; the refinement
+        // overrides Code_Size only. OSATE consults the refinement, then the
+        // refined original (SubcomponentImpl.getPropertyValueInternal).
+        let src = REFINE_MODEL.replace(" REFINED_PROPS", " { Code_Size => 8 KByte; }");
+        let inst = instantiate_aadl(&src, "Rf", "D", "bound");
+        let hw = children_named(&inst, inst.root, "hw");
+        assert_eq!(hw.len(), 1);
+        let props = inst.properties_for(hw[0]);
+        let get = |n: &str| {
+            props
+                .get("Memory_Properties", n)
+                .or_else(|| props.get("", n))
+                .map(str::to_string)
+        };
+        assert_eq!(
+            get("Code_Size").as_deref(),
+            Some("8 KByte"),
+            "the refinement overrides"
+        );
+        assert_eq!(
+            get("Data_Size").as_deref(),
+            Some("1 KByte"),
+            "the original's value survives"
+        );
+    }
+
+    // rivet: verifies REQ-AADL-SUBCOMPONENT-REFINE-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_refinement_without_a_classifier_keeps_the_originals() {
+        // `hw : refined to system;` names no classifier; it keeps
+        // Plat.single (SubcomponentImpl.getAllClassifier).
+        let src = REFINE_MODEL
+            .replace("hw : system Plat {", "hw : system Plat.single {")
+            .replace(
+                "hw : refined to system Plat.single REFINED_PROPS;",
+                "hw : refined to system;",
+            );
+        let inst = instantiate_aadl(&src, "Rf", "D", "bound");
+        let hw = children_named(&inst, inst.root, "hw");
+        assert_eq!(hw.len(), 1);
+        assert_eq!(
+            inst.components[hw[0]]
+                .impl_name
+                .as_ref()
+                .map(|n| n.as_str()),
+            Some("single")
+        );
+        assert_eq!(children_named(&inst, hw[0], "cpu").len(), 1);
     }
 }
