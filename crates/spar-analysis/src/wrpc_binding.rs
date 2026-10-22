@@ -80,7 +80,7 @@ impl Analysis for WrpcBindingAnalysis {
             // If both have processor bindings and they differ, the connection
             // crosses a processor boundary.
             let crosses_boundary = match (&src_binding, &dst_binding) {
-                (Some(src_b), Some(dst_b)) => !src_b.eq_ignore_ascii_case(dst_b),
+                (Some((src_b, _)), Some((dst_b, _))) => !src_b.eq_ignore_ascii_case(dst_b),
                 _ => false,
             };
 
@@ -120,8 +120,17 @@ impl Analysis for WrpcBindingAnalysis {
                          but has no Actual_Connection_Binding to a bus",
                         conn.name,
                         owner_comp.name,
-                        src_binding.as_deref().unwrap_or("?"),
-                        dst_binding.as_deref().unwrap_or("?"),
+                        // The binding as WRITTEN, not the group key: the key of
+                        // a resolved binding is an internal `\0`-prefixed path
+                        // that leaked into this message (#507 → #518).
+                        src_binding
+                            .as_ref()
+                            .map(|(_, raw)| raw.as_str())
+                            .unwrap_or("?"),
+                        dst_binding
+                            .as_ref()
+                            .map(|(_, raw)| raw.as_str())
+                            .unwrap_or("?"),
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
@@ -177,7 +186,7 @@ fn find_child_by_name(
 /// Walks up the hierarchy: if a thread has a binding, use it; otherwise
 /// check its parent process, etc.
 ///
-/// The result is the processor GROUP key (#498): the processor the binding
+/// The result is `(group key, value as written)`: the processor GROUP key (#498): the processor the binding
 /// resolves to from its declarer, or its target text when it does not
 /// resolve. It used to be the whole raw value, so `reference (cpu)` and
 /// `(reference (cpu))` counted as two processors, and `cpu` vs `hw.cpu`
@@ -186,7 +195,7 @@ fn get_processor_binding(
     instance: &SystemInstance,
     idx: ComponentInstanceIdx,
     groups: &mut crate::property_accessors::ProcessorGroups,
-) -> Option<String> {
+) -> Option<(String, String)> {
     let mut current = Some(idx);
     while let Some(ci) = current {
         let props = instance.properties_for(ci);
@@ -196,7 +205,7 @@ fn get_processor_binding(
         {
             let text = crate::property_accessors::get_processor_binding(props)
                 .unwrap_or_else(|| val.trim().to_string());
-            return Some(groups.key(instance, ci, Some(&text)));
+            return Some((groups.key(instance, ci, Some(&text)), val.to_string()));
         }
         current = instance.component(ci).parent;
     }
