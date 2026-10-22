@@ -6090,4 +6090,35 @@ end Rf;
         );
         assert_eq!(children_named(&inst, hw[0], "cpu").len(), 1);
     }
+
+    // rivet: verifies REQ-AADL-SUBCOMPONENT-REFINE-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_classifierless_subcomponent_keeps_its_own_properties() {
+        // `x : system { … };` names no classifier, so its property map is built
+        // by build_anon_property_map — which #496 routed through
+        // push_subcomponent_associations. The in-diff mutation gate (#400)
+        // showed nothing exercised it: replacing it with `()` survived.
+        let src = r#"
+package Anon
+public
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      x : system { Code_Size => 4 KByte; };
+  end Top.impl;
+end Anon;
+"#;
+        let inst = instantiate_aadl(src, "Anon", "Top", "impl");
+        let x = children_named(&inst, inst.root, "x");
+        assert_eq!(x.len(), 1);
+        let props = inst.properties_for(x[0]);
+        assert_eq!(
+            props
+                .get("Memory_Properties", "Code_Size")
+                .or_else(|| props.get("", "Code_Size")),
+            Some("4 KByte")
+        );
+    }
 }
