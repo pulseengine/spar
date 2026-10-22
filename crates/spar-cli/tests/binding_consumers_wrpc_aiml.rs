@@ -297,3 +297,24 @@ fn ai_redundancy_on_two_processors_is_redundancy() {
     let text = analyze("AiTwo::Top.impl", "at.aadl", AI_TWO);
     assert_eq!(count(&text, REDUNDANCY, "Top.impl/left/app/"), 0, "{text}");
 }
+
+// rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
+#[test]
+fn wrpc_message_names_the_binding_as_written_with_no_internal_key() {
+    // #518: the group key of a RESOLVED binding is an internal `\0`-prefixed
+    // instance path. #507 printed it in this message, so the warning carried
+    // a NUL byte ("source bound to \0Top.impl/left/cpu") — and a NUL makes
+    // `diff -r` report "Binary files differ", which hid the change from a
+    // corpus diff. The message names the binding as the model wrote it.
+    let text = analyze("LatTwo::Top.impl", "lt_msg.aadl", LAT_TWO);
+    assert!(!text.contains('\0'), "no NUL in analyze output");
+    let line = text
+        .lines()
+        .find(|l| l.contains(WRPC))
+        .expect("the wrpc warning fires on LatTwo");
+    assert!(
+        line.contains("source bound to (reference (cpu))")
+            && line.contains("destination bound to (reference (right.cpu))"),
+        "{line}"
+    );
+}
