@@ -7544,3 +7544,15 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-16T03:14:13Z
     release: v0.48.0
+
+  - id: REQ-HIR-SOM-COUNT-CHECKED-001
+    type: requirement
+    title: The system-operation-mode count shall be computed without overflow, and an overflow shall be reported as such
+    status: verified
+    description: "#520. compute_soms took the u64 product of every modal component's mode count unchecked. On test-data/osate2/multiModalPingPong.aadl a debug build panicked (attempt to multiply with overflow) and a release build reported the wrapped value 4137309267128563259. The product is now a checked try_fold; an overflow is read as more than the limit and reported as \"more than 2^64\". Oracle: a CLI test on that model asserts no panic, the \"(more than 2^64)\" message and no wrapped count. It is RED with main's compute_soms restored (the debug test binary panics)."
+    tags: [instance, modes, bug]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-22T01:06:28Z
+    release: v0.47.0
