@@ -91,8 +91,18 @@ fn main() {
     // means there is nothing left to compare: a command that dispatches is
     // documented by construction, and adding one without a description does
     // not compile.
-    if let Some((_, _, run)) = COMMANDS.iter().find(|(name, _, _)| *name == args[1]) {
-        run(&args[2..]);
+    if let Some((name, desc, run)) = COMMANDS.iter().find(|(name, _, _)| *name == args[1]) {
+        let tail = &args[2..];
+        // #508: `--help` is a request, not an unknown option. The CLI baseline
+        // is exit 0 with the usage on stdout. Commands with their own help
+        // text keep it.
+        if !SELF_HELP.contains(name) && tail.iter().any(|a| a == "--help" || a == "-h") {
+            println!("spar {name} — {desc}");
+            println!();
+            println!("Run `spar --help` for every command.");
+            process::exit(0);
+        }
+        run(tail);
         return;
     }
 
@@ -146,6 +156,9 @@ fn cmd_lsp_argv(_args: &[String]) {
 /// not subcommands over a model, they short-circuit before this table, and
 /// listing them under `Commands:` would imply `spar version <file>`. `--help`
 /// documents them in its own line instead.
+/// Commands that print their own, fuller `--help` (#508).
+const SELF_HELP: &[&str] = &["moves", "dbc", "mcp"];
+
 const COMMANDS: &[(&str, &str, CmdFn)] = &[
     (
         "parse",
@@ -422,7 +435,9 @@ fn cmd_parse(args: &[String]) {
             "--tree" => show_tree = true,
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -477,7 +492,9 @@ fn cmd_items(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => file_args.push(s.to_string()),
         }
@@ -635,7 +652,9 @@ fn cmd_instance(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -825,7 +844,9 @@ fn cmd_analyze(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1006,7 +1027,9 @@ fn cmd_allocate(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1323,7 +1346,9 @@ fn cmd_diff(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1448,7 +1473,9 @@ fn cmd_modes(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1675,7 +1702,9 @@ fn cmd_emit(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1844,7 +1873,9 @@ fn cmd_render(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -1943,7 +1974,9 @@ fn cmd_verify(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => positional.push(s.to_string()),
         }
@@ -2295,7 +2328,9 @@ fn cmd_codegen(args: &[String]) {
             "--dry-run" => dry_run = true,
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -2563,7 +2598,9 @@ fn cmd_sysml2_parse(args: &[String]) {
         match arg.as_str() {
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -2616,7 +2653,9 @@ fn cmd_sysml2_lower(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -2702,7 +2741,9 @@ fn cmd_dbc(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => {
                 if input.is_some() {
@@ -2761,7 +2802,9 @@ fn cmd_sysml2_extract(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
@@ -2839,7 +2882,9 @@ fn cmd_sysml2_generate(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                // #508: an unknown option is a usage error: exit 2, as the
+                // top-level dispatcher does (#422).
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
