@@ -357,6 +357,148 @@ def check(output_dir: str, max_missed: int, out=None) -> int:
     return 0
 
 
+# ── Per-PR mode: `cargo mutants --in-diff` (#400) ──────────────────────────
+#
+# The full-crate run (1755 mutants, 85–240 min on the scarce lean-mem pool) ran
+# on every PR and every rebase of a strict merge queue. `--in-diff` mutates only
+# the lines a change touches: measured on real spar diffs, 1755 → 3–27 mutants,
+# 85 min → ~2 min, and on #479 it selected the one survivor that mattered.
+#
+# Its trap is the one this whole file exists to close, one notch over: a run
+# that SELECTED NOTHING tests nothing and must not read as "0 survivors". With
+# cargo-mutants 27.1.0 a zero selection prints "No mutants to filter", exits 0,
+# and writes NO report directory (measured). So the verdict needs the diff
+# itself: zero selected is only acceptable when the diff changes no mutable
+# source line — and then it is reported as exactly that, not as a pass of the
+# mutation gate.
+
+def _is_mutable_source(path: str) -> bool:
+    """A file cargo-mutants would mutate: Rust under a crate's src/, not a
+    test, bench or example target."""
+    if not path.endswith(".rs"):
+        return False
+    parts = path.split("/")
+    if "src" not in parts:
+        return False
+    if any(p in ("tests", "benches", "examples") for p in parts):
+        return False
+    return parts[-1] not in ("tests.rs", "build.rs")
+
+
+def diff_mutable_lines(diff_text: str) -> dict[str, int]:
+    """{path: added-or-changed line count} for mutable source files in a
+    unified diff. Only ADDED lines count. MEASURED (cargo-mutants 27.1.0): a
+    deletion inside a function that still exists DOES select that function's
+    mutants — the hunk maps onto it — and then writes a report, so the normal
+    path judges it. A pure removal with no surrounding function (a whole fn
+    deleted) legitimately selects nothing, which is why removal-only changes
+    are not counted here as source that must select something."""
+    out: dict[str, int] = {}
+    current = None
+    for line in diff_text.splitlines():
+        if line.startswith("+++ "):
+            target = line[4:].strip()
+            if target == "/dev/null":
+                current = None
+                continue
+            current = target[2:] if target.startswith("b/") else target
+            if not _is_mutable_source(current):
+                current = None
+            continue
+        if current and line.startswith("+") and not line.startswith("+++"):
+            out[current] = out.get(current, 0) + 1
+    return out
+
+
+def check_in_diff(output_dir: str, diff_path: str, out=None) -> int:
+    """The per-PR gate. 0 = every selected mutant was killed (or the diff has
+    no mutable source, said so); 1 = otherwise."""
+    out = out or sys.stdout
+    try:
+        with open(diff_path, "r", encoding="utf-8", errors="replace") as fh:
+            diff_text = fh.read()
+    except OSError as exc:
+        print(f"::error::cannot read the diff {diff_path}: {exc} — the in-diff gate has nothing to judge against", file=out)
+        return 1
+    if not diff_text.strip():
+        print(
+            f"::error::{diff_path} is EMPTY, but this job only runs when the change "
+            f"touches code. The diff was not taken against the checked-out tree, so "
+            f"`--in-diff` would select nothing and score nothing (#400).",
+            file=out,
+        )
+        return 1
+
+    mutable = diff_mutable_lines(diff_text)
+    n_lines = sum(mutable.values())
+    rdir = report_dir(output_dir)
+
+    if not os.path.isdir(rdir) and n_lines == 0:
+        print(
+            "No mutable source line in the diff (no non-test Rust under a crate's "
+            "src/ was added or changed) — nothing to mutate. This is NOT a mutation "
+            "verdict on the change; the full-crate run on main still covers it (#400).",
+            file=out,
+        )
+        return 0
+    if not os.path.isdir(rdir):
+        print(
+            f"::error::the diff changes {n_lines} mutable source line(s) in "
+            f"{len(mutable)} file(s) but cargo-mutants wrote no report — it selected "
+            f"ZERO mutants. Zero selected over changed source is no measurement, not "
+            f"zero survivors (#400, the #381 shape): {sorted(mutable)[:5]}",
+            file=out,
+        )
+        return 1
+
+    try:
+        counts = _load_counts(rdir)
+        note = _cross_check(rdir, counts)
+        note = f"{note}; {_assert_completed(rdir)}"
+    except GateFailure as exc:
+        print(f"::error::{exc}", file=out)
+        return 1
+
+    missed, caught = counts["missed"], counts["caught"]
+    total = missed + caught + counts["unviable"] + counts["timeout"]
+    print(
+        f"In-diff mutants: {total} selected over {n_lines} changed source line(s) — "
+        f"missed {missed}, caught {caught}, unviable {counts['unviable']}, "
+        f"timeout {counts['timeout']}; {note}",
+        file=out,
+    )
+    if total == 0 and n_lines > 0:
+        print(
+            f"::error::the diff changes {n_lines} mutable source line(s) but the "
+            f"report selected ZERO mutants — no measurement (#400).",
+            file=out,
+        )
+        return 1
+    if missed > 0:
+        print(
+            f"::error::{missed} mutant(s) survived in lines this change touches. The "
+            f"per-PR gate allows none: kill each, or the change ships an untested "
+            f"predicate (DEC-MUTANTS-IN-DIFF-001).",
+            file=out,
+        )
+        with open(os.path.join(rdir, "missed.txt"), "r", encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                if i >= 30:
+                    break
+                print(f"  {line.rstrip()}", file=out)
+        return 1
+    if caught == 0 and total > 0:
+        print(
+            f"::error::{total} mutant(s) selected and NONE was caught — every one was "
+            f"unviable or timed out, so no test ran against this change. That is "
+            f"absence of evidence, not a pass (#400).",
+            file=out,
+        )
+        return 1
+    print(f"Every in-diff mutant was killed ({caught}).", file=out)
+    return 0
+
+
 # The line the mutation gate is enforced by: `check_mutants_report.py` invoked
 # with --max-missed, which is the ratcheting flag. --self-test and --summary-file
 # carry no threshold, so they cannot be mistaken for the gate; --max-missed exists
@@ -375,6 +517,27 @@ _GATE_INVOCATION = re.compile(
 # is not a word char, so there is no boundary there — hence the word boundary is
 # tied to `true` alone. `-` on a `run:` line is YAML, not shell, and not neutering.
 _NEUTERED = re.compile(r"\|\|\s*(true\b|:)")
+
+
+_IN_DIFF_INVOCATION = re.compile(r"check_mutants_report\.py\b.*--in-diff(?:=|\s+)\S+")
+
+
+def _step_condition(lines: list[str], i: int) -> str:
+    """The `if:` of the workflow step containing line `i` (1-based), or ''.
+
+    Walks back to the step's `- ` start; an `if:` found on the way, at the
+    step's own indentation, is the step's condition."""
+    j = i - 1
+    while j >= 0:
+        raw = lines[j]
+        stripped = raw.lstrip()
+        if stripped.startswith("if:"):
+            return stripped[3:].strip()
+        if stripped.startswith("- "):
+            # The step's first line may itself be `- if: …`.
+            return stripped[2:].strip()[3:].strip() if stripped[2:].lstrip().startswith("if:") else ""
+        j -= 1
+    return ""
 
 
 def assert_workflow_threshold(workflow_path: str, out=None) -> int:
@@ -456,10 +619,54 @@ def assert_workflow_threshold(workflow_path: str, out=None) -> int:
         return 1
 
     lineno, threshold, _raw = found[0]
+
+    # #400: the per-PR gate is the --in-diff invocation, and the full-crate
+    # ratchet above runs OFF the PR path (push to main, dispatch). Both must be
+    # declared, un-neutered, and each guarded so it runs where it is meant to:
+    # a ratchet that only EXISTS in the file, or an in-diff gate that never runs
+    # on a PR, is "defined but not enforced".
+    in_diff = []
+    for i, raw in enumerate(lines, start=1):
+        if raw.lstrip().startswith("#") or not _IN_DIFF_INVOCATION.search(raw):
+            continue
+        if _NEUTERED.search(raw):
+            print(f"::error::{workflow_path}:{i}: the in-diff gate is neutered — `|| true`/`|| :` swallows its exit (#389).", file=out)
+            return 1
+        in_diff.append(i)
+    if len(in_diff) != 1:
+        print(
+            f"::error::{workflow_path} declares {len(in_diff)} in-diff mutation "
+            f"gate(s) (`check_mutants_report.py --in-diff …`); exactly one is "
+            f"required — it is the per-PR merge gate (#400).",
+            file=out,
+        )
+        return 1
+    pr_only = "== 'pull_request'"
+    not_pr = "!= 'pull_request'"
+    full_cond = _step_condition(lines, lineno)
+    diff_cond = _step_condition(lines, in_diff[0])
+    if pr_only not in diff_cond:
+        print(
+            f"::error::{workflow_path}:{in_diff[0]}: the in-diff gate must run only "
+            f"on pull_request (`if: github.event_name == 'pull_request'`); its "
+            f"condition is {diff_cond!r} (#400).",
+            file=out,
+        )
+        return 1
+    if not_pr not in full_cond:
+        print(
+            f"::error::{workflow_path}:{lineno}: the full-crate ratchet must run "
+            f"off the PR path (`if: github.event_name != 'pull_request'`); its "
+            f"condition is {full_cond!r} (#400).",
+            file=out,
+        )
+        return 1
+
     print(
         f"Mutation gate declared at {workflow_path}:{lineno} with a bounded "
-        f"ratchet: --max-missed {threshold}. Threshold single-sourced from the "
-        f"workflow (#414). Target: 0 (#382).",
+        f"ratchet: --max-missed {threshold}, off the PR path. Per-PR in-diff gate "
+        f"declared at {workflow_path}:{in_diff[0]}, on pull_request only. Threshold "
+        f"single-sourced from the workflow (#414). Target: 0 (#382).",
         file=out,
     )
     return 0
@@ -763,11 +970,18 @@ def self_test() -> int:
     print()
     # A realistic gate: the --self-test line (no threshold) must be ignored, and
     # only the --output-dir + --max-missed line counts.
+    IN_DIFF_STEP = (
+        "      - name: Check in-diff mutants\n"
+        "        if: github.event_name == 'pull_request'\n"
+        "        run: tools/check_mutants_report.py --output-dir mutants-out --in-diff pr.diff\n"
+    )
     GATE_292 = (
         "      - name: Mutants-report guardrail self-test\n"
         "        run: tools/check_mutants_report.py --self-test\n"
         "      - name: Check surviving mutants\n"
+        "        if: github.event_name != 'pull_request'\n"
         "        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292\n"
+        + IN_DIFF_STEP
     )
     wcase("declared gate with a bounded threshold passes and prints it", 0,
           GATE_292, want_msg="--max-missed 292")
@@ -811,11 +1025,72 @@ def self_test() -> int:
           "      - name: Check surviving mutants\n"
           "        # run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292\n",
           want_msg="declares no mutation gate")
+    # #400: both gates, each guarded to the event it serves.
+    wcase("the full ratchet with NO in-diff gate FAILS (no per-PR gate)", 1,
+          GATE_292.replace(IN_DIFF_STEP, ""), want_msg="0 in-diff mutation gate")
+    wcase("two in-diff gates FAIL (exactly one is the merge gate)", 1,
+          GATE_292 + IN_DIFF_STEP, want_msg="2 in-diff mutation gate")
+    wcase("a neutered in-diff gate FAILS", 1,
+          GATE_292.replace("--in-diff pr.diff", "--in-diff pr.diff || true"), want_msg="in-diff gate is neutered")
+    wcase("an in-diff gate that is not PR-only FAILS", 1,
+          GATE_292.replace("        if: github.event_name == 'pull_request'\n", ""),
+          want_msg="must run only on pull_request")
+    wcase("a full ratchet that also runs on PRs FAILS", 1,
+          GATE_292.replace("        if: github.event_name != 'pull_request'\n", ""),
+          want_msg="must run off the PR path")
     # 0 is a LEGITIMATE bound (the ratchet's target, #382) — it must pass, or the
     # gate would punish the very state it exists to drive toward.
     wcase("a threshold of 0 (the target) is a valid bound", 0,
           GATE_292.replace("--max-missed 292", "--max-missed 0"),
           want_msg="--max-missed 0")
+
+    # ── In-diff gate (#400) ─────────────────────────────────────────────
+    SRC_DIFF = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
+                "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
+                "@@ -1,2 +1,3 @@\n fn f() {\n+    let y = 1;\n }\n")
+    TEST_DIFF = ("diff --git a/crates/spar-cli/tests/t.rs b/crates/spar-cli/tests/t.rs\n"
+                 "--- a/crates/spar-cli/tests/t.rs\n+++ b/crates/spar-cli/tests/t.rs\n"
+                 "@@ -1 +1,2 @@\n #[test]\n+fn t() {}\n")
+    DELETE_ONLY = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
+                   "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
+                   "@@ -1,3 +1,2 @@\n fn f() {\n-    let y = 1;\n }\n")
+
+    def dcase(desc: str, want: int, diff_text: str, build, want_msg: str):
+        nonlocal passed, failed
+        with tempfile.TemporaryDirectory() as tmp:
+            dpath = os.path.join(tmp, "pr.diff")
+            with open(dpath, "w", encoding="utf-8") as fh:
+                fh.write(diff_text)
+            out_dir = build(tmp)
+            buf = io.StringIO()
+            got = check_in_diff(out_dir, dpath, out=buf)
+            text = buf.getvalue()
+            if got != want or want_msg not in text:
+                failed += 1
+                print(f"  FAIL {desc}: got exit {got} (want {want}); expected {want_msg!r}")
+                for line in text.splitlines()[:4]:
+                    print(f"         {line}")
+            else:
+                passed += 1
+                print(f"  ok   {desc}")
+
+    no_report = lambda t: os.path.join(t, "mutants-out")
+    dcase("in-diff: an EMPTY diff fails (taken against the wrong tree)", 1,
+          "", no_report, "is EMPTY")
+    dcase("in-diff: changed source, ZERO selected (no report) fails", 1,
+          SRC_DIFF, no_report, "selected ZERO mutants")
+    dcase("in-diff: a test-only diff with no report is labelled, not scored", 0,
+          TEST_DIFF, no_report, "nothing to mutate")
+    dcase("in-diff: a removal-only diff with no report is labelled, not scored", 0,
+          DELETE_ONLY, no_report, "nothing to mutate")
+    dcase("in-diff: every selected mutant killed passes", 0,
+          SRC_DIFF, lambda t: _fixture(t, missed=0, caught=4, unviable=1), "Every in-diff mutant was killed")
+    dcase("in-diff: ONE survivor in the diff fails (zero tolerance)", 1,
+          SRC_DIFF, lambda t: _fixture(t, missed=1, caught=4), "survived in lines this change touches")
+    dcase("in-diff: all selected unviable (none caught) fails", 1,
+          SRC_DIFF, lambda t: _fixture(t, missed=0, caught=0, unviable=3), "NONE was caught")
+    dcase("in-diff: a truncated run (end_time null) fails", 1,
+          SRC_DIFF, lambda t: _fixture(t, missed=0, caught=4, outcomes={"end_time": None}), "did not finish")
 
     print(f"\n{passed} passed, {failed} failed")
     return 0 if failed == 0 else 1
@@ -851,6 +1126,14 @@ def main() -> int:
              "instead of gating — e.g. $GITHUB_STEP_SUMMARY. Never fails the job.",
     )
     ap.add_argument("--shard", default="", help="shard label for the summary heading")
+    ap.add_argument(
+        "--in-diff",
+        default=None,
+        metavar="DIFF",
+        help="per-PR gate (#400): judge a `cargo mutants --in-diff DIFF` run. Zero "
+             "survivors allowed; zero SELECTED fails unless DIFF changes no mutable "
+             "source. Pass the same diff cargo-mutants received.",
+    )
     args = ap.parse_args()
 
     if args.self_test:
@@ -867,8 +1150,11 @@ def main() -> int:
         with open(args.summary_file, "a", encoding="utf-8") as fh:
             return summarize(args.output_dir, args.shard, fh)
 
+    if args.in_diff:
+        return check_in_diff(args.output_dir, args.in_diff)
+
     if args.max_missed is None:
-        ap.error("--max-missed is required (or use --self-test / --summary-file)")
+        ap.error("--max-missed is required (or use --in-diff / --self-test / --summary-file)")
     return check(args.output_dir, args.max_missed)
 
 

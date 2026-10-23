@@ -362,6 +362,48 @@ MUTANTS: list[Mutant] = [
              "a clean bill of health having read no text — the shape of #381, #403 "
              "and #464. Caught by `scanning nothing is exit 2, not 0`.",
     ),
+    # ── #400: the per-PR in-diff mutation gate ──────────────────────────
+    Mutant(
+        tool="check_mutants_report.py",
+        id="mr-in-diff-zero-selected-ok",
+        old='''            file=out,
+        )
+        return 1
+
+    try:
+        counts = _load_counts(rdir)
+        note = _cross_check(rdir, counts)
+        note = f"{note}; {_assert_completed(rdir)}"''',
+        new='''            file=out,
+        )
+        return 0
+
+    try:
+        counts = _load_counts(rdir)
+        note = _cross_check(rdir, counts)
+        note = f"{note}; {_assert_completed(rdir)}"''',
+        note="#400's named trap: `--in-diff` selecting ZERO mutants over changed "
+             "source must FAIL, not read as 0 survivors (cargo-mutants 27.1.0 "
+             "then writes no report at all). Caught by `changed source, ZERO "
+             "selected (no report) fails`.",
+    ),
+    Mutant(
+        tool="check_mutants_report.py",
+        id="mr-in-diff-one-survivor-ok",
+        old="    if missed > 0:\n",
+        new="    if missed > 1:\n",
+        note="DEC-MUTANTS-IN-DIFF-001: zero survivors in the lines a change "
+             "touches. Caught by `ONE survivor in the diff fails`.",
+    ),
+    Mutant(
+        tool="check_mutants_report.py",
+        id="mr-workflow-in-diff-unguarded",
+        old="    if pr_only not in diff_cond:\n",
+        new="    if False and pr_only not in diff_cond:\n",
+        note="a per-PR gate that also runs off the PR path, or not at all on "
+             "PRs, is defined-but-not-enforced. Caught by `an in-diff gate that "
+             "is not PR-only FAILS`.",
+    ),
 ]
 
 
@@ -460,7 +502,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 6
+MIN_COVERED = 7
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`
