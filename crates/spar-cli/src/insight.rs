@@ -67,7 +67,7 @@ fn cmd_verify_trace(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
-                process::exit(1);
+                process::exit(2);
             }
             s => files.push(s.to_string()),
         }
