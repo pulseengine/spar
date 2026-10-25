@@ -222,7 +222,25 @@ impl TopologyGraph {
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| val.trim().to_string());
 
-                if let Some(&bus_comp_idx) = bus_name_to_idx.get(&target_name.to_lowercase()) {
+                // Resolved from the component that declared the binding, by
+                // identity (#498, REQ-AADL-REF-CONTEXT-001): a dotted
+                // `reference (net.can)` names its bus, and two buses sharing a
+                // name stay distinct. A resolved non-bus adds no edge; an
+                // unresolved reference falls back to the bare-name map.
+                let ctx = instance.reference_context(
+                    comp_idx,
+                    "Deployment_Properties",
+                    "Actual_Connection_Binding",
+                );
+                let bus = match instance.resolve_reference(ctx, &target_name) {
+                    Some(idx) => matches!(
+                        instance.component(idx).category,
+                        ComponentCategory::Bus | ComponentCategory::VirtualBus
+                    )
+                    .then_some(idx),
+                    None => bus_name_to_idx.get(&target_name.to_lowercase()).copied(),
+                };
+                if let Some(bus_comp_idx) = bus {
                     // If both the component and the bus are in our HW graph, add an edge.
                     if let (Some(&comp_node), Some(&bus_node)) =
                         (idx_map.get(&comp_idx), idx_map.get(&bus_comp_idx))
