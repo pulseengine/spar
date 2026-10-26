@@ -7556,3 +7556,26 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-22T08:31:16Z
     release: v0.47.0
+  - id: REQ-HIR-CONNECTION-INLINE-PROPS-001
+    type: requirement
+    title: A connection's own property associations shall be attached to its connection instance
+    status: verified
+    description: "#515. A property association written inline on a connection, `nav : port est.o -> cas.i { Actual_Connection_Binding => (reference (ram)); };`, never reaches the instance. Builder::connection_property_maps is filled only by the `applies to <conn>` post-pass (instance.rs attach_applies_to, the AppliesTarget::Connection branch). No code lowers ConnectionItem.property_associations. Measured on main 2026-10-22 with a two-processor root-system model: the inline form gives wrpc-binding \"has no Actual_Connection_Binding\" and the JSON connection node carries no properties, while the `applies to nav` form in the same system's properties IS found. The defect is therefore every inline connection association, for any owner, not root-owned connections only, as #515 first suspected. Inline values resolve their references from the connection's owning component (SystemInstance::connection_reference_context's default, as OSATE does). An `applies to` value from an enclosing component overrides an inline one. NOT CLAIMED: refined connections."
+    tags: [aadl, instance, bug, properties]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-22T00:57:24Z
+    release: v0.47.0
+
+  - id: REQ-WRPC-BINDING-MEMORY-001
+    type: requirement
+    title: wrpc-binding shall accept a memory (shared-memory seam) as a connection's transport, as AS5506 permits
+    status: proposed
+    description: "#515, second point. Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares Actual_Connection_Binding as a list of reference (processor, virtual processor, bus, virtual bus, device, memory, system, abstract). wrpc-binding warns \"which is a memory — not a bus or virtual bus\" on a legal binding. Shared on-chip RAM is the real inter-core transport on dual-core MCUs (relay#587, i.MX RT1176). This needs a decision: accept memory as a transport (Info), or keep a Warning only for target categories that cannot carry data at all. Proposed; not scheduled into v0.47.0."
+    tags: [wrpc, analysis, binding]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-22T00:57:24Z
+    release: v0.48.0
