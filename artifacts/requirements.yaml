@@ -5938,7 +5938,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -6043,7 +6043,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6069,7 +6069,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6100,7 +6100,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6125,7 +6125,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6163,7 +6163,7 @@ artifacts:
       form, spar adopts it; until then spar's expression is a proposal and must
       be labelled as one wherever it is emitted.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
       - type: traces-to
@@ -7259,7 +7259,7 @@ artifacts:
       the output. The evaluator did not test a switch or a NETCONF session and
       neither has this triage. Schema-valid is necessary, not sufficient.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [tsn, yang, interop, bug, deployment]
 
   - id: REQ-TSN-CLI-SURFACE-001
@@ -7289,7 +7289,7 @@ artifacts:
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [tsn, cli, synthesis, interop]
 
   - id: REQ-DBC-CYCLE-TIME-001
@@ -7312,7 +7312,7 @@ artifacts:
       time present in the source reaches the model, and that its ABSENCE is
       reported rather than silently yielding an unrated frame.
     status: proposed
-    release: v0.47.0
+    release: v0.48.0
     tags: [dbc, can, ingest, interop]
   - id: REQ-TSN-WCTT-PROVENANCE-001
     type: requirement
@@ -7503,10 +7503,10 @@ artifacts:
   - id: REQ-AADL-BINDING-CONSUMERS-001
     type: requirement
     title: Every analysis that consumes a binding shall resolve it to the same component, by the declarer-relative resolver, and key on that component
-    status: approved
+    status: verified
     description: |-
       Measured by the #460 audit (#498): of about 30 non-test sites that read Actual_Processor_Binding, Actual_Memory_Binding or Actual_Connection_Binding, 4 resolve through SystemInstance::reference_context + resolve_reference (REQ-AADL-REF-CONTEXT-001). The rest key on the raw string or match names on their own. Scheduling, rta, latency, ai_ml, wrpc_binding and solver constraints group by string. rta processor_latency, scheduling find_processor_path, arinc653 owning_partition, memory_budget, resource_budget, wctt resolve_connection_binding, solver topology, allocate, milp and codegen threads_for_processor each match names in their own way: first match, last match, whole string, last segment, exact full path. resource_budget bandwidth and bus_bandwidth match SUBSTRINGS. So the validator and the analyses can disagree about which component a thread is bound to. This shall be one accessor that every consumer keys on by component index, landed one consumer at a time, each with a before/after corpus diff of that analysis's full output. Spar_Migration::Allowed_Targets is excluded: it is spar's own property and lists processors by name.
-       PROGRESS, 2026-10-16. Scheduling (analyze and analyze_in_mode) and RTA (thread groups, ISR groups, Interrupt_Latency_Bound lookup) now key on the resolved processor through one shared helper, property_accessors::ProcessorGroups. A binding that does not resolve keeps its string key, and messages print the binding text as before. Red on v0.46.0 in both directions: two different processors named cpu were merged into a false 120% overload and a false RTA miss, and one processor named cpu by Node.impl and left.cpu by Top.impl was split into two 60% groups, so a real overload on right/cpu went unreported. Full-output corpus diff over 455 runs (444 instantiating): identical. Mutants: 15 caught, 4 unviable; the one survivor was a pre-existing unbound-group guard in analyze_in_mode, now caught by a new test. PROGRESS 2: memory_budget, resource_budget (memory and bandwidth) and bus_bandwidth decide by identity through property_accessors::binding_names: resolved from the declarer, and when unresolved a whole-name comparison, never a substring. Red on v0.46.0: two memories named ram were merged into a false 'budget exceeded: 120%' on both, and the substring match made a link bound to can_net count against net. Corpus full-output diff: identical over 444 instantiating runs. Mutants: 8 caught, 3 unviable; the survivor (resource_budget's memory guard) is now caught. Remaining consumers: latency, ai_ml, arinc653, wctt, wrpc_binding, solver constraints, allocate, milp and topology, and codegen.
+       PROGRESS, 2026-10-16. Scheduling (analyze and analyze_in_mode) and RTA (thread groups, ISR groups, Interrupt_Latency_Bound lookup) now key on the resolved processor through one shared helper, property_accessors::ProcessorGroups. A binding that does not resolve keeps its string key, and messages print the binding text as before. Red on v0.46.0 in both directions: two different processors named cpu were merged into a false 120% overload and a false RTA miss, and one processor named cpu by Node.impl and left.cpu by Top.impl was split into two 60% groups, so a real overload on right/cpu went unreported. Full-output corpus diff over 455 runs (444 instantiating): identical. Mutants: 15 caught, 4 unviable; the one survivor was a pre-existing unbound-group guard in analyze_in_mode, now caught by a new test. PROGRESS 2: memory_budget, resource_budget (memory and bandwidth) and bus_bandwidth decide by identity through property_accessors::binding_names: resolved from the declarer, and when unresolved a whole-name comparison, never a substring. Red on v0.46.0: two memories named ram were merged into a false 'budget exceeded: 120%' on both, and the substring match made a link bound to can_net count against net. Corpus full-output diff: identical over 444 instantiating runs. Mutants: 8 caught, 3 unviable; the survivor (resource_budget's memory guard) is now caught. PROGRESS 3, 2026-10-27, all merged to main: latency, both the walk's Inter_Processor_Overhead and the crossing note (#505); wctt, with connection references resolved from the declarer and connection_reference_context added (#506); wrpc-binding and ai_ml (#507, plus the message regression fix #518); solver constraints (allocate and milp) (#509); solver topology and moves-enumerate total load (#514); codegen threads_for_processor (#511). Each was red on v0.46.0 in its own CLI or unit oracle, each has a full-output corpus diff identical to v0.46.0 (re-measured NUL-safe after #518: 459 runs, 0 differing), and each passed mutation testing. SCOPE OF THIS REQUIREMENT, reduced 2026-10-27 (DEC-RELEASE-V047-SCOPE-001): the consumers above. Three remain, moved to REQ-AADL-BINDING-CONSUMERS-002 (v0.48.0): arinc653 owning_partition, implemented on branch fix/binding-consumers-arinc but BLOCKED on #504 (resolving partitions turns on an isolation rule that gives 13 false ERRORs on canonical ARINC examples); solver compute_max_response_ns, which matches processor names in RTA message TEXT and needs structured RTA results; and bus_bandwidth, which never reads per-connection (applies to <conn>) bindings.
     tags: [aadl, analysis, properties, bug]
     provenance:
       created-by: ai-assisted
@@ -7555,6 +7555,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-22T08:31:16Z
+    release: v0.47.0
   - id: REQ-HIR-SOM-COUNT-CHECKED-001
     type: requirement
     title: The system-operation-mode count shall be computed without overflow, and an overflow shall be reported as such
@@ -7605,3 +7606,18 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-AADL-REF-CONTEXT-001
+
+  - id: REQ-AADL-BINDING-CONSUMERS-002
+    type: requirement
+    title: "The remaining binding consumers shall resolve the binding by identity from its declarer: ARINC 653 partitions, move-ranking response time, per-connection bus bindings"
+    status: approved
+    description: "Split from REQ-AADL-BINDING-CONSUMERS-001 at the v0.47.0 cut (DEC-RELEASE-V047-SCOPE-001). (1) arinc653::owning_partition matches a whole binding text against virtual-processor names, so (reference (cpu.p1)) never assigns a partition: 40 false 'not bound to any partition' warnings on the corpus's ARINC examples. A fix exists on branch fix/binding-consumers-arinc (e920336) but is blocked by #504: once partitions resolve, check_partition_isolation reports every inter-partition port connection as an Error, 13 false errors on OSATE/AADLib's canonical sampling/queueing examples. (2) spar-solver enumerate::compute_max_response_ns finds a target's threads by matching \"on processor '<name>'\" in RTA's message TEXT; it needs RTA to expose structured per-processor results. (3) bus_bandwidth reads only component property maps, so a bus binding written as Actual_Connection_Binding => … applies to <conn> (or inline on the connection, #515) is invisible to it."
+    tags: [aadl, analysis, properties, bug]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-27T18:32:14Z
+    release: v0.48.0
+    links:
+      - type: refines
+        target: REQ-AADL-BINDING-CONSUMERS-001
