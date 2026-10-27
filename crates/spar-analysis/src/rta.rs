@@ -388,14 +388,10 @@ impl Analysis for RtaAnalysis {
                 continue;
             }
 
-            // Sort by priority: explicit priority first (lower number = higher
-            // priority), then by shorter period (Rate Monotonic ordering).
-            threads.sort_by(|a, b| match (a.priority, b.priority) {
-                (Some(pa), Some(pb)) => pa.cmp(&pb),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.period_ps.cmp(&b.period_ps),
-            });
+            // Sort highest priority first: explicit Priority (a LARGER value
+            // is the higher priority, #526), then Rate Monotonic.
+            threads
+                .sort_by(|a, b| dispatch_order(a.priority, a.period_ps, b.priority, b.period_ps));
 
             // ISR interference terms for threads on this CPU.
             let isr_interference: Vec<(u64, u64)> = processor_isrs
@@ -587,7 +583,8 @@ struct RtaThreadInfo {
     /// `Compute_Execution_Time` was not a range.
     exec_bcet_ps: Option<u64>,
     deadline_ps: u64,
-    /// Explicit priority (lower = higher priority). `None` means unset.
+    /// Explicit AADL `Priority` (a LARGER value is the higher priority,
+    /// #526). `None` means unset.
     priority: Option<u64>,
     /// `Timing_Properties::Dispatch_Jitter` in picoseconds (0 if unset).
     jitter_ps: u64,
@@ -626,6 +623,33 @@ struct IrqChainSource {
     /// but a future refinement may follow the event-port connection
     /// graph back to the producing feature.
     event_port: String,
+}
+
+/// Fixed-priority dispatch order: `Less` means `a` is analysed BEFORE `b`,
+/// i.e. `a` is the higher priority and pre-empts `b`.
+///
+/// 1. An explicit `Priority` ranks by value, and a LARGER value is the
+///    HIGHER priority. AADL's `Thread_Properties::Priority`: "A larger value
+///    represents a higher priority" (osate2 @
+///    87468992ee0d4c4cc856a72bd542899953f088f3, `Thread_Properties.aadl`
+///    lines 41-44). Until #526 spar sorted a lower number first.
+/// 2. A thread that declares `Priority` ranks above one that does not.
+/// 3. Neither declares it: rate-monotonic, the shorter period first.
+///
+/// Shared by [`RtaAnalysis`] and `Arinc653SupplyRtaAnalysis`, so the two
+/// passes cannot disagree on the order.
+pub(crate) fn dispatch_order(
+    a_priority: Option<u64>,
+    a_period: u64,
+    b_priority: Option<u64>,
+    b_period: u64,
+) -> std::cmp::Ordering {
+    match (a_priority, b_priority) {
+        (Some(pa), Some(pb)) => pb.cmp(&pa),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a_period.cmp(&b_period),
+    }
 }
 
 /// Read the `Deployment_Properties::Priority` value.
@@ -966,16 +990,57 @@ mod tests {
         );
         b.set_children(proc, vec![t1, t2]);
 
+        // #526: a LARGER Priority value is the higher priority, so t_long
+        // (Priority 2) pre-empts t_short (Priority 1) against RM. Before
+        // #526 this test set t_long = 1, t_short = 2 and asserted only "no
+        // error", which also holds under plain RM, so it could not tell an
+        // override from no override.
         bind_thread(&mut b, t1, "100 ms", "5 ms", None);
-        b.set_property(t1, "Deployment_Properties", "Priority", "1");
+        b.set_property(t1, "Deployment_Properties", "Priority", "2");
 
         bind_thread(&mut b, t2, "10 ms", "2 ms", None);
-        b.set_property(t2, "Deployment_Properties", "Priority", "2");
+        b.set_property(t2, "Deployment_Properties", "Priority", "1");
 
         let inst = b.build(root);
         let diags = RtaAnalysis.analyze(&inst);
 
         assert!(diags.iter().all(|d| d.severity != Severity::Error));
+        // R_long = 5 ms (no hp). R_short: 2 → 2 + ceil(2/100)·5 = 7 → 7 ms.
+        // Under RM they would be 2 ms and 5 + ceil(5/10)·2 = 7 ms instead.
+        let msg = |name: &str| {
+            diags
+                .iter()
+                .find(|d| d.message.contains(&format!("thread '{name}'")))
+                .unwrap_or_else(|| panic!("no diagnostic for {name}: {diags:#?}"))
+                .message
+                .clone()
+        };
+        assert!(
+            msg("t_long").contains("response time 5.00 ms"),
+            "{diags:#?}"
+        );
+        assert!(
+            msg("t_short").contains("response time 7.00 ms"),
+            "{diags:#?}"
+        );
+    }
+
+    // ── #526: the dispatch-order comparator, arm by arm ─────────────
+    // rivet: verifies REQ-RTA-PRIORITY-ORDER-001
+    #[test]
+    fn dispatch_order_larger_priority_first_then_declared_then_rm() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        // Both declared: the LARGER value goes first, period ignored.
+        assert_eq!(dispatch_order(Some(10), 100, Some(1), 10), Less);
+        assert_eq!(dispatch_order(Some(1), 10, Some(10), 100), Greater);
+        assert_eq!(dispatch_order(Some(5), 10, Some(5), 100), Equal);
+        // Declared outranks undeclared, whatever the periods.
+        assert_eq!(dispatch_order(Some(0), 100, None, 10), Less);
+        assert_eq!(dispatch_order(None, 10, Some(0), 100), Greater);
+        // Neither declared: rate-monotonic.
+        assert_eq!(dispatch_order(None, 10, None, 100), Less);
+        assert_eq!(dispatch_order(None, 100, None, 10), Greater);
+        assert_eq!(dispatch_order(None, 10, None, 10), Equal);
     }
 
     // ── Test 7: Boundary deadline ───────────────────────────────────
@@ -2112,8 +2177,8 @@ mod tests {
     fn isr_priority_above_all_tasks() {
         // An ISR with priority 1 (a low numeric value, but ANY
         // ISR_Priority at all causes ISR-tier interference) still
-        // preempts a task whose Deployment_Properties::Priority is 0
-        // (the highest numeric task priority).
+        // preempts a task whatever its Deployment_Properties::Priority
+        // (here 0; the task tier's order does not reach the ISR tier).
         let (mut b, root, proc) = make_base();
         let dev = add_isr_device(&mut b, root, "irq1", "1 ms", "50 us", 1);
         let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));

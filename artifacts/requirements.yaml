@@ -7623,3 +7623,19 @@ artifacts:
     links:
       - type: refines
         target: REQ-AADL-BINDING-CONSUMERS-001
+  - id: REQ-RTA-PRIORITY-ORDER-001
+    type: requirement
+    title: The higher AADL Priority value shall be the higher priority in every fixed-priority analysis
+    status: implemented
+    description: "Refs #526. Thread_Properties::Priority in the predeclared property set (osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3, Predeclared_Property_Sets/Thread_Properties.aadl lines 41-44) says: 'A larger value represents a higher priority.' rta and arinc653_supply_rta sorted a LOWER number first, so a thread its author made the most important was analysed as the least important: a false deadline miss on it, and a missed one on the thread that really is lowest. Both passes now order threads through one comparator, rta::dispatch_order: an explicit Priority ranks by value, the larger first; a thread that declares Priority ranks above one that does not; with neither, rate-monotonic (shorter period first). Only the both-declared arm changed. ORACLES: four CLI tests (crates/spar-cli/tests/rta_priority_order.rs) on inline two-thread models, two red before the fix: hi/lo where the inverted order makes hi miss, and a Priority that overrides rate-monotonic, which separates the AADL order from Priority being ignored; plus a rate-monotonic control with no Priority and a mixed declared/undeclared case. Unit tests: the comparator arm by arm, and arinc_supply on the #331 golden model with Priority 1/2/3 (t3 highest, R = 1550/1570/1570 us), red before the fix. Deliberately updated tests that encoded the old order: rta explicit_priority_overrides_period_ordering (values swapped, response times now asserted), the arinc_supply #331 golden model (Priority 1/2/3 to 3/2/1, pinned numbers unchanged), and the jittered_chain RTA fixture (1/2 to 2/1, expected output unchanged). CORPUS: spar analyze over every tracked .aadl directory, old vs new, full sorted output: 319 runs in directories that declare Priority, 4 of which reach rta, and 3 change (jittered_chain, osate issue251 ravenscar, avionics-display Priority_Inversion), each checked by hand against the recurrence; 1230 runs elsewhere, identical. NOT CLAIMED: a qualified Thread_Properties::Priority is not read at all (get_priority reads Deployment_Properties::Priority or the bare name), so a model that qualifies it falls back to rate-monotonic; that is a separate gap."
+    tags: [rta, arinc653, scheduling, aadl, bug]
+    links:
+      - type: traces-to
+        target: REQ-RTA-001
+      - type: traces-to
+        target: REQ-RTA-ARINC-SUPPLY-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-27T20:05:59Z
+    release: v0.47.1
