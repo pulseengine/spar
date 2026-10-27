@@ -483,7 +483,14 @@ jobs:
         # `|| true`: cargo-mutants exits non-zero when any mutant survives, and
         # with a zero selection it exits 0 and writes no report at all. Either
         # way the verdict is the checker's, which reads the same pr.diff.
-        run: cargo mutants --in-diff pr.diff --test-workspace=true --timeout 300 --jobs 4 --output mutants-out || true
+        # --cap-lints=true: the workflow-wide RUSTFLAGS "-D warnings" turns a
+        # mutant's unused parameter into a COMPILE ERROR, so on #517 all 9
+        # selected mutants were "unviable", nothing was caught, and the gate
+        # failed with no test ever run (measured; same diff locally: 6 caught).
+        # Capping lints for mutated builds lets them compile and be TESTED.
+        # Deliberately NOT on the full-crate run below: its 292 ratchet was
+        # measured under -D warnings, and capping would change what compiles.
+        run: cargo mutants --in-diff pr.diff --test-workspace=true --cap-lints=true --timeout 300 --jobs 4 --output mutants-out || true
       - name: Run cargo-mutants on spar-analysis
         if: github.event_name != 'pull_request'
         # `|| true` because cargo-mutants exits non-zero whenever ANY mutant
