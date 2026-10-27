@@ -1281,3 +1281,21 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-CI-MUTANTS-IN-DIFF-001
+
+  - id: DEC-RELEASE-V047-SCOPE-001
+    type: design-decision
+    title: v0.47.0 is the property-semantics release; nine unstarted requirements move to v0.48.0
+    status: accepted
+    description: Scope decision for v0.47.0.
+    tags: [release, planning]
+    fields:
+      rationale: "v0.47.0's verified work forms one coherent theme: how AADL property values are found and applied. A reference resolves from its declarer (REF-CONTEXT); a connection's inline properties reach the instance (CONNECTION-INLINE-PROPS); a refined subcomponent replaces the original and inherits its classifier and properties (SUBCOMPONENT-REFINE); every analysis resolves a binding by identity (BINDING-CONSUMERS-001); plus guard and robustness fixes (CLOSING-KEYWORD-CROSSLINE, WCTT-PMOO-SKIP-VISIBLE, SOM-COUNT-CHECKED, CI-MUTANTS-IN-DIFF). Nine requirements were never started (render x3, TSN CLI/YANG, SysML2 flows/modes, findings layer, DBC cycle time, claim ledger). Holding the release for them would sit verified fixes behind unscheduled work, so they move to v0.48.0, as v0.46.0 did (DEC-RELEASE-V046-SCOPE-001). REQ-AADL-PROPERTY-INHERIT-001 stays in v0.47.0 only if it reaches verified before the cut; otherwise it moves too. A release is cut only when its scope is all verified. UPDATE 2026-10-27: REQ-AADL-PROPERTY-INHERIT-001 moves to v0.47.1. Its implementation (#527) is independently verified, but once threads are bound it makes RTA reachable on models where spar orders Priority backwards against Thread_Properties (#526). It ships together with that fix, not ahead of it."
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-27T18:32:26Z
+    links:
+      - type: satisfies
+        target: REQ-AADL-REF-CONTEXT-001
+      - type: satisfies
+        target: REQ-AADL-BINDING-CONSUMERS-001
