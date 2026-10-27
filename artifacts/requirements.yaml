@@ -6569,7 +6569,7 @@ artifacts:
 
       NOT CLAIMED: that every reported binding error is this cause.
     status: proposed
-    release: v0.47.0
+    release: v0.47.1
     tags: [aadl, analysis, properties, bug, interop]
     links:
       - type: depends-on
