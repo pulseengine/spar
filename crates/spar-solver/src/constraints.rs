@@ -12,7 +12,7 @@
 use serde::Serialize;
 
 use spar_analysis::property_accessors::{
-    get_execution_time, get_processor_binding, get_size_property, get_timing_property,
+    get_execution_time, get_priority, get_processor_binding, get_size_property, get_timing_property,
 };
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
@@ -33,7 +33,8 @@ pub struct ThreadConstraint {
     pub deadline_ps: u64,
     /// Existing processor binding, if any.
     pub current_binding: Option<String>,
-    /// Thread priority (from `Deployment_Properties::Priority`).
+    /// Thread priority (from `Thread_Properties::Priority`; see
+    /// [`get_priority`] for the accepted spellings).
     pub priority: Option<u64>,
 }
 
@@ -166,12 +167,4 @@ fn component_path(instance: &SystemInstance, idx: ComponentInstanceIdx) -> Strin
     }
     segments.reverse();
     segments.join(".")
-}
-
-/// Read the `Deployment_Properties::Priority` value.
-fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
-    let raw = props
-        .get("Deployment_Properties", "Priority")
-        .or_else(|| props.get("", "Priority"))?;
-    raw.trim().parse::<u64>().ok()
 }

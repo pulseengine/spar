@@ -652,23 +652,9 @@ pub(crate) fn dispatch_order(
     }
 }
 
-/// Read the `Deployment_Properties::Priority` value.
-pub(crate) fn get_priority(props: &spar_hir_def::properties::PropertyMap) -> Option<u64> {
-    // Typed path
-    if let Some(expr) = props
-        .get_typed("Deployment_Properties", "Priority")
-        .or_else(|| props.get_typed("", "Priority"))
-        && let Some(v) = crate::property_accessors::extract_integer(expr)
-    {
-        return Some(v);
-    }
-
-    // String fallback
-    let raw = props
-        .get("Deployment_Properties", "Priority")
-        .or_else(|| props.get("", "Priority"))?;
-    raw.trim().parse::<u64>().ok()
-}
+/// Read a thread's `Thread_Properties::Priority` (#529: the qualified name,
+/// the legacy `Deployment_Properties::Priority`, or the bare `Priority`).
+pub(crate) use crate::property_accessors::get_priority;
 
 /// Format a time value in picoseconds as a human-readable string.
 fn format_time(ps: u64) -> String {
@@ -1138,6 +1124,109 @@ mod tests {
             is_append: false,
         });
         assert_eq!(get_priority(&props), None);
+    }
+
+    fn priority_prop(set: Option<&str>, value: &str) -> PropertyValue {
+        PropertyValue {
+            name: PropertyRef {
+                property_set: set.map(Name::new),
+                property_name: Name::new("Priority"),
+            },
+            value: value.to_string(),
+            typed_expr: None,
+            is_append: false,
+        }
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_reads_qualified_thread_properties() {
+        // #529: the property's own qualified name, string path.
+        let mut props = PropertyMap::new();
+        props.add(priority_prop(Some("Thread_Properties"), "7"));
+        assert_eq!(get_priority(&props), Some(7));
+        // Surrounding whitespace in the value text is not part of the number.
+        let mut props = PropertyMap::new();
+        props.add(priority_prop(Some("Thread_Properties"), " 8 "));
+        assert_eq!(get_priority(&props), Some(8));
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_reads_qualified_thread_properties_typed() {
+        // #529: the property's own qualified name, typed path.
+        let mut props = PropertyMap::new();
+        let mut pv = priority_prop(Some("Thread_Properties"), "not-an-int");
+        pv.typed_expr = Some(spar_hir_def::item_tree::PropertyExpr::Integer(9, None));
+        props.add(pv);
+        assert_eq!(get_priority(&props), Some(9));
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_reads_every_spelling() {
+        for set in [
+            Some("Thread_Properties"),
+            Some("Deployment_Properties"),
+            None,
+        ] {
+            let mut props = PropertyMap::new();
+            props.add(priority_prop(set, "4"));
+            assert_eq!(get_priority(&props), Some(4), "spelling {set:?}");
+        }
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_reads_every_spelling_typed() {
+        // The text is unparseable, so only the typed path can yield 6.
+        for set in [
+            Some("Thread_Properties"),
+            Some("Deployment_Properties"),
+            None,
+        ] {
+            let mut props = PropertyMap::new();
+            let mut pv = priority_prop(set, "not-an-int");
+            pv.typed_expr = Some(spar_hir_def::item_tree::PropertyExpr::Integer(6, None));
+            props.add(pv);
+            assert_eq!(get_priority(&props), Some(6), "typed spelling {set:?}");
+        }
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_typed_precedence_matches_string_precedence() {
+        let typed = |set: Option<&str>, v: i64| {
+            let mut pv = priority_prop(set, "x");
+            pv.typed_expr = Some(spar_hir_def::item_tree::PropertyExpr::Integer(v, None));
+            pv
+        };
+        let mut props = PropertyMap::new();
+        props.add(typed(None, 1));
+        props.add(typed(Some("Deployment_Properties"), 2));
+        props.add(typed(Some("Thread_Properties"), 3));
+        assert_eq!(get_priority(&props), Some(3));
+        let mut props = PropertyMap::new();
+        props.add(typed(None, 1));
+        props.add(typed(Some("Deployment_Properties"), 2));
+        assert_eq!(get_priority(&props), Some(2));
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn get_priority_qualified_name_wins_over_other_spellings() {
+        // The standard qualified name is authoritative when a model writes
+        // more than one spelling.
+        let mut props = PropertyMap::new();
+        props.add(priority_prop(None, "1"));
+        props.add(priority_prop(Some("Deployment_Properties"), "2"));
+        props.add(priority_prop(Some("Thread_Properties"), "3"));
+        assert_eq!(get_priority(&props), Some(3));
+        // Legacy alias over bare.
+        let mut props = PropertyMap::new();
+        props.add(priority_prop(None, "1"));
+        props.add(priority_prop(Some("Deployment_Properties"), "2"));
+        assert_eq!(get_priority(&props), Some(2));
     }
 
     #[test]

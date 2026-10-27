@@ -649,6 +649,38 @@ pub fn get_dispatch_protocol(props: &PropertyMap) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Get `Thread_Properties::Priority` (a larger value is a higher priority).
+///
+/// `Priority` is declared in the predeclared `Thread_Properties` set (osate2
+/// @ 87468992ee0d4c4cc856a72bd542899953f088f3, `Thread_Properties.aadl`
+/// line 44), so the qualified name is read first (#529).
+///
+/// `Deployment_Properties::Priority` is NOT a predeclared AADL 2 property
+/// (`Deployment_Properties` declares only `Priority_Map` and
+/// `Priority_Range`). It is a non-standard legacy spelling that spar has
+/// always read, and is still accepted so existing models keep their
+/// priorities. The bare `Priority` is read last, as for every accessor here.
+pub fn get_priority(props: &PropertyMap) -> Option<u64> {
+    // Typed path, in the same precedence as the string fallback below.
+    if let Some(expr) = props
+        .get_typed("Thread_Properties", "Priority")
+        .or_else(|| props.get_typed("Deployment_Properties", "Priority"))
+        .or_else(|| props.get_typed("", "Priority"))
+        && let Some(v) = extract_integer(expr)
+    {
+        return Some(v);
+    }
+
+    // String fallback
+    props
+        .get("Thread_Properties", "Priority")
+        .or_else(|| props.get("Deployment_Properties", "Priority"))
+        .or_else(|| props.get("", "Priority"))?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
 // ── AI_ML property accessors ───────────────────────────────────────
 
 const AI_ML: &str = "AI_ML";
