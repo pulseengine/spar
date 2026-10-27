@@ -694,7 +694,9 @@ mod tests {
     fn total_load_counts_only_threads_on_the_target_itself() {
         // #498: two processors both named `cpu`. The overlay moves t1 to
         // cpu_a; t2 is bound (from the root, `reference (cpu)`) to cpu_b —
-        // the exact walk takes the later same-named child. By NAME, t2 counted
+        // the walk takes the FIRST same-named child (sibling names are unique
+        // in a legal model; this synthetic instance keeps two to exercise the
+        // identity check), so cpu_b is listed first. By NAME, t2 counted
         // toward cpu_a's load; by identity it does not.
         let (mut inst, idx) = make_instance_with_components(&[
             ("cpu", ComponentCategory::Processor),
@@ -702,7 +704,7 @@ mod tests {
             ("t1", ComponentCategory::Thread),
             ("t2", ComponentCategory::Thread),
         ]);
-        let (root, cpu_a, cpu_b, t1, t2) = (idx[0], idx[1], idx[2], idx[3], idx[4]);
+        let (root, cpu_b, cpu_a, t1, t2) = (idx[0], idx[1], idx[2], idx[3], idx[4]);
         let timing = |p: &mut PropertyMap| {
             for (n, v) in [("Period", "10 ms"), ("Compute_Execution_Time", "2 ms")] {
                 p.add(PropertyValue {
