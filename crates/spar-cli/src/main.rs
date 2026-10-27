@@ -2793,7 +2793,15 @@ fn cmd_sysml2_lower(args: &[String]) {
         process::exit(1);
     }
 
-    let tree = spar_sysml2::lower::lower_to_aadl(&parsed);
+    // REQ-SYSML2-PROPERTY-VALUES-001: the lowering's diagnostics (constructs
+    // it cannot translate, units of the wrong dimension) used to be computed
+    // and discarded here, so a dropped value was invisible. They are
+    // warnings: the AADL that could be lowered is still written, exit 0.
+    let (tree, diagnostics) = spar_sysml2::lower::lower_to_aadl_with_diagnostics(&parsed);
+    for d in &diagnostics {
+        let (line, col) = spar_base_db::offset_to_line_col(&all_source, d.offset);
+        eprintln!("warning at {}:{}: {}", line, col, d.msg);
+    }
     let aadl = spar_sysml2::lower::item_tree_to_aadl(&tree);
 
     match output_path {

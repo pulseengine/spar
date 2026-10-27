@@ -367,6 +367,9 @@ pub enum SyntaxKind {
     OPERATOR_EXPR,
     /// Feature reference expression
     FEATURE_REF_EXPR,
+    /// Measurement reference after a numeric literal: the `[ms]` of
+    /// `10 [ms]`, also `[SI::ms]` and compound `[m/s]`.
+    UNIT_REF,
 
     // Keep this last -- used for bounds checking.
     #[doc(hidden)]
