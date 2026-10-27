@@ -687,9 +687,437 @@ pub fn standard_property_type(set_name: &str, property_name: &str) -> Option<&'s
         .map(|&(_, ty)| ty)
 }
 
+// ── `inherit` properties (REQ-AADL-PROPERTY-INHERIT-001) ─────────────
+//
+// A property declared `inherit` takes its value from the CONTAINING
+// component instance when the instance itself has none. This table is the
+// set of `inherit` properties in the eight predeclared property sets, taken
+// from the `inherit` keyword in OSATE's copies of them:
+//
+//   osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3,
+//   core/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/
+//
+// Only names, the `applies to` categories that can hold a COMPONENT
+// instance, and line numbers are recorded here; no file text is copied.
+// Deployment 15, Timing 8, Thread 5, Programming 3, Modeling 3 = 34;
+// AADL_Project, Communication_Properties and Memory_Properties declare none.
+//
+// The `applies to` list matters: OSATE caches a value only on an instance
+// that `acceptsProperty` (CachePropertyAssociationsSwitch.
+// cachePropertyAssociations), and ComponentInstanceImpl.acceptsProperty
+// accepts every property on an `abstract` component and otherwise matches
+// the component's category. So a system's `Actual_Processor_Binding` reaches
+// its threads and processes but not its processors or memories.
+
+use crate::item_tree::ComponentCategory;
+
+/// Which component instances may receive an inherited value of a property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InheritReceivers {
+    /// Components of these categories (plus `abstract`, which accepts all).
+    Categories(&'static [ComponentCategory]),
+    /// Every component instance: the property applies to `classifier` or
+    /// `subcomponent`, and every component instance has one or the other.
+    AnyComponent,
+    /// Component instances whose classifier is an implementation
+    /// (`applies to (component implementation)`).
+    Implementations,
+}
+
+/// A predeclared property declared `inherit`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InheritProperty {
+    /// The predeclared property set that defines it.
+    pub property_set: &'static str,
+    /// The property name.
+    pub name: &'static str,
+    /// The component instances that accept it.
+    pub receivers: InheritReceivers,
+}
+
+impl InheritProperty {
+    /// Whether a component instance of `category` accepts this property.
+    /// `is_implementation` says whether its classifier is an implementation.
+    pub fn accepts(&self, category: ComponentCategory, is_implementation: bool) -> bool {
+        if category == ComponentCategory::Abstract {
+            return true;
+        }
+        match self.receivers {
+            InheritReceivers::Categories(cats) => cats.contains(&category),
+            InheritReceivers::AnyComponent => true,
+            InheritReceivers::Implementations => is_implementation,
+        }
+    }
+}
+
+const fn inh(
+    property_set: &'static str,
+    name: &'static str,
+    receivers: InheritReceivers,
+) -> InheritProperty {
+    InheritProperty {
+        property_set,
+        name,
+        receivers,
+    }
+}
+
+mod cats {
+    use crate::item_tree::ComponentCategory;
+    use crate::item_tree::ComponentCategory::*;
+
+    pub const PROC_BINDING: &[ComponentCategory] = &[
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        VirtualProcessor,
+        Device,
+    ];
+    pub const MEM_BINDING_CLASS: &[ComponentCategory] = &[
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        Device,
+        Data,
+        Subprogram,
+        SubprogramGroup,
+        Processor,
+        VirtualProcessor,
+    ];
+    pub const MEM_BINDING: &[ComponentCategory] = &[
+        Memory,
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        Device,
+        Data,
+        Subprogram,
+        SubprogramGroup,
+        Processor,
+        VirtualProcessor,
+    ];
+    pub const CONN_BINDING: &[ComponentCategory] =
+        &[Thread, ThreadGroup, Process, System, VirtualBus];
+    pub const FUNCTION_BINDING: &[ComponentCategory] =
+        &[Subprogram, Thread, ThreadGroup, Process, System, Abstract];
+    pub const PROVIDED_VB: &[ComponentCategory] = &[
+        Bus,
+        VirtualBus,
+        Processor,
+        VirtualProcessor,
+        Device,
+        Memory,
+        System,
+    ];
+    pub const REQUIRED_VB: &[ComponentCategory] =
+        &[VirtualBus, Thread, ThreadGroup, Process, System, Device];
+    pub const SCHEDULING_PROTOCOL: &[ComponentCategory] = &[VirtualProcessor, Processor, System];
+    pub const SOURCE_LANGUAGE: &[ComponentCategory] = &[
+        Subprogram,
+        Data,
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        Bus,
+        Device,
+        Processor,
+        VirtualProcessor,
+        VirtualBus,
+    ];
+    pub const SOURCE_TEXT: &[ComponentCategory] = &[
+        Data,
+        Subprogram,
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        VirtualBus,
+        VirtualProcessor,
+        Memory,
+        Bus,
+        Device,
+        Processor,
+    ];
+    pub const HW_SOURCE_TEXT: &[ComponentCategory] = &[Memory, Bus, Device, Processor, System];
+    pub const PRIORITY: &[ComponentCategory] =
+        &[Thread, ThreadGroup, Process, System, Device, Data];
+    pub const THREAD_TO_SYSTEM: &[ComponentCategory] = &[Thread, ThreadGroup, Process, System];
+    pub const RUNTIME_PROTECTION: &[ComponentCategory] = &[Process, System, VirtualProcessor];
+    pub const DEADLINE: &[ComponentCategory] = &[
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        Device,
+        VirtualProcessor,
+    ];
+    pub const THREAD_AND_GROUP: &[ComponentCategory] = &[Thread, ThreadGroup];
+    pub const THREAD: &[ComponentCategory] = &[Thread];
+    pub const PERIOD: &[ComponentCategory] = &[
+        Thread,
+        ThreadGroup,
+        Process,
+        System,
+        Device,
+        VirtualProcessor,
+        VirtualBus,
+        Bus,
+    ];
+    pub const REFERENCE_TIME: &[ComponentCategory] = &[
+        Device,
+        Processor,
+        Bus,
+        System,
+        Memory,
+        VirtualBus,
+        VirtualProcessor,
+    ];
+    pub const REFERENCE_PROCESSOR: &[ComponentCategory] = &[
+        Subprogram,
+        SubprogramGroup,
+        Thread,
+        ThreadGroup,
+        Process,
+        Device,
+        System,
+    ];
+    pub const PROCESSOR: &[ComponentCategory] = &[Processor];
+}
+
+use InheritReceivers::{AnyComponent, Categories, Implementations};
+
+/// Every `inherit` property of the predeclared property sets, with the
+/// declaring line in osate2 @ 87468992 (see the block comment above).
+pub const INHERIT_PROPERTIES: &[InheritProperty] = &[
+    // Deployment_Properties.aadl
+    inh(
+        "Deployment_Properties",
+        "Allowed_Processor_Binding_Class",
+        Categories(cats::PROC_BINDING),
+    ), // :13
+    inh(
+        "Deployment_Properties",
+        "Allowed_Processor_Binding",
+        Categories(cats::PROC_BINDING),
+    ), // :29
+    inh(
+        "Deployment_Properties",
+        "Actual_Processor_Binding",
+        Categories(cats::PROC_BINDING),
+    ), // :41
+    inh(
+        "Deployment_Properties",
+        "Allowed_Memory_Binding_Class",
+        Categories(cats::MEM_BINDING_CLASS),
+    ), // :51
+    inh(
+        "Deployment_Properties",
+        "Allowed_Memory_Binding",
+        Categories(cats::MEM_BINDING),
+    ), // :65
+    inh(
+        "Deployment_Properties",
+        "Actual_Memory_Binding",
+        Categories(cats::MEM_BINDING),
+    ), // :72
+    inh(
+        "Deployment_Properties",
+        "Allowed_Connection_Binding_Class",
+        Categories(cats::CONN_BINDING),
+    ), // :81
+    inh(
+        "Deployment_Properties",
+        "Allowed_Connection_Binding",
+        Categories(cats::CONN_BINDING),
+    ), // :90
+    inh(
+        "Deployment_Properties",
+        "Actual_Connection_Binding",
+        Categories(cats::CONN_BINDING),
+    ), // :96
+    inh(
+        "Deployment_Properties",
+        "Actual_Function_Binding",
+        Categories(cats::FUNCTION_BINDING),
+    ), // :100
+    inh(
+        "Deployment_Properties",
+        "Provided_Virtual_Bus_Class",
+        Categories(cats::PROVIDED_VB),
+    ), // :132
+    inh(
+        "Deployment_Properties",
+        "Required_Virtual_Bus_Class",
+        Categories(cats::REQUIRED_VB),
+    ), // :139
+    inh(
+        "Deployment_Properties",
+        "Provided_Connection_Quality_Of_Service",
+        Categories(cats::PROVIDED_VB),
+    ), // :144
+    inh(
+        "Deployment_Properties",
+        "Required_Connection_Quality_Of_Service",
+        Categories(cats::REQUIRED_VB),
+    ), // :149
+    inh(
+        "Deployment_Properties",
+        "Scheduling_Protocol",
+        Categories(cats::SCHEDULING_PROTOCOL),
+    ), // :215
+    // Modeling_Properties.aadl
+    inh(
+        "Modeling_Properties",
+        "Classifier_Matching_Rule",
+        Implementations,
+    ), // :14 (connection, component implementation)
+    inh(
+        "Modeling_Properties",
+        "Classifier_Substitution_Rule",
+        AnyComponent,
+    ), // :19 (classifier, subcomponent, feature)
+    inh(
+        "Modeling_Properties",
+        "Prototype_Substitution_Rule",
+        AnyComponent,
+    ), // :30 (prototype, classifier)
+    // Programming_Properties.aadl
+    inh(
+        "Programming_Properties",
+        "Source_Language",
+        Categories(cats::SOURCE_LANGUAGE),
+    ), // :178
+    inh(
+        "Programming_Properties",
+        "Source_Text",
+        Categories(cats::SOURCE_TEXT),
+    ), // :197
+    inh(
+        "Programming_Properties",
+        "Hardware_Description_Source_Text",
+        Categories(cats::HW_SOURCE_TEXT),
+    ), // :221
+    // Thread_Properties.aadl
+    inh("Thread_Properties", "Priority", Categories(cats::PRIORITY)), // :47
+    inh(
+        "Thread_Properties",
+        "Active_Thread_Handling_Protocol",
+        Categories(cats::THREAD_TO_SYSTEM),
+    ), // :104
+    inh(
+        "Thread_Properties",
+        "Active_Thread_Queue_Handling_Protocol",
+        Categories(cats::THREAD_TO_SYSTEM),
+    ), // :111
+    inh(
+        "Thread_Properties",
+        "Runtime_Protection",
+        Categories(cats::RUNTIME_PROTECTION),
+    ), // :123
+    inh(
+        "Thread_Properties",
+        "Synchronized_Component",
+        Categories(cats::THREAD_TO_SYSTEM),
+    ), // :134
+    // Timing_Properties.aadl
+    inh("Timing_Properties", "Deadline", Categories(cats::DEADLINE)), // :89
+    inh(
+        "Timing_Properties",
+        "First_Dispatch_Time",
+        Categories(cats::THREAD_AND_GROUP),
+    ), // :94
+    inh(
+        "Timing_Properties",
+        "Dispatch_Jitter",
+        Categories(cats::THREAD_AND_GROUP),
+    ), // :103
+    inh(
+        "Timing_Properties",
+        "Dispatch_Offset",
+        Categories(cats::THREAD),
+    ), // :110
+    inh("Timing_Properties", "Period", Categories(cats::PERIOD)),     // :190
+    inh(
+        "Timing_Properties",
+        "Reference_Time",
+        Categories(cats::REFERENCE_TIME),
+    ), // :218
+    inh(
+        "Timing_Properties",
+        "Reference_Processor",
+        Categories(cats::REFERENCE_PROCESSOR),
+    ), // :270
+    inh(
+        "Timing_Properties",
+        "Scheduler_Quantum",
+        Categories(cats::PROCESSOR),
+    ), // :278
+];
+
+/// The `inherit` declaration for the property stored under the key
+/// `(set, name)` of a [`PropertyMap`](crate::properties::PropertyMap), if
+/// that property is `inherit`.
+///
+/// `set` is the qualifier as written, or `""` for an unqualified reference.
+/// An unqualified name denotes the predeclared property of that name; a
+/// qualified one is `inherit` only when the qualifier is the predeclared set
+/// that defines it — a user's `My_Set::Period` is a different property.
+/// Comparison is case-insensitive.
+pub fn inherit_property(set: &str, name: &str) -> Option<&'static InheritProperty> {
+    INHERIT_PROPERTIES.iter().find(|p| {
+        p.name.eq_ignore_ascii_case(name)
+            && (set.is_empty() || p.property_set.eq_ignore_ascii_case(set))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    fn inherit_table_matches_the_predeclared_sets() {
+        // Counts measured from the `inherit` keyword in osate2 @ 87468992's
+        // predeclared property sets.
+        let count = |set: &str| {
+            INHERIT_PROPERTIES
+                .iter()
+                .filter(|p| p.property_set == set)
+                .count()
+        };
+        assert_eq!(INHERIT_PROPERTIES.len(), 34);
+        assert_eq!(count("Deployment_Properties"), 15);
+        assert_eq!(count("Timing_Properties"), 8);
+        assert_eq!(count("Thread_Properties"), 5);
+        assert_eq!(count("Programming_Properties"), 3);
+        assert_eq!(count("Modeling_Properties"), 3);
+
+        // Keyed lookup: bare and matching-qualified names are inherit; a
+        // non-inherit predeclared property and a user set's namesake are not.
+        assert!(inherit_property("", "period").is_some());
+        assert!(inherit_property("Timing_Properties", "Period").is_some());
+        assert!(inherit_property("My_Set", "Period").is_none());
+        assert!(inherit_property("", "Compute_Execution_Time").is_none());
+        assert!(inherit_property("Deployment_Properties", "Actual_Processor_Binding").is_some());
+        assert!(inherit_property("Timing_Properties", "Actual_Processor_Binding").is_none());
+
+        // Receivers: a binding reaches a thread, not a processor; abstract
+        // accepts every property.
+        let apb = inherit_property("", "Actual_Processor_Binding").unwrap();
+        assert!(apb.accepts(ComponentCategory::Thread, false));
+        assert!(!apb.accepts(ComponentCategory::Processor, false));
+        assert!(!apb.accepts(ComponentCategory::Memory, true));
+        assert!(apb.accepts(ComponentCategory::Abstract, false));
+        let cmr = inherit_property("", "Classifier_Matching_Rule").unwrap();
+        assert!(cmr.accepts(ComponentCategory::Process, true));
+        assert!(!cmr.accepts(ComponentCategory::Process, false));
+        let csr = inherit_property("", "Classifier_Substitution_Rule").unwrap();
+        assert!(csr.accepts(ComponentCategory::Memory, false));
+    }
 
     #[test]
     fn test_is_standard_property_set() {

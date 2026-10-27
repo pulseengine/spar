@@ -151,9 +151,19 @@ fn a_binding_that_really_names_a_memory_is_still_an_error() {
     // check must still fire, from both passes.
     let src = DECLARED_AT_TOP.replace("(reference (cpu))", "(reference (sub.cpu))");
     let errs = memory_category_errors("CtxTop::Top.impl", "real_memory.aadl", &src);
+    // Since REQ-AADL-PROPERTY-INHERIT-001 the thread `sub.app.t` INHERITS
+    // `app`'s binding (Actual_Processor_Binding is `inherit`), so it is bound
+    // to the memory too, and both passes report it on both components.
     assert_eq!(
         errs.len(),
-        2,
+        4,
         "binding_check and binding_rules must both reject a memory: {errs:#?}"
     );
+    for path in ["(at Top.impl/sub/app)", "(at Top.impl/sub/app/t)"] {
+        assert_eq!(
+            errs.iter().filter(|e| e.contains(path)).count(),
+            2,
+            "both passes report {path}: {errs:#?}"
+        );
+    }
 }

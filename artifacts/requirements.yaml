@@ -6499,76 +6499,26 @@ artifacts:
   - id: REQ-AADL-PROPERTY-INHERIT-001
     type: requirement
     title: Property lookup shall honour inheritance from the containing component
-    description: >
-      Reported 2026-10-09 (#460) from external tool testing:
-      `Actual_Processor_Binding` set on a process is not seen by that process's
-      threads, so spar reports an error on a model that is legal.
-
-      RE-SCOPED during triage. The report framed it as a binding-rule defect
-      and cited AS5506 §10.6; that citation is unverified and is not what this
-      requirement rests on. The mechanism is the `inherit` keyword in the
-      predeclared property sets: a property declared `inherit` takes its value
-      from the containing component when the component itself declares none.
-      spar's property lookup does not implement that, which is a general defect
-      affecting every `inherit` property, not Actual_Processor_Binding alone.
-
-      Scoping it to the keyword rather than the one property is deliberate: a
-      fix that special-cased binding would leave the same hole behind every
-      other inherit property, and would have to be re-derived the next time one
-      is reported.
-
-      The predeclared property sets carry the `inherit` declarations directly,
-      so the fix has a citable source that does not depend on the unverified
-      §10.6 reading.
-
-      CORRECTION, 2026-10-14: this text previously described those sets as
-      "EPL-2.0 ... open material". That was asserted, not measured. Measured:
-      the OSATE copies carry NO licence text in the files, and GitHub reports
-      the osate/osate2 repository licence as `NOASSERTION`. Nothing has been
-      vendored. Only property names and line numbers are cited below, and
-      vendoring the files needs the licence settled first.
-
-      ADJUDICATED, 2026-10-14 — the question #460 was filed without. osate2 @
-      87468992ee0d4c4cc856a72bd542899953f088f3,
-      core/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/
-      Deployment_Properties.aadl:41:
+    description: |-
+      Reported 2026-10-09 (#460) from external tool testing: `Actual_Processor_Binding` set on a process is not seen by that process's threads, so spar reports an error on a model that is legal.
+      RE-SCOPED during triage. The report framed it as a binding-rule defect and cited AS5506 §10.6; that citation is unverified and is not what this requirement rests on. The mechanism is the `inherit` keyword in the predeclared property sets: a property declared `inherit` takes its value from the containing component when the component itself declares none. spar's property lookup does not implement that, which is a general defect affecting every `inherit` property, not Actual_Processor_Binding alone.
+      Scoping it to the keyword rather than the one property is deliberate: a fix that special-cased binding would leave the same hole behind every other inherit property, and would have to be re-derived the next time one is reported.
+      The predeclared property sets carry the `inherit` declarations directly, so the fix has a citable source that does not depend on the unverified §10.6 reading.
+      CORRECTION, 2026-10-14: this text previously described those sets as "EPL-2.0 ... open material". That was asserted, not measured. Measured: the OSATE copies carry NO licence text in the files, and GitHub reports the osate/osate2 repository licence as `NOASSERTION`. Nothing has been vendored. Only property names and line numbers are cited below, and vendoring the files needs the licence settled first.
+      ADJUDICATED, 2026-10-14 — the question #460 was filed without. osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3, core/org.osate.aadl2.contrib/resources/properties/Predeclared_Property_Sets/ Deployment_Properties.aadl:41:
 
         Actual_Processor_Binding: inherit list of reference (processor,
             virtual processor, system, device, abstract) applies to (thread,
             thread group, process, system, virtual processor, device);
 
-      `inherit`: a component declaring no value takes its CONTAINING
-      component's. So a thread in a process bound with `applies to app` IS
-      bound, and the binding_rules errors on it are FALSE POSITIVES — three of
-      them on this repo's own test-data/parser/complex_system.aadl. That model
-      is pinned only by a PARSER test (`check_file_no_errors`), so no analysis
-      gate counts those errors and the eventual fix moves no declared constant.
-
-      SCOPE, MEASURED: 34 `inherit` properties across the eight predeclared
-      sets — Deployment 15 (every Actual_/Allowed_ binding, virtual-bus and QoS
-      pairs, Actual_Function_Binding, Scheduling_Protocol), Timing 8, Thread 5,
-      Programming 3, Modeling 3. TIMING IS AMONG THEM: `Period`, `Deadline`,
-      `Dispatch_Offset` and `Priority` are all `inherit`. A keyword-scoped fix
-      therefore changes scheduling, RTA, latency and WCTT results on any model
-      that declares timing above thread level. That is the standard's semantics
-      and is the right end state, but it must land with a before/after diff of
-      every analysis over the corpus, not as a binding fix.
-
-      BLOCKER, MEASURED: reference resolution is CONTEXT-FREE.
-      `SystemInstance::resolve_dotted_path(&self, name: &str)` takes only a
-      name; both its branches scan every component and keep the DEEPEST match;
-      all five callers (binding_rules, binding_check, overlay x2, moves) pass
-      only a name. So the declaring component already resolves its own
-      `reference (cpu)` globally, and wherever names repeat at depth it can
-      bind a different `cpu` than the one its declaring context names.
-      Inheritance does not resolve references differently — it propagates the
-      same string to every inheriting thread — but it would extend that silent
-      mis-binding to all of them, replacing today's loud (false) error with a
-      silent wrong binding in exactly those models. A declaring-context index
-      must be threaded through resolve_dotted_path and its callers first.
-
+      `inherit`: a component declaring no value takes its CONTAINING component's. So a thread in a process bound with `applies to app` IS bound, and the binding_rules errors on it are FALSE POSITIVES — three of them on this repo's own test-data/parser/complex_system.aadl. That model is pinned only by a PARSER test (`check_file_no_errors`), so no analysis gate counts those errors and the eventual fix moves no declared constant.
+      SCOPE, MEASURED: 34 `inherit` properties across the eight predeclared sets — Deployment 15 (every Actual_/Allowed_ binding, virtual-bus and QoS pairs, Actual_Function_Binding, Scheduling_Protocol), Timing 8, Thread 5, Programming 3, Modeling 3. TIMING IS AMONG THEM: `Period`, `Deadline`, `Dispatch_Offset` and `Priority` are all `inherit`. A keyword-scoped fix therefore changes scheduling, RTA, latency and WCTT results on any model that declares timing above thread level. That is the standard's semantics and is the right end state, but it must land with a before/after diff of every analysis over the corpus, not as a binding fix.
+      BLOCKER, MEASURED: reference resolution is CONTEXT-FREE. `SystemInstance::resolve_dotted_path(&self, name: &str)` takes only a name; both its branches scan every component and keep the DEEPEST match; all five callers (binding_rules, binding_check, overlay x2, moves) pass only a name. So the declaring component already resolves its own `reference (cpu)` globally, and wherever names repeat at depth it can bind a different `cpu` than the one its declaring context names. Inheritance does not resolve references differently — it propagates the same string to every inheriting thread — but it would extend that silent mis-binding to all of them, replacing today's loud (false) error with a silent wrong binding in exactly those models. A declaring-context index must be threaded through resolve_dotted_path and its callers first.
       NOT CLAIMED: that every reported binding error is this cause.
-    status: proposed
+      IMPLEMENTATION, 2026-10-27. An instantiate-time post-pass, Builder::inherit_properties (crates/spar-hir-def/src/instance.rs), runs right after the applies-to pass, so applies-to values that land on ancestors are seen, and every consumer reads the inherited value through properties_for with no change to any analysis. The inherit set is a table, standard_properties::INHERIT_PROPERTIES: the 34 properties declared `inherit` in osate2 @ 87468992's eight predeclared sets (Deployment 15, Timing 8, Thread 5, Programming 3, Modeling 3), with each property's applies-to component categories and its OSATE line; names, categories and line numbers only, no file text. A test pins 34 and the per-set counts; a script cross-check of every row's set and component categories against the OSATE files matched 34 of 34 (the 3 Modeling properties apply to classifier/subcomponent/component implementation, modelled as any component, or implementations only). Rules, from the OSATE source: (1) a component receives a value only if it accepts the property (CachePropertyAssociationsSwitch caches only where io.acceptsProperty; ComponentInstanceImpl.acceptsProperty accepts everything on abstract), so a system's binding reaches its processes and threads but not its processors or memories; (2) the walk goes up through containers that do not accept the property, as PropertyImpl.getPropertyValueInternal's eContainer recursion does (Dispatch_Offset on a system reaches a thread through its process); (3) a local value wins, and local means the property, not the map key: a bare Period blocks an inherited Timing_Properties::Period; (4) the nearest ancestor holding a value supplies it, read from the maps as they were before the pass; (5) the value is copied verbatim with the DECLARER's reference context: the ancestor's recorded context for that key, or the ancestor itself, via PropertyMap::insert_inherited, never a plain add. (6) A value that an UNRESOLVABLE applies-to left on its declarer (spar's recovery, not AADL) is not inherited from it and the walk goes on up; an unresolvable +=> onto the declarer's own value leaves that value inheritable. A first cut without (6) copied such recovery values onto every accepting child of the declarer; on the corpus (below) that cut ADDED 70 binding_rules ERRORs, 16 binding_check ERRORs, 82 rta ERRORs, 19 scheduling ERRORs and 19 property_rules WARNINGs, against 15, 14, 42, 9 and 0 with (6). The difference in binding_rules is 35 Actual_Memory_Binding and 18 Actual_Processor_Binding 'does not exist' errors and 2 'is a system component' errors, all on children of a declarer whose applies-to did not resolve (UAV.aadl in four FMW models, FlightGuidanceIMA, Dual FGS x2, multi-core arinc653, Avionics_System_Priority_Inversion).
+      EVIDENCE, 2026-10-27, on origin/main 833486f. Unit tests (spar-hir-def instance.rs): a thread inherits its process's applies-to binding (context = Top.impl); an inherited reference resolves from the declarer, where the thread (none), the root (a memory) and the declarer (a processor) give three different answers; a local value wins (including the bare-vs-qualified Period case) and the nearest ancestor wins; Compute_Execution_Time (not inherit) is not inherited; Period and Dispatch_Offset are inherited where they apply and not onto processor, memory or data; an unresolvable applies-to value is not inherited; the +=> case. Red before the fix (pass call disabled, otherwise the unmodified behaviour): 4 of the first 5 FAILED; the non-inherit test passes on unmodified code by construction (nothing is inherited there) and is a guard against an inherit-everything build. The unresolvable-applies-to and +=> tests were written after the fix; their potency rests on the mutation runs below, not on a pre-fix run. CLI (crates/spar-cli/tests/property_inherit.rs): the origin/main binary prints 'missing required Actual_Processor_Binding' for both the bound and the unbound thread; the new one for the unbound thread only, and none on test-data/parser/complex_system.aadl (3 before), whose two nav_threads now load cpu to 100.0% (25 ms / 50 ms each). Two hand mutants that take the context from the inheriting thread, or from its immediate parent, each fail the CLI test. binding_reference_context.rs's negative control now expects 4 memory-category errors, not 2: the thread inherits its process's binding to the memory. CORPUS, full analyze output, origin/main vs this change, diff -ra: 297 test-data files with a system implementation that mention an inherit property (or Compute_Execution_Time) plus 15 seeded random controls of the 473 that mention none; 654 (file, root) jobs, 651 after removing 3 duplicate pairs; 639 instantiate on both; no run timed out; 181 runs differ (96 files), 0 control runs differ, 0 binary, 0 only-in. Removed: 658 binding_rules 'missing required Actual_Processor_Binding' ERRORs, 661 binding_check INFO and 670 scheduling 'no Actual_Processor_Binding' WARNINGs, 2 'no Period' WARNINGs (both threads now inherit one), 3 'missing Actual_Memory_Binding' WARNINGs; 131 runs go from exit 1 to exit 0. No INFO rta, scheduling or latency line was removed, so no previously computed figure changed; the added figures are new ones, on threads that were unbound before, plus issue024's flow latency, which is computed only now that its thread inherits a 50 ms Period. Added ERRORs, each read: binding_rules 14 + binding_check 14 on satellite_software.aadl and binding_rules 1 on multi-core/simple.aadl repeat, on the inheriting threads, a verdict origin/main already gives their process (a binding to a system; cpu.cores[3] not existing); scheduling 9 overloads, arithmetic checked by hand (modevva 4/8+3/10+2/8 = 105%, partitioned_system 35/20 = 175%, car 142.8%, stepper-motor inf% from a model Period => 0 ms); latency 1 (issue024: the flow now sees an inherited 50 ms Period and computes 0..50 ms against a declared 350 ms minimum); rta 42. RTA: an independent fixed-priority recurrence (no jitter or blocking) over the same inputs, under spar's order, agrees with every spar verdict on the priority-declaring models except partitioned_system's receiver. CORRECTED 2026-10-28: an earlier version of this note said 34 of the 42 misses happened only because spar's RTA ordered Priority backwards (#526), and that those threads meet their deadlines under the AADL order. That was wrong for the largest group. Re-measured on main after #528 fixed the order (174 tracked .aadl files mentioning Priority, 191 runs, diff -ra): rta ERRORs 1 -> 27. 20 of the 26 added are aadlib rap (4 threads x 5 roots on s_cpu). An independent fixed-point check of s_cpu under the AADL order (a larger Priority value is higher) gives U = 0.945, and the declared priorities put the 40 and 59 ms threads lowest, so Target_Tracking, Radar_Control, Steering and Flight_Data miss (R = 66, 68, 98, 82 ms). Those are TRUE verdicts for the model as written. The remaining 6 were not hand-checked. The other 8: stepper-motor 2 (Period 0), car 1 and modevva 1 (RM, overloaded, checked), partitioned_system 2 and modevva_data_access 1 (overloaded at 175% and 105%, so some thread misses under any order, though which one depends on the order), flowlatencydata 1 (RM with equal periods, so which thread misses depends on the tie-break). That is a pre-existing RTA defect which inheritance makes visible, not an inheritance defect, and it must be resolved or accepted before this lands. MUTANTS, cargo-mutants 27.1.0 --in-diff, --test-workspace=true: first run 33 mutants, 21 caught, 6 unviable, 6 missed (a never-reached fallback-removal branch, now deleted, and the +=> rule, now tested); final run 26 mutants, 20 caught, 6 unviable, 0 missed.
+      NOT CLAIMED: any output other than `spar analyze` was diffed; `spar instance` JSON (and anything else reading the property maps: diff, render, mermaid, wasm) now shows inherited values on every accepting descendant, so a binding change on a process shows up on all its threads; feature and connection instances (a connection does not inherit its owner's Actual_Connection_Binding); default values (Deadline => Period, Runtime_Protection => true); modal values; +=> appends across inheritance (a local +=> counts as a local value and blocks inheritance); `inherit` in user-defined property sets (the parser accepts the keyword, PropertyDefItem drops it); a binding overlay that moves a process does not move its threads' inherited copies; an analysis that sums over every bound component counts a process and its threads both when both declare sizes (none in the corpus); an empty-valued unresolvable applies-to marks its key, which the parser is not known to produce.
+    status: implemented
     release: v0.47.1
     tags: [aadl, analysis, properties, bug, interop]
     links:
