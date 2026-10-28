@@ -205,6 +205,38 @@ jobs:
           fi
           echo "scheduling_verified.rs matches the Lean generator — gate green."
 
+      # Generated-proof build gate (REQ-PROOF-GEN-COMPILES-001, refs #542).
+      #
+      # `spar codegen --verify proof` writes Lean theorems that import
+      # `Proofs.Scheduling.RTA`. They once called `compute_response_time`, which
+      # no module here defines, and no step compiled a generated proof, so the
+      # break shipped unseen. This step runs the generator on
+      # the tool's built-in four-thread model (FIXTURE; three threads meet
+      # their deadline, one misses) and `lake build`s its output against
+      # the library built above (a wrapper project that requires `proofs/` by
+      # path and reuses its `.lake/packages`, so Mathlib is not fetched again).
+      # It fails on a build error, on `sorry`/`admit`/`native_decide` in the
+      # output, on a theorem that depends on `sorryAx`, or on an output with no
+      # theorem. `--negative-control` rebuilds three broken variants (deadline
+      # below the response time; wrong fixed-point witness; a proof replaced by
+      # `sorry`, which tests warningAsError) and fails unless all three builds
+      # fail, so the step shows on every run that it can go red.
+      #
+      # Inside this job on purpose: it is already the required context and has
+      # Mathlib restored. It triggers on any code path the `changes` classifier
+      # admits, which covers both crates/spar-codegen/** and proofs/**.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-26
+      - uses: Swatinem/rust-cache@v2
+      - name: Generated proofs build against proofs/ (lake build)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          cargo build -p spar --locked
+          tools/check_generated_proofs.py --spar target/debug/spar \
+            --workdir "$RUNNER_TEMP/generated-proofs" --negative-control
+
       # Capture the Lake log on failure for forensic review. The action
       # streams output to the GH log already; this preserves a downloadable
       # copy in the run artifacts so reviewers don't have to scrape logs.

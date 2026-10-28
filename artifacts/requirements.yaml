@@ -8096,3 +8096,18 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-28T16:47:27Z
     release: v0.48.0
+
+  - id: REQ-PROOF-GEN-COMPILES-001
+    type: requirement
+    title: The Lean proofs spar codegen --verify proof writes shall build against the in-repo proofs/ library with no sorry
+    status: implemented
+    description: "Refs #542. spar codegen --verify proof wrote theorems that imported Proofs.Scheduling.RTA and called compute_response_time, which no module under proofs/Proofs defines, so no generated proof could build; nothing compiled one. THE REQUIREMENT. (1) Each generated theorem is stated over the existing RTA definitions, the single source named by REQ-PROOF-SCHED-SPEC-SOURCE-001: Task and rtaStep (RTACore.lean), isFixedPoint, iterN, iterN_le_fixed_point and rtaStep_mono (RTA.lean). A schedulable thread gets <t>_meets_deadline: some fixed point r of rtaStep with exec <= r <= deadline exists, and every RTA iterate from exec is <= deadline. The generator's Rust RTA supplies the fixed point only as a witness; Lean checks it by decide and closes the rest with iterN_le_fixed_point, so a wrong witness fails the build rather than producing a false theorem. An unschedulable thread gets <t>_misses_deadline: every fixed point r >= exec exceeds the deadline, proved by walking the iterates with rtaStep_mono. Before this, an unschedulable thread got a _meets_deadline theorem that was false. A thread with a non-positive WCET, period or deadline (in itself or a higher-priority task), or no verdict within 256 RTA steps, gets a comment and no theorem. No sorry, admit or native_decide is emitted. (2) proofs.yml, inside the required Lean proof typecheck job, runs tools/check_generated_proofs.py: spar codegen --verify proof on a built-in four-thread model (FIXTURE in the tool, mirrored by RTA_FIXTURE in proof_gen.rs tests; three schedulable threads, one unschedulable), then lake build of the output in a wrapper project that requires proofs/ by path with warningAsError, then #print axioms on every theorem (fails on sorryAx, Lean.ofReduceBool). It fails on a build error, a forbidden token, a bad axiom or zero theorems. --negative-control rebuilds with a deadline one below the response time, with a wrong fixed-point witness, and with one proof replaced by sorry, and fails unless all three builds fail. ACCEPTANCE: on origin/main the gate exits 1 (compute_response_time unknown); on this change it exits 0 and all three negative controls exit 1. proof_gen.rs unit test generated_proof_names_only_what_proofs_library_declares checks every non-local identifier in the generated text against the declarations under proofs/Proofs, and fails on origin/main. NOT CLAIMED: the response-time model itself (fixed-priority RTA without jitter, blocking or release offsets, rate-monotonic priorities by period) is unchanged; the Kani harnesses are unchanged; only one fixture is lake-built in CI."
+    tags: [proofs, lean, codegen, scheduling, ci]
+    links:
+      - type: traces-to
+        target: REQ-PROOF-SCHED-SPEC-SOURCE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T09:05:18Z
+    release: v0.48.0

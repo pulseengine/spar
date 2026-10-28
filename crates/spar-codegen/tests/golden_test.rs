@@ -291,8 +291,8 @@ fn golden_model_generates_lean4_proof() {
         "Lean4 proof should contain 'theorem'"
     );
     assert!(
-        lean.content.contains("compute_response_time"),
-        "Lean4 proof should reference RTA"
+        lean.content.contains("rtaStep") && lean.content.contains("isFixedPoint"),
+        "Lean4 proof should be stated over the RTA library's rtaStep / isFixedPoint (#542)"
     );
 }
 
