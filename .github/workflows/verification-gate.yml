@@ -3,6 +3,15 @@ name: Verification Gate
 on:
   pull_request:
     branches: [main]
+  # GitHub merge queue: every workflow that emits a REQUIRED context must also
+  # run on the queue's `merge_group` event, or a queued PR waits on a context
+  # nothing reports until the queue's check-response timeout evicts it. A
+  # job-level `if:` that is false here still reports `skipped`, which satisfies
+  # the context; only a workflow that does not trigger reports nothing.
+  merge_group:
+  # In a merge_group run there is no PR body, so a `Verify-Filter:` override
+  # does not apply: the queue runs the DEFAULT filter below. The sticky PR
+  # comment step is skipped there (it is guarded on pull_request).
   workflow_dispatch:
 
 concurrency:

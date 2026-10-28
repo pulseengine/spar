@@ -127,6 +127,19 @@ _ALLOW: list[tuple[str, str]] = [
 
 _ALLOW_RE: list[tuple[str, re.Pattern[str]]] = [(k, re.compile(p)) for k, p in _ALLOW]
 
+# The events whose diff is classified. Every other event (push, dispatch,
+# schedule, anything GitHub adds later) runs the full suite: it has no base the
+# workflow can name, so no file can be shown to be inert.
+#
+# `merge_group` is here so a docs-only merge-queue entry skips the heavy jobs
+# exactly as its pull_request run did. The workflows pass
+# `github.event.merge_group.base_sha` as the base, and the queue's checkout is
+# `merge_group.head_sha`, so `base...HEAD` is everything the queue commit adds
+# to main — including any entries queued AHEAD of this one, because
+# `base_sha` is main's tip, not the previous entry. That is the fail-safe
+# direction: a docs-only PR queued behind a code PR inherits the code verdict.
+DIFF_EVENTS = frozenset({"pull_request", "merge_group"})
+
 
 def classify_one(path: str) -> str | None:
     """Return the allow-list label that admits `path`, or None if it is code."""
@@ -175,14 +188,15 @@ def run(
     print("== changed-path classifier ==", file=out)
     print(f"event: {event_name}", file=out)
 
-    if event_name != "pull_request":
-        print(f"non-PR event -> full suite.", file=out)
+    if event_name not in DIFF_EVENTS:
+        print(f"event {event_name!r} has no base to diff against -> full suite.",
+              file=out)
         emit(True, github_output)
         return 0
 
     if not base_sha:
         raise RuntimeError(
-            "pull_request event with an empty base sha — the diff cannot be "
+            f"{event_name} event with an empty base sha — the diff cannot be "
             "computed, so no file can be shown to be inert."
         )
 
@@ -331,6 +345,12 @@ def self_test() -> int:
     induce("ERROR: empty base sha on a PR -> non-zero, no code=false",
            lambda gh: ["--event-name", "pull_request", "--base-sha", "",
                        "--github-output", gh])
+    induce("ERROR: empty base sha on a merge_group -> non-zero, no code=false",
+           lambda gh: ["--event-name", "merge_group", "--base-sha", "",
+                       "--github-output", gh])
+    induce("ERROR: nonexistent base sha on a merge_group -> non-zero, no code=false",
+           lambda gh: ["--event-name", "merge_group", "--base-sha", "0" * 40,
+                       "--github-output", gh])
     induce("ERROR: unwritable --github-output -> non-zero, no code=false",
            lambda _: ["--event-name", "push", "--github-output",
                       "/nonexistent-dir-84f2/out"])
@@ -343,11 +363,18 @@ def self_test() -> int:
     induce("push event emits code=true and exits 0",
            lambda gh: ["--event-name", "push", "--github-output", gh],
            expect_written="code=true")
+    # Unknown is not a licence to skip: an event this script does not diff
+    # gets the full suite, even with a base sha handed to it.
+    induce("an unrecognised event (schedule) with a base sha still emits code=true",
+           lambda gh: ["--event-name", "schedule", "--base-sha", "0" * 40,
+                       "--github-output", gh],
+           expect_written="code=true")
 
     # -- end-to-end over a real git diff --------------------------------------
     # Closes the seam between classify() and emit(): a run() that emitted a
     # constant would satisfy every test above.
-    def e2e(desc: str, files: list[str], want: str) -> None:
+    def e2e(desc: str, files: list[str], want: str,
+            event: str = "pull_request") -> None:
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as td:
             g = ["git", "-C", td, "-c", "user.name=t", "-c", "user.email=t@t",
@@ -383,7 +410,7 @@ def self_test() -> int:
                 return
             gh = Path(td, "gh_output")
             gh.write_text("")
-            rc = run("pull_request", base, "HEAD", str(gh), cwd=td, out=io.StringIO())
+            rc = run(event, base, "HEAD", str(gh), cwd=td, out=io.StringIO())
             written = gh.read_text().strip()
         if rc == 0 and written == want:
             passed += 1
@@ -397,6 +424,13 @@ def self_test() -> int:
     e2e("E2E: a .rs diff emits code=true", ["crates/x/src/lib.rs"], "code=true")
     e2e("E2E: REGRESSION #384-A end-to-end — docs/*.rs emits code=true",
         ["docs/nested/evil.rs"], "code=true")
+    # Merge queue: the same diff, the same verdicts. The pair matters — a
+    # merge_group branch that emitted a constant would satisfy either alone.
+    e2e("E2E merge_group: a docs-only queue entry emits code=false",
+        ["docs/guide.md", "artifacts/requirements.yaml"], "code=false",
+        event="merge_group")
+    e2e("E2E merge_group: a .rs queue entry emits code=true",
+        ["crates/x/src/lib.rs"], "code=true", event="merge_group")
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
@@ -410,7 +444,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--event-name", required=True, help="github.event_name")
     ap.add_argument("--base-sha", default="",
-                    help="github.event.pull_request.base.sha")
+                    help="github.event.pull_request.base.sha, or "
+                         "github.event.merge_group.base_sha in a merge queue")
     ap.add_argument("--head", default="HEAD")
     # Required, and the only emission mode. See the module docstring: an
     # optional stdout mode is a mode a workflow will interpolate through a

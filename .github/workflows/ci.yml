@@ -12,6 +12,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # GitHub merge queue: every workflow that emits a REQUIRED context must also
+  # run on the queue's `merge_group` event, or a queued PR waits on a context
+  # nothing reports until the queue's check-response timeout evicts it. A
+  # job-level `if:` that is false here still reports `skipped`, which satisfies
+  # the context; only a workflow that does not trigger reports nothing.
+  merge_group:
   # smithy's downtime dispatcher (GitHub App pulseengine-smithy) runs the
   # full-crate mutation ratchet off-peak via workflow_dispatch (#400).
   workflow_dispatch:
@@ -77,7 +83,11 @@ jobs:
         name: Classify diff as code vs artifacts/docs
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # pull_request: the PR's base. merge_group: the queue's base (main's
+          # tip); the queue checkout is merge_group.head_sha, so `base...HEAD`
+          # is what this queue commit adds. Any other event takes neither and
+          # the classifier runs the full suite without reading this.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: >-
           tools/classify_changed_paths.py
           --event-name "$EVENT_NAME"
@@ -435,23 +445,25 @@ jobs:
     # DEC-MUTANTS-IN-DIFF-001). Never two same-named jobs: a SKIPPED job named
     # `Mutation Testing` satisfies the required context.
     #
-    # pull_request — `cargo mutants --in-diff` over the WHOLE workspace on
+    # pull_request AND merge_group — `cargo mutants --in-diff` over the WHOLE workspace on
     #   rust-cpu. It mutates only the lines the change touches (measured on
     #   real spar diffs: 3–27 mutants, against 1755 for the full crate), tests
     #   with the whole workspace (many kills come from CLI tests in another
     #   package), and allows zero survivors. Zero SELECTED fails unless the
     #   diff adds no mutable source.
+    # The queue runs the in-diff mode too: the full crate there would cost up to
+    #   240 min per queue entry and then again on the push it lands as.
     # push to main / workflow_dispatch — the full spar-analysis crate with the
     #   exact 292 ratchet, on lean-mem (RAM under -j 4). It is the only gate
     #   that sees a change which WEAKENS a test without touching source: that
     #   diff selects nothing, so in-diff cannot see it. Its cost moves from
     #   once per PR rebase to once per merge, plus smithy's off-peak dispatches.
     #   The exhaustive full-workspace run stays in mutants-weekly.yml.
-    runs-on: ${{ github.event_name == 'pull_request' && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]') }}
+    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]') }}
     # Full crate: the only finished run took 182.3 min, and 2026-10-22 saw one
     # hit 240, so 240 stays the ceiling for the off-PR run. PR: see the
     # measured in-diff durations in REQ-CI-MUTANTS-IN-DIFF-001.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 240 }}
+    timeout-minutes: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 60 || 240 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -469,8 +481,10 @@ jobs:
           # --in-diff selection; both were measured against 27.1.0.
           tool: cargo-mutants@27.1.0
       - name: Diff of this change against main
-        if: github.event_name == 'pull_request'
-        # HEAD is the merge commit; HEAD^1 is main. Taken from the CHECKED-OUT
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
+        # HEAD is the merge commit; HEAD^1 is main. In a merge_group run HEAD is
+        # the queue's squash commit and HEAD^1 the entry ahead of it (or main),
+        # so the diff is exactly this entry's change. Taken from the CHECKED-OUT
         # tree, because --in-diff matches hunks against the source it mutates:
         # a diff against any other tree selects nothing (measured: 0/0/0 on
         # three real diffs whose branches were not checked out).
@@ -479,7 +493,7 @@ jobs:
           git diff HEAD^1 HEAD > pr.diff
           echo "pr.diff: $(wc -l < pr.diff) lines, $(grep -c '^+++ ' pr.diff || true) files"
       - name: Run cargo-mutants on the diff
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         # `|| true`: cargo-mutants exits non-zero when any mutant survives, and
         # with a zero selection it exits 0 and writes no report at all. Either
         # way the verdict is the checker's, which reads the same pr.diff.
@@ -492,7 +506,7 @@ jobs:
         # measured under -D warnings, and capping would change what compiles.
         run: cargo mutants --in-diff pr.diff --test-workspace=true --cap-lints=true --timeout 300 --jobs 4 --output mutants-out || true
       - name: Run cargo-mutants on spar-analysis
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         # `|| true` because cargo-mutants exits non-zero whenever ANY mutant
         # survives and the ratchet below tolerates a bounded number. That makes
         # this step incapable of reporting failure — so the next step has to
@@ -507,12 +521,12 @@ jobs:
       - name: Mutants-report guardrail self-test
         run: tools/check_mutants_report.py --self-test
       - name: Check in-diff mutants
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         # Zero survivors in the lines the change touches; zero selected over
         # changed source FAILS; an empty diff FAILS (DEC-MUTANTS-IN-DIFF-001).
         run: tools/check_mutants_report.py --output-dir mutants-out --in-diff pr.diff
       - name: Check surviving mutants
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         # The logic lives in tools/check_mutants_report.py rather than inline
         # here because inline shell in a workflow is only testable by pushing —
         # which is precisely how the original misread survived from 563eb8c
@@ -567,12 +581,14 @@ jobs:
   fuzz-smoke:
     name: Fuzz smoke (60s/target)
     runs-on: [self-hosted, linux, x64, rust-cpu]
-    # 3 targets x 60s + cold ASan builds (observed ~5m on PRs; this job is
-    # PR-only). 30m ceiling.
+    # 3 targets x 60s + cold ASan builds (observed ~5m on PRs). 30m ceiling.
     timeout-minutes: 30
-    # Only run on PRs — pushes to main hit the nightly workflow instead.
+    # PRs and merge-queue entries — pushes to main hit the nightly workflow
+    # instead. The queue runs it because the queue commit is what lands, and
+    # ~5 min is cheap against the merge it gates; a docs-only entry still skips
+    # via `changes`.
     needs: [changes]
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

@@ -27,6 +27,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # GitHub merge queue: every workflow that emits a REQUIRED context must also
+  # run on the queue's `merge_group` event, or a queued PR waits on a context
+  # nothing reports until the queue's check-response timeout evicts it. A
+  # job-level `if:` that is false here still reports `skipped`, which satisfies
+  # the context; only a workflow that does not trigger reports nothing.
+  merge_group:
 
 jobs:
   # Same construct (and the same required-check caveat) as ci.yml's `changes`
@@ -59,7 +65,11 @@ jobs:
         name: Classify diff as code vs artifacts/docs
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # pull_request: the PR's base. merge_group: the queue's base (main's
+          # tip); the queue checkout is merge_group.head_sha, so `base...HEAD`
+          # is what this queue commit adds. Any other event takes neither and
+          # the classifier runs the full suite without reading this.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: >-
           tools/classify_changed_paths.py
           --event-name "$EVENT_NAME"
