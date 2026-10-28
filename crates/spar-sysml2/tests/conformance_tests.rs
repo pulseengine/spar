@@ -57,17 +57,24 @@ use Expect::*;
 /// quoted names, `alias`, `::**`): three now parse, and every remaining
 /// failure has moved PAST the construct it was recorded against — so each
 /// reason below is its new first error, not the old one.
+///
+/// Re-measured 2026-10-28 after `REQ-SYSML2-CORPUS-RATCHET-001` (multiplicity
+/// after a type, `perform`, KerML classifiers): no verdict changed, and three
+/// first errors moved on — `Parts_Example` and `Connections_Example` past the
+/// multiplicity after a type, Annex A past `perform action providePower;`.
 const CASES: &[(&str, Expect)] = &[
     ("Package_Example.sysml", Parses),
     ("Part_Definition_Example.sysml", Parses),
     ("Port_Example.sysml", Parses),
     (
         "Parts_Example.sysml",
-        Fails("10:22 multiplicity after a type — `part cyl : Cylinder[4..6];`"),
+        Fails("18:18 unnamed usage opened by `redefines` — `part redefines eng {`"),
     ),
     (
         "Connections_Example.sysml",
-        Fails("21:29 multiplicity after a type — `part wheel : WheelAssembly[1] {`"),
+        Fails(
+            "30:5 connection usage with a `connect` part — `connection : PressureSeat connect bead references t.bead`",
+        ),
     ),
     (
         "VehicleUsages.sysml",
@@ -75,7 +82,7 @@ const CASES: &[(&str, Expect)] = &[
     ),
     (
         "SysML_v2_Spec_Annex_A_SimpleVehicleModel.sysml",
-        Fails("35:17 `perform action providePower;`"),
+        Fails("41:17 `exhibit state vehicleStates parallel {`"),
     ),
 ];
 
@@ -106,8 +113,9 @@ fn every_named_file_gets_the_verdict_it_claims() {
                 Parses => "expected it to PARSE, and it does not".to_string(),
                 Fails(why) => format!(
                     "expected it to FAIL ({why}) — it now PARSES. That is a fix: \
-                     change this entry to Parses and raise OFFICIAL_PARSING in \
-                     official_corpus.rs, which will also have moved."
+                     change this entry to Parses. If the file is also in the \
+                     official corpus, official_corpus.rs will ask for it to be \
+                     added to official_corpus_parsing.txt."
                 ),
             };
             wrong.push(format!("  {name}: {detail}"));

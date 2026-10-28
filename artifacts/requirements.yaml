@@ -7620,6 +7620,51 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-28T04:10:22Z
+
+  - id: REQ-SYSML2-CORPUS-RATCHET-001
+    type: requirement
+    title: The official SysML v2 corpus gate shall name every file that parses, so a regression cannot hide behind a win
+    status: implemented
+    description: >
+      The corpus gate in crates/spar-sysml2/tests/official_corpus.rs compared
+      the NUMBER of parsing official files to an exact constant
+      (OFFICIAL_PARSING = 16 of 310). A count cannot see a swap: a change that
+      made two files parse and broke one that used to would raise it by one and
+      read as a pure win.
+
+      The gate is now a checked-in list,
+      crates/spar-sysml2/tests/official_corpus_parsing.txt, of every official
+      file that parses, by corpus-relative path. It FAILS if a listed file
+      stops parsing; FAILS if an unlisted file starts parsing and is not added,
+      so the list cannot fall behind the parser; FAILS on a stale, duplicate,
+      unsorted or padded entry; and keeps the exact corpus-size guard (310,
+      stronger than a floor of 300).
+
+      Raised by three grammar constructs chosen from a first-error histogram
+      of the 294 failing files, each cited to the textual BNF at the corpus
+      pin 29a3d2ac: SysML FeatureSpecializationPart, a multiplicity after the
+      typing (clause 8.2.2.6.5); KerML Class / Classifier / DataType /
+      Behavior with ClassifierDeclaration and SuperclassingPart (8.2.4.2.1,
+      8.2.5.1, 8.2.5.2, 8.2.5.6.1); and SysML PerformActionUsage
+      (8.2.2.17.2). MEASURED: 16 to 24 of 310. Every new positive snippet was
+      run against origin/main first and failed there.
+
+      Lowering has no AADL mapping for a classifier or a performed action. A
+      post-pass now reports every such node as an unsupported construct
+      wherever it sits, including inside part usage bodies that the per-body
+      walks never enter.
+
+      NOT CLAIMED: that the newly parsing files lower correctly. KNOWN
+      OVER-ACCEPTANCE: a multiplicity both before and after the typing
+      (`part x [1] : T [2];`) parses, although the production allows one
+      MultiplicityPart.
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-CONFORMANCE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T05:35:08Z
     release: v0.48.0
 
   - id: REQ-CLI-UNKNOWN-OPTION-001

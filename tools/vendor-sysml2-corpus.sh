@@ -21,9 +21,9 @@
 #   tools/vendor-sysml2-corpus.sh                 # re-vendor at the recorded pin
 #   tools/vendor-sysml2-corpus.sh <commit-sha>    # move the pin, deliberately
 #
-# Moving the pin is a reviewable change: it will move the count that
-# crates/spar-sysml2/tests/official_corpus.rs asserts, and that test names both
-# constants when it fails.
+# Moving the pin is a reviewable change: it will move the corpus size and the
+# parsing-file list that crates/spar-sysml2/tests/official_corpus.rs asserts,
+# and that test names the files that moved when it fails.
 
 set -euo pipefail
 
@@ -95,7 +95,8 @@ fi
 echo
 echo "Now update, together:"
 echo "  * test-data/sysml2/PROVENANCE.md  — the pin and the file counts"
-echo "  * crates/spar-sysml2/tests/official_corpus.rs — OFFICIAL_TOTAL, and"
-echo "    OFFICIAL_PARSING if the parse count moved"
+echo "  * crates/spar-sysml2/tests/official_corpus.rs — OFFICIAL_TOTAL"
+echo "  * crates/spar-sysml2/tests/official_corpus_parsing.txt — the files that"
+echo "    parse, if any were added, removed or renamed"
 echo
 echo "  cargo test -p spar-sysml2 --test official_corpus"

@@ -493,7 +493,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # name claims. check_stale_scope.py came within one commit of landing outside
 # this table, and the potency checker itself is still outside it.
 #
-# EXACT, TWO-SIDED, like DEFAULT_MAX and OFFICIAL_PARSING: below fails as a
+# EXACT, TWO-SIDED, like DEFAULT_MAX and official_corpus_parsing.txt: below fails as a
 # regression, above fails until the constant is raised. Coverage can then only
 # rise, and closing the remaining tools can ratchet across releases instead of
 # needing one heroic pass.

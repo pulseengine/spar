@@ -72,6 +72,8 @@ fn is_member_start(kind: SyntaxKind, p: &Parser) -> bool {
         SyntaxKind::IN_KW | SyntaxKind::OUT_KW | SyntaxKind::INOUT_KW => true,
         // `ref` prefix
         SyntaxKind::REF_KW => true,
+        // `perform` action usage
+        SyntaxKind::PERFORM_KW => true,
         // `abstract` prefix
         SyntaxKind::ABSTRACT_KW => true,
         // Identifier could be a named usage

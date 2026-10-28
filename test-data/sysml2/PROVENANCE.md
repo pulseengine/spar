@@ -103,3 +103,33 @@ are a finding of this vendoring — recheck it before planning v0.44.0.
 
 Moving the pin is a reviewable change: it will move the ratchet in
 `official_corpus.rs`, and the test says so when it fails.
+
+## The ratchet is a list of files, not a count
+
+Since `REQ-SYSML2-CORPUS-RATCHET-001` (2026-10-28) the gate is
+`crates/spar-sysml2/tests/official_corpus_parsing.txt`: every official file
+that parses, by corpus-relative path. A listed file that stops parsing fails
+the gate by name; an unlisted file that starts parsing fails it until it is
+added. A bare count could not see a change that fixed two files and broke a
+third. 24 of 310 files are listed at that date (16 before it).
+
+First-error histogram on `main` just before that change (294 failing files,
+bucketed by the construct at the first error):
+
+| first error | files | construct |
+|---|---|---|
+| `expected SEMICOLON` after `class` / `classifier` / `behavior` / `datatype` | 46 | KerML classifier declarations (30 / 9 / 6 / 1) |
+| `expected SEMICOLON` at `[` | 30 | multiplicity after a type — `part cyl : Cylinder[4..6];` |
+| `expected SEMICOLON` at `=` | 18 | feature values — `item scene = ...`, `pressure = ...` |
+| `expected member declaration` at `perform` | 15 | `perform action providePower;` |
+| `expected member declaration` at `metadata` | 12 | `metadata def`, metadata usages |
+| `expected member declaration` at `first` | 10 | `first start;` successions in state/action bodies |
+| `expected SEMICOLON` at `constraint` | 8 | `assert constraint`, `require constraint` |
+| `expected member declaration` at `bind` | 7 | binding connectors |
+| `expected SEMICOLON` at `(` / `<` | 6 / 6 | invocation expressions; short names `<'1'>` |
+| `expected name` at `~` | 6 | conjugated port typing `: ~FuelPort` |
+
+The ratchet change closed the first, second and fourth rows. Clearing a first
+error freed far fewer files than the row counts, because most files carry
+further unsupported constructs behind it: 30 + 46 + 15 = 91 first errors
+freed 8 files.
