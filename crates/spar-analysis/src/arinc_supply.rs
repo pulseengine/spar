@@ -371,13 +371,10 @@ impl Analysis for Arinc653SupplyRtaAnalysis {
                 continue; // no partition budget → not an analyzable Γ
             };
 
-            // Priority order: explicit priority (lower = higher), then RM
-            // (shorter period first) — same ordering as RtaAnalysis.
-            tasks.sort_by(|a, b| match (a.priority, b.priority) {
-                (Some(pa), Some(pb)) => pa.cmp(&pb),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => a.period.cmp(&b.period),
+            // Priority order: explicit Priority (a LARGER value is the higher
+            // priority, #526), then RM: the comparator RtaAnalysis uses.
+            tasks.sort_by(|a, b| {
+                crate::rta::dispatch_order(a.priority, a.period, b.priority, b.period)
             });
 
             for i in 0..tasks.len() {
@@ -521,7 +518,7 @@ mod tests {
     // ── Pure core: the #331 golden worked example ────────────────────
     //
     // Γ = (Π = 1000 µs, Θ = 300 µs); blackout 2(Π−Θ) = 1400 µs.
-    // Three inner tasks (D_i = T_i, priority 1 highest), B = 100/100/0.
+    // Three inner tasks (D_i = T_i, τ1 highest priority), B = 100/100/0.
     // NUMBERS ARE THE BUSY-WINDOW w-FORM (R = 2(Π−Θ) + w), pinned as such
     // per issue #331's form note — they coincide with the engine R-form on
     // THIS set but differ in general; do not "fix" a future mismatch by
@@ -749,7 +746,16 @@ mod tests {
     }
 
     /// The #331 golden two-level partition model as an instance.
+    ///
+    /// τ1 is the highest priority, so under AADL's order (a LARGER `Priority`
+    /// value is the higher priority, #526) it carries the largest value:
+    /// 3 / 2 / 1 on t1 / t2 / t3. Before #526 this read 1 / 2 / 3.
     fn golden_instance() -> SystemInstance {
+        golden_instance_with_priorities(["3", "2", "1"])
+    }
+
+    /// The #331 golden model with the `Priority` values of t1/t2/t3 given.
+    fn golden_instance_with_priorities(prios: [&str; 3]) -> SystemInstance {
         let mut b = TB::new();
         let root = b.add("root", ComponentCategory::System, None);
         let cpu = b.add("cpu1", ComponentCategory::Processor, Some(root));
@@ -768,9 +774,9 @@ mod tests {
         // Inner tasks — NO Actual_Processor_Binding (so RtaAnalysis skips
         // them; the supply pass is the sole analyzer). D_i = T_i.
         for (t, prio, c, period) in [
-            (t1, "1", "20 us", "5000 us"),
-            (t2, "2", "50 us", "10000 us"),
-            (t3, "3", "100 us", "20000 us"),
+            (t1, prios[0], "20 us", "5000 us"),
+            (t2, prios[1], "50 us", "10000 us"),
+            (t3, prios[2], "100 us", "20000 us"),
         ] {
             b.prop(t, "Deployment_Properties", "Priority", prio);
             b.prop(t, "Timing_Properties", "Compute_Execution_Time", c);
@@ -805,6 +811,40 @@ mod tests {
                 .iter()
                 .all(|d| d.message.contains(&format!("2(Π−Θ)={}", 1400 * US)))
         );
+    }
+
+    // rivet: verifies REQ-RTA-PRIORITY-ORDER-001
+    #[test]
+    fn integration_larger_priority_value_is_higher_priority() {
+        // The golden model with Priority 1 / 2 / 3 on t1 / t2 / t3. Under
+        // AADL (a LARGER value is the higher priority, #526) t3 is highest
+        // and t1 lowest, the reverse of rate-monotonic. Γ = (1000, 300),
+        // blackout J = 2(Π−Θ) = 1400 µs; w = C + B + Σ ceil((w+J)/T_j)·C_j,
+        // R = 1400 + w, B = max segment (= C) of the lower-priority tasks.
+        //   t3: C=100, B = max(50, 20) = 50, no hp. w = 150.        R = 1550.
+        //   t2: C=50,  B = 20, hp = t3. w = 70 + ceil(1470/20000)·100 = 170;
+        //       ceil(1570/20000) = 1, fixed at 170.                 R = 1570.
+        //   t1: C=20,  B = 0, hp = t3, t2. w = 20 + 100 + 50 = 170;
+        //       ceil(1570/20000) = ceil(1570/10000) = 1, fixed.     R = 1570.
+        // The inverted order puts t1 first (B = 100) and gives t1 = 1520,
+        // t3 = 1570: the #331 golden numbers on the wrong threads.
+        let inst = golden_instance_with_priorities(["1", "2", "3"]);
+        let diags = Arinc653SupplyRtaAnalysis.analyze(&inst);
+        assert_eq!(diags.len(), 3, "one bound per inner thread: {diags:#?}");
+        assert!(diags.iter().all(|d| d.severity == Severity::Info));
+        let find = |name: &str| {
+            diags
+                .iter()
+                .find(|d| d.message.contains(&format!("'{name}'")))
+                .unwrap_or_else(|| panic!("no diagnostic for {name}: {diags:#?}"))
+                .message
+                .clone()
+        };
+        let (t1, t2, t3) = (find("t1"), find("t2"), find("t3"));
+        assert!(t3.contains(&format!("{}", 1550 * US)), "t3 highest: {t3}");
+        assert!(t2.contains(&format!("{}", 1570 * US)), "t2: {t2}");
+        assert!(t1.contains(&format!("{}", 1570 * US)), "t1 lowest: {t1}");
+        assert!(!t1.contains(&format!("{}", 1520 * US)), "t1 lowest: {t1}");
     }
 
     #[test]

@@ -3,6 +3,10 @@
 -- threads share one CPU. Both deadlines are met; the lower-priority
 -- thread's response time reflects the higher-priority thread's
 -- jitter inside the fixed-point recurrence.
+--
+-- t_hi is the higher priority, so it carries the LARGER Priority value
+-- (AADL: "A larger value represents a higher priority"; #526). Before
+-- #526 spar read a lower number as higher, and this fixture said 1 / 2.
 
 package Jittered
 public
@@ -19,7 +23,7 @@ public
       Timing_Properties::Deadline          => 10 ms;
       Timing_Properties::Compute_Execution_Time => 1 ms;
       Timing_Properties::Dispatch_Jitter   => 2 ms;
-      Deployment_Properties::Priority      => 1;
+      Deployment_Properties::Priority      => 2;
       Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
   end th;
   thread implementation th.impl
@@ -31,7 +35,7 @@ public
       Timing_Properties::Period            => 100 ms;
       Timing_Properties::Deadline          => 100 ms;
       Timing_Properties::Compute_Execution_Time => 10 ms;
-      Deployment_Properties::Priority      => 2;
+      Deployment_Properties::Priority      => 1;
       Deployment_Properties::Actual_Processor_Binding => (reference (cpu1));
   end tl;
   thread implementation tl.impl
