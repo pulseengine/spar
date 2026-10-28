@@ -11,7 +11,7 @@ use spar_hir_def::instance::SystemInstance;
 use spar_hir_def::{GlobalScope, HirDefDatabase, Name, file_item_tree};
 use spar_insight::{analyze, parse_ctf};
 
-use crate::parse_root_ref;
+use crate::{parse_root_ref, refuse_parse_errors};
 
 fn print_insight_usage() {
     eprintln!("Usage: spar insight <subcommand> [options] <file...>");
@@ -102,22 +102,19 @@ fn cmd_verify_trace(args: &[String]) {
     let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
 
     let db = HirDefDatabase::default();
-    let mut trees = Vec::new();
+    let mut sources = Vec::new();
     for file_path in &files {
         let source = fs::read_to_string(file_path).unwrap_or_else(|e| {
             eprintln!("Cannot read {file_path}: {e}");
             process::exit(1);
         });
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                eprintln!("{file_path}:{line}:{col}: {}", err.msg);
-            }
-            eprintln!("Cannot verify-trace: parse errors in {file_path}");
-            process::exit(1);
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        sources.push((file_path.clone(), source));
+    }
+    // #552: the shared parse gate, so this command cannot drift from the rest.
+    refuse_parse_errors("verify-trace", &sources);
+    let mut trees = Vec::new();
+    for (file_path, source) in sources {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(file_item_tree(&db, sf));
     }
     let scope = GlobalScope::from_trees(trees);
