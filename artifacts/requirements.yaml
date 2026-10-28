@@ -1727,6 +1727,11 @@ artifacts:
       `spar analyze --allow arinc-partition-isolation` flag demotes
       it back to Warning for legitimate IMA bypasses (rare). Per the
       post-v0.9.0 reviewer's Tier A #9.
+      CORRECTED by REQ-ARINC-ISOLATION-FP-001 (#504): a port connection
+      between partitions is the ARINC 653 inter-partition channel
+      (sampling or queueing port) and does NOT break IMA, so it is no
+      longer reported. The Error severity and the --allow flag now apply
+      to data shared by access connections across partitions.
     status: implemented
     tags: [analysis, arinc653, safety, v092]
 
@@ -7564,7 +7569,7 @@ artifacts:
     type: requirement
     title: "The remaining binding consumers shall resolve the binding by identity from its declarer: ARINC 653 partitions, move-ranking response time, per-connection bus bindings"
     status: approved
-    description: "Split from REQ-AADL-BINDING-CONSUMERS-001 at the v0.47.0 cut (DEC-RELEASE-V047-SCOPE-001). (1) arinc653::owning_partition matches a whole binding text against virtual-processor names, so (reference (cpu.p1)) never assigns a partition: 40 false 'not bound to any partition' warnings on the corpus's ARINC examples. A fix exists on branch fix/binding-consumers-arinc (e920336) but is blocked by #504: once partitions resolve, check_partition_isolation reports every inter-partition port connection as an Error, 13 false errors on OSATE/AADLib's canonical sampling/queueing examples. (2) spar-solver enumerate::compute_max_response_ns finds a target's threads by matching \"on processor '<name>'\" in RTA's message TEXT; it needs RTA to expose structured per-processor results. (3) bus_bandwidth reads only component property maps, so a bus binding written as Actual_Connection_Binding => … applies to <conn> (or inline on the connection, #515) is invisible to it."
+    description: "Split from REQ-AADL-BINDING-CONSUMERS-001 at the v0.47.0 cut (DEC-RELEASE-V047-SCOPE-001). (1) arinc653::owning_partition matches a whole binding text against virtual-processor names, so (reference (cpu.p1)) never assigns a partition: 40 false 'not bound to any partition' warnings on the corpus's ARINC examples. A fix exists on branch fix/binding-consumers-arinc (e920336) but is blocked by #504: once partitions resolve, check_partition_isolation reports every inter-partition port connection as an Error, 13 false errors on OSATE/AADLib's canonical sampling/queueing examples. (2) spar-solver enumerate::compute_max_response_ns finds a target's threads by matching \"on processor '<name>'\" in RTA's message TEXT; it needs RTA to expose structured per-processor results. (3) bus_bandwidth reads only component property maps, so a bus binding written as Actual_Connection_Binding => … applies to <conn> (or inline on the connection, #515) is invisible to it. PROGRESS, 2026-10-28 (#504): item (1) is DONE, landed with REQ-ARINC-ISOLATION-FP-001. arinc653::owning_partition resolves an Actual_Processor_Binding through spar_hir_def::overlay::actual_processor_binding_with_overlay, the resolver property_accessors::ProcessorGroups::key wraps (from the declarer, by identity); a binding that resolves to a processor is not a partition; an unresolved binding falls back to the old whole-name lookup. ProcessorGroups itself is not used because owning_partition needs the bound component, not a group key. Oracle: crates/spar-cli/tests/binding_consumers_arinc.rs (ported from e920336): red on main (2 false ARINC-PARTITION-ASSIGNMENT warnings), green on the branch; its negative control binds a process to the processor and still warns. Corpus (49 ARINC653 files, 50 runs): 45 false ASSIGNMENT warnings removed, nothing else changes. Items (2) and (3) remain."
     tags: [aadl, analysis, properties, bug]
     provenance:
       created-by: ai-assisted
@@ -7636,4 +7641,20 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-28T04:10:22Z
+    release: v0.48.0
+  - id: REQ-ARINC-ISOLATION-FP-001
+    type: requirement
+    title: ARINC-PARTITION-ISOLATION shall accept a port connection between partitions and report data shared across partitions
+    status: implemented
+    description: "Refs #504. check_partition_isolation reported EVERY semantic connection between processes bound to different virtual processors as an Error ('should use approved mechanisms'), plus a name-matched declarative duplicate. In the ARINC 653 annex mapping a partition is a process bound to a virtual processor, and an AADL data port connected across processes IS an ARINC 653 sampling port, an event data port a queueing port (Delange et al., 'Validate, Simulate, and Implement ARINC653 Systems using the AADL', SIGAda 2009, sections 3.1 and 3.4; AADLib arinc653_annex/example_1, 'adapted from the ARINC653 annex document', connects its partitions exactly so). The annex text itself (SAE AS5506/1A) was NOT obtained; see DEC-ARINC-ANNEX-VS-OSATE-001 for the sources used. The rule masked itself: owning_partition compared the whole binding text cpu.p1 with VP names, so partitions almost never resolved. This requirement also lands the identity-based owning_partition (REQ-AADL-BINDING-CONSUMERS-002 item 1) through the resolver ProcessorGroups uses (overlay::actual_processor_binding_with_overlay). RULE NOW: a port connection across partitions passes; a DATA component reached by access connections from processes of two or more partitions is an Error (shared data is intra-partition only: SIGAda 2009 section 3.3; partitions cannot create covert channels: Delange, Pautet, Kordon, ERTS 2010 section 2.3.2), including system-level data that main never checked because it lies in no process; bus and subprogram access across partitions is not reported, because the sources forbid shared data and say nothing of those; a pure event port across partitions is a Warning (ARINC 653 has sampling and queueing ports only). The declarative second pass, which matched endpoints by global name and merged two different processes both called process_part1, is removed. RED on main: 12 of the 21 new spar-analysis unit tests fail against main's implementation (including annex_shaped_two_partition_model_has_no_isolation_or_assignment_finding and the shared-data negative controls), and so do both CLI tests in crates/spar-cli/tests/arinc_isolation.rs: on the published-shape model main prints 2 false ASSIGNMENT warnings and no shared-data Error; with only the binding fixed, main's rule prints both port connections as Errors. NEGATIVE CONTROLS: data inside partition A accessed from B (main also reported it, under its generic 'direct connection' message); data at the system level reached by both partitions (main MISSED it, since the data lies in no process: a new detection); --allow arinc-partition-isolation demotes the Error to a Warning. CORPUS (49 tracked .aadl files mentioning ARINC653, 50 runs, all instantiate): main vs branch differs in 25 runs, only by 45 false ARINC-PARTITION-ASSIGNMENT warnings removed; no error count changes. Binding-fix-only vs branch: 19 ARINC-PARTITION-ISOLATION Errors in 13 runs removed, every one a port connection on OSATE's, AADLib's or the annex's own examples. MUTANTS (cargo-mutants --in-diff, workspace tests, base ef4141c): 35 mutants, 30 caught, 5 unviable, 0 missed; a first run missed the data-access test `||`->`&&` (one access end only), now caught by one_data_access_end_is_enough_for_shared_data. NOT CLAIMED: memory-segment segregation (two partitions bound to one memory), Partition_Identifier uniqueness and Module_Schedule checks are not implemented (DEC-ARINC-ANNEX-VS-OSATE-001)."
+    tags: [arinc653, analysis, safety, bug]
+    links:
+      - type: traces-to
+        target: REQ-ARINC-005
+      - type: traces-to
+        target: REQ-AADL-BINDING-CONSUMERS-002
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T05:47:34Z
     release: v0.48.0

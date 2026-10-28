@@ -7,13 +7,20 @@
 //!   processor subcomponents (partitions).
 //! - **ARINC-PARTITION-ASSIGNMENT**: Every process must be bound to a virtual
 //!   processor (partition).
-//! - **ARINC-PARTITION-ISOLATION**: Processes under different virtual processors
-//!   should not share direct connections without an inter-partition mechanism.
+//! - **ARINC-PARTITION-ISOLATION**: Partitions communicate only through ports.
+//!   A port connection between processes bound to different partitions IS
+//!   the ARINC 653 inter-partition channel (a data port is a sampling port,
+//!   an event data port a queueing port) and passes. Data shared by access
+//!   connections from more than one partition bypasses those ports and is an
+//!   Error; a pure event port across partitions, which has no ARINC 653
+//!   inter-partition service, is a Warning (#504,
+//!   REQ-ARINC-ISOLATION-FP-001, DEC-ARINC-ANNEX-VS-OSATE-001).
 //! - **ARINC-WINDOW-UTILIZATION**: The sum of virtual processor execution times
 //!   on a processor must not exceed the processor's major frame period.
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
-use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::item_tree::{ComponentCategory, ConnectionKind, FeatureKind};
+use spar_hir_def::name::Name;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
@@ -36,8 +43,10 @@ impl Analysis for Arinc653Analysis {
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         // Severity rationale (STPA-REQ-016):
         //   Error   — partition window overcommitted (>100% utilization)
+        //   Error   — data shared by access connections across partitions
+        //             (bypasses the ARINC 653 inter-partition ports)
         //   Warning — processor has no partitions, process not bound to partition,
-        //             direct connection crosses partition boundary
+        //             pure event port connection across partitions
         //   Info    — partition window utilization within budget
         let mut diags = Vec::new();
 
@@ -81,14 +90,6 @@ fn find_components_by_category(
         .collect()
 }
 
-/// Find a component by name anywhere in the instance hierarchy.
-fn find_component_by_name(instance: &SystemInstance, name: &str) -> Option<ComponentInstanceIdx> {
-    instance
-        .all_components()
-        .find(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name))
-        .map(|(idx, _)| idx)
-}
-
 /// Find the nearest ancestor (or the component itself) of the given
 /// category. Returns `None` if no such ancestor exists.
 fn find_ancestor_of_category(
@@ -127,7 +128,19 @@ fn owning_partition(
         .or_else(|| props.get("", "Actual_Processor_Binding"))
         && let Some(target) = extract_reference_target(raw)
     {
-        // Look up the target by name and check if it's a virtual processor
+        // Resolved from the component that declared the binding, by identity
+        // — the resolver `ProcessorGroups` uses (#498,
+        // REQ-AADL-BINDING-CONSUMERS-002): `(reference (cpu.p1)) applies to a`
+        // names partition `p1` of `cpu`. A binding that resolves to a
+        // processor is not a partition, whatever virtual processor shares
+        // its name.
+        if let Some(bound) =
+            spar_hir_def::overlay::actual_processor_binding_with_overlay(instance, idx, None)
+        {
+            return (instance.component(bound).category == ComponentCategory::VirtualProcessor)
+                .then_some(bound);
+        }
+        // Unresolved from the declarer: look the target up by name, as before.
         for (comp_idx, comp) in instance.all_components() {
             if comp.name.as_str().eq_ignore_ascii_case(target)
                 && comp.category == ComponentCategory::VirtualProcessor
@@ -201,126 +214,189 @@ fn check_partition_assignment(
     }
 }
 
-/// **ARINC-PARTITION-ISOLATION**: Processes bound to different virtual
-/// processors should not share direct port connections. Connections
-/// between different partitions must go through an inter-partition
-/// communication mechanism.
+/// The partition a connection endpoint lives in: the partition of the
+/// nearest enclosing process (the endpoint itself when it is one), with that
+/// process. `None` when the endpoint is in no process, or the process is
+/// bound to no partition.
+fn endpoint_partition(
+    instance: &SystemInstance,
+    comp: ComponentInstanceIdx,
+) -> Option<(ComponentInstanceIdx, ComponentInstanceIdx)> {
+    let process = find_ancestor_of_category(instance, comp, ComponentCategory::Process)?;
+    owning_partition(instance, process).map(|vp| (process, vp))
+}
+
+/// The kind of `comp`'s feature `name`; `None` when the endpoint names no
+/// feature of `comp` (an access connection ends on the data component
+/// itself, with an empty feature name).
+fn endpoint_feature_kind(
+    instance: &SystemInstance,
+    comp: ComponentInstanceIdx,
+    name: &Name,
+) -> Option<FeatureKind> {
+    instance
+        .component(comp)
+        .features
+        .iter()
+        .map(|&f| &instance.features[f])
+        .find(|f| f.name.as_str().eq_ignore_ascii_case(name.as_str()))
+        .map(|f| f.kind)
+}
+
+/// Whether `kind` is an access feature: a path to a component's memory or
+/// code rather than an ARINC 653 port.
+fn is_access(kind: Option<FeatureKind>) -> bool {
+    matches!(
+        kind,
+        Some(
+            FeatureKind::DataAccess
+                | FeatureKind::BusAccess
+                | FeatureKind::SubprogramAccess
+                | FeatureKind::SubprogramGroupAccess
+        )
+    )
+}
+
+/// **ARINC-PARTITION-ISOLATION** (#504, REQ-ARINC-ISOLATION-FP-001).
+///
+/// In the ARINC 653 annex mapping, a partition is a process (its address
+/// space) bound to a virtual processor (its runtime), and partitions
+/// communicate only through ports supervised by the module: an AADL data
+/// port connected across processes is an ARINC 653 sampling port, an event
+/// data port a queueing port (Delange et al., SIGAda 2009 §3.1, §3.4; the
+/// AADLib `arinc653_annex/example_1`, "adapted from the ARINC653 annex
+/// document", connects its two partitions exactly so). Such a connection is
+/// the approved mechanism and is NOT reported.
+///
+/// What isolation forbids is a channel that bypasses those ports: shared
+/// data, which the mapping confines to the threads of ONE partition (SIGAda
+/// 2009 §3.3: buffers, blackboards, events and semaphores are
+/// intra-partition; ERTS 2010 §2.3.2: partitions "cannot create covert
+/// channels"). A DATA component reached by access connections from more
+/// than one partition is an Error. Bus and subprogram access across
+/// partitions is not reported: the sources speak of shared data, not of
+/// those (DEC-ARINC-ANNEX-VS-OSATE-001).
+///
+/// A pure event port across partitions is not a covert channel, but ARINC
+/// 653 has no inter-partition event service (only sampling and queueing
+/// ports), so it is a Warning.
+///
+/// Endpoints are the ultimate (semantic) ones, and partitions are resolved
+/// by identity through [`owning_partition`], so two processes that merely
+/// share a name are never confused.
 fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagnostic>) {
-    // Check semantic connections for cross-partition violations
+    // Accessed component -> the (process, partition) pairs that reach it, in
+    // first-seen order so diagnostics are deterministic.
+    type Users = Vec<(ComponentInstanceIdx, ComponentInstanceIdx)>;
+    let mut shared: Vec<(ComponentInstanceIdx, Users)> = Vec::new();
+
     for sem_conn in &instance.semantic_connections {
-        let (src_comp, _) = &sem_conn.ultimate_source;
-        let (dst_comp, _) = &sem_conn.ultimate_destination;
+        let (src_comp, src_feat) = &sem_conn.ultimate_source;
+        let (dst_comp, dst_feat) = &sem_conn.ultimate_destination;
+        let src_kind = endpoint_feature_kind(instance, *src_comp, src_feat);
+        let dst_kind = endpoint_feature_kind(instance, *dst_comp, dst_feat);
+        let src_part = endpoint_partition(instance, *src_comp);
+        let dst_part = endpoint_partition(instance, *dst_comp);
 
-        // Walk up to the owning process for each endpoint
-        let src_process =
-            find_ancestor_of_category(instance, *src_comp, ComponentCategory::Process);
-        let dst_process =
-            find_ancestor_of_category(instance, *dst_comp, ComponentCategory::Process);
-
-        if let (Some(src_proc), Some(dst_proc)) = (src_process, dst_process) {
-            if src_proc == dst_proc {
-                // Same process -- no isolation concern
+        let access =
+            sem_conn.kind == ConnectionKind::Access || is_access(src_kind) || is_access(dst_kind);
+        if access {
+            // The accessed component is the end that names no feature of its
+            // own (`data access blackboard -> t.req`); else the source.
+            let resource = if dst_kind.is_none() && src_kind.is_some() {
+                *dst_comp
+            } else {
+                *src_comp
+            };
+            // Only shared DATA is an annex violation; bus and subprogram
+            // access is not reported (and is no port channel either).
+            let data = src_kind == Some(FeatureKind::DataAccess)
+                || dst_kind == Some(FeatureKind::DataAccess)
+                || instance.component(resource).category == ComponentCategory::Data;
+            if !data {
                 continue;
             }
-
-            let src_vp = owning_partition(instance, src_proc);
-            let dst_vp = owning_partition(instance, dst_proc);
-
-            if let (Some(svp), Some(dvp)) = (src_vp, dst_vp)
-                && svp != dvp
-            {
-                let src_name = instance.component(src_proc).name.as_str();
-                let dst_name = instance.component(dst_proc).name.as_str();
-                let src_vp_name = instance.component(svp).name.as_str();
-                let dst_vp_name = instance.component(dvp).name.as_str();
-
-                diags.push(AnalysisDiagnostic {
-                    // v0.9.2: ARINC 653 / DO-297 spatial isolation is a
-                    // hard invariant — a cross-partition direct port
-                    // connection breaks IMA. Promoted from Warning to
-                    // Error per the post-v0.9.0 reviewer's Tier A #9.
-                    // Models that legitimately need this can suppress
-                    // via `spar analyze --allow arinc-partition-isolation`.
-                    severity: Severity::Error,
-                    message: format!(
-                        "direct connection '{}' crosses partition boundary: \
-                         process '{}' (partition '{}') -> process '{}' (partition '{}'). \
-                         Inter-partition communication should use approved mechanisms \
-                         (ARINC-PARTITION-ISOLATION)",
-                        sem_conn.name, src_name, src_vp_name, dst_name, dst_vp_name,
-                    ),
-                    path: component_path(instance, *src_comp),
-                    analysis: "arinc653".to_string(),
-                });
+            let i = match shared.iter().position(|(r, _)| *r == resource) {
+                Some(i) => i,
+                None => {
+                    shared.push((resource, Vec::new()));
+                    shared.len() - 1
+                }
+            };
+            for part in [src_part, dst_part].into_iter().flatten() {
+                if !shared[i].1.contains(&part) {
+                    shared[i].1.push(part);
+                }
             }
+            continue;
+        }
+
+        // A port connection across partitions is the ARINC 653
+        // inter-partition channel; only a pure event port has no service.
+        let event_only =
+            src_kind == Some(FeatureKind::EventPort) || dst_kind == Some(FeatureKind::EventPort);
+        if let (Some((sp, svp)), Some((dp, dvp))) = (src_part, dst_part)
+            && svp != dvp
+            && event_only
+        {
+            diags.push(AnalysisDiagnostic {
+                severity: Severity::Warning,
+                message: format!(
+                    "event port connection '{}' crosses partition boundary: \
+                     process '{}' (partition '{}') -> process '{}' (partition '{}'). \
+                     ARINC 653 inter-partition communication has sampling ports \
+                     (data ports) and queueing ports (event data ports), no event \
+                     service (ARINC-PARTITION-ISOLATION)",
+                    sem_conn.name,
+                    instance.component(sp).name,
+                    instance.component(svp).name,
+                    instance.component(dp).name,
+                    instance.component(dvp).name,
+                ),
+                path: component_path(instance, *src_comp),
+                analysis: "arinc653".to_string(),
+            });
         }
     }
 
-    // Also check connection instances at the declarative level
-    for (_idx, comp) in instance.all_components() {
-        for &conn_idx in &comp.connections {
-            let conn = &instance.connections[conn_idx];
-
-            // We need both endpoints to reference subcomponents
-            let src_sub = conn.src.as_ref().and_then(|e| e.subcomponent.as_ref());
-            let dst_sub = conn.dst.as_ref().and_then(|e| e.subcomponent.as_ref());
-
-            if let (Some(src_name), Some(dst_name)) = (src_sub, dst_sub) {
-                // Find the referenced components by name anywhere in the hierarchy
-                let src_comp_idx = find_component_by_name(instance, src_name.as_str());
-                let dst_comp_idx = find_component_by_name(instance, dst_name.as_str());
-
-                if let (Some(src_idx), Some(dst_idx)) = (src_comp_idx, dst_comp_idx) {
-                    let src_cat = instance.component(src_idx).category;
-                    let dst_cat = instance.component(dst_idx).category;
-
-                    // Only check if both endpoints are processes
-                    if src_cat == ComponentCategory::Process
-                        && dst_cat == ComponentCategory::Process
-                    {
-                        let src_vp = owning_partition(instance, src_idx);
-                        let dst_vp = owning_partition(instance, dst_idx);
-
-                        if let (Some(svp), Some(dvp)) = (src_vp, dst_vp)
-                            && svp != dvp
-                        {
-                            // Check if we already reported this via semantic connections
-                            // to avoid duplicates
-                            let already_reported = diags.iter().any(|d| {
-                                d.analysis == "arinc653"
-                                    && d.message.contains("ARINC-PARTITION-ISOLATION")
-                                    && d.message
-                                        .contains(instance.component(src_idx).name.as_str())
-                                    && d.message
-                                        .contains(instance.component(dst_idx).name.as_str())
-                            });
-
-                            if !already_reported {
-                                let src_vp_name = instance.component(svp).name.as_str();
-                                let dst_vp_name = instance.component(dvp).name.as_str();
-
-                                diags.push(AnalysisDiagnostic {
-                                    severity: Severity::Warning,
-                                    message: format!(
-                                        "direct connection '{}' crosses partition boundary: \
-                                         process '{}' (partition '{}') -> process '{}' (partition '{}'). \
-                                         Inter-partition communication should use approved mechanisms \
-                                         (ARINC-PARTITION-ISOLATION)",
-                                        conn.name,
-                                        instance.component(src_idx).name,
-                                        src_vp_name,
-                                        instance.component(dst_idx).name,
-                                        dst_vp_name,
-                                    ),
-                                    path: component_path(instance, conn.owner),
-                                    analysis: "arinc653".to_string(),
-                                });
-                            }
-                        }
-                    }
-                }
+    for (resource, users) in shared {
+        let mut partitions: Vec<ComponentInstanceIdx> = Vec::new();
+        for (_, vp) in &users {
+            if !partitions.contains(vp) {
+                partitions.push(*vp);
             }
         }
+        if partitions.len() < 2 {
+            continue;
+        }
+        let users = users
+            .iter()
+            .map(|(p, vp)| {
+                format!(
+                    "process '{}' (partition '{}')",
+                    instance.component(*p).name,
+                    instance.component(*vp).name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let comp = instance.component(resource);
+        diags.push(AnalysisDiagnostic {
+            // ARINC 653 / DO-297 spatial isolation is a hard invariant: data
+            // shared across partitions is a channel the module does not
+            // supervise. Models that legitimately need it can demote this
+            // via `spar analyze --allow arinc-partition-isolation`.
+            severity: Severity::Error,
+            message: format!(
+                "{} '{}' is shared by access connections across partition \
+                 boundaries: {}. ARINC 653 partitions communicate only through \
+                 sampling and queueing ports; shared data belongs inside one \
+                 partition (ARINC-PARTITION-ISOLATION)",
+                comp.category, comp.name, users,
+            ),
+            path: component_path(instance, resource),
+            analysis: "arinc653".to_string(),
+        });
     }
 }
 
@@ -732,57 +808,318 @@ mod tests {
         );
     }
 
-    #[test]
-    fn different_partitions_direct_connection_warns() {
-        // Two processes under different VPs connected directly -- violation
+    /// Two partitions, each a process contained in its own VP, with one
+    /// thread each, and a semantic connection `sender.out1 -> receiver.in1`
+    /// over features of the given kinds.
+    fn two_partitions(src_kind: FeatureKind, dst_kind: FeatureKind) -> SystemInstance {
         let mut b = TestBuilder::new();
         let root = b.add_component("root", ComponentCategory::System, None);
         let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
-        let vp1 = b.add_component("vp1", ComponentCategory::VirtualProcessor, Some(cpu));
-        let vp2 = b.add_component("vp2", ComponentCategory::VirtualProcessor, Some(cpu));
-        let p1 = b.add_component("nav_app", ComponentCategory::Process, Some(vp1));
-        let p2 = b.add_component("display_app", ComponentCategory::Process, Some(vp2));
+        let vp1 = b.add_component("part_a", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("part_b", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("app1", ComponentCategory::Process, Some(vp1));
+        let p2 = b.add_component("app2", ComponentCategory::Process, Some(vp2));
+        let t1 = b.add_component("sender", ComponentCategory::Thread, Some(p1));
+        let t2 = b.add_component("receiver", ComponentCategory::Thread, Some(p2));
 
-        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), p1);
-        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), p2);
-
-        // Connection owned by root crossing partition boundary
-        b.add_connection(
-            "cross_conn",
-            ConnectionKind::Port,
-            root,
-            Some(ConnectionEnd {
-                subcomponent: Some(Name::new("nav_app")),
-                feature: Name::new("out1"),
-            }),
-            Some(ConnectionEnd {
-                subcomponent: Some(Name::new("display_app")),
-                feature: Name::new("in1"),
-            }),
-        );
+        b.add_feature("out1", src_kind, Some(Direction::Out), t1);
+        b.add_feature("in1", dst_kind, Some(Direction::In), t2);
 
         b.set_children(root, vec![cpu]);
         b.set_children(cpu, vec![vp1, vp2]);
         b.set_children(vp1, vec![p1]);
         b.set_children(vp2, vec![p2]);
+        b.set_children(p1, vec![t1]);
+        b.set_children(p2, vec![t2]);
 
-        let inst = b.build(root);
-        let diags = Arinc653Analysis.analyze(&inst);
+        let mut inst = b.build(root);
+        inst.semantic_connections.push(SemanticConnection {
+            name: Name::new("cross_sc"),
+            kind: ConnectionKind::Port,
+            ultimate_source: (t1, Name::new("out1")),
+            ultimate_destination: (t2, Name::new("in1")),
+            connection_path: Vec::new(),
+        });
+        inst
+    }
 
-        let isolation_warnings: Vec<_> = diags
-            .iter()
+    fn isolation_diags(inst: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        Arinc653Analysis
+            .analyze(inst)
+            .into_iter()
             .filter(|d| d.message.contains("ARINC-PARTITION-ISOLATION"))
-            .collect();
-        assert_eq!(
-            isolation_warnings.len(),
-            1,
-            "cross-partition connection should warn: {:?}",
-            diags
+            .collect()
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn sampling_port_across_partitions_is_the_approved_channel() {
+        // #504: a data port connected across partitions IS an ARINC 653
+        // sampling port (SIGAda 2009 §3.4). main reported it as an Error.
+        let inst = two_partitions(FeatureKind::DataPort, FeatureKind::DataPort);
+        let isolation = isolation_diags(&inst);
+        assert!(isolation.is_empty(), "{isolation:?}");
+        // The partitions did resolve: neither process is unassigned.
+        let diags = Arinc653Analysis.analyze(&inst);
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.contains("ARINC-PARTITION-ASSIGNMENT")),
+            "{diags:?}"
         );
-        assert!(isolation_warnings[0].message.contains("nav_app"));
-        assert!(isolation_warnings[0].message.contains("display_app"));
-        assert!(isolation_warnings[0].message.contains("vp1"));
-        assert!(isolation_warnings[0].message.contains("vp2"));
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn queueing_port_across_partitions_is_the_approved_channel() {
+        // An event data port across partitions is an ARINC 653 queueing port.
+        let inst = two_partitions(FeatureKind::EventDataPort, FeatureKind::EventDataPort);
+        let isolation = isolation_diags(&inst);
+        assert!(isolation.is_empty(), "{isolation:?}");
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn event_port_across_partitions_warns_no_inter_partition_service() {
+        // ARINC 653 has sampling and queueing ports only; a pure event port
+        // across partitions has no service. Warning, not Error.
+        let inst = two_partitions(FeatureKind::EventPort, FeatureKind::EventPort);
+        let isolation = isolation_diags(&inst);
+        assert_eq!(isolation.len(), 1, "{isolation:?}");
+        assert_eq!(isolation[0].severity, Severity::Warning);
+        assert!(isolation[0].message.contains("event port"));
+        assert!(isolation[0].message.contains("part_a"));
+        assert!(isolation[0].message.contains("part_b"));
+        assert!(isolation[0].message.contains("app1"));
+        assert!(isolation[0].message.contains("app2"));
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn event_port_only_on_one_end_still_warns() {
+        let inst = two_partitions(FeatureKind::EventPort, FeatureKind::EventDataPort);
+        assert_eq!(isolation_diags(&inst).len(), 1);
+        let inst = two_partitions(FeatureKind::EventDataPort, FeatureKind::EventPort);
+        assert_eq!(isolation_diags(&inst).len(), 1);
+    }
+
+    /// Partition A's process holds data `blackboard`; a thread of partition
+    /// B reaches it by an access connection.
+    fn data_in_a_accessed_from_b(accessor_kind: FeatureKind) -> SystemInstance {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("part_a", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("part_b", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("app1", ComponentCategory::Process, Some(vp1));
+        let p2 = b.add_component("app2", ComponentCategory::Process, Some(vp2));
+        let d = b.add_component("blackboard", ComponentCategory::Data, Some(p1));
+        let t2 = b.add_component("reader", ComponentCategory::Thread, Some(p2));
+        b.add_feature("req", accessor_kind, None, t2);
+
+        b.set_children(root, vec![cpu]);
+        b.set_children(cpu, vec![vp1, vp2]);
+        b.set_children(vp1, vec![p1]);
+        b.set_children(vp2, vec![p2]);
+        b.set_children(p1, vec![d]);
+        b.set_children(p2, vec![t2]);
+
+        let mut inst = b.build(root);
+        inst.semantic_connections.push(SemanticConnection {
+            name: Name::new("cross_access"),
+            kind: ConnectionKind::Access,
+            ultimate_source: (d, Name::new("")),
+            ultimate_destination: (t2, Name::new("req")),
+            connection_path: Vec::new(),
+        });
+        inst
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn data_of_one_partition_accessed_from_another_is_an_error() {
+        // Negative control: shared data bypasses the inter-partition ports.
+        let inst = data_in_a_accessed_from_b(FeatureKind::DataAccess);
+        let isolation = isolation_diags(&inst);
+        assert_eq!(isolation.len(), 1, "{isolation:?}");
+        assert_eq!(isolation[0].severity, Severity::Error);
+        let m = &isolation[0].message;
+        assert!(m.contains("'blackboard'"), "{m}");
+        assert!(m.contains("part_a") && m.contains("part_b"), "{m}");
+        assert!(m.contains("app1") && m.contains("app2"), "{m}");
+        assert!(isolation[0].path.iter().any(|n| n.as_str() == "blackboard"));
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn access_is_recognised_by_its_feature_even_when_kind_is_not_access() {
+        // A connection whose declared kind is not Access but whose ends are
+        // access features (a feature connection) is still shared access.
+        for kind in [
+            FeatureKind::DataAccess,
+            FeatureKind::BusAccess,
+            FeatureKind::SubprogramAccess,
+            FeatureKind::SubprogramGroupAccess,
+        ] {
+            let mut inst = data_in_a_accessed_from_b(kind);
+            inst.semantic_connections[0].kind = ConnectionKind::Feature;
+            let isolation = isolation_diags(&inst);
+            assert_eq!(isolation.len(), 1, "{kind:?}: {isolation:?}");
+            assert_eq!(isolation[0].severity, Severity::Error);
+        }
+        // Accessed component at the DESTINATION end is the resource too.
+        let mut inst = data_in_a_accessed_from_b(FeatureKind::DataAccess);
+        let sc = &mut inst.semantic_connections[0];
+        std::mem::swap(&mut sc.ultimate_source, &mut sc.ultimate_destination);
+        let isolation = isolation_diags(&inst);
+        assert_eq!(isolation.len(), 1, "{isolation:?}");
+        assert!(isolation[0].path.iter().any(|n| n.as_str() == "blackboard"));
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn non_access_feature_connection_is_not_shared_access() {
+        // A Feature connection between abstract features is not an access
+        // path: it is not reported as shared data.
+        let mut inst = data_in_a_accessed_from_b(FeatureKind::AbstractFeature);
+        inst.semantic_connections[0].kind = ConnectionKind::Feature;
+        assert!(isolation_diags(&inst).is_empty());
+    }
+
+    /// Threads `t1` (partition part_a) and `t2` (partition part_b), each
+    /// with one feature `f` of `kind`; plus a root-level component `res` of
+    /// `res_cat`.
+    fn two_threads_and_resource(
+        kind: FeatureKind,
+        res_cat: ComponentCategory,
+    ) -> (
+        SystemInstance,
+        ComponentInstanceIdx,
+        ComponentInstanceIdx,
+        ComponentInstanceIdx,
+    ) {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let vp1 = b.add_component("part_a", ComponentCategory::VirtualProcessor, Some(cpu));
+        let vp2 = b.add_component("part_b", ComponentCategory::VirtualProcessor, Some(cpu));
+        let p1 = b.add_component("app1", ComponentCategory::Process, Some(vp1));
+        let p2 = b.add_component("app2", ComponentCategory::Process, Some(vp2));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(p1));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(p2));
+        let res = b.add_component("res", res_cat, Some(root));
+        b.add_feature("f", kind, None, t1);
+        b.add_feature("f", kind, None, t2);
+        b.set_children(root, vec![cpu, res]);
+        b.set_children(cpu, vec![vp1, vp2]);
+        b.set_children(vp1, vec![p1]);
+        b.set_children(vp2, vec![p2]);
+        b.set_children(p1, vec![t1]);
+        b.set_children(p2, vec![t2]);
+        (b.build(root), t1, t2, res)
+    }
+
+    fn access_sc(
+        src: (ComponentInstanceIdx, &str),
+        dst: (ComponentInstanceIdx, &str),
+    ) -> SemanticConnection {
+        SemanticConnection {
+            name: Name::new("acc"),
+            kind: ConnectionKind::Access,
+            ultimate_source: (src.0, Name::new(src.1)),
+            ultimate_destination: (dst.0, Name::new(dst.1)),
+            connection_path: Vec::new(),
+        }
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn root_level_data_shared_by_two_partitions_is_an_error() {
+        // The shared data lies in NO process (main skipped it entirely).
+        let (mut inst, t1, t2, res) =
+            two_threads_and_resource(FeatureKind::DataAccess, ComponentCategory::Data);
+        inst.semantic_connections
+            .push(access_sc((res, ""), (t1, "f")));
+        inst.semantic_connections
+            .push(access_sc((res, ""), (t2, "f")));
+        let isolation = isolation_diags(&inst);
+        assert_eq!(isolation.len(), 1, "{isolation:?}");
+        assert_eq!(isolation[0].severity, Severity::Error);
+        assert!(isolation[0].message.contains("'res'"));
+        // One partition only: not reported.
+        let (mut inst, t1, _, res) =
+            two_threads_and_resource(FeatureKind::DataAccess, ComponentCategory::Data);
+        inst.semantic_connections
+            .push(access_sc((res, ""), (t1, "f")));
+        assert!(isolation_diags(&inst).is_empty());
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn data_resource_is_recognised_without_access_features() {
+        // An Access connection whose ends name no feature: the data component
+        // itself makes it shared data.
+        let (mut inst, t1, t2, res) =
+            two_threads_and_resource(FeatureKind::AbstractFeature, ComponentCategory::Data);
+        inst.semantic_connections
+            .push(access_sc((res, ""), (t1, "")));
+        inst.semantic_connections
+            .push(access_sc((res, ""), (t2, "")));
+        assert_eq!(isolation_diags(&inst).len(), 1);
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn bus_and_subprogram_access_across_partitions_is_not_reported() {
+        // The sources forbid shared DATA; bus or subprogram access across
+        // partitions has no annex rule in them (DEC-ARINC-ANNEX-VS-OSATE-001).
+        for (kind, cat) in [
+            (FeatureKind::BusAccess, ComponentCategory::Bus),
+            (FeatureKind::SubprogramAccess, ComponentCategory::Subprogram),
+        ] {
+            let (mut inst, t1, t2, res) = two_threads_and_resource(kind, cat);
+            inst.semantic_connections
+                .push(access_sc((res, ""), (t1, "f")));
+            inst.semantic_connections
+                .push(access_sc((res, ""), (t2, "f")));
+            let isolation = isolation_diags(&inst);
+            assert!(isolation.is_empty(), "{kind:?}: {isolation:?}");
+        }
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn feature_to_feature_data_access_across_partitions_names_the_source() {
+        // Both ends name a data access feature: the source is the resource.
+        let (mut inst, t1, t2, _) =
+            two_threads_and_resource(FeatureKind::DataAccess, ComponentCategory::Data);
+        inst.semantic_connections
+            .push(access_sc((t1, "f"), (t2, "f")));
+        let isolation = isolation_diags(&inst);
+        assert_eq!(isolation.len(), 1, "{isolation:?}");
+        assert!(isolation[0].message.contains("'t1'"), "{isolation:?}");
+        assert!(isolation[0].path.iter().any(|n| n.as_str() == "t1"));
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn one_data_access_end_is_enough_for_shared_data() {
+        // Only ONE end is a data access feature, and the resource (the source
+        // thread) is not a data component: still shared data.
+        for data_end_is_src in [true, false] {
+            let (mut inst, t1, t2, _) =
+                two_threads_and_resource(FeatureKind::DataAccess, ComponentCategory::Data);
+            let other = if data_end_is_src { t2 } else { t1 };
+            for (_, f) in inst.features.iter_mut() {
+                if f.owner == other {
+                    f.kind = FeatureKind::AbstractFeature;
+                }
+            }
+            inst.semantic_connections
+                .push(access_sc((t1, "f"), (t2, "f")));
+            let isolation = isolation_diags(&inst);
+            assert_eq!(isolation.len(), 1, "src={data_end_is_src}: {isolation:?}");
+        }
     }
 
     // ── ARINC-WINDOW-UTILIZATION ────────────────────────────────
@@ -1085,55 +1422,6 @@ mod tests {
             "same-partition semantic connection should not warn: {:?}",
             isolation
         );
-    }
-
-    #[test]
-    fn partition_isolation_different_vp_via_semantic_connections_warns() {
-        // Two processes under DIFFERENT VPs with a semantic connection — should warn
-        let mut b = TestBuilder::new();
-        let root = b.add_component("root", ComponentCategory::System, None);
-        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
-        let vp1 = b.add_component("part_a", ComponentCategory::VirtualProcessor, Some(cpu));
-        let vp2 = b.add_component("part_b", ComponentCategory::VirtualProcessor, Some(cpu));
-        let p1 = b.add_component("app1", ComponentCategory::Process, Some(vp1));
-        let p2 = b.add_component("app2", ComponentCategory::Process, Some(vp2));
-        let t1 = b.add_component("sender", ComponentCategory::Thread, Some(p1));
-        let t2 = b.add_component("receiver", ComponentCategory::Thread, Some(p2));
-
-        b.add_feature("out1", FeatureKind::DataPort, Some(Direction::Out), t1);
-        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), t2);
-
-        b.set_children(root, vec![cpu]);
-        b.set_children(cpu, vec![vp1, vp2]);
-        b.set_children(vp1, vec![p1]);
-        b.set_children(vp2, vec![p2]);
-        b.set_children(p1, vec![t1]);
-        b.set_children(p2, vec![t2]);
-
-        let mut inst = b.build(root);
-        inst.semantic_connections.push(SemanticConnection {
-            name: Name::new("cross_sc"),
-            kind: ConnectionKind::Port,
-            ultimate_source: (t1, Name::new("out1")),
-            ultimate_destination: (t2, Name::new("in1")),
-            connection_path: Vec::new(),
-        });
-
-        let diags = Arinc653Analysis.analyze(&inst);
-        let isolation: Vec<_> = diags
-            .iter()
-            .filter(|d| d.message.contains("ARINC-PARTITION-ISOLATION"))
-            .collect();
-        assert_eq!(
-            isolation.len(),
-            1,
-            "cross-partition semantic connection should warn: {:?}",
-            diags
-        );
-        assert!(isolation[0].message.contains("part_a"));
-        assert!(isolation[0].message.contains("part_b"));
-        assert!(isolation[0].message.contains("app1"));
-        assert!(isolation[0].message.contains("app2"));
     }
 
     #[test]
@@ -1561,5 +1849,236 @@ mod tests {
             "light mode should be within budget: {:?}",
             diags_light
         );
+    }
+
+    // ── #504: source-level fixtures (real parser + instantiation) ──────
+
+    fn instantiate(src: &str) -> SystemInstance {
+        use spar_hir_def::{HirDefDatabase, file_item_tree, resolver::GlobalScope};
+        let db = HirDefDatabase::default();
+        let file = spar_base_db::SourceFile::new(&db, "arinc504.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("Arinc504"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+        assert!(
+            inst.component_count() > 1,
+            "instantiation failed: {:?}",
+            inst.diagnostics
+        );
+        inst
+    }
+
+    /// Two partitions modelled as the ARINC 653 annex example does
+    /// (AADLib `arinc653_annex/example_1`): each partition is a process
+    /// bound to a virtual processor of `cpu` by a DOTTED reference declared
+    /// on the enclosing system, and to its own memory segment. They talk over
+    /// a sampling port (data port) and a queueing port (event data port).
+    /// `@SHARED@` is replaced to add shared data in the negative controls.
+    const ANNEX_SHAPE: &str = r#"package Arinc504
+public
+  data Int
+  end Int;
+  thread Sender
+    features
+      sout : out data port Int;
+      qout : out event data port Int;
+      @SENDER_FEATURES@
+  end Sender;
+  thread Receiver
+    features
+      sin : in data port Int;
+      qin : in event data port Int;
+      @RECEIVER_FEATURES@
+  end Receiver;
+  process P1
+    features
+      sout : out data port Int;
+      qout : out event data port Int;
+      @P1_FEATURES@
+  end P1;
+  process implementation P1.impl
+    subcomponents
+      t : thread Sender;
+      @P1_SUBS@
+    connections
+      c1 : port t.sout -> sout;
+      c2 : port t.qout -> qout;
+      @P1_CONNS@
+  end P1.impl;
+  process P2
+    features
+      sin : in data port Int;
+      qin : in event data port Int;
+      @P2_FEATURES@
+  end P2;
+  process implementation P2.impl
+    subcomponents
+      t : thread Receiver;
+    connections
+      c1 : port sin -> t.sin;
+      c2 : port qin -> t.qin;
+      @P2_CONNS@
+  end P2.impl;
+  virtual processor Part
+  end Part;
+  processor Module
+  end Module;
+  processor implementation Module.impl
+    subcomponents
+      part1 : virtual processor Part;
+      part2 : virtual processor Part;
+  end Module.impl;
+  memory Seg
+  end Seg;
+  memory Main
+  end Main;
+  memory implementation Main.impl
+    subcomponents
+      seg1 : memory Seg;
+      seg2 : memory Seg;
+  end Main.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      cpu : processor Module.impl;
+      mem : memory Main.impl;
+      p1 : process P1.impl;
+      p2 : process P2.impl;
+      @TOP_SUBS@
+    connections
+      sampling : port p1.sout -> p2.sin;
+      queueing : port p1.qout -> p2.qin;
+      @TOP_CONNS@
+    properties
+      Actual_Processor_Binding => (reference (cpu.part1)) applies to p1;
+      Actual_Processor_Binding => (reference (cpu.part2)) applies to p2;
+      Actual_Memory_Binding => (reference (mem.seg1)) applies to p1;
+      Actual_Memory_Binding => (reference (mem.seg2)) applies to p2;
+  end Top.impl;
+end Arinc504;
+"#;
+
+    fn fill(pairs: &[(&str, &str)]) -> String {
+        let mut s = ANNEX_SHAPE.to_string();
+        for (k, v) in pairs {
+            assert!(s.contains(k), "placeholder {k}");
+            s = s.replace(k, v);
+        }
+        for k in [
+            "@SENDER_FEATURES@",
+            "@RECEIVER_FEATURES@",
+            "@P1_FEATURES@",
+            "@P2_FEATURES@",
+            "@P1_SUBS@",
+            "@P1_CONNS@",
+            "@P2_CONNS@",
+            "@TOP_SUBS@",
+            "@TOP_CONNS@",
+        ] {
+            s = s.replace(k, "");
+        }
+        s
+    }
+
+    fn arinc_lines(inst: &SystemInstance, tag: &str) -> Vec<AnalysisDiagnostic> {
+        Arinc653Analysis
+            .analyze(inst)
+            .into_iter()
+            .filter(|d| d.message.contains(tag))
+            .collect()
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn annex_shaped_two_partition_model_has_no_isolation_or_assignment_finding() {
+        // #504: the annex's own two-partition pattern. On main every process
+        // was "not bound to any virtual processor" (the dotted binding was
+        // compared with VP names); with the binding resolved, main's rule
+        // then flagged both port connections as Errors.
+        let inst = instantiate(&fill(&[]));
+        assert!(
+            inst.semantic_connections.len() >= 2,
+            "the port connections must trace: {:?}",
+            inst.semantic_connections.len()
+        );
+        let assignment = arinc_lines(&inst, "ARINC-PARTITION-ASSIGNMENT");
+        assert!(assignment.is_empty(), "{assignment:#?}");
+        let isolation = arinc_lines(&inst, "ARINC-PARTITION-ISOLATION");
+        assert!(isolation.is_empty(), "{isolation:#?}");
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn data_shared_by_two_partitions_is_still_an_error() {
+        // Negative control: a data component of the enclosing system reached
+        // by access connections from both partitions bypasses the ports.
+        let src = fill(&[
+            ("@SENDER_FEATURES@", "w : requires data access Int;"),
+            ("@RECEIVER_FEATURES@", "r : requires data access Int;"),
+            ("@P1_FEATURES@", "acc : requires data access Int;"),
+            ("@P2_FEATURES@", "acc : requires data access Int;"),
+            ("@P1_CONNS@", "a1 : data access acc -> t.w;"),
+            ("@P2_CONNS@", "a1 : data access acc -> t.r;"),
+            ("@TOP_SUBS@", "shared : data Int;"),
+            (
+                "@TOP_CONNS@",
+                "s1 : data access shared -> p1.acc; s2 : data access shared -> p2.acc;",
+            ),
+        ]);
+        let inst = instantiate(&src);
+        let isolation = arinc_lines(&inst, "ARINC-PARTITION-ISOLATION");
+        assert_eq!(isolation.len(), 1, "{isolation:#?}");
+        assert_eq!(isolation[0].severity, Severity::Error);
+        let m = &isolation[0].message;
+        assert!(m.contains("'shared'"), "{m}");
+        assert!(m.contains("'part1'") && m.contains("'part2'"), "{m}");
+        assert!(m.contains("'p1'") && m.contains("'p2'"), "{m}");
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn data_of_partition_one_provided_to_partition_two_is_an_error() {
+        // Negative control: partition 1 PROVIDES access to its own data and
+        // partition 2's thread uses it.
+        let src = fill(&[
+            ("@RECEIVER_FEATURES@", "r : requires data access Int;"),
+            ("@P1_FEATURES@", "give : provides data access Int;"),
+            ("@P2_FEATURES@", "acc : requires data access Int;"),
+            ("@P1_SUBS@", "bb : data Int;"),
+            ("@P1_CONNS@", "a1 : data access bb -> give;"),
+            ("@P2_CONNS@", "a1 : data access acc -> t.r;"),
+            ("@TOP_CONNS@", "s1 : data access p1.give -> p2.acc;"),
+        ]);
+        let inst = instantiate(&src);
+        let isolation = arinc_lines(&inst, "ARINC-PARTITION-ISOLATION");
+        assert_eq!(isolation.len(), 1, "{isolation:#?}");
+        assert_eq!(isolation[0].severity, Severity::Error);
+        let m = &isolation[0].message;
+        assert!(m.contains("'bb'"), "{m}");
+        assert!(m.contains("'part1'") && m.contains("'part2'"), "{m}");
+    }
+
+    // rivet: verifies REQ-ARINC-ISOLATION-FP-001
+    #[test]
+    fn data_shared_inside_one_partition_is_not_reported() {
+        // The annex's intra-partition blackboard: data shared by threads of
+        // ONE partition is the approved mechanism.
+        let src = fill(&[
+            ("@SENDER_FEATURES@", "w : requires data access Int;"),
+            ("@P1_SUBS@", "bb : data Int; t2 : thread Sender;"),
+            (
+                "@P1_CONNS@",
+                "a1 : data access bb -> t.w; a2 : data access bb -> t2.w;",
+            ),
+        ]);
+        let inst = instantiate(&src);
+        let isolation = arinc_lines(&inst, "ARINC-PARTITION-ISOLATION");
+        assert!(isolation.is_empty(), "{isolation:#?}");
     }
 }
