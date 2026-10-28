@@ -97,7 +97,11 @@ impl Analysis for BindingRuleAnalysis {
             {
                 check_binding_target(
                     instance,
-                    comp_idx,
+                    instance.reference_context(
+                        comp_idx,
+                        "Deployment_Properties",
+                        "Actual_Processor_Binding",
+                    ),
                     binding_val,
                     "Actual_Processor_Binding",
                     &[
@@ -115,7 +119,11 @@ impl Analysis for BindingRuleAnalysis {
             {
                 check_binding_target(
                     instance,
-                    comp_idx,
+                    instance.reference_context(
+                        comp_idx,
+                        "Deployment_Properties",
+                        "Actual_Memory_Binding",
+                    ),
                     binding_val,
                     "Actual_Memory_Binding",
                     &[
@@ -129,17 +137,64 @@ impl Analysis for BindingRuleAnalysis {
             }
         }
 
+        // BIND-TARGET-EXISTS + BIND-TARGET-CATEGORY for connections (#539,
+        // REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001). A connection's own
+        // `{ … }` value and an `applies to <conn>` value from an enclosing
+        // implementation both live in the connection's property map; each
+        // resolves from the component that declared it
+        // (connection_reference_context), never by a model-wide name search.
+        for (conn_idx, conn) in instance.connections.iter() {
+            let props = instance.properties_for_connection(conn_idx);
+            let Some(binding_val) = props
+                .get("Deployment_Properties", ACB)
+                .or_else(|| props.get("", ACB))
+            else {
+                continue;
+            };
+            check_binding_target(
+                instance,
+                instance.connection_reference_context(conn_idx, "Deployment_Properties", ACB),
+                binding_val,
+                &format!("{ACB} of connection '{}'", conn.name),
+                CONNECTION_BINDING_CATEGORIES,
+                &component_path(instance, conn.owner),
+                &mut diags,
+            );
+        }
+
         diags
     }
 }
 
+const ACB: &str = "Actual_Connection_Binding";
+
+/// The categories `Actual_Connection_Binding` may reference:
+/// Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares it
+/// `list of reference (processor, virtual processor, bus, virtual bus,
+/// device, memory, system, abstract)`.
+const CONNECTION_BINDING_CATEGORIES: &[ComponentCategory] = &[
+    ComponentCategory::Processor,
+    ComponentCategory::VirtualProcessor,
+    ComponentCategory::Bus,
+    ComponentCategory::VirtualBus,
+    ComponentCategory::Device,
+    ComponentCategory::Memory,
+    ComponentCategory::System,
+    ComponentCategory::Abstract,
+];
+
 /// BIND-TARGET-EXISTS + BIND-TARGET-CATEGORY: Validate that a binding
 /// target exists and has an appropriate category.
+///
+/// `ctx` is the component the value's `reference (...)` resolves from — the
+/// one that DECLARED the association (REQ-AADL-REF-CONTEXT-001). `label`
+/// opens each message: the property name, plus the connection for a
+/// connection binding.
 fn check_binding_target(
     instance: &SystemInstance,
-    comp_idx: spar_hir_def::instance::ComponentInstanceIdx,
+    ctx: spar_hir_def::instance::ComponentInstanceIdx,
     binding_val: &str,
-    binding_name: &str,
+    label: &str,
     allowed_categories: &[ComponentCategory],
     path: &[String],
     diags: &mut Vec<AnalysisDiagnostic>,
@@ -158,7 +213,6 @@ fn check_binding_target(
     // child subcomponents exactly, as OSATE does — never the deepest
     // same-named component anywhere in the model (#460,
     // REQ-AADL-REF-CONTEXT-001).
-    let ctx = instance.reference_context(comp_idx, "Deployment_Properties", binding_name);
     match instance.resolve_reference(ctx, target_name) {
         Some(idx) => {
             // BIND-TARGET-CATEGORY: Check that the category is appropriate
@@ -168,7 +222,7 @@ fn check_binding_target(
                     severity: Severity::Error,
                     message: format!(
                         "{} target '{}' is a {} component, expected one of: {}",
-                        binding_name,
+                        label,
                         target_name,
                         comp.category,
                         allowed_categories
@@ -187,7 +241,7 @@ fn check_binding_target(
                 severity: Severity::Error,
                 message: format!(
                     "{} references '{}' which does not exist in the instance model",
-                    binding_name, target_name
+                    label, target_name
                 ),
                 path: path.to_vec(),
                 analysis: "binding_rules".to_string(),
@@ -202,6 +256,7 @@ mod tests {
     use la_arena::Arena;
     use rustc_hash::FxHashMap;
     use spar_hir_def::instance::*;
+    use spar_hir_def::item_tree::ConnectionKind;
     use spar_hir_def::name::{Name, PropertyRef};
     use spar_hir_def::properties::{PropertyMap, PropertyValue};
 
@@ -210,6 +265,7 @@ mod tests {
         features: Arena<FeatureInstance>,
         connections: Arena<ConnectionInstance>,
         property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+        connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     }
 
     impl TestBuilder {
@@ -219,6 +275,51 @@ mod tests {
                 features: Arena::default(),
                 connections: Arena::default(),
                 property_maps: FxHashMap::default(),
+                connection_property_maps: FxHashMap::default(),
+            }
+        }
+
+        /// A port connection `name` owned by `owner`.
+        fn add_connection(
+            &mut self,
+            name: &str,
+            owner: ComponentInstanceIdx,
+        ) -> ConnectionInstanceIdx {
+            let ci = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind: ConnectionKind::Port,
+                is_bidirectional: false,
+                owner,
+                src: None,
+                dst: None,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(ci);
+            ci
+        }
+
+        /// Set `Actual_Connection_Binding` on connection `conn`: declared on
+        /// the connection itself when `ctx` is `None`, otherwise through
+        /// `applies to` from `ctx`.
+        fn set_connection_binding(
+            &mut self,
+            conn: ConnectionInstanceIdx,
+            ctx: Option<ComponentInstanceIdx>,
+            value: &str,
+        ) {
+            let pv = PropertyValue {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Deployment_Properties")),
+                    property_name: Name::new("Actual_Connection_Binding"),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
+            };
+            let map = self.connection_property_maps.entry(conn).or_default();
+            match ctx {
+                Some(ctx) => map.add_with_reference_context(pv, ctx),
+                None => map.add(pv),
             }
         }
 
@@ -317,7 +418,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
                 feature_property_maps: Default::default(),
-                connection_property_maps: Default::default(),
+                connection_property_maps: self.connection_property_maps,
                 emv2_models: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
@@ -819,5 +920,137 @@ mod tests {
             1,
             "binding a thread to a nested memory component should flag category: {diags:?}"
         );
+    }
+
+    // ── Actual_Connection_Binding (#539) ────────────────────────────
+
+    /// `root` holds `net` (a bus) and the system `node`; `node` holds `local`
+    /// (a bus), the process `proc`, and owns connection `c`.
+    fn conn_base() -> (
+        TestBuilder,
+        ComponentInstanceIdx,
+        ComponentInstanceIdx,
+        ConnectionInstanceIdx,
+    ) {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let net = b.add_component("net", ComponentCategory::Bus, Some(root));
+        let node = b.add_component("node", ComponentCategory::System, Some(root));
+        let local = b.add_component("local", ComponentCategory::Bus, Some(node));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(node));
+        b.set_children(root, vec![net, node]);
+        b.set_children(node, vec![local, proc]);
+        let c = b.add_connection("c", node);
+        (b, root, node, c)
+    }
+
+    fn acb_diags(b: TestBuilder, root: ComponentInstanceIdx) -> Vec<AnalysisDiagnostic> {
+        BindingRuleAnalysis
+            .analyze(&b.build(root))
+            .into_iter()
+            .filter(|d| d.message.contains("Actual_Connection_Binding"))
+            .collect()
+    }
+
+    // rivet: verifies REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
+    #[test]
+    fn connection_binding_to_a_missing_name_is_an_error() {
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, None, "(reference (no_such_thing))");
+        let diags = acb_diags(b, root);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert_eq!(
+            diags[0].message,
+            "Actual_Connection_Binding of connection 'c' references 'no_such_thing' \
+             which does not exist in the instance model"
+        );
+        assert_eq!(diags[0].path, vec!["root".to_string(), "node".to_string()]);
+        assert_eq!(diags[0].analysis, "binding_rules");
+    }
+
+    // rivet: verifies REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
+    #[test]
+    fn connection_own_binding_resolves_from_its_owner() {
+        // `local` is a child of the owner `node`: resolves, a bus, silent.
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, None, "(reference (local))");
+        assert!(acb_diags(b, root).is_empty());
+        // `net` is a child of `root`, not of the owner: it does not resolve
+        // from `node`, and no model-wide name search finds it.
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, None, "(reference (net))");
+        let diags = acb_diags(b, root);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("'net' which does not exist"));
+    }
+
+    // rivet: verifies REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
+    #[test]
+    fn applies_to_connection_binding_resolves_from_its_declarer() {
+        // Declared in `root` (applies to node.c): `net` resolves from root.
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, Some(root), "(reference (net))");
+        assert!(acb_diags(b, root).is_empty());
+        // ...and `local`, a child of the owner but not of the declarer, does not.
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, Some(root), "(reference (local))");
+        let diags = acb_diags(b, root);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("'local' which does not exist"));
+        // A dotted path from the declarer resolves.
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, Some(root), "(reference (node.local))");
+        assert!(acb_diags(b, root).is_empty());
+    }
+
+    // rivet: verifies REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
+    #[test]
+    fn connection_binding_to_a_process_is_the_wrong_category() {
+        let (mut b, root, _, c) = conn_base();
+        b.set_connection_binding(c, None, "(reference (proc))");
+        let diags = acb_diags(b, root);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Error);
+        assert_eq!(
+            diags[0].message,
+            "Actual_Connection_Binding of connection 'c' target 'proc' is a process component, \
+             expected one of: processor, virtual processor, bus, virtual bus, device, memory, \
+             system, abstract"
+        );
+    }
+
+    // rivet: verifies REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
+    #[test]
+    fn connection_binding_accepts_every_deployment_properties_category() {
+        for cat in [
+            ComponentCategory::Processor,
+            ComponentCategory::VirtualProcessor,
+            ComponentCategory::Bus,
+            ComponentCategory::VirtualBus,
+            ComponentCategory::Device,
+            ComponentCategory::Memory,
+            ComponentCategory::System,
+            ComponentCategory::Abstract,
+        ] {
+            let (mut b, root, node, c) = conn_base();
+            let t = b.add_component("t", cat, Some(node));
+            b.components[node].children.push(t);
+            b.set_connection_binding(c, None, "(reference (t))");
+            let diags = acb_diags(b, root);
+            assert!(diags.is_empty(), "{cat}: {diags:?}");
+        }
+        for cat in [
+            ComponentCategory::Process,
+            ComponentCategory::Thread,
+            ComponentCategory::Data,
+            ComponentCategory::Subprogram,
+        ] {
+            let (mut b, root, node, c) = conn_base();
+            let t = b.add_component("t", cat, Some(node));
+            b.components[node].children.push(t);
+            b.set_connection_binding(c, None, "(reference (t))");
+            assert_eq!(acb_diags(b, root).len(), 1, "{cat} is not a legal target");
+        }
     }
 }
