@@ -1,5 +1,6 @@
 mod assertion;
 mod diff;
+mod explain;
 mod insight;
 mod lsp;
 mod refactor;
@@ -286,6 +287,11 @@ fn print_usage() {
     eprintln!("  parse    [--tree] <file...>");
     eprintln!("  items    [--format text|json] <file...>");
     eprintln!("  instance --root Package::Type.Impl [--format text|json] [--analyze] <file...>");
+    eprintln!(
+        "  instance --root Package::Type.Impl --explain <instance.path> [--property Set::Name] \
+         [--format text|json] <file...>\n\
+         \t\t  each property value of one instance, where it came from, and what its references resolve to"
+    );
     eprintln!(
         "  analyze  --root Package::Type.Impl [--format text|json|sarif] [--per-som] [--pmoo] \
          [--allow <cat,...>] <file...>"
@@ -625,6 +631,11 @@ fn cmd_instance(args: &[String]) {
     let mut files = Vec::new();
     let mut run_analysis = false;
     let mut format = None;
+    // REQ-AADL-PROPERTY-PROVENANCE-001: `--explain <path>` prints the
+    // property values of ONE instance and where each came from, instead of
+    // the instance tree; `--property` narrows it to one property.
+    let mut explain: Option<String> = None;
+    let mut explain_property: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -650,6 +661,24 @@ fn cmd_instance(args: &[String]) {
             "--analyze" => {
                 run_analysis = true;
             }
+            "--explain" => {
+                i += 1;
+                if i < args.len() {
+                    explain = Some(args[i].clone());
+                } else {
+                    eprintln!("--explain requires an instance path (e.g. sub.app.t)");
+                    process::exit(2);
+                }
+            }
+            "--property" => {
+                i += 1;
+                if i < args.len() {
+                    explain_property = Some(args[i].clone());
+                } else {
+                    eprintln!("--property requires a property name (Set::Name)");
+                    process::exit(2);
+                }
+            }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
                 // #508: an unknown option is a usage error: exit 2, as the
@@ -665,6 +694,14 @@ fn cmd_instance(args: &[String]) {
         eprintln!("--root Package::Type.Impl is required");
         process::exit(1);
     });
+    if explain_property.is_some() && explain.is_none() {
+        eprintln!("--property is only meaningful with --explain <instance.path>");
+        process::exit(2);
+    }
+    if explain.is_some() && run_analysis {
+        eprintln!("--explain and --analyze are separate queries; pass one");
+        process::exit(2);
+    }
 
     // Resolve the root BEFORE choosing an output path (#417).
     //
@@ -704,6 +741,32 @@ fn cmd_instance(args: &[String]) {
         &spar_hir_def::Name::new(&type_name),
         &spar_hir_def::Name::new(&impl_name),
     );
+
+    if let Some(path) = explain {
+        let json_out = match format.as_deref() {
+            None | Some("text") => false,
+            Some("json") => true,
+            Some(other) => {
+                eprintln!("Unknown --format: {other} (expected text|json)");
+                process::exit(1);
+            }
+        };
+        // An unknown path is an error, never an empty explanation (#417).
+        let Some(comp) = explain::resolve_instance_path(&inst, &path) else {
+            eprintln!(
+                "error: no component instance at '{path}' under {}",
+                inst.component(inst.root).name
+            );
+            eprintln!("       give a path from the root, e.g. sub.app.t or Top.impl/sub/app/t");
+            process::exit(1);
+        };
+        process::exit(explain::run(
+            &inst,
+            comp,
+            explain_property.as_deref(),
+            json_out,
+        ));
+    }
 
     // #472: run the analysis ONCE when `--analyze` is set, regardless of format,
     // and compute the verdict here before any format dispatch, so text and json

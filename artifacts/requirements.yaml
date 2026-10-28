@@ -7620,3 +7620,20 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SYSML2-FLOWS-MODES-001
+
+  - id: REQ-AADL-PROPERTY-PROVENANCE-001
+    type: requirement
+    title: spar shall say, for a component instance and a property, what value it uses and where that value came from
+    status: implemented
+    description: "spar resolves a component instance property values through six mechanisms: the classifier (component type and its extends chain), the implementation (and its extends chain), the subcomponent declaration itself, contained associations (applies to, resolved per SystemInstance::reference_context), refinement (#496, a refined subcomponent inherits the original values) and inherit properties from containers (#460). Reference values resolve from the DECLARING component. Each is a way a user can be surprised by the value an analysis uses. spar instance --root P::T.Impl --explain <instance.path> [--property Set::Name] [--format text|json] <files> prints, for each property value of that instance, the value text, its SOURCE (classifier <Pkg::Type> | implementation <Pkg::Type.impl> | declared-local | contained (applies to) from <declarer path> | refined from <Impl>/<subcomponent> | inherited from <ancestor path>, with how the value reached the ancestor) and, for each reference (...) term, the resolved target instance path and the context component it was resolved from. Provenance is RECORDED when each value is inserted (a PropertyMap side table index-aligned with the values, enum PropertySource), not reconstructed. It is metadata only: PropertyMap equality ignores it and no analysis reads it. NOT COVERED: modal values (in modes); feature and connection properties in the CLI (recorded, not printed); default values from property declarations; values added by overlays or analysis-side rebinding (reported as unrecorded)."
+    tags: [aadl, properties, cli, provenance]
+    links:
+      - type: traces-to
+        target: REQ-AADL-PROPERTY-INHERIT-001
+      - type: traces-to
+        target: REQ-AADL-REF-CONTEXT-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T04:10:22Z
+    release: v0.48.0
