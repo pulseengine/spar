@@ -13,21 +13,32 @@ use spar_insight::{analyze, parse_ctf};
 
 use crate::parse_root_ref;
 
+fn print_insight_usage() {
+    eprintln!("Usage: spar insight <subcommand> [options] <file...>");
+    eprintln!();
+    eprintln!("Subcommands:");
+    eprintln!(
+        "  verify-trace --root Pkg::Type.Impl --trace trace.ctf [--format text|json] <file...>"
+    );
+}
+
 pub fn cmd_insight(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: spar insight <subcommand> [options] <file...>");
-        eprintln!();
-        eprintln!("Subcommands:");
-        eprintln!(
-            "  verify-trace --root Pkg::Type.Impl --trace trace.ctf [--format text|json] <file...>"
-        );
+        print_insight_usage();
         process::exit(1);
     }
     match args[0].as_str() {
         "verify-trace" => cmd_verify_trace(&args[1..]),
+        // #508: an unknown option or subcommand is a usage error (2).
+        s if s.starts_with('-') => {
+            eprintln!("Unknown option: {s}");
+            print_insight_usage();
+            process::exit(2);
+        }
         other => {
             eprintln!("Unknown insight subcommand: {other}");
-            process::exit(1);
+            print_insight_usage();
+            process::exit(2);
         }
     }
 }
@@ -67,6 +78,7 @@ fn cmd_verify_trace(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
+                print_insight_usage();
                 process::exit(2);
             }
             s => files.push(s.to_string()),

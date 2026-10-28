@@ -41,6 +41,13 @@
 //! | 0 | Move is admissible: no overlay violations, no error-severity diagnostics |
 //! | 1 | One or more analysis diagnostics at `Severity::Error` |
 //! | 2 | Overlay violations (frozen / allowed-targets) |
+//! | 2 | Usage error: an unknown option or subcommand (#508) |
+//!
+//! Exit 2 is overloaded: an unknown option or subcommand exits 2 as on every
+//! other spar command (#508), so a caller cannot tell it from an overlay
+//! violation by the code alone. The two are told apart on stderr
+//! (`Unknown option:` / `Unknown moves subcommand:`). Every other argument
+//! error (a missing value, a missing `--root`) still exits 1.
 //!
 //! Overlay violations dominate analysis errors for exit-code purposes
 //! because they are *constraint-layer* rejections — the move would never
@@ -910,7 +917,7 @@ pub fn print_verify_usage() {
     eprintln!("Exit codes:");
     eprintln!("  0  move is admissible (no violations, no analysis errors)");
     eprintln!("  1  one or more analysis-error-severity diagnostics");
-    eprintln!("  2  overlay violations (Frozen / Allowed_Targets)");
+    eprintln!("  2  overlay violations (Frozen / Allowed_Targets), or an unknown option");
 }
 
 /// Manual-arg parser for `spar moves` matching the rest of `main.rs`'s
@@ -928,10 +935,17 @@ pub fn cmd_moves(args: &[String]) -> i32 {
             print_moves_usage();
             0
         }
+        // #508: an unknown option or subcommand is a usage error (2), as on
+        // every other spar command. Other argument errors stay 1.
+        s if s.starts_with('-') => {
+            eprintln!("Unknown option: {s}");
+            print_moves_usage();
+            2
+        }
         other => {
             eprintln!("Unknown moves subcommand: {other}");
             print_moves_usage();
-            1
+            2
         }
     }
 }
@@ -1004,7 +1018,8 @@ fn cmd_moves_verify(args: &[String]) -> i32 {
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
                 print_verify_usage();
-                return 1;
+                // #508: a usage error, 2, as on every other spar command.
+                return 2;
             }
             s => model_files.push(s.to_string()),
         }
@@ -1475,6 +1490,7 @@ pub fn print_enumerate_usage() {
     eprintln!("Exit codes:");
     eprintln!("  0  at least one candidate is admissible (valid >= 1)");
     eprintln!("  1  no admissible candidate (or input-resolution error)");
+    eprintln!("  2  an unknown option");
 }
 
 /// Parse the `--objective` CLI value into an [`EnumerationObjective`].
@@ -1580,7 +1596,8 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
                 print_enumerate_usage();
-                return 1;
+                // #508: a usage error, 2, as on every other spar command.
+                return 2;
             }
             s => model_files.push(s.to_string()),
         }
