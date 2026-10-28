@@ -1791,34 +1791,14 @@ fn lower_property_expr(node: &SyntaxNode) -> Option<PropertyExpr> {
     }
 }
 
-/// Lower an operand of an arithmetic operator or a range bound.
+/// Lower a BINARY_EXPR node — `lhs (+|-|*|/) rhs` (#546).
 ///
-/// The parser has no grouping node: `(2 + 3)` is a one-element LIST_VALUE.
-/// Where a list cannot stand — as an operand, a sign's target or a range
-/// bound — a one-element, comma-free list is a parenthesised group.
-fn lower_operand(node: &SyntaxNode) -> Option<PropertyExpr> {
-    if node.kind() == SyntaxKind::LIST_VALUE {
-        let has_comma = node
-            .children_with_tokens()
-            .any(|e| e.kind() == SyntaxKind::COMMA);
-        let mut elems = node.children().filter(|c| is_value_node(c.kind()));
-        if !has_comma && let (Some(only), None) = (elems.next(), elems.next()) {
-            return lower_operand(&only);
-        }
-    }
-    lower_property_expr(node)
-}
-
-/// Lower a BINARY_EXPR node — `lhs (+|-|*|/) rhs`, a spar extension (#546).
-///
-/// The result is EVALUATED ([`crate::property_arith::fold`]): `5 * 8 ms` is
-/// `Integer(40, ms)`, a leaf every accessor already reads. An expression
-/// that does not evaluate (`5 ms * 8 ms`) stays a `BinaryOp`, which no
-/// accessor reads as a value and `property_rules` reports — it is never cut
-/// down to its first operand. A malformed node (a parse error left an
-/// operand missing) is `Opaque`.
+/// Arithmetic is not AADL ([`crate::property_arith`]), so the expression is
+/// NOT evaluated: the whole tree is kept as a `BinaryOp`, which the property
+/// map treats as absent and `property_rules` reports. It is never cut down
+/// to its first operand. An operand a parse error left unlowerable is kept
+/// as `Opaque`, so the value is still recognised as arithmetic.
 fn lower_binary_expr(node: &SyntaxNode) -> PropertyExpr {
-    let opaque = || PropertyExpr::Opaque(node.text().to_string().trim().to_string());
     let op = node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
@@ -1828,21 +1808,23 @@ fn lower_binary_expr(node: &SyntaxNode) -> PropertyExpr {
             SyntaxKind::STAR => Some(BinaryOpKind::Mul),
             SyntaxKind::SLASH => Some(BinaryOpKind::Div),
             _ => None,
-        });
+        })
+        .unwrap_or(BinaryOpKind::Mul);
+    let operand = |n: Option<SyntaxNode>| {
+        let opaque = |t: String| PropertyExpr::Opaque(t.trim().to_string());
+        match n {
+            Some(n) => lower_property_expr(&n).unwrap_or_else(|| opaque(n.text().to_string())),
+            None => opaque(String::new()),
+        }
+    };
     let mut operands = node.children().filter(|c| is_value_node(c.kind()));
-    let (Some(op), Some(l), Some(r), None) =
-        (op, operands.next(), operands.next(), operands.next())
-    else {
-        return opaque();
-    };
-    let (Some(lhs), Some(rhs)) = (lower_operand(&l), lower_operand(&r)) else {
-        return opaque();
-    };
-    crate::property_arith::fold(PropertyExpr::BinaryOp {
+    let lhs = operand(operands.next());
+    let rhs = operand(operands.next());
+    PropertyExpr::BinaryOp {
         op,
         lhs: Box::new(lhs),
         rhs: Box::new(rhs),
-    })
+    }
 }
 
 /// Lower an INTEGER_VALUE node.
@@ -2066,6 +2048,25 @@ fn lower_record_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     Some(PropertyExpr::Record(fields))
 }
 
+/// Lower one bound (or the delta) of a range.
+///
+/// A range bound is a signed literal or a signed constant in AADL. A
+/// parenthesised bound, `(1 ms) .. 2 ms`, is a grouping, which AADL has no
+/// term for (it was a parse error before #546): it is kept as a `1 * (…)`
+/// `BinaryOp` so the whole value is rejected like any other arithmetic,
+/// never read through its other bound.
+fn lower_range_bound(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let bound = lower_property_expr(node)?;
+    if node.kind() == SyntaxKind::LIST_VALUE {
+        return Some(PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(PropertyExpr::Integer(1, None)),
+            rhs: Box::new(bound),
+        });
+    }
+    Some(bound)
+}
+
 /// Lower a RANGE_VALUE node.
 ///
 /// Structure: property_expression DOT_DOT property_expression [DELTA_VALUE]
@@ -2090,17 +2091,21 @@ fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         return lower_range_from_tokens(node);
     }
 
-    // A bound is an operand: `(1 ms) .. 2 * 3 ms` has a grouped minimum and
-    // an arithmetic maximum, both evaluated.
-    let min_expr = lower_operand(&value_nodes[0]).unwrap_or_else(|| {
+    // Since #546 each bound is its own value node — a signed literal
+    // (`-180`) keeps its sign, and an arithmetic bound is a whole
+    // BINARY_EXPR that lowers to a rejected `BinaryOp`.
+    let min_expr = lower_range_bound(&value_nodes[0]).unwrap_or_else(|| {
         PropertyExpr::Opaque(value_nodes[0].text().to_string().trim().to_string())
     });
-    let max_expr = lower_operand(&value_nodes[1]).unwrap_or_else(|| {
+    let max_expr = lower_range_bound(&value_nodes[1]).unwrap_or_else(|| {
         PropertyExpr::Opaque(value_nodes[1].text().to_string().trim().to_string())
     });
 
-    let delta =
-        delta_node.and_then(|dn| dn.children().find_map(|c| lower_operand(&c)).map(Box::new));
+    let delta = delta_node.and_then(|dn| {
+        dn.children()
+            .find_map(|c| lower_range_bound(&c))
+            .map(Box::new)
+    });
 
     Some(PropertyExpr::Range {
         min: Box::new(min_expr),
@@ -2264,8 +2269,20 @@ fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         // Signed value wrapper — find the inner expression
         let sign_negative = tok.kind() == SyntaxKind::MINUS;
         for child in node.children() {
-            // `-(…)`: the parenthesised group is an operand, not a list.
-            if let Some(inner) = lower_operand(&child) {
+            if let Some(inner) = lower_property_expr(&child) {
+                // `-(…)` signs a parenthesised group, which AADL has no
+                // term for (#546): it is arithmetic, kept whole and
+                // rejected, never a negated list or a dropped sign.
+                if child.kind() == SyntaxKind::LIST_VALUE {
+                    return Some(PropertyExpr::BinaryOp {
+                        op: BinaryOpKind::Mul,
+                        lhs: Box::new(PropertyExpr::Integer(
+                            if sign_negative { -1 } else { 1 },
+                            None,
+                        )),
+                        rhs: Box::new(inner),
+                    });
+                }
                 return Some(apply_sign(inner, sign_negative));
             }
         }
@@ -2294,10 +2311,9 @@ fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
 
 /// Apply a sign to a property expression (negate integers/reals).
 ///
-/// Anything that is not a numeric leaf — a group that did not evaluate, a
-/// named constant, a list — is negated as `-1 * x` and evaluated, so the
-/// sign is never silently dropped: it either yields the negated number or
-/// stays an unevaluated `BinaryOp` that `property_rules` reports.
+/// A signed constant (`-Some_Constant`, OSATE's `SignedConstant`) is legal
+/// AADL and lowers to its `Enum` name as it always has: constant values are
+/// not resolved, so there is no number to negate.
 fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
     if !negative {
         return expr;
@@ -2311,11 +2327,7 @@ fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
                 PropertyExpr::Real(format!("-{}", val), unit)
             }
         }
-        other => crate::property_arith::fold(PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Mul,
-            lhs: Box::new(PropertyExpr::Integer(-1, None)),
-            rhs: Box::new(other),
-        }),
+        other => other,
     }
 }
 

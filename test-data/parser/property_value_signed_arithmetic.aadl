@@ -4,7 +4,8 @@
 -- property_expression (which runs a left-associative binary-op loop),
 -- so `-1 + 2` parsed as `-(1+2)` instead of `(-1)+2` — silently
 -- inverting the sign of every downstream arithmetic property.
--- AS-5506B §11.2.5: `numeric_term ::= [sign] numeric_literal`.
+-- In AADL the sign belongs to the literal (`[sign] numeric_literal [unit]`);
+-- the arithmetic around it is not AADL and is rejected (#546).
 package Test_Signed_Arithmetic
 public
 

@@ -136,12 +136,9 @@ pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
         PropertyExpr::Integer(v, _unit) => Some(*v as f64),
         PropertyExpr::Real(v, _unit) => v.parse::<f64>().ok(),
         PropertyExpr::UnitValue(inner, _unit) => eval_numeric(inner),
-        // Arithmetic goes through the one unit-checked evaluator (#546), so
-        // an ill-typed `5 ms * 8 ms` has no magnitude here either, rather
-        // than the unit-stripped 40.
-        PropertyExpr::BinaryOp { .. } => crate::property_arith::evaluate(expr)
-            .ok()
-            .and_then(|leaf| eval_numeric(&leaf)),
+        // Arithmetic is not AADL and has no value (#546,
+        // `crate::property_arith`): it is never evaluated, here or anywhere.
+        PropertyExpr::BinaryOp { .. } => None,
         _ => None,
     }
 }
@@ -151,11 +148,8 @@ pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
 /// # Arithmetic
 ///
 /// For leaf `Integer` / `Real` / `UnitValue` the returned unit is correct.
-/// Lowering already evaluates arithmetic that evaluates
-/// ([`crate::property_arith`]), so a `BinaryOp` reaching this helper either
-/// was built by hand or is ill-typed. Its magnitude comes from the
-/// unit-checked evaluator and its returned unit is `None`; use
-/// [`crate::property_arith::evaluate`] for the unit.
+/// A `BinaryOp` is arithmetic, which is not AADL and has no value
+/// ([`crate::property_arith`], #546): it returns `None`.
 ///
 /// For timing / bandwidth / memory extraction, use the unit-aware helpers
 /// in `crates/spar-analysis/src/property_accessors.rs`
@@ -172,10 +166,6 @@ pub fn numeric_with_unit(expr: &PropertyExpr) -> Option<(f64, Option<&Name>)> {
         PropertyExpr::UnitValue(inner, unit) => {
             let val = eval_numeric(inner)?;
             Some((val, Some(unit)))
-        }
-        PropertyExpr::BinaryOp { .. } => {
-            let val = eval_numeric(expr)?;
-            Some((val, None))
         }
         _ => None,
     }
@@ -457,92 +447,36 @@ mod tests {
         assert_eq!(eval_range(&expr), None);
     }
 
-    // ── BinaryOp evaluation ─────────────────────────────────────
+    // ── BinaryOp: arithmetic is not AADL and has no value (#546) ───────
 
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
     #[test]
-    fn eval_binary_add() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Add,
-            lhs: Box::new(PropertyExpr::Integer(10, None)),
-            rhs: Box::new(PropertyExpr::Integer(20, None)),
+    fn arithmetic_has_no_numeric_value() {
+        let bin = |op, l, r| PropertyExpr::BinaryOp {
+            op,
+            lhs: Box::new(l),
+            rhs: Box::new(r),
         };
-        assert_eq!(eval_numeric(&expr), Some(30.0));
-    }
-
-    #[test]
-    fn eval_binary_sub() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Sub,
-            lhs: Box::new(PropertyExpr::Integer(50, None)),
-            rhs: Box::new(PropertyExpr::Integer(20, None)),
-        };
-        assert_eq!(eval_numeric(&expr), Some(30.0));
-    }
-
-    #[test]
-    fn eval_binary_mul() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Mul,
-            lhs: Box::new(PropertyExpr::Integer(6, None)),
-            rhs: Box::new(PropertyExpr::Integer(7, None)),
-        };
-        assert_eq!(eval_numeric(&expr), Some(42.0));
-    }
-
-    #[test]
-    fn eval_binary_div() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Div,
-            lhs: Box::new(PropertyExpr::Integer(100, None)),
-            rhs: Box::new(PropertyExpr::Integer(4, None)),
-        };
-        assert_eq!(eval_numeric(&expr), Some(25.0));
-    }
-
-    #[test]
-    fn eval_binary_div_by_zero_returns_none() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Div,
-            lhs: Box::new(PropertyExpr::Integer(100, None)),
-            rhs: Box::new(PropertyExpr::Integer(0, None)),
-        };
-        assert_eq!(eval_numeric(&expr), None);
-    }
-
-    #[test]
-    fn eval_binary_nested() {
-        // (10 + 20) * 3 = 90
-        let add = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Add,
-            lhs: Box::new(PropertyExpr::Integer(10, None)),
-            rhs: Box::new(PropertyExpr::Integer(20, None)),
-        };
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Mul,
-            lhs: Box::new(add),
-            rhs: Box::new(PropertyExpr::Integer(3, None)),
-        };
-        assert_eq!(eval_numeric(&expr), Some(90.0));
-    }
-
-    #[test]
-    fn eval_binary_with_real() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Mul,
-            lhs: Box::new(PropertyExpr::Real("2.5".to_string(), None)),
-            rhs: Box::new(PropertyExpr::Integer(4, None)),
-        };
-        assert_eq!(eval_numeric(&expr), Some(10.0));
-    }
-
-    #[test]
-    fn eval_binary_non_numeric_operand_returns_none() {
-        let expr = PropertyExpr::BinaryOp {
-            op: BinaryOpKind::Add,
-            lhs: Box::new(PropertyExpr::StringLit("hello".to_string())),
-            rhs: Box::new(PropertyExpr::Integer(1, None)),
-        };
-        assert_eq!(eval_numeric(&expr), None);
+        for expr in [
+            bin(
+                BinaryOpKind::Add,
+                PropertyExpr::Integer(10, None),
+                PropertyExpr::Integer(20, None),
+            ),
+            bin(
+                BinaryOpKind::Mul,
+                PropertyExpr::Integer(5, None),
+                PropertyExpr::Integer(8, Some(Name::new("ms"))),
+            ),
+            bin(
+                BinaryOpKind::Div,
+                PropertyExpr::Real("2.5".to_string(), None),
+                PropertyExpr::Integer(4, None),
+            ),
+        ] {
+            assert_eq!(eval_numeric(&expr), None, "{expr:?}");
+            assert_eq!(numeric_with_unit(&expr), None, "{expr:?}");
+        }
     }
 
     // ── Record field access ─────────────────────────────────────
@@ -681,6 +615,16 @@ mod tests {
             rhs: Box::new(PropertyExpr::ComputedValue(Name::new("Y"))),
         };
         let resolved = resolve_property_expr(&expr, &associations, &definitions);
-        assert_eq!(eval_numeric(&resolved), Some(30.0));
+        // value() references inside the tree are resolved...
+        assert_eq!(
+            resolved,
+            PropertyExpr::BinaryOp {
+                op: BinaryOpKind::Add,
+                lhs: Box::new(PropertyExpr::Integer(10, None)),
+                rhs: Box::new(PropertyExpr::Integer(20, None)),
+            }
+        );
+        // ...but arithmetic is not AADL and is never evaluated (#546).
+        assert_eq!(eval_numeric(&resolved), None);
     }
 }

@@ -3574,93 +3574,18 @@ end MyProps;
 
     // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
     #[test]
-    fn arithmetic_values_lower_to_their_evaluated_leaf() {
-        for (src, want) in [
-            ("5 * 8 ms", int(40, Some("ms"))),
-            ("8 ms * 5", int(40, Some("ms"))),
-            ("20 ms + 20 ms", int(40, Some("ms"))),
-            ("(2 + 3) * 8 ms", int(40, Some("ms"))),
-            ("1 sec - 500 ms", int(500, Some("ms"))),
-            ("80 ms / 2", int(40, Some("ms"))),
-            ("1 ms / 4", int(250, Some("us"))),
-            // `*` binds tighter than `+`, and both are left-associative.
-            ("2 + 3 * 4", int(14, None)),
-            ("2 * 3 + 4", int(10, None)),
-            ("10 - 3 - 2", int(5, None)),
-            ("100 / 10 / 5", int(2, None)),
-            ("-1 + 2", int(1, None)),
-            ("-(2 * 3 ms)", int(-6, Some("ms"))),
-            ("-(-40 ms)", int(40, Some("ms"))),
-            (
-                "((40 ms))",
-                item_tree::PropertyExpr::List(vec![item_tree::PropertyExpr::List(vec![int(
-                    40,
-                    Some("ms"),
-                )])]),
-            ),
-        ] {
-            assert_eq!(lower_value(src), Some(want), "`MyProp => {src}`");
-        }
-        assert_eq!(
-            lower_value("2.5 * 4 ms"),
-            Some(item_tree::PropertyExpr::Real(
-                "10.0".to_string(),
-                Some(Name::new("ms"))
-            ))
-        );
-    }
-
-    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
-    #[test]
-    fn arithmetic_inside_ranges_lists_and_records_is_evaluated() {
-        use item_tree::PropertyExpr as E;
-        let range = |min, max, delta: Option<E>| E::Range {
-            min: Box::new(min),
-            max: Box::new(max),
-            delta: delta.map(Box::new),
-        };
-        assert_eq!(
-            lower_value("1 ms .. 2 * 3 ms"),
-            Some(range(int(1, Some("ms")), int(6, Some("ms")), None))
-        );
-        assert_eq!(
-            lower_value("2 * 500 us .. 2 ms"),
-            Some(range(int(1000, Some("us")), int(2, Some("ms")), None))
-        );
-        assert_eq!(
-            lower_value("(1 ms) .. 4 ms / 2 delta 1 ms - 500 us"),
-            Some(range(
-                int(1, Some("ms")),
-                int(2, Some("ms")),
-                Some(int(500, Some("us")))
-            ))
-        );
-        // Each list element is one expression: two elements, not three.
-        assert_eq!(
-            lower_value("(2 * 3 ms, 4 ms)"),
-            Some(E::List(vec![int(6, Some("ms")), int(4, Some("ms"))]))
-        );
-        assert_eq!(
-            lower_value("[a => 2 * 3 ms; b => 1;]"),
-            Some(E::Record(vec![
-                (Name::new("a"), int(6, Some("ms"))),
-                (Name::new("b"), int(1, None)),
-            ]))
-        );
-    }
-
-    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
-    #[test]
-    fn ill_typed_arithmetic_keeps_the_whole_tree_never_the_first_operand() {
+    fn arithmetic_lowers_whole_and_unevaluated_never_to_its_first_operand() {
         use item_tree::{BinaryOpKind, PropertyExpr as E};
         for src in [
+            "5 * 8 ms",
+            "20 ms + 20 ms",
+            "(2 + 3) * 8 ms",
             "5 ms * 8 ms",
-            "5 ms + 3 KByte",
             "40 ms / 0",
-            "40 ms + 5",
+            "-1 + 2",
+            "-(40 ms)",
+            "+(40 ms)",
             "2 * My_Set::Base",
-            "-My_Set::Base",
-            "-(5 ms * 8 ms)",
         ] {
             let got = lower_value(src);
             let Some(expr) = &got else {
@@ -3668,21 +3593,87 @@ end MyProps;
             };
             assert!(
                 matches!(expr, E::BinaryOp { .. }),
-                "`{src}` must stay an unevaluated BinaryOp, got {got:?}"
+                "`{src}` must stay a whole BinaryOp, got {got:?}"
             );
-            assert_eq!(
-                property_arith::arithmetic_errors(expr).len(),
-                1,
-                "`{src}` must report exactly one arithmetic error"
-            );
+            assert!(property_arith::is_arithmetic(expr), "`{src}`");
+        }
+        // The whole tree, with precedence: `2 + 3 * 4` is 2 + (3 * 4).
+        assert_eq!(
+            lower_value("2 + 3 * 4"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Add,
+                lhs: Box::new(int(2, None)),
+                rhs: Box::new(E::BinaryOp {
+                    op: BinaryOpKind::Mul,
+                    lhs: Box::new(int(3, None)),
+                    rhs: Box::new(int(4, None)),
+                }),
+            })
+        );
+        assert_eq!(
+            lower_value("80 ms / 2"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Div,
+                lhs: Box::new(int(80, Some("ms"))),
+                rhs: Box::new(int(2, None)),
+            })
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_in_ranges_lists_and_records_is_found() {
+        for src in [
+            "1 ms .. 2 * 1 ms",
+            "2 * 500 us .. 2 ms",
+            "1 ms .. 2 ms delta 1 ms - 500 us",
+            "(1 ms) .. 2 ms",
+            "1 ms .. (2 ms)",
+            "1 ms .. 2 ms delta (1 ms)",
+            "(2 * 3 ms, 4 ms)",
+            "[a => 2 * 3 ms; b => 1;]",
+        ] {
+            let got = lower_value(src).unwrap_or_else(|| panic!("`{src}` lowered to nothing"));
+            assert!(property_arith::is_arithmetic(&got), "`{src}`: {got:?}");
+        }
+        // Each list element is one expression: two elements, not three.
+        match lower_value("(2 * 3 ms, 4 ms)") {
+            Some(item_tree::PropertyExpr::List(items)) => assert_eq!(items.len(), 2),
+            other => panic!("expected a 2-element list, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn signed_literals_ranges_and_constants_are_not_arithmetic() {
+        use item_tree::PropertyExpr as E;
+        let range = |min, max| E::Range {
+            min: Box::new(min),
+            max: Box::new(max),
+            delta: None,
+        };
+        for (src, want) in [
+            ("40 ms", int(40, Some("ms"))),
+            ("-5 ms", int(-5, Some("ms"))),
+            ("+5", int(5, None)),
+            // The minimum keeps its sign (it was lost before #546).
+            ("-180 .. 180", range(int(-180, None), int(180, None))),
+            ("-1 .. 4", range(int(-1, None), int(4, None))),
+            (
+                "1 ms .. 2 ms",
+                range(int(1, Some("ms")), int(2, Some("ms"))),
+            ),
+            // A signed constant (OSATE SignedConstant) lowers as before.
+            ("-My_Set::Base", E::Enum(Name::new("My_Set::Base"))),
+            ("My_Set::Base", E::Enum(Name::new("My_Set::Base"))),
+        ] {
+            let got = lower_value(src);
+            assert_eq!(got, Some(want), "`MyProp => {src}`");
+            assert!(!property_arith::is_arithmetic(&got.unwrap()), "`{src}`");
         }
         assert_eq!(
-            lower_value("5 ms * 8 ms"),
-            Some(E::BinaryOp {
-                op: BinaryOpKind::Mul,
-                lhs: Box::new(int(5, Some("ms"))),
-                rhs: Box::new(int(8, Some("ms"))),
-            })
+            lower_value("-2.5 ms"),
+            Some(E::Real("-2.5".to_string(), Some(Name::new("ms"))))
         );
     }
 }
