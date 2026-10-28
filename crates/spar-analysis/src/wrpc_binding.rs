@@ -1,12 +1,17 @@
 //! wRPC binding validation analysis.
 //!
 //! Checks that connections between components bound to different processors
-//! have an `Actual_Connection_Binding` property pointing to a bus.
+//! have an `Actual_Connection_Binding` property pointing to a transport: a
+//! bus, a virtual bus, or a memory.
 //!
 //! In AADL, when two communicating components are deployed to different
 //! processors, the connection between them must be bound to a bus (or
-//! virtual bus) to model the transport. This analysis warns when such
-//! a binding is missing, which helps catch incomplete deployment models.
+//! virtual bus) to model the transport — or to a memory, the shared-memory
+//! seam between the cores of a multi-core MCU (Deployment_Properties.aadl:
+//! 96-97 lists `memory` among the targets, REQ-WRPC-BINDING-MEMORY-001).
+//! This analysis warns when such a binding is missing or names a component
+//! of another category, which helps catch incomplete deployment models, and
+//! reports a memory binding at Info.
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
@@ -31,7 +36,11 @@ impl Analysis for WrpcBindingAnalysis {
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         let mut groups = crate::property_accessors::ProcessorGroups::default();
         // Severity rationale (STPA-REQ-016):
-        //   Warning — cross-processor connection missing Actual_Connection_Binding to a bus
+        //   Warning — cross-processor connection missing Actual_Connection_Binding
+        //             to a bus, or bound to a component that is not a bus,
+        //             virtual bus or memory
+        //   Info    — cross-processor connection bound to a memory (shared-memory
+        //             seam, REQ-WRPC-BINDING-MEMORY-001)
         let mut diagnostics = Vec::new();
 
         // Only run if the model has multiple processors — otherwise cross-processor
@@ -101,14 +110,33 @@ impl Analysis for WrpcBindingAnalysis {
             let owner_props = instance.properties_for(owner);
             // Capture the binding VALUE (not just presence) — prefer the
             // per-connection property map (the #281 `applies to <conn>` idiom),
-            // then the owning component's flat map.
-            let binding_value = conn_props
-                .get("Deployment_Properties", "Actual_Connection_Binding")
-                .or_else(|| conn_props.get("", "Actual_Connection_Binding"))
-                .or_else(|| owner_props.get("Deployment_Properties", "Actual_Connection_Binding"))
-                .or_else(|| owner_props.get("", "Actual_Connection_Binding"));
+            // then the owning component's flat map — together with the
+            // component its `reference (...)` resolves from, which depends on
+            // the map the value came from (REQ-AADL-REF-CONTEXT-001).
+            const ACB: &str = "Actual_Connection_Binding";
+            let binding = conn_props
+                .get("Deployment_Properties", ACB)
+                .or_else(|| conn_props.get("", ACB))
+                .map(|v| {
+                    let ctx = instance.connection_reference_context(
+                        conn_idx,
+                        "Deployment_Properties",
+                        ACB,
+                    );
+                    (v, ctx)
+                })
+                .or_else(|| {
+                    owner_props
+                        .get("Deployment_Properties", ACB)
+                        .or_else(|| owner_props.get("", ACB))
+                        .map(|v| {
+                            let ctx =
+                                instance.reference_context(owner, "Deployment_Properties", ACB);
+                            (v, ctx)
+                        })
+                });
 
-            let Some(binding_value) = binding_value else {
+            let Some((binding_value, ctx)) = binding else {
                 // REQ-WRPC-BINDING-002: no binding at all on a cross-processor
                 // connection → warn (missing transport).
                 let path = component_path(instance, owner);
@@ -139,25 +167,58 @@ impl Analysis for WrpcBindingAnalysis {
             };
 
             // REQ-WRPC-BINDING-003: the binding is present — verify its
-            // `reference (...)` target is a bus / virtual bus. Warn ONLY when
-            // the reference resolves UNAMBIGUOUSLY to a non-bus component;
-            // accept a bus, an unresolvable name, a dotted/multi-level path, or
-            // a multi-reference list (the sound rule that avoids new
+            // `reference (...)` target. The reference resolves BY IDENTITY from
+            // the component its association was declared on (#498), never by
+            // a model-wide name search. Accept a bus, a virtual bus, an
+            // unresolvable name, a dotted/multi-level path, or a
+            // multi-reference list (the sound rule that avoids new
             // false-positives, per the requirement).
-            if let Some(target) = extract_simple_reference_name(binding_value)
-                && let Some(category) = unambiguous_non_bus_category(instance, &target)
-            {
-                let path = component_path(instance, owner);
-                diagnostics.push(AnalysisDiagnostic {
+            //
+            // REQ-WRPC-BINDING-MEMORY-001 (#515): a memory is a legal target
+            // too — Deployment_Properties.aadl:96-97 lists it — and shared RAM
+            // is the real inter-core transport on a multi-core MCU. Report the
+            // shared-memory seam at Info; warn on any other category.
+            let Some(target) = extract_simple_reference_name(binding_value) else {
+                continue;
+            };
+            let Some(target_idx) = instance.resolve_reference(ctx, &target) else {
+                continue;
+            };
+            let path = component_path(instance, owner);
+            match instance.component(target_idx).category {
+                ComponentCategory::Bus | ComponentCategory::VirtualBus => {}
+                ComponentCategory::Memory => diagnostics.push(AnalysisDiagnostic {
+                    severity: Severity::Info,
+                    message: format!(
+                        "connection '{}' in '{}' crosses processor boundary \
+                         (source bound to {}, destination bound to {}) \
+                         through shared memory: Actual_Connection_Binding \
+                         to memory '{}'",
+                        conn.name,
+                        owner_comp.name,
+                        src_binding
+                            .as_ref()
+                            .map(|(_, raw)| raw.as_str())
+                            .unwrap_or("?"),
+                        dst_binding
+                            .as_ref()
+                            .map(|(_, raw)| raw.as_str())
+                            .unwrap_or("?"),
+                        target,
+                    ),
+                    path,
+                    analysis: "wrpc-binding".to_string(),
+                }),
+                category => diagnostics.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
                     message: format!(
                         "connection '{}' in '{}' is bound via Actual_Connection_Binding \
-                         to '{}', which is a {} — not a bus or virtual bus",
+                         to '{}', which is a {} — not a bus, virtual bus or memory",
                         conn.name, owner_comp.name, target, category,
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
-                });
+                }),
             }
         }
 
@@ -236,25 +297,6 @@ fn extract_simple_reference_name(value: &str) -> Option<String> {
         return None;
     }
     Some(name.to_string())
-}
-
-/// If `name` resolves to EXACTLY ONE component and that component is not a
-/// `bus` / `virtual bus`, return its category (for the diagnostic). A bus,
-/// zero matches, or multiple matches all return `None` — accept, no warning.
-fn unambiguous_non_bus_category(
-    instance: &SystemInstance,
-    name: &str,
-) -> Option<ComponentCategory> {
-    let mut matches = instance
-        .all_components()
-        .filter(|(_, c)| c.name.as_str().eq_ignore_ascii_case(name));
-    match (matches.next(), matches.next()) {
-        (Some((_, comp)), None) => match comp.category {
-            ComponentCategory::Bus | ComponentCategory::VirtualBus => None,
-            other => Some(other),
-        },
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -755,9 +797,10 @@ mod tests {
         let cpu2 = b.add_component("cpu2", ComponentCategory::Processor, Some(root));
         let can_bus = b.add_component("can_bus", ComponentCategory::Bus, Some(root));
         let vbus = b.add_component("ip_vbus", ComponentCategory::VirtualBus, Some(root));
+        let ram = b.add_component("shared_ram", ComponentCategory::Memory, Some(root));
         let sender = b.add_component("sender", ComponentCategory::Process, Some(root));
         let receiver = b.add_component("receiver", ComponentCategory::Process, Some(root));
-        b.set_children(root, vec![cpu1, cpu2, can_bus, vbus, sender, receiver]);
+        b.set_children(root, vec![cpu1, cpu2, can_bus, vbus, ram, sender, receiver]);
         b.set_property(
             sender,
             "Deployment_Properties",
@@ -835,6 +878,81 @@ mod tests {
             analyze_with_binding("reference (cpu1), reference (can_bus)").is_empty(),
             "a multi-reference binding list must not warn",
         );
+    }
+
+    // ---- REQ-WRPC-BINDING-MEMORY-001: a memory is a legal transport ----
+
+    fn assert_memory_info(diags: &[AnalysisDiagnostic]) {
+        assert_eq!(diags.len(), 1, "one diagnostic: {diags:?}");
+        assert_eq!(diags[0].severity, Severity::Info, "{diags:?}");
+        assert!(
+            diags[0].message.contains("connection 'c1'")
+                && diags[0].message.contains("memory 'shared_ram'")
+                && diags[0].message.contains("reference (cpu1)")
+                && diags[0].message.contains("reference (cpu2)"),
+            "{}",
+            diags[0].message
+        );
+        assert_eq!(diags[0].analysis, "wrpc-binding");
+        assert_eq!(diags[0].path, vec!["top".to_string()]);
+    }
+
+    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
+    #[test]
+    fn binding_to_memory_on_the_owner_is_reported_at_info() {
+        assert_memory_info(&analyze_with_binding("reference (shared_ram)"));
+    }
+
+    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
+    #[test]
+    fn binding_to_memory_on_the_connection_is_reported_at_info() {
+        let (mut b, root) = two_proc_base();
+        let conn = b.components[root].connections[0];
+        b.set_connection_property(
+            conn,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "(reference (shared_ram))",
+        );
+        assert_memory_info(&WrpcBindingAnalysis.analyze(&b.build(root)));
+    }
+
+    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
+    #[test]
+    fn binding_to_a_process_warns() {
+        let diags = analyze_with_binding("reference (receiver)");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Warning);
+        assert!(
+            diags[0].message.contains("'receiver', which is a process")
+                && diags[0]
+                    .message
+                    .contains("not a bus, virtual bus or memory"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    // rivet: verifies REQ-WRPC-BINDING-MEMORY-001
+    #[test]
+    fn binding_target_resolves_from_its_declarer_not_by_name_search() {
+        // A processor named `deep_cpu` exists, but under `node`, not under the
+        // declaring `top`: `reference (deep_cpu)` does not resolve from `top`,
+        // so it is accepted unresolved (no diagnostic). A model-wide name
+        // search would have found it.
+        let (mut b, root) = two_proc_base();
+        let node = b.add_component("node", ComponentCategory::System, Some(root));
+        let deep = b.add_component("deep_cpu", ComponentCategory::Processor, Some(node));
+        b.set_children(node, vec![deep]);
+        b.components[root].children.push(node);
+        b.set_property(
+            root,
+            "Deployment_Properties",
+            "Actual_Connection_Binding",
+            "reference (deep_cpu)",
+        );
+        let diags = WrpcBindingAnalysis.analyze(&b.build(root));
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]
