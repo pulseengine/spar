@@ -28,12 +28,22 @@ use std::process::Command;
 /// `(name, priority, period, wcet, deadline)`; `priority = None` omits the
 /// property.
 fn model(pkg: &str, threads: &[(&str, Option<u32>, &str, &str, &str)]) -> String {
+    model_spelled(pkg, "Priority", threads)
+}
+
+/// [`model`], writing the priority property as `prio_prop` (for instance the
+/// qualified `Thread_Properties::Priority`) instead of the bare `Priority`.
+fn model_spelled(
+    pkg: &str,
+    prio_prop: &str,
+    threads: &[(&str, Option<u32>, &str, &str, &str)],
+) -> String {
     let mut types = String::new();
     let mut subs = String::new();
     let mut binds = String::new();
     for (name, prio, period, wcet, deadline) in threads {
         let prio_line = prio
-            .map(|p| format!("      Priority => {p};\n"))
+            .map(|p| format!("      {prio_prop} => {p};\n"))
             .unwrap_or_default();
         types.push_str(&format!(
             "  thread T_{name}\n    properties\n      Dispatch_Protocol => Periodic;\n      \
@@ -201,6 +211,96 @@ fn a_declared_priority_outranks_an_undeclared_one() {
     let lines = rta_lines("PrioMixed", &src);
     assert!(
         line_for(&lines, "slow").contains("response time 20.00 ms <= deadline 100.00 ms"),
+        "{lines:#?}"
+    );
+    assert!(
+        line_for(&lines, "fast")
+            .contains("misses deadline: response time exceeds deadline 10.00 ms"),
+        "{lines:#?}"
+    );
+}
+
+// ── #529: the property's own qualified name ─────────────────────────────
+//
+// `Priority` is declared in `Thread_Properties` (osate2 @
+// 87468992ee0d4c4cc856a72bd542899953f088f3, `Thread_Properties.aadl` line
+// 44). A model that writes the qualified name must get the same analysis as
+// one that writes the bare name. Before #529 the qualified spelling was not
+// read at all, so these threads silently fell back to rate-monotonic order.
+
+/// The `urgent`/`fast` model of `priority_overrides_rate_monotonic`, where
+/// the declared order and rate-monotonic order DISAGREE, so a dropped
+/// priority is visible in the response times.
+fn urgent_fast(pkg: &str, prio_prop: &str) -> String {
+    model_spelled(
+        pkg,
+        prio_prop,
+        &[
+            ("urgent", Some(10), "100 ms", "20 ms", "100 ms"),
+            ("fast", Some(1), "10 ms", "2 ms", "10 ms"),
+        ],
+    )
+}
+
+/// Strip the package name so lines from two models can be compared.
+fn without_pkg(lines: &[String], pkg: &str) -> Vec<String> {
+    lines.iter().map(|l| l.replace(pkg, "PKG")).collect()
+}
+
+// rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+#[test]
+fn qualified_thread_properties_priority_overrides_rate_monotonic() {
+    // Same numbers as `priority_overrides_rate_monotonic`:
+    //   declared order (urgent first): R_urgent = 20 ms;
+    //     R_fast: 2 → 2 + ceil(2/100)·20 = 22 → 22 ms > 10 ms: MISS.
+    //   rate-monotonic (Priority dropped): R_fast = 2 ms;
+    //     R_urgent: 20 → 20 + ceil(20/10)·2 = 24 → 26 → 26 ms.
+    let src = urgent_fast("PrioQualified", "Thread_Properties::Priority");
+    let lines = rta_lines("PrioQualified", &src);
+    let urgent = line_for(&lines, "urgent");
+    let fast = line_for(&lines, "fast");
+    // The rate-monotonic numbers must NOT appear: that is the #529 symptom.
+    assert!(
+        !urgent.contains("26.00 ms") && !fast.contains("response time 2.00 ms"),
+        "Thread_Properties::Priority was ignored (rate-monotonic order): {lines:#?}"
+    );
+    assert!(
+        urgent.contains("response time 20.00 ms <= deadline 100.00 ms"),
+        "urgent (Thread_Properties::Priority 10) must see no interference: {urgent}"
+    );
+    assert!(
+        fast.contains("misses deadline: response time exceeds deadline 10.00 ms"),
+        "fast (Thread_Properties::Priority 1) must be pre-empted by urgent: {fast}"
+    );
+}
+
+// rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+#[test]
+fn qualified_and_bare_priority_give_identical_rta() {
+    let bare = rta_lines("PrioBare", &urgent_fast("PrioBare", "Priority"));
+    let qual = rta_lines(
+        "PrioQual2",
+        &urgent_fast("PrioQual2", "Thread_Properties::Priority"),
+    );
+    let mut bare = without_pkg(&bare, "PrioBare");
+    let mut qual = without_pkg(&qual, "PrioQual2");
+    bare.sort();
+    qual.sort();
+    assert_eq!(
+        bare, qual,
+        "Thread_Properties::Priority must analyse exactly like bare Priority"
+    );
+}
+
+// rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+#[test]
+fn legacy_deployment_properties_priority_still_read() {
+    // `Deployment_Properties::Priority` is not a predeclared AADL 2 property,
+    // but spar has always accepted it; #529 keeps it as a legacy alias.
+    let src = urgent_fast("PrioLegacy", "Deployment_Properties::Priority");
+    let lines = rta_lines("PrioLegacy", &src);
+    assert!(
+        line_for(&lines, "urgent").contains("response time 20.00 ms <= deadline 100.00 ms"),
         "{lines:#?}"
     );
     assert!(

@@ -620,6 +620,36 @@ fn constraints_extract_thread_timing() {
     assert!(constraints.warnings.is_empty());
 }
 
+// rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+#[test]
+fn constraints_read_every_priority_spelling() {
+    // #529: `Thread_Properties::Priority` (the property's own name), the
+    // legacy `Deployment_Properties::Priority`, and the bare `Priority`.
+    use crate::constraints::ModelConstraints;
+
+    for (set, value) in [
+        ("Thread_Properties", 7u64),
+        ("Deployment_Properties", 5),
+        ("", 3),
+    ] {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let thr = b.add_component("worker", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![proc]);
+        b.set_children(proc, vec![thr]);
+        b.set_property(thr, "Timing_Properties", "Period", "10 ms");
+        b.set_property(thr, set, "Priority", &value.to_string());
+
+        let constraints = ModelConstraints::from_instance(&b.build(root));
+        assert_eq!(
+            constraints.threads[0].priority,
+            Some(value),
+            "spelling {set:?}::Priority"
+        );
+    }
+}
+
 #[test]
 fn constraints_missing_wcet_warns() {
     // SOLVER-REQ-020: periodic thread without WCET must produce a warning.

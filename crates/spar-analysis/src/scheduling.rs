@@ -373,7 +373,11 @@ impl Analysis for SchedulingAnalysis {
             if n >= 2 {
                 let has_any_protocol = threads.iter().any(|t| {
                     let props = instance.properties_for(t.comp_idx);
-                    props.get("Deployment_Properties", "Priority").is_some()
+                    // Priority's own name is `Thread_Properties::Priority`
+                    // (#529); `Deployment_Properties::Priority` is a
+                    // non-standard legacy spelling still accepted.
+                    props.get("Thread_Properties", "Priority").is_some()
+                        || props.get("Deployment_Properties", "Priority").is_some()
                         || props.get("", "Priority").is_some()
                         || props
                             .get("Deployment_Properties", "Concurrency_Control_Protocol")
@@ -2531,6 +2535,46 @@ mod tests {
     }
 
     // ── OR-branch coverage for priority/protocol check (lines 353-358) ──
+
+    // rivet: verifies REQ-RTA-PRIORITY-QUALIFIED-001
+    #[test]
+    fn priority_inversion_suppressed_by_qualified_thread_properties_priority() {
+        // #529: `Thread_Properties::Priority` is the property's own name, so
+        // it counts as a declared Priority just as the bare spelling does.
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let cpu = b.add_component("cpu1", ComponentCategory::Processor, Some(root));
+        let proc = b.add_component("proc", ComponentCategory::Process, Some(root));
+        let t1 = b.add_component("t1", ComponentCategory::Thread, Some(proc));
+        let t2 = b.add_component("t2", ComponentCategory::Thread, Some(proc));
+        b.set_children(root, vec![cpu, proc]);
+        b.set_children(proc, vec![t1, t2]);
+
+        for t in [t1, t2] {
+            b.set_property(t, "Timing_Properties", "Period", "10 ms");
+            b.set_property(t, "Timing_Properties", "Compute_Execution_Time", "1 ms");
+            b.set_property(
+                t,
+                "Deployment_Properties",
+                "Actual_Processor_Binding",
+                "reference (cpu1)",
+            );
+        }
+        b.set_property(t1, "Thread_Properties", "Priority", "1");
+
+        let inst = b.build(root);
+        let diags = SchedulingAnalysis.analyze(&inst);
+
+        let pi_diags: Vec<_> = diags
+            .iter()
+            .filter(|d| d.message.contains("priority inversion"))
+            .collect();
+        assert!(
+            pi_diags.is_empty(),
+            "Thread_Properties::Priority should suppress priority inversion advisory: {:?}",
+            pi_diags
+        );
+    }
 
     #[test]
     fn priority_inversion_suppressed_by_bare_priority() {

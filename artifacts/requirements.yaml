@@ -7639,3 +7639,18 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-27T20:05:59Z
     release: v0.47.1
+
+  - id: REQ-RTA-PRIORITY-QUALIFIED-001
+    type: requirement
+    title: Every fixed-priority reader shall read Priority under its own qualified name, Thread_Properties::Priority
+    status: implemented
+    description: "Refs #529. Priority is declared in the predeclared Thread_Properties set (osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3, Thread_Properties.aadl line 44), but get_priority (rta, and its twin in spar-solver constraints) read only Deployment_Properties::Priority and the bare Priority, so a model writing Thread_Properties::Priority => N had its priorities silently dropped and rta fell back to rate-monotonic order. One accessor, property_accessors::get_priority, now reads Thread_Properties::Priority first, then Deployment_Properties::Priority, then bare Priority, on both the typed and string paths; rta (and arinc653_supply_rta through it) and spar-solver call it, and the scheduling priority-inversion advisory counts the qualified name as a declared Priority. Deployment_Properties::Priority is NOT predeclared (Deployment_Properties declares only Priority_Map and Priority_Range); it is kept as a non-standard legacy spelling so existing models keep their priorities. ORACLES: three CLI tests in crates/spar-cli/tests/rta_priority_order.rs on the urgent/fast model where declared order and rate-monotonic disagree (the qualified spelling gives R_urgent = 20 ms and a miss on fast, not the RM 26 ms / 2 ms; qualified and bare give identical rta lines; the legacy spelling is still read), two red before the fix; rta get_priority unit tests (qualified string and typed paths, every spelling, precedence), a scheduling advisory test and a solver ModelConstraints test, all red before the fix. CORPUS: spar analyze over every tracked .aadl file and every system implementation root, old vs new, full sorted output: 1554 runs (1514 instantiated), 0 differ; no tracked .aadl file writes Thread_Properties::Priority, and only 4 runs reach rta at all. Positive control through the same instrument: a three-thread Thread_Properties::Priority model changes from RM (R = 2/7/33 ms) to declared order (R_urgent = 20 ms, R_mid = 25 ms, fast misses), checked by hand. NOT CLAIMED: the solver ThreadConstraint.priority is not read by any allocator and ModelConstraints is not serialised by any CLI path, so the solver fix has no observable CLI output today."
+    tags: [rta, scheduling, solver, aadl, bug]
+    links:
+      - type: traces-to
+        target: REQ-RTA-PRIORITY-ORDER-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-27T21:00:18Z
+    release: v0.47.1
