@@ -21,6 +21,8 @@
 //! | `constraint def` | Timing property annotation |
 //! | `calc def` | `subprogram type` |
 //! | `allocation def` | Processor binding annotation |
+//! | `part def X :> Thread` (official SysML-v2-AADL library category) | `thread type` (any of the 14 categories) |
+//! | `allocate a.t to cpu;` in a part def (spar proposal) | `Actual_Processor_Binding` / `Actual_Memory_Binding` `applies to a.t` |
 //! | `requirement def` | property annotation |
 //! | `specializes` | AADL `extends` |
 //! | `abstract part def` | `abstract` component type |
@@ -63,9 +65,13 @@ pub fn lower_to_aadl(parse: &crate::Parse) -> ItemTree {
 /// returning any diagnostics about constructs that could not be translated.
 pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<LowerDiagnostic>) {
     let root = parse.syntax_node();
-    let mut ctx = LowerCtx::default();
+    let mut ctx = LowerCtx {
+        local_part_defs: collect_local_part_def_names(&root),
+        ..LowerCtx::default()
+    };
     lower_node(&root, &mut ctx);
     resolve_subcomponent_categories(&mut ctx.tree);
+    lower_pending_allocations(&mut ctx);
     let diagnostics = std::mem::take(&mut ctx.diagnostics);
     (ctx.tree, diagnostics)
 }
@@ -75,6 +81,24 @@ pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<Lo
 struct LowerCtx {
     tree: ItemTree,
     diagnostics: Vec<LowerDiagnostic>,
+    /// Names of every `part def` declared in the source being lowered; an
+    /// unqualified supertype that names one of these is the model's own
+    /// type, never an AADL library category (see [`aadl_library_category`]).
+    local_part_defs: std::collections::HashSet<String>,
+    /// `allocate` relationships found in part def bodies, resolved after
+    /// subcomponent categories are known (see [`lower_pending_allocations`]).
+    pending_allocations: Vec<PendingAllocation>,
+}
+
+/// An `allocate <src> to <dst>;` inside a part def body, awaiting resolution
+/// against the lowered implementation that owns both ends.
+struct PendingAllocation {
+    /// The implementation lowered from the enclosing part def, or `None` if
+    /// the part def had no parts (and so no implementation).
+    owner: Option<la_arena::Idx<ComponentImplItem>>,
+    src: Vec<String>,
+    dst: Vec<String>,
+    offset: usize,
 }
 
 /// Walk a SysML v2 CST node and lower children to AADL items.
@@ -267,11 +291,6 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     };
 
     let is_abstract = node_has_abstract_prefix(node);
-    let category = if is_abstract {
-        ComponentCategory::Abstract
-    } else {
-        infer_category(node)
-    };
 
     // Check for specialization (extends)
     // NOTE: known limitation — specialization cycles (e.g., `A specializes A`)
@@ -279,6 +298,27 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     // graph walk across all ComponentTypeItems; for now the AADL backend will
     // emit the `extends` clause as-is and downstream validation should catch it.
     let extends = extract_specialization(node);
+
+    // `part def Worker :> Thread;` — specialising an AADL library category
+    // fixes the category explicitly, and the supertype is consumed as that
+    // marker rather than emitted as an `extends` of a classifier that does
+    // not exist in the lowered AADL.
+    let library_category = extends
+        .as_ref()
+        .and_then(|r| aadl_library_category(r, &ctx.local_part_defs));
+    let extends = if library_category.is_some() {
+        None
+    } else {
+        extends
+    };
+
+    let category = if let Some(cat) = library_category {
+        cat
+    } else if is_abstract {
+        ComponentCategory::Abstract
+    } else {
+        infer_category(node)
+    };
 
     // Guard against trivial self-specialization (A specializes A).
     let extends = extends.filter(|r| r.type_name.as_str() != name.as_str());
@@ -289,6 +329,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     let mut connections = Vec::new();
     let mut property_associations = Vec::new();
     let mut modes = Vec::new();
+    let mut allocations = Vec::new();
 
     if let Some(body) = find_child(node, SyntaxKind::NAMESPACE_BODY) {
         for child in body.children() {
@@ -343,6 +384,13 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         features.push(idx);
                     }
                 }
+                SyntaxKind::ALLOCATE_REQ => {
+                    // `allocate src to dst;` -> deployment binding, resolved
+                    // once every subcomponent's category is known.
+                    if let Some((src, dst)) = extract_allocate_ends(&child) {
+                        allocations.push((src, dst, child.text_range().start().into()));
+                    }
+                }
                 other if !is_ignorable_kind(other) => {
                     let offset: usize = child.text_range().start().into();
                     ctx.diagnostics.push(LowerDiagnostic {
@@ -372,8 +420,9 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         emv2: Vec::new(),
     });
 
+    let mut owner = None;
     if !subcomponents.is_empty() || !connections.is_empty() {
-        ctx.tree.component_impls.alloc(ComponentImplItem {
+        owner = Some(ctx.tree.component_impls.alloc(ComponentImplItem {
             type_name: name.clone(),
             impl_name: Name::new("impl"),
             category,
@@ -390,6 +439,14 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
             property_associations: Vec::new(),
             requires_modes: false,
             emv2: Vec::new(),
+        }));
+    }
+    for (src, dst, offset) in allocations {
+        ctx.pending_allocations.push(PendingAllocation {
+            owner,
+            src,
+            dst,
+            offset,
         });
     }
 
@@ -1133,14 +1190,227 @@ fn resolve_subcomponent_categories(tree: &mut ItemTree) {
         .map(|(_, ct)| (ct.name.as_str().to_string(), ct.category))
         .collect();
 
+    // Types that were lowered with an implementation (`<Type>.impl`).
+    let implemented: std::collections::HashSet<String> = tree
+        .component_impls
+        .iter()
+        .map(|(_, ci)| ci.type_name.as_str().to_string())
+        .collect();
+
     // Walk every subcomponent and propagate the category.
     for (_idx, sub) in tree.subcomponents.iter_mut() {
-        if let Some(cls) = &sub.classifier {
+        if let Some(cls) = &mut sub.classifier {
             let type_name = cls.type_name.as_str();
             if let Some(&cat) = type_categories.get(type_name) {
                 sub.category = cat;
             }
+            // A part typed by a def that has parts must name the lowered
+            // implementation, or instantiation stops at the bare type and
+            // the parts inside it (e.g. the thread an `allocate` binds)
+            // never exist in the instance model.
+            if cls.impl_name.is_none() && implemented.contains(type_name) {
+                cls.impl_name = Some(Name::new("impl"));
+            }
         }
+    }
+}
+
+/// Collect the name of every `part def` anywhere in the source.
+fn collect_local_part_def_names(root: &SyntaxNode) -> std::collections::HashSet<String> {
+    root.descendants()
+        .filter(|n| n.kind() == SyntaxKind::PART_DEF)
+        .filter_map(|n| extract_name(&n))
+        .map(|n| n.as_str().to_string())
+        .collect()
+}
+
+/// The AADL component category a `part def` fixes by specialising a type of
+/// the official SysML-v2-AADL library (`Systems-Modeling/SysML-v2-AADL-Release`,
+/// `aadl.library/AADL.sysml`, package `AADL`).
+///
+/// That library declares one `part def` per AADL category — `Abstract`, `Bus`,
+/// `Data`, `Device`, `Memory`, `Process`, `Processor`, `Subprogram`,
+/// `SubprogramGroup`, `System`, `Thread`, `ThreadGroup`, `VirtualBus`,
+/// `VirtualProcessor`, each `:> Component` — and its own examples type a
+/// component by specialisation (`part def ThreadWithBinding :> Thread`). spar
+/// reads that convention; it does not vendor or modify the library
+/// (CC-BY-ND 4.0), it only recognises the names:
+///
+/// * `:> AADL::Thread` always means the library type;
+/// * `:> Thread` means it unless the model declares its own `part def Thread`,
+///   in which case the model's type wins and nothing changes;
+/// * any other supertype returns `None` and lowering behaves as before
+///   (category from the body heuristic, supertype kept as `extends`).
+///
+/// The category is never guessed from attribute or part names. A library
+/// category takes precedence over the SysML `abstract` keyword (which means
+/// "not instantiable", not the AADL `abstract` category) and over the body
+/// heuristic in [`infer_category`].
+fn aadl_library_category(
+    sup: &spar_hir_def::name::ClassifierRef,
+    local_part_defs: &std::collections::HashSet<String>,
+) -> Option<ComponentCategory> {
+    match &sup.package {
+        Some(pkg) if pkg.as_str() != "AADL" => return None,
+        None if local_part_defs.contains(sup.type_name.as_str()) => return None,
+        _ => {}
+    }
+    Some(match sup.type_name.as_str() {
+        "Abstract" => ComponentCategory::Abstract,
+        "Bus" => ComponentCategory::Bus,
+        "Data" => ComponentCategory::Data,
+        "Device" => ComponentCategory::Device,
+        "Memory" => ComponentCategory::Memory,
+        "Process" => ComponentCategory::Process,
+        "Processor" => ComponentCategory::Processor,
+        "Subprogram" => ComponentCategory::Subprogram,
+        "SubprogramGroup" => ComponentCategory::SubprogramGroup,
+        "System" => ComponentCategory::System,
+        "Thread" => ComponentCategory::Thread,
+        "ThreadGroup" => ComponentCategory::ThreadGroup,
+        "VirtualBus" => ComponentCategory::VirtualBus,
+        "VirtualProcessor" => ComponentCategory::VirtualProcessor,
+        _ => return None,
+    })
+}
+
+/// The two dotted paths of an `allocate <src> to <dst>;` node.
+fn extract_allocate_ends(node: &SyntaxNode) -> Option<(Vec<String>, Vec<String>)> {
+    let mut ends = node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::NAME_REF)
+        .map(|c| {
+            let text: String = c
+                .text()
+                .to_string()
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect();
+            text.split('.').map(str::to_string).collect::<Vec<_>>()
+        });
+    let src = ends.next()?;
+    let dst = ends.next()?;
+    Some((src, dst))
+}
+
+/// Resolve a dotted allocation end against the implementation that owns the
+/// `allocate`: the first segment is one of its parts, each further segment a
+/// part of the previous part's lowered implementation. Returns the category
+/// of the part the path names.
+fn resolve_allocation_end(
+    tree: &ItemTree,
+    owner: la_arena::Idx<ComponentImplItem>,
+    path: &[String],
+) -> Option<ComponentCategory> {
+    let mut scope = Some(owner);
+    let mut found = None;
+    for seg in path {
+        let ci = &tree.component_impls[scope?];
+        let sub = ci
+            .subcomponents
+            .iter()
+            .map(|i| &tree.subcomponents[*i])
+            .find(|s| s.name.as_str() == seg)?;
+        found = Some(sub.category);
+        scope = sub.classifier.as_ref().and_then(|c| {
+            tree.component_impls
+                .iter()
+                .find(|(_, ci)| ci.type_name.as_str() == c.type_name.as_str())
+                .map(|(idx, _)| idx)
+        });
+    }
+    found
+}
+
+/// Lower each `allocate <src> to <dst>;` found in a part def body to an
+/// implementation-level AADL binding on the enclosing implementation:
+///
+/// | `dst` resolves to                 | emitted (`applies to <src>`)                    |
+/// |-----------------------------------|-------------------------------------------------|
+/// | processor, virtual processor      | `Actual_Processor_Binding => (reference (dst))` |
+/// | memory                            | `Actual_Memory_Binding => (reference (dst))`    |
+/// | any other category                | `Actual_Processor_Binding` **and** a diagnostic |
+/// | nothing (either end unresolvable) | no binding, a diagnostic                        |
+///
+/// The "other category" row deliberately still emits the processor binding:
+/// SysML v2 `allocate` is how a deployment is written, and emitting it lets
+/// spar's `binding_rules` judge the target (it rejects a non-processor) in
+/// the AADL the user will analyze, instead of the mistake vanishing here.
+///
+/// This mapping of `allocate` to AADL deployment properties is a spar
+/// PROPOSAL (REQ-SYSML2-ALLOCATE-BINDING-001, under
+/// REQ-SYSML2-FLOWS-MODES-001): the official SysML-v2-AADL library's own
+/// binding examples use flows and `bind` instead, and the RTESC working group
+/// has not settled the form. If it does, spar adopts that form.
+fn lower_pending_allocations(ctx: &mut LowerCtx) {
+    for alloc in std::mem::take(&mut ctx.pending_allocations) {
+        let src = alloc.src.join(".");
+        let dst = alloc.dst.join(".");
+        let Some(owner) = alloc.owner else {
+            ctx.diagnostics.push(LowerDiagnostic {
+                offset: alloc.offset,
+                msg: format!(
+                    "`allocate {src} to {dst}` is in a part def with no parts; \
+                     no binding emitted"
+                ),
+            });
+            continue;
+        };
+        let owner_name = ctx.tree.component_impls[owner].type_name.clone();
+        if resolve_allocation_end(&ctx.tree, owner, &alloc.src).is_none() {
+            ctx.diagnostics.push(LowerDiagnostic {
+                offset: alloc.offset,
+                msg: format!(
+                    "allocate source `{src}` is not a part of `{owner_name}`; no binding emitted"
+                ),
+            });
+            continue;
+        }
+        let Some(dst_category) = resolve_allocation_end(&ctx.tree, owner, &alloc.dst) else {
+            ctx.diagnostics.push(LowerDiagnostic {
+                offset: alloc.offset,
+                msg: format!(
+                    "allocate target `{dst}` is not a part of `{owner_name}`; no binding emitted"
+                ),
+            });
+            continue;
+        };
+        let property = match dst_category {
+            ComponentCategory::Processor | ComponentCategory::VirtualProcessor => {
+                "Actual_Processor_Binding"
+            }
+            ComponentCategory::Memory => "Actual_Memory_Binding",
+            other => {
+                ctx.diagnostics.push(LowerDiagnostic {
+                    offset: alloc.offset,
+                    msg: format!(
+                        "allocate target `{dst}` is a {other} component, not a processor, \
+                         virtual processor or memory; emitted Actual_Processor_Binding \
+                         for binding analysis to judge"
+                    ),
+                });
+                "Actual_Processor_Binding"
+            }
+        };
+        let pa = ctx
+            .tree
+            .property_associations
+            .alloc(PropertyAssociationItem {
+                name: PropertyRef {
+                    property_set: Some(Name::new("Deployment_Properties")),
+                    property_name: Name::new(property),
+                },
+                value: format!("(reference ({dst}))"),
+                typed_value: Some(PropertyExpr::List(vec![PropertyExpr::ReferenceValue(
+                    dst.clone(),
+                )])),
+                is_append: false,
+                applies_to: Some(src),
+                in_modes: Vec::new(),
+            });
+        ctx.tree.component_impls[owner]
+            .property_associations
+            .push(pa);
     }
 }
 
@@ -1514,10 +1784,14 @@ pub fn item_tree_to_aadl(tree: &ItemTree) -> String {
                         for sub_idx in &ci.subcomponents {
                             let sub = &tree.subcomponents[*sub_idx];
                             let cls = sub.classifier.as_ref().map(|c| {
-                                if let Some(pkg) = &c.package {
+                                let ty = if let Some(pkg) = &c.package {
                                     format!("{}::{}", pkg, c.type_name)
                                 } else {
                                     c.type_name.to_string()
+                                };
+                                match &c.impl_name {
+                                    Some(im) => format!("{ty}.{im}"),
+                                    None => ty,
                                 }
                             });
                             if let Some(cls) = &cls {
@@ -1550,6 +1824,19 @@ pub fn item_tree_to_aadl(tree: &ItemTree) -> String {
                                 "    {} : port {} {arrow} {};",
                                 conn.name, src, dst
                             ));
+                            out.push('\n');
+                        }
+                    }
+                    if !ci.property_associations.is_empty() {
+                        out.push_str("  properties\n");
+                        for pa_idx in &ci.property_associations {
+                            let pa = &tree.property_associations[*pa_idx];
+                            let applies = pa
+                                .applies_to
+                                .as_ref()
+                                .map(|p| format!(" applies to {p}"))
+                                .unwrap_or_default();
+                            out.push_str(&format!("    {} => {}{applies};", pa.name, pa.value));
                             out.push('\n');
                         }
                     }
