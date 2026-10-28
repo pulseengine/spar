@@ -7620,6 +7620,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-28T04:10:22Z
+    release: v0.48.0
 
   - id: REQ-SYSML2-CORPUS-RATCHET-001
     type: requirement
