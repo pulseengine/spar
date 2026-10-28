@@ -4518,7 +4518,8 @@ artifacts:
     description: >
       Verifies REQ-GUARD-GATE-EVIDENCE-002 (e). Closes #384.
 
-      `tools/classify_changed_paths.py --self-test` runs 25 cases and is the
+      `tools/classify_changed_paths.py --self-test` runs 30 cases (25 before
+      the merge_group cases were added for the merge queue) and is the
       FIRST step of the `changes` job in both `ci.yml` and `proofs.yml` — a
       classifier whose own tests fail must not be trusted to decide which
       required checks run.
@@ -5120,3 +5121,39 @@ artifacts:
         target: REQ-GUARD-CONTEXT-TIMEOUT-001
       - type: verifies
         target: REQ-GUARD-CONTEXT-TIMEOUT-001
+
+  - id: TEST-CI-MERGE-QUEUE
+    type: feature
+    title: A merge-queue run classifies its diff like a PR, fails closed without a base, and routes Mutation Testing to the in-diff mode
+    description: >
+      Verifies REQ-CI-MERGE-QUEUE-001. `classify_changed_paths.py --self-test`
+      carries the merge_group cases. An empty base or a nonexistent one exits
+      non-zero with no verdict. End-to-end over a real git diff, a docs-only
+      queue entry emits code=false and a .rs entry emits code=true. That pair
+      is what stops a merge_group branch that emits a constant from passing.
+      An unrecognised event (schedule) with a base sha still emits code=true.
+      `check_mutants_report.py --self-test` adds two workflow cases: an in-diff
+      gate that skips the queue FAILS, and a full ratchet that runs in the queue
+      FAILS. `--assert-workflow-threshold .github/workflows/ci.yml` applies that
+      check to the real workflow. Run against the pre-change ci.yml it exits 1
+      ("the in-diff gate must also run in the merge queue").
+      Mutation-checked by hand 2026-10-28. Dropping merge_group from
+      DIFF_EVENTS fails 3 classifier cases, and forcing every event to the full
+      suite fails 6.
+      NOT claimed: that a real merge_group run has executed. The ruleset is
+      enabled after this lands. The first queue run's `Detect changed paths` log
+      shows whether the event and file list were read correctly.
+    status: implemented
+    release: v0.48.0
+    tags: [ci, merge-queue, guardrail, tooling]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/classify_changed_paths.py --self-test
+        - run: tools/check_mutants_report.py --self-test
+        - run: tools/check_mutants_report.py --assert-workflow-threshold .github/workflows/ci.yml
+    links:
+      - type: satisfies
+        target: REQ-CI-MERGE-QUEUE-001
+      - type: verifies
+        target: REQ-CI-MERGE-QUEUE-001

@@ -661,11 +661,34 @@ def assert_workflow_threshold(workflow_path: str, out=None) -> int:
             file=out,
         )
         return 1
+    # Merge queue: a `merge_group` run is neither `pull_request` nor a push, so
+    # with the PR-only guards alone it falls into the full-crate branch — up to
+    # 240 min on lean-mem per queue entry, then again on the push it lands as.
+    # The queue must take the in-diff mode, and the ratchet must exclude it.
+    mq_in = "== 'merge_group'"
+    mq_out = "!= 'merge_group'"
+    if mq_in not in diff_cond:
+        print(
+            f"::error::{workflow_path}:{in_diff[0]}: the in-diff gate must also run "
+            f"in the merge queue (`|| github.event_name == 'merge_group'`); its "
+            f"condition is {diff_cond!r}. Without it a queue entry runs the "
+            f"full-crate ratchet instead.",
+            file=out,
+        )
+        return 1
+    if mq_out not in full_cond:
+        print(
+            f"::error::{workflow_path}:{lineno}: the full-crate ratchet must not "
+            f"run in the merge queue (`&& github.event_name != 'merge_group'`); "
+            f"its condition is {full_cond!r}.",
+            file=out,
+        )
+        return 1
 
     print(
         f"Mutation gate declared at {workflow_path}:{lineno} with a bounded "
         f"ratchet: --max-missed {threshold}, off the PR path. Per-PR in-diff gate "
-        f"declared at {workflow_path}:{in_diff[0]}, on pull_request only. Threshold "
+        f"declared at {workflow_path}:{in_diff[0]}, on pull_request and merge_group. Threshold "
         f"single-sourced from the workflow (#414). Target: 0 (#382).",
         file=out,
     )
@@ -972,14 +995,14 @@ def self_test() -> int:
     # only the --output-dir + --max-missed line counts.
     IN_DIFF_STEP = (
         "      - name: Check in-diff mutants\n"
-        "        if: github.event_name == 'pull_request'\n"
+        "        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'\n"
         "        run: tools/check_mutants_report.py --output-dir mutants-out --in-diff pr.diff\n"
     )
     GATE_292 = (
         "      - name: Mutants-report guardrail self-test\n"
         "        run: tools/check_mutants_report.py --self-test\n"
         "      - name: Check surviving mutants\n"
-        "        if: github.event_name != 'pull_request'\n"
+        "        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'\n"
         "        run: tools/check_mutants_report.py --output-dir mutants-out --max-missed 292\n"
         + IN_DIFF_STEP
     )
@@ -1033,11 +1056,19 @@ def self_test() -> int:
     wcase("a neutered in-diff gate FAILS", 1,
           GATE_292.replace("--in-diff pr.diff", "--in-diff pr.diff || true"), want_msg="in-diff gate is neutered")
     wcase("an in-diff gate that is not PR-only FAILS", 1,
-          GATE_292.replace("        if: github.event_name == 'pull_request'\n", ""),
+          GATE_292.replace("        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'\n", ""),
           want_msg="must run only on pull_request")
     wcase("a full ratchet that also runs on PRs FAILS", 1,
-          GATE_292.replace("        if: github.event_name != 'pull_request'\n", ""),
+          GATE_292.replace("        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'\n", ""),
           want_msg="must run off the PR path")
+    # Merge queue: the pre-queue guards (PR-only in-diff, != PR ratchet) are
+    # exactly the shape that routes a merge_group run into the 240-min ratchet.
+    wcase("an in-diff gate that skips the merge queue FAILS", 1,
+          GATE_292.replace(" || github.event_name == 'merge_group'\n", "\n"),
+          want_msg="must also run in the merge queue")
+    wcase("a full ratchet that also runs in the merge queue FAILS", 1,
+          GATE_292.replace(" && github.event_name != 'merge_group'\n", "\n"),
+          want_msg="must not run in the merge queue")
     # 0 is a LEGITIMATE bound (the ratchet's target, #382) — it must pass, or the
     # gate would punish the very state it exists to drive toward.
     wcase("a threshold of 0 (the target) is a valid bound", 0,

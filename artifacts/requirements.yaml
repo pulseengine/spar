@@ -7673,3 +7673,20 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-28T05:47:34Z
     release: v0.48.0
+
+  - id: REQ-CI-MERGE-QUEUE-001
+    type: requirement
+    title: Every required context shall report in a merge-queue run, and a docs-only queue entry shall skip the heavy jobs exactly as its PR run did
+    status: implemented
+    description: "Preparation for GitHub merge queue on main (owner-approved pilot, 2026-10-28). A required context whose workflow does not trigger on `merge_group` reports nothing in the queue, so the entry waits until the queue's check-response timeout evicts it. Every workflow emitting one of the 18 required contexts (ci.yml, proofs.yml, verification-gate.yml) shall therefore trigger on `merge_group`. A job whose job-level `if:` is false there still reports `skipped`, which satisfies the context. The changed-path classifier shall diff a `merge_group` run exactly like a pull_request: base `github.event.merge_group.base_sha`, head the queue checkout. An empty or unresolvable base shall turn the required `Detect changed paths` context red without emitting a verdict, and every other event shall keep running the full suite. Because base_sha is main's tip and not the previous entry, a queue entry's diff includes every entry queued ahead of it. That is the fail-safe direction: a docs-only PR behind a code PR inherits the code verdict. Mutation Testing shall run its in-diff mode in the queue, never the full-crate ratchet. Each event_name test in that job is written against pull_request, so before this change a merge_group run fell into the 240-minute lean-mem ratchet, once per queue entry and again on the push it lands as. `check_mutants_report.py --assert-workflow-threshold` asserts the routing. Fuzz smoke runs in the queue as well as on PRs, because the queue commit is the one that lands. NOT YET EXERCISED: the merge queue ruleset is not enabled when this lands, so the merge_group path is covered by self-tests only until the first queue run."
+    tags: [ci, merge-queue, infrastructure, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-CI-MUTANTS-IN-DIFF-001
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-002
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T07:37:10Z
+    release: v0.48.0
