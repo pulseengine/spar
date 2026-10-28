@@ -1,5 +1,6 @@
 //! Property grammar rules.
 
+use crate::marker::CompletedMarker;
 use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
 
@@ -86,24 +87,62 @@ fn property_value(p: &mut Parser) {
     }
 }
 
-/// Parse a property expression, including binary operator chains.
+/// Parse a property expression: an arithmetic expression, optionally the
+/// lower bound of a range `lo .. hi [delta d]`.
 ///
-/// AS5506B §11.2.5 admits `numeric_term` with binary operators (e.g.
-/// `5 * 1000 ps`). Precedence is flat/left-associative — that is enough
-/// to parse the common unit-scaling idiom without a full expression
-/// grammar.
+/// AS5506 itself has NO arithmetic in property values: a numeric property
+/// term is `[sign] numeric_literal [unit_identifier]` or `[sign]` a property
+/// constant (OSATE's `Properties.xtext`: `IntegerTerm`, `RealTerm`,
+/// `SignedConstant`, and `NumericRangeTerm` over `NumAlt`). The `+ - * /`
+/// operators accepted here are a spar EXTENSION (#127, #546), which OSATE
+/// rejects. Each binary chain is wrapped in one `BINARY_EXPR` node so
+/// lowering sees the whole expression, never just its first operand (#546).
+///
+/// Precedence: `*` and `/` bind tighter than `+` and `-`; both levels are
+/// left-associative. Each range bound is a whole arithmetic expression.
 fn property_expression(p: &mut Parser) {
-    property_expression_primary(p);
-    while matches!(
-        p.current(),
-        SyntaxKind::STAR | SyntaxKind::PLUS | SyntaxKind::MINUS
-    ) {
-        p.bump_any();
-        property_expression_primary(p);
+    let Some(lhs) = additive_expression(p) else {
+        return;
+    };
+    if p.at(SyntaxKind::DOT_DOT) {
+        let m = lhs.precede(p);
+        p.bump(SyntaxKind::DOT_DOT);
+        additive_expression(p);
+        if p.at(SyntaxKind::DELTA_KW) {
+            let d = p.start();
+            p.bump(SyntaxKind::DELTA_KW);
+            additive_expression(p);
+            d.complete(p, SyntaxKind::DELTA_VALUE);
+        }
+        m.complete(p, SyntaxKind::RANGE_VALUE);
     }
 }
 
-fn property_expression_primary(p: &mut Parser) {
+/// `term (('+' | '-') term)*`
+fn additive_expression(p: &mut Parser) -> Option<CompletedMarker> {
+    let mut lhs = multiplicative_expression(p)?;
+    while matches!(p.current(), SyntaxKind::PLUS | SyntaxKind::MINUS) {
+        let m = lhs.precede(p);
+        p.bump_any();
+        multiplicative_expression(p);
+        lhs = m.complete(p, SyntaxKind::BINARY_EXPR);
+    }
+    Some(lhs)
+}
+
+/// `primary (('*' | '/') primary)*`
+fn multiplicative_expression(p: &mut Parser) -> Option<CompletedMarker> {
+    let mut lhs = property_expression_primary(p)?;
+    while matches!(p.current(), SyntaxKind::STAR | SyntaxKind::SLASH) {
+        let m = lhs.precede(p);
+        p.bump_any();
+        property_expression_primary(p);
+        lhs = m.complete(p, SyntaxKind::BINARY_EXPR);
+    }
+    Some(lhs)
+}
+
+fn property_expression_primary(p: &mut Parser) -> Option<CompletedMarker> {
     match p.current() {
         SyntaxKind::INTEGER_LIT => {
             let m = p.start();
@@ -112,20 +151,7 @@ fn property_expression_primary(p: &mut Parser) {
             if p.at(SyntaxKind::IDENT) {
                 p.bump(SyntaxKind::IDENT); // unit name
             }
-            // Check for range: `..`
-            if p.at(SyntaxKind::DOT_DOT) {
-                p.bump(SyntaxKind::DOT_DOT);
-                property_expression(p);
-                if p.at(SyntaxKind::DELTA_KW) {
-                    let d = p.start();
-                    p.bump(SyntaxKind::DELTA_KW);
-                    property_expression(p);
-                    d.complete(p, SyntaxKind::DELTA_VALUE);
-                }
-                m.complete(p, SyntaxKind::RANGE_VALUE);
-            } else {
-                m.complete(p, SyntaxKind::INTEGER_VALUE);
-            }
+            Some(m.complete(p, SyntaxKind::INTEGER_VALUE))
         }
         SyntaxKind::REAL_LIT => {
             let m = p.start();
@@ -133,36 +159,24 @@ fn property_expression_primary(p: &mut Parser) {
             if p.at(SyntaxKind::IDENT) {
                 p.bump(SyntaxKind::IDENT); // unit name
             }
-            if p.at(SyntaxKind::DOT_DOT) {
-                p.bump(SyntaxKind::DOT_DOT);
-                property_expression(p);
-                if p.at(SyntaxKind::DELTA_KW) {
-                    let d = p.start();
-                    p.bump(SyntaxKind::DELTA_KW);
-                    property_expression(p);
-                    d.complete(p, SyntaxKind::DELTA_VALUE);
-                }
-                m.complete(p, SyntaxKind::RANGE_VALUE);
-            } else {
-                m.complete(p, SyntaxKind::REAL_VALUE);
-            }
+            Some(m.complete(p, SyntaxKind::REAL_VALUE))
         }
         SyntaxKind::STRING_LIT => {
             let m = p.start();
             p.bump(SyntaxKind::STRING_LIT);
-            m.complete(p, SyntaxKind::STRING_VALUE);
+            Some(m.complete(p, SyntaxKind::STRING_VALUE))
         }
         SyntaxKind::TRUE_KW | SyntaxKind::FALSE_KW => {
             let m = p.start();
             p.bump_any();
-            m.complete(p, SyntaxKind::BOOLEAN_VALUE);
+            Some(m.complete(p, SyntaxKind::BOOLEAN_VALUE))
         }
         SyntaxKind::NOT_KW => {
             // Boolean negation
             let m = p.start();
             p.bump(SyntaxKind::NOT_KW);
             property_expression(p);
-            m.complete(p, SyntaxKind::BOOLEAN_VALUE);
+            Some(m.complete(p, SyntaxKind::BOOLEAN_VALUE))
         }
         SyntaxKind::CLASSIFIER_KW => {
             let m = p.start();
@@ -170,7 +184,7 @@ fn property_expression_primary(p: &mut Parser) {
             p.expect(SyntaxKind::L_PAREN);
             super::classifier_ref(p);
             p.expect(SyntaxKind::R_PAREN);
-            m.complete(p, SyntaxKind::CLASSIFIER_VALUE);
+            Some(m.complete(p, SyntaxKind::CLASSIFIER_VALUE))
         }
         SyntaxKind::REFERENCE_KW => {
             let m = p.start();
@@ -178,7 +192,7 @@ fn property_expression_primary(p: &mut Parser) {
             p.expect(SyntaxKind::L_PAREN);
             containment_path(p);
             p.expect(SyntaxKind::R_PAREN);
-            m.complete(p, SyntaxKind::REFERENCE_VALUE);
+            Some(m.complete(p, SyntaxKind::REFERENCE_VALUE))
         }
         SyntaxKind::COMPUTE_KW => {
             let m = p.start();
@@ -188,7 +202,7 @@ fn property_expression_primary(p: &mut Parser) {
                 p.bump(SyntaxKind::IDENT);
             }
             p.expect(SyntaxKind::R_PAREN);
-            m.complete(p, SyntaxKind::COMPUTED_VALUE);
+            Some(m.complete(p, SyntaxKind::COMPUTED_VALUE))
         }
         SyntaxKind::L_PAREN => {
             // List value: (val1, val2, ...)
@@ -201,7 +215,7 @@ fn property_expression_primary(p: &mut Parser) {
                 }
             }
             p.expect(SyntaxKind::R_PAREN);
-            m.complete(p, SyntaxKind::LIST_VALUE);
+            Some(m.complete(p, SyntaxKind::LIST_VALUE))
         }
         SyntaxKind::L_BRACKET => {
             // Record value: [ field => value; ... ]
@@ -216,7 +230,7 @@ fn property_expression_primary(p: &mut Parser) {
                 f.complete(p, SyntaxKind::RECORD_FIELD);
             }
             p.expect(SyntaxKind::R_BRACKET);
-            m.complete(p, SyntaxKind::RECORD_VALUE);
+            Some(m.complete(p, SyntaxKind::RECORD_VALUE))
         }
         SyntaxKind::IDENT => {
             // Named value, enumeration literal, or property constant reference
@@ -229,33 +243,22 @@ fn property_expression_primary(p: &mut Parser) {
                     p.bump_any();
                 }
             }
-            // Check for range: `ident .. expr`
-            if p.at(SyntaxKind::DOT_DOT) {
-                p.bump(SyntaxKind::DOT_DOT);
-                property_expression(p);
-                if p.at(SyntaxKind::DELTA_KW) {
-                    let d = p.start();
-                    p.bump(SyntaxKind::DELTA_KW);
-                    property_expression(p);
-                    d.complete(p, SyntaxKind::DELTA_VALUE);
-                }
-                m.complete(p, SyntaxKind::RANGE_VALUE);
-            } else {
-                m.complete(p, SyntaxKind::PROPERTY_EXPRESSION);
-            }
+            // A following `.. expr` (a range whose lower bound is a named
+            // constant) is handled by `property_expression`.
+            Some(m.complete(p, SyntaxKind::PROPERTY_EXPRESSION))
         }
         SyntaxKind::PLUS | SyntaxKind::MINUS => {
-            // Signed numeric value. Recurse into *primary* (not the outer
+            // Signed operand. Recurse into *primary* (not the outer
             // wrapper), otherwise the binary-op loop would greedily consume
             // the following `+`/`-`/`*` operators into the signed operand —
             // causing `-1 + 2` to parse as `-(1+2)` instead of `(-1)+2`.
-            // AS-5506B §11.2.5: `numeric_term ::= [sign] numeric_literal`
-            // — the sign is part of the signed literal, not a prefix over
-            // the additive expression.
+            // AS5506's numeric term is `[sign] numeric_literal [unit]`: the
+            // sign is part of the signed literal, not a prefix over the
+            // additive expression. `-(…)` negates a parenthesised group.
             let m = p.start();
             p.bump_any();
             property_expression_primary(p);
-            m.complete(p, SyntaxKind::PROPERTY_EXPRESSION);
+            Some(m.complete(p, SyntaxKind::PROPERTY_EXPRESSION))
         }
         SyntaxKind::ERROR if is_c_style_radix_literal(p.current_text()) => {
             // A C-style radix literal (`0x40003000`, `0b1010`, `0o17`) — the
@@ -268,10 +271,11 @@ fn property_expression_primary(p: &mut Parser) {
                  e.g. `16#…#` for hexadecimal",
             );
             p.bump_any();
-            m.complete(p, SyntaxKind::ERROR);
+            Some(m.complete(p, SyntaxKind::ERROR))
         }
         _ => {
             p.error("expected property expression");
+            None
         }
     }
 }

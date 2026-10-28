@@ -10,8 +10,11 @@
 //!   element types
 //! - **PROP-APPLIES-TO** — Properties are applied to categories they're allowed on
 //! - **PROP-CONSTANT-EXISTS** — Property constant references must resolve
+//! - **PROP-ARITHMETIC** — An arithmetic value (a spar extension, #546) that
+//!   does not evaluate is an error: the property then has no value
 
 use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::item_tree::PropertyExpr;
 
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
@@ -105,10 +108,26 @@ fn check_range_ordering(
     for ((_set_key, _name_key), values) in prop_map.iter() {
         for pv in values {
             let val = pv.value.trim();
+            // Prefer the lowered range: its bounds are already EVALUATED, so
+            // `10 .. 2 * 30` compares 10 with 60. The text bound `2 * 30`
+            // would be read by `parse_numeric_value` as its first operand,
+            // 2, and report a false inversion (#546). A bound that did not
+            // evaluate is not compared at all; PROP-ARITHMETIC reports it.
+            let bounds = match &pv.typed_expr {
+                Some(PropertyExpr::Range { min, max, .. }) => {
+                    match (bound_text(min), bound_text(max)) {
+                        (Some(l), Some(h)) => Some((l, h)),
+                        _ => None,
+                    }
+                }
+                _ => val
+                    .split_once("..")
+                    .map(|(l, h)| (l.trim().to_string(), h.trim().to_string())),
+            };
             // Look for range pattern: "number .. number"
-            if let Some((low_str, high_str)) = val.split_once("..") {
-                let low_str = low_str.trim();
-                let high_str = high_str.trim();
+            if let Some((low_str, high_str)) = bounds {
+                let low_str = low_str.as_str();
+                let high_str = high_str.as_str();
                 if range_is_inverted(low_str, high_str) == Some(true) {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
@@ -123,6 +142,20 @@ fn check_range_ordering(
             }
         }
     }
+}
+
+/// The text of an evaluated numeric range bound (`40 ms`, `7`), or `None`
+/// for anything else — an unevaluated arithmetic bound among them.
+fn bound_text(expr: &PropertyExpr) -> Option<String> {
+    let (num, unit) = match expr {
+        PropertyExpr::Integer(v, u) => (v.to_string(), u),
+        PropertyExpr::Real(s, u) => (s.clone(), u),
+        _ => return None,
+    };
+    Some(match unit {
+        Some(u) => format!("{num} {u}"),
+        None => num,
+    })
 }
 
 /// Try to parse a numeric value string, stripping any trailing unit.
@@ -302,6 +335,23 @@ fn check_value_types(
                     analysis: "property_rules".to_string(),
                 });
             }
+            // PROP-ARITHMETIC (#546): arithmetic that did not evaluate is
+            // left as a `BinaryOp`, which no accessor reads as a value. Say
+            // why here, or the property would silently vanish.
+            if let Some(expr) = &pv.typed_expr {
+                for err in spar_hir_def::property_arith::arithmetic_errors(expr) {
+                    diags.push(AnalysisDiagnostic {
+                        severity: Severity::Error,
+                        message: format!(
+                            "property '{}' value '{}' is arithmetic that does not evaluate, \
+                             so the property has no value: {}",
+                            pv.name, val, err
+                        ),
+                        path: path.to_vec(),
+                        analysis: "property_rules".to_string(),
+                    });
+                }
+            }
             // Check for unbalanced parentheses
             let open = val.chars().filter(|&c| c == '(').count();
             let close = val.chars().filter(|&c| c == ')').count();
@@ -461,6 +511,27 @@ mod tests {
 
         fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
             self.set_property_ext(comp, set, name, value, false);
+        }
+
+        /// A value with its lowered typed expression, as instantiation
+        /// records it.
+        fn set_typed(
+            &mut self,
+            comp: ComponentInstanceIdx,
+            name: &str,
+            value: &str,
+            e: PropertyExpr,
+        ) {
+            let map = self.property_maps.entry(comp).or_default();
+            map.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: None,
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: Some(e),
+                is_append: false,
+            });
         }
 
         fn set_property_ext(
@@ -1769,5 +1840,100 @@ mod tests {
             range_is_inverted("200 ns", "20 us"),
             range_is_inverted("20 us", "200 ns")
         );
+    }
+
+    // ── PROP-ARITHMETIC and evaluated range bounds (#546) ───────────
+
+    fn int(v: i64, unit: Option<&str>) -> PropertyExpr {
+        PropertyExpr::Integer(v, unit.map(Name::new))
+    }
+
+    fn range(min: PropertyExpr, max: PropertyExpr) -> PropertyExpr {
+        PropertyExpr::Range {
+            min: Box::new(min),
+            max: Box::new(max),
+            delta: None,
+        }
+    }
+
+    fn bad() -> PropertyExpr {
+        PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(int(5, Some("ms"))),
+            rhs: Box::new(int(8, Some("ms"))),
+        }
+    }
+
+    fn run(value: &str, e: PropertyExpr) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_typed(root, "Weight", value, e);
+        PropertyRuleAnalysis.analyze(&b.build(root))
+    }
+
+    fn range_errors(d: &[AnalysisDiagnostic]) -> usize {
+        d.iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .count()
+    }
+
+    fn arith_errors(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|d| d.message.contains("arithmetic that does not evaluate"))
+            .collect()
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn range_order_reads_evaluated_bounds_not_the_first_operand() {
+        // The text `2 * 30` read as its first operand is 2 < 10: a false
+        // inversion. The evaluated bound is 60.
+        assert_eq!(
+            range_errors(&run("10 .. 2 * 30", range(int(10, None), int(60, None)))),
+            0
+        );
+        // And a real inversion written with arithmetic is still caught.
+        assert_eq!(
+            range_errors(&run("2 * 30 .. 10", range(int(60, None), int(10, None)))),
+            1
+        );
+        assert_eq!(
+            range_errors(&run(
+                "1 sec - 500 ms .. 400 ms",
+                range(int(500, Some("ms")), int(400, Some("ms")))
+            )),
+            1
+        );
+        // An unevaluated bound is not compared: no range verdict at all.
+        assert_eq!(
+            range_errors(&run("100 .. 5 ms * 8 ms", range(int(100, None), bad()))),
+            0
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn unevaluated_arithmetic_is_an_error_naming_the_cause() {
+        let d = run("5 ms * 8 ms", bad());
+        let errs = arith_errors(&d);
+        assert_eq!(errs.len(), 1, "{d:?}");
+        assert_eq!(errs[0].severity, Severity::Error);
+        assert!(
+            errs[0].message.contains("'5 ms * 8 ms'"),
+            "{}",
+            errs[0].message
+        );
+        assert!(errs[0].message.contains("ms * ms"), "{}", errs[0].message);
+        // Inside a range, too.
+        assert_eq!(
+            arith_errors(&run(
+                "1 ms .. 5 ms * 8 ms",
+                range(int(1, Some("ms")), bad())
+            ))
+            .len(),
+            1
+        );
+        // An evaluated value is not reported.
+        assert!(arith_errors(&run("40 ms", int(40, Some("ms")))).is_empty());
     }
 }

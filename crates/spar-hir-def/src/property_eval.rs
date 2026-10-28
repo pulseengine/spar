@@ -14,7 +14,7 @@
 //! default value. Resolution is recursive: a `value()` reference may
 //! itself reference another `value()`.
 
-use crate::item_tree::{BinaryOpKind, PropertyAssociationItem, PropertyDefItem, PropertyExpr};
+use crate::item_tree::{PropertyAssociationItem, PropertyDefItem, PropertyExpr};
 use crate::name::Name;
 
 /// Resolve a [`PropertyExpr`], substituting `ComputedValue` references
@@ -136,35 +136,26 @@ pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
         PropertyExpr::Integer(v, _unit) => Some(*v as f64),
         PropertyExpr::Real(v, _unit) => v.parse::<f64>().ok(),
         PropertyExpr::UnitValue(inner, _unit) => eval_numeric(inner),
-        PropertyExpr::BinaryOp { op, lhs, rhs } => {
-            let l = eval_numeric(lhs)?;
-            let r = eval_numeric(rhs)?;
-            match op {
-                BinaryOpKind::Add => Some(l + r),
-                BinaryOpKind::Sub => Some(l - r),
-                BinaryOpKind::Mul => Some(l * r),
-                BinaryOpKind::Div => {
-                    if r == 0.0 {
-                        None
-                    } else {
-                        Some(l / r)
-                    }
-                }
-            }
-        }
+        // Arithmetic goes through the one unit-checked evaluator (#546), so
+        // an ill-typed `5 ms * 8 ms` has no magnitude here either, rather
+        // than the unit-stripped 40.
+        PropertyExpr::BinaryOp { .. } => crate::property_arith::evaluate(expr)
+            .ok()
+            .and_then(|leaf| eval_numeric(&leaf)),
         _ => None,
     }
 }
 
 /// Compute a numeric property expression, returning the value and unit.
 ///
-/// # Unit propagation through arithmetic is NOT implemented
+/// # Arithmetic
 ///
 /// For leaf `Integer` / `Real` / `UnitValue` the returned unit is correct.
-/// For `BinaryOp` (e.g. `5 ms + 3 ms`) the returned unit is `None` — this
-/// helper does not propagate units through arithmetic, even when both
-/// operands agree. Any caller that expects `5 ms + 3 ms` to yield
-/// `(8.0, Some("ms"))` will get a unit-stripped result instead.
+/// Lowering already evaluates arithmetic that evaluates
+/// ([`crate::property_arith`]), so a `BinaryOp` reaching this helper either
+/// was built by hand or is ill-typed. Its magnitude comes from the
+/// unit-checked evaluator and its returned unit is `None`; use
+/// [`crate::property_arith::evaluate`] for the unit.
 ///
 /// For timing / bandwidth / memory extraction, use the unit-aware helpers
 /// in `crates/spar-analysis/src/property_accessors.rs`
@@ -231,6 +222,7 @@ pub fn get_record_field_numeric(expr: &PropertyExpr, field_name: &str) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::item_tree::BinaryOpKind;
     use crate::item_tree::PropertyAssociationItem;
     use crate::item_tree::PropertyDefItem;
     use crate::item_tree::PropertyExpr;

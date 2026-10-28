@@ -24,6 +24,7 @@ pub mod migration;
 pub mod name;
 pub mod overlay;
 pub mod properties;
+pub mod property_arith;
 pub mod property_check;
 pub mod property_eval;
 pub mod property_value;
@@ -3556,5 +3557,132 @@ end MyProps;
             }
             other => panic!("expected TypeRef(Time_Range), got {:?}", other),
         }
+    }
+
+    // ── Arithmetic property values, parsed and lowered (#546) ──────────
+
+    /// Lower `MyProp => <value>;` through the real parser and lowering.
+    fn lower_value(value: &str) -> Option<item_tree::PropertyExpr> {
+        lower_first_typed_value(&format!(
+            "package P\npublic\n  system S\n    properties\n      MyProp => {value};\n  end S;\nend P;\n"
+        ))
+    }
+
+    fn int(v: i64, unit: Option<&str>) -> item_tree::PropertyExpr {
+        item_tree::PropertyExpr::Integer(v, unit.map(Name::new))
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_values_lower_to_their_evaluated_leaf() {
+        for (src, want) in [
+            ("5 * 8 ms", int(40, Some("ms"))),
+            ("8 ms * 5", int(40, Some("ms"))),
+            ("20 ms + 20 ms", int(40, Some("ms"))),
+            ("(2 + 3) * 8 ms", int(40, Some("ms"))),
+            ("1 sec - 500 ms", int(500, Some("ms"))),
+            ("80 ms / 2", int(40, Some("ms"))),
+            ("1 ms / 4", int(250, Some("us"))),
+            // `*` binds tighter than `+`, and both are left-associative.
+            ("2 + 3 * 4", int(14, None)),
+            ("2 * 3 + 4", int(10, None)),
+            ("10 - 3 - 2", int(5, None)),
+            ("100 / 10 / 5", int(2, None)),
+            ("-1 + 2", int(1, None)),
+            ("-(2 * 3 ms)", int(-6, Some("ms"))),
+            ("-(-40 ms)", int(40, Some("ms"))),
+            (
+                "((40 ms))",
+                item_tree::PropertyExpr::List(vec![item_tree::PropertyExpr::List(vec![int(
+                    40,
+                    Some("ms"),
+                )])]),
+            ),
+        ] {
+            assert_eq!(lower_value(src), Some(want), "`MyProp => {src}`");
+        }
+        assert_eq!(
+            lower_value("2.5 * 4 ms"),
+            Some(item_tree::PropertyExpr::Real(
+                "10.0".to_string(),
+                Some(Name::new("ms"))
+            ))
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_inside_ranges_lists_and_records_is_evaluated() {
+        use item_tree::PropertyExpr as E;
+        let range = |min, max, delta: Option<E>| E::Range {
+            min: Box::new(min),
+            max: Box::new(max),
+            delta: delta.map(Box::new),
+        };
+        assert_eq!(
+            lower_value("1 ms .. 2 * 3 ms"),
+            Some(range(int(1, Some("ms")), int(6, Some("ms")), None))
+        );
+        assert_eq!(
+            lower_value("2 * 500 us .. 2 ms"),
+            Some(range(int(1000, Some("us")), int(2, Some("ms")), None))
+        );
+        assert_eq!(
+            lower_value("(1 ms) .. 4 ms / 2 delta 1 ms - 500 us"),
+            Some(range(
+                int(1, Some("ms")),
+                int(2, Some("ms")),
+                Some(int(500, Some("us")))
+            ))
+        );
+        // Each list element is one expression: two elements, not three.
+        assert_eq!(
+            lower_value("(2 * 3 ms, 4 ms)"),
+            Some(E::List(vec![int(6, Some("ms")), int(4, Some("ms"))]))
+        );
+        assert_eq!(
+            lower_value("[a => 2 * 3 ms; b => 1;]"),
+            Some(E::Record(vec![
+                (Name::new("a"), int(6, Some("ms"))),
+                (Name::new("b"), int(1, None)),
+            ]))
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn ill_typed_arithmetic_keeps_the_whole_tree_never_the_first_operand() {
+        use item_tree::{BinaryOpKind, PropertyExpr as E};
+        for src in [
+            "5 ms * 8 ms",
+            "5 ms + 3 KByte",
+            "40 ms / 0",
+            "40 ms + 5",
+            "2 * My_Set::Base",
+            "-My_Set::Base",
+            "-(5 ms * 8 ms)",
+        ] {
+            let got = lower_value(src);
+            let Some(expr) = &got else {
+                panic!("`{src}` lowered to nothing; the text fallback must not run")
+            };
+            assert!(
+                matches!(expr, E::BinaryOp { .. }),
+                "`{src}` must stay an unevaluated BinaryOp, got {got:?}"
+            );
+            assert_eq!(
+                property_arith::arithmetic_errors(expr).len(),
+                1,
+                "`{src}` must report exactly one arithmetic error"
+            );
+        }
+        assert_eq!(
+            lower_value("5 ms * 8 ms"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Mul,
+                lhs: Box::new(int(5, Some("ms"))),
+                rhs: Box::new(int(8, Some("ms"))),
+            })
+        );
     }
 }

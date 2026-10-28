@@ -200,7 +200,7 @@ fn type_kind_name(type_def: &PropertyTypeDef) -> &'static str {
 // ── Unit conversion ────────────────────────────────────────────────
 
 /// Standard AADL time units and their conversion factors to picoseconds.
-const TIME_UNITS: &[(&str, u64)] = &[
+pub(crate) const TIME_UNITS: &[(&str, u64)] = &[
     ("ps", 1),
     ("ns", 1_000),
     ("us", 1_000_000),
@@ -211,7 +211,7 @@ const TIME_UNITS: &[(&str, u64)] = &[
 ];
 
 /// Standard AADL size units and their conversion factors to bits.
-const SIZE_UNITS: &[(&str, u64)] = &[
+pub(crate) const SIZE_UNITS: &[(&str, u64)] = &[
     ("bits", 1),
     ("Bytes", 8),
     ("KByte", 8 * 1024),

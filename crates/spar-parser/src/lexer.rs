@@ -444,6 +444,10 @@ fn scan_token<'a>(c: &mut Cursor<'a>) -> (SyntaxKind, &'a str) {
             c.bump();
             SyntaxKind::STAR
         }
+        b'/' => {
+            c.bump();
+            SyntaxKind::SLASH
+        }
         b'#' => {
             c.bump();
             SyntaxKind::HASH
