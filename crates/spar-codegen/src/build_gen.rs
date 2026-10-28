@@ -37,10 +37,9 @@ pub fn generate_contract_manifest(
 
     for &idx in threads {
         let comp = inst.component(idx);
-        let parent_name = comp
-            .parent
-            .map(|p| sanitize_ident(inst.component(p).name.as_str()))
-            .unwrap_or_else(|| "root".to_string());
+        // The key's process part is the crate directory build.rs looks the
+        // thread up in, so it must be the crate name (#543).
+        let parent_name = crate::naming::parent_crate_dir(inst, idx, "root");
         let name = sanitize_ident(comp.name.as_str());
         let (period, deadline, wcet) = extract_timing(inst, idx);
         if period.is_none() && deadline.is_none() && wcet.is_none() {

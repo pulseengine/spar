@@ -15,6 +15,7 @@
 pub mod build_gen;
 pub mod config_gen;
 pub mod doc_gen;
+mod naming;
 pub mod proof_gen;
 pub mod rust_gen;
 pub mod target_gen;
@@ -427,7 +428,12 @@ pub fn generate(
     scope: &spar_hir_def::resolver::GlobalScope,
     config: &CodegenConfig,
 ) -> Result<CodegenOutput, CodegenError> {
-    let mut files = Vec::new();
+    // Every file with the generator and instance it came from, so a
+    // duplicate output path can name both sources (#543).
+    let mut files: Vec<(GeneratedFile, String)> = Vec::new();
+    let from = |generator: &str, idx: ComponentInstanceIdx| {
+        format!("{generator} for {}", inst.component_instance_path(idx))
+    };
 
     // Collect processes and threads
     let processes: Vec<_> = inst
@@ -448,14 +454,20 @@ pub fn generate(
     // Generate WIT files
     if config.format == OutputFormat::Wit || config.format == OutputFormat::Both {
         for &(idx, _comp) in &processes {
-            files.push(wit_gen::generate_wit(inst, scope, idx)?);
+            files.push((
+                wit_gen::generate_wit(inst, scope, idx)?,
+                from("wit_gen", idx),
+            ));
         }
     }
 
     // Generate Rust files
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
         for &(idx, _comp) in &threads {
-            files.push(rust_gen::generate_rust_component(inst, scope, idx));
+            files.push((
+                rust_gen::generate_rust_component(inst, scope, idx),
+                from("rust_gen", idx),
+            ));
         }
         // Per process: the crate-local record `types` module (REQ-CODEGEN-WIT-
         // RECORDS-002, #319 item 3) and the WIT-binding crate root
@@ -465,8 +477,14 @@ pub fn generate(
         // items 3, 4 & 7). This replaces the placeholder lib.rs workspace_gen
         // used to emit.
         for &(idx, _comp) in &processes {
-            files.push(rust_gen::generate_types_module(inst, scope, idx));
-            files.push(rust_gen::generate_process_bindings(inst, scope, idx));
+            files.push((
+                rust_gen::generate_types_module(inst, scope, idx),
+                from("rust_gen types", idx),
+            ));
+            files.push((
+                rust_gen::generate_process_bindings(inst, scope, idx),
+                from("rust_gen bindings", idx),
+            ));
         }
     }
 
@@ -475,7 +493,10 @@ pub fn generate(
     // emit them (strict-filter semantics: `wit` yields only `.wit`).
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
         for &(idx, _comp) in &processes {
-            files.push(config_gen::generate_config(inst, idx));
+            files.push((
+                config_gen::generate_config(inst, idx),
+                from("config_gen", idx),
+            ));
         }
     }
 
@@ -484,7 +505,10 @@ pub fn generate(
         && (verify == VerifyMode::All || verify == VerifyMode::Test)
     {
         for &(idx, _comp) in &threads {
-            files.push(test_gen::generate_test_harness(inst, idx));
+            files.push((
+                test_gen::generate_test_harness(inst, idx),
+                from("test_gen", idx),
+            ));
         }
     }
 
@@ -497,8 +521,14 @@ pub fn generate(
         && (config.format == OutputFormat::Rust || config.format == OutputFormat::Both)
     {
         let thread_idxs: Vec<_> = threads.iter().map(|&(idx, _)| idx).collect();
-        files.push(build_gen::generate_contract_manifest(inst, &thread_idxs));
-        files.push(build_gen::generate_build_verifier());
+        files.push((
+            build_gen::generate_contract_manifest(inst, &thread_idxs),
+            "build_gen contract".to_string(),
+        ));
+        files.push((
+            build_gen::generate_build_verifier(),
+            "build_gen verifier".to_string(),
+        ));
     }
 
     // Generate proof artifacts
@@ -506,16 +536,25 @@ pub fn generate(
         && (verify == VerifyMode::All || verify == VerifyMode::Proof)
     {
         for &(proc_idx, _proc_comp) in &processors {
-            files.push(proof_gen::generate_lean4_proof(inst, proc_idx));
+            files.push((
+                proof_gen::generate_lean4_proof(inst, proc_idx),
+                from("proof_gen lean", proc_idx),
+            ));
             let thread_idxs = threads_for_processor(inst, proc_idx);
             for t_idx in &thread_idxs {
-                files.push(proof_gen::generate_kani_harness(inst, *t_idx));
+                files.push((
+                    proof_gen::generate_kani_harness(inst, *t_idx),
+                    from("proof_gen kani", *t_idx),
+                ));
             }
         }
         // If no explicit processors, still generate per-thread Kani harnesses
         if processors.is_empty() {
             for &(idx, _comp) in &threads {
-                files.push(proof_gen::generate_kani_harness(inst, idx));
+                files.push((
+                    proof_gen::generate_kani_harness(inst, idx),
+                    from("proof_gen kani", idx),
+                ));
             }
         }
     }
@@ -524,8 +563,8 @@ pub fn generate(
     if config.rivet {
         for &(idx, _comp) in &processes {
             let (doc, verification) = doc_gen::generate_design_doc(inst, idx);
-            files.push(doc);
-            files.push(verification);
+            files.push((doc, from("doc_gen design", idx)));
+            files.push((verification, from("doc_gen verification", idx)));
         }
     }
 
@@ -534,18 +573,55 @@ pub fn generate(
     // emitted only for `--format rust` and `--format both`. Under
     // `--format wit` the output is strictly the `.wit` interface files.
     if config.format == OutputFormat::Rust || config.format == OutputFormat::Both {
-        let process_names: Vec<String> = processes
-            .iter()
-            .map(|(_, c)| sanitize_ident(c.name.as_str()))
+        // The crate names from the one naming table every generator uses,
+        // so the workspace members are the crates rust_gen writes (#543).
+        let process_names: Vec<String> = naming::process_name_table(inst)
+            .into_iter()
+            .map(|(_, names)| names.crate_name)
             .collect();
 
-        files.extend(workspace_gen::generate_workspace(
-            &config.root_name,
-            &process_names,
-        ));
+        files.extend(
+            workspace_gen::generate_workspace(&config.root_name, &process_names)
+                .into_iter()
+                .map(|f| (f, "workspace_gen".to_string())),
+        );
     }
 
-    Ok(CodegenOutput { files })
+    check_unique_paths(&files)?;
+    Ok(CodegenOutput {
+        files: files.into_iter().map(|(file, _)| file).collect(),
+    })
+}
+
+/// Refuse two generated files with one output path (#543).
+///
+/// Writing both would let the second silently overwrite the first, which is
+/// how two processes named `app` lost one WIT file, one crate and one config
+/// on disk. Paths are compared ignoring ASCII case, because a case-insensitive
+/// filesystem (the macOS default) folds `App.wit` and `app.wit` into one
+/// file. Every duplicate is reported, each naming both of its sources.
+fn check_unique_paths(files: &[(GeneratedFile, String)]) -> Result<(), CodegenError> {
+    let mut seen: std::collections::BTreeMap<String, (&str, &str)> =
+        std::collections::BTreeMap::new();
+    let mut errors = Vec::new();
+    for (file, origin) in files {
+        let key = file.path.to_ascii_lowercase();
+        if let Some((first_path, first_origin)) = seen.get(&key) {
+            errors.push(format!(
+                "duplicate output path `{}`: written by {first_origin} (as \
+                 `{first_path}`) and by {origin} (as `{}`); writing both would \
+                 overwrite the first",
+                file.path, file.path
+            ));
+        } else {
+            seen.insert(key, (file.path.as_str(), origin.as_str()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CodegenError { errors })
+    }
 }
 
 #[cfg(test)]
@@ -792,5 +868,104 @@ end TwoCpu;
             let got = threads_for_processor(&inst, at(&format!("Top.impl/{side}/cpu")));
             assert_eq!(got, vec![at(&format!("Top.impl/{side}/app/t"))], "{side}");
         }
+    }
+
+    // ── #543: no two generated files share an output path ────────────
+
+    fn file(path: &str) -> GeneratedFile {
+        GeneratedFile {
+            path: path.to_string(),
+            content: String::new(),
+        }
+    }
+
+    // rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+    #[test]
+    fn duplicate_output_path_is_refused_naming_both_sources() {
+        let files = vec![
+            (
+                file("wit/app.wit"),
+                "wit_gen for Top.impl/left/app".to_string(),
+            ),
+            (
+                file("config/app.toml"),
+                "config_gen for Top.impl/left/app".to_string(),
+            ),
+            (
+                file("wit/app.wit"),
+                "wit_gen for Top.impl/right/app".to_string(),
+            ),
+        ];
+        let err = check_unique_paths(&files).expect_err("duplicate must be refused");
+        assert_eq!(err.errors.len(), 1, "{err}");
+        let msg = &err.errors[0];
+        assert!(msg.contains("`wit/app.wit`"), "{msg}");
+        assert!(msg.contains("wit_gen for Top.impl/left/app"), "{msg}");
+        assert!(msg.contains("wit_gen for Top.impl/right/app"), "{msg}");
+
+        // Distinct paths pass.
+        assert!(check_unique_paths(&files[..2]).is_ok());
+    }
+
+    // rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+    #[test]
+    fn output_paths_differing_only_in_case_are_refused() {
+        // A case-insensitive filesystem (the macOS default) writes these to
+        // one file, so the second would silently overwrite the first.
+        let files = vec![
+            (file("wit/App.wit"), "first".to_string()),
+            (file("wit/app.wit"), "second".to_string()),
+        ];
+        let err = check_unique_paths(&files).expect_err("case-only duplicate");
+        assert!(err.errors[0].contains("first") && err.errors[0].contains("second"));
+    }
+
+    // rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+    #[test]
+    fn generate_refuses_a_real_generator_collision() {
+        // Identifiers are truncated to 64 characters, so two threads whose
+        // names share their first 64 characters both map to one module file.
+        // That is a collision no naming table removes; `generate` must fail
+        // naming both threads instead of writing one file twice.
+        let long = "a".repeat(64);
+        let src = format!(
+            "package Trunc\npublic\n  thread T\n  end T;\n  process P\n  end P;\n\
+             process implementation P.impl\n    subcomponents\n      {long}x : thread T;\n\
+             {long}y : thread T;\n  end P.impl;\n  system Top\n  end Top;\n\
+             system implementation Top.impl\n    subcomponents\n      app : process P.impl;\n\
+             end Top.impl;\nend Trunc;\n"
+        );
+        let db = spar_hir_def::HirDefDatabase::default();
+        let sf = spar_base_db::SourceFile::new(&db, "t.aadl".to_string(), src);
+        let tree = spar_hir_def::file_item_tree(&db, sf);
+        let scope = spar_hir_def::resolver::GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &spar_hir_def::name::Name::new("Trunc"),
+            &spar_hir_def::name::Name::new("Top"),
+            &spar_hir_def::name::Name::new("impl"),
+        );
+        let config = CodegenConfig {
+            root_name: "trunc".to_string(),
+            output_dir: "out".to_string(),
+            format: OutputFormat::Rust,
+            verify: None,
+            rivet: false,
+            dry_run: true,
+        };
+        let err = generate(&inst, &scope, &config).expect_err("collision must be refused");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&format!("`crates/app/src/{long}.rs`")),
+            "{msg}"
+        );
+        assert!(
+            msg.contains(&format!("rust_gen for Top.impl/app/{long}x")),
+            "{msg}"
+        );
+        assert!(
+            msg.contains(&format!("rust_gen for Top.impl/app/{long}y")),
+            "{msg}"
+        );
     }
 }

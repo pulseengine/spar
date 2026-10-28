@@ -13,6 +13,7 @@
 
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 
+use crate::naming::{encode_instance_path, path_below_root};
 use crate::{GeneratedFile, extract_timing, format_time_ps, threads_for_processor};
 
 /// Generate a Lean4 scheduling proof file for a processor instance.
@@ -227,92 +228,6 @@ pub fn generate_kani_harness(
     GeneratedFile {
         path: format!("proofs/kani/{parent_dir}/{name}_harness.rs"),
         content: code,
-    }
-}
-
-/// The instance path of `idx` below the root, as its segment names
-/// (`left`, `cpu` for `Top.impl/left/cpu`). Empty for the root itself.
-fn path_below_root(inst: &SystemInstance, idx: ComponentInstanceIdx) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut current = idx;
-    while let Some(parent) = inst.component(current).parent {
-        segments.push(inst.component(current).name.as_str().to_string());
-        current = parent;
-    }
-    segments.reverse();
-    segments
-}
-
-/// Encode an instance path as a lowercase identifier, injectively (#510).
-///
-/// Proof files were named by the component's NAME, so two processors called
-/// `cpu` in different subsystems wrote one file and the second overwrote the
-/// first. The name is now built from the whole instance path below the root:
-/// `left`/`cpu` gives `left__cpu`, and a processor directly under the root
-/// keeps its plain name (`cpu`).
-///
-/// The output uses only `[a-z0-9_]`. Two different paths therefore never give
-/// names that differ only in case, which a case-insensitive filesystem would
-/// fold into one file. The output is also a valid Lean and Rust identifier
-/// stem: it never starts with a digit or `_`.
-///
-/// Injectivity comes from the escape `z`, which always starts an escape
-/// (prefix-free codes):
-///
-/// | input                                   | output             |
-/// |-----------------------------------------|--------------------|
-/// | `a`–`y`, `0`–`9`                        | itself             |
-/// | `z`                                     | `zz`               |
-/// | uppercase letter `L`                    | `zc` + lowercase L |
-/// | `_` between two non-`_` characters      | `_`                |
-/// | any other `_` (leading, trailing, run)  | `zu`               |
-/// | any other character                     | `zx` + 6 hex digits |
-/// | empty segment                           | `ze`               |
-/// | empty path (the root)                   | `zr`               |
-/// | leading digit of the whole name         | `zd` before it     |
-///
-/// An encoded segment never contains `__` and never starts or ends with `_`,
-/// so joining segments with `__` can be split back unambiguously. The test
-/// decoder in this module recovers every path from its encoding, which is
-/// what makes the map injective.
-fn encode_instance_path<S: AsRef<str>>(segments: &[S]) -> String {
-    if segments.is_empty() {
-        return "zr".to_string();
-    }
-    let mut out = String::new();
-    for (i, segment) in segments.iter().enumerate() {
-        if i > 0 {
-            out.push_str("__");
-        }
-        encode_segment(segment.as_ref(), &mut out);
-    }
-    if out.starts_with(|c: char| c.is_ascii_digit()) {
-        out.insert_str(0, "zd");
-    }
-    out
-}
-
-fn encode_segment(segment: &str, out: &mut String) {
-    let chars: Vec<char> = segment.chars().collect();
-    if chars.is_empty() {
-        out.push_str("ze");
-        return;
-    }
-    for (i, &c) in chars.iter().enumerate() {
-        match c {
-            'z' => out.push_str("zz"),
-            'a'..='y' | '0'..='9' => out.push(c),
-            'A'..='Z' => {
-                out.push_str("zc");
-                out.push(c.to_ascii_lowercase());
-            }
-            '_' => {
-                let interior =
-                    i > 0 && i + 1 < chars.len() && chars[i - 1] != '_' && chars[i + 1] != '_';
-                out.push_str(if interior { "_" } else { "zu" });
-            }
-            other => out.push_str(&format!("zx{:06x}", other as u32)),
-        }
     }
 }
 

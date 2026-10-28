@@ -778,3 +778,149 @@ fn emitted_crate_builds_to_wasm32_wasip2() {
         root.display()
     );
 }
+
+/// #543: two subsystems `left` and `right`, each with a process `app` (ports
+/// routed to and from its thread `t`). On origin/main both `app`s wrote
+/// `wit/app.wit` and `crates/app/*`, and the workspace listed `crates/app`
+/// twice. Each process now gets its own crate and its own WIT package.
+const TWO_SUBSYSTEMS_AADL: &str = r#"
+package TwoSub
+public
+    data Reading
+        properties
+            Data_Size => 4 Bytes;
+    end Reading;
+    processor Cpu
+    end Cpu;
+    thread W
+        features
+            raw: in data port Reading;
+            clean: out data port Reading;
+        properties
+            Dispatch_Protocol => Periodic;
+            Period => 10 ms;
+    end W;
+    process P
+        features
+            raw: in data port Reading;
+            clean: out data port Reading;
+    end P;
+    process implementation P.Impl
+        subcomponents
+            t: thread W;
+        connections
+            c_in: port raw -> t.raw;
+            c_out: port t.clean -> clean;
+    end P.Impl;
+    system Node
+    end Node;
+    system implementation Node.Impl
+        subcomponents
+            cpu: processor Cpu;
+            app: process P.Impl;
+        properties
+            Actual_Processor_Binding => (reference (cpu)) applies to app.t;
+    end Node.Impl;
+    system Top
+    end Top;
+    system implementation Top.Impl
+        subcomponents
+            left: system Node.Impl;
+            right: system Node.Impl;
+    end Top.Impl;
+end TwoSub;
+"#;
+
+fn two_subsystem_files() -> Vec<spar_codegen::GeneratedFile> {
+    let (scope, inst) = build(TWO_SUBSYSTEMS_AADL, "TwoSub", "Top", "Impl");
+    let config = CodegenConfig {
+        root_name: "two".into(),
+        output_dir: "out".into(),
+        format: OutputFormat::Both,
+        verify: None,
+        rivet: false,
+        dry_run: true,
+    };
+    generate(&inst, &scope, &config)
+        .expect("codegen should succeed")
+        .files
+}
+
+/// Each process's WIT file parses on its own and declares its own package,
+/// and each crate's bindings load its own world from its own file.
+// rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+#[test]
+fn two_same_named_processes_get_their_own_wit_package_and_world() {
+    let files = two_subsystem_files();
+    for side in ["left", "right"] {
+        let wit = files
+            .iter()
+            .find(|f| f.path == format!("wit/{side}-app.wit"))
+            .unwrap_or_else(|| panic!("no wit/{side}-app.wit"));
+        let mut resolve = wit_parser::Resolve::new();
+        resolve
+            .push_str(&wit.path, &wit.content)
+            .unwrap_or_else(|e| panic!("{} is not valid WIT: {e}\n{}", wit.path, wit.content));
+        assert!(
+            wit.content
+                .contains(&format!("package two-sub:{side}-app;")),
+            "{}",
+            wit.content
+        );
+        let lib = files
+            .iter()
+            .find(|f| f.path == format!("crates/{side}_app/src/lib.rs"))
+            .unwrap_or_else(|| panic!("no crates/{side}_app/src/lib.rs"));
+        assert!(
+            lib.content
+                .contains(&format!("world: \"{side}-app-world\""))
+                && lib
+                    .content
+                    .contains(&format!("path: \"../../wit/{side}-app.wit\""))
+                && lib
+                    .content
+                    .contains(&format!("crate::two_sub::{side}_app::{side}_app_ports")),
+            "{}",
+            lib.content
+        );
+    }
+}
+
+/// COMPILE oracle for #543: the two-subsystem workspace `cargo check`s with
+/// `-D warnings`. On origin/main cargo rejects its root `Cargo.toml`
+/// (`duplicate key` `app`), and an instance-path crate name spelt with `__`
+/// would trip rustc's `non_snake_case`.
+///
+/// `#[ignore]` (shells out to cargo). Run:
+///   `cargo test -p spar-codegen --test lifecycle_bindings -- --ignored`
+// rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+#[test]
+#[ignore = "shells out to cargo check (network/disk); run with --ignored"]
+fn emitted_two_subsystem_workspace_cargo_checks() {
+    use std::process::Command;
+
+    let files = two_subsystem_files();
+    let root = std::env::temp_dir().join("spar-543-two-subsystem-oracle");
+    let _ = std::fs::remove_dir_all(&root);
+    for f in &files {
+        let path = root.join(&f.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &f.content).unwrap();
+    }
+
+    let target_dir = std::env::temp_dir().join("spar-543-two-subsystem-target");
+    let status = Command::new("cargo")
+        .arg("check")
+        .current_dir(&root)
+        .env("CARGO_INCREMENTAL", "0")
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("RUSTFLAGS", "-D warnings")
+        .status()
+        .expect("failed to spawn cargo check");
+    assert!(
+        status.success(),
+        "generated two-subsystem workspace failed to `cargo check`; inspect {}",
+        root.display()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

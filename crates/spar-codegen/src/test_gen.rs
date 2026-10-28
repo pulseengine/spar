@@ -112,11 +112,8 @@ pub fn generate_test_harness(
     code.push_str("    let _ = std::mem::size_of_val(&ports);\n");
     code.push_str("}\n");
 
-    // Determine parent process for path
-    let parent_name = comp
-        .parent
-        .map(|p| sanitize_ident(inst.component(p).name.as_str()))
-        .unwrap_or_else(|| "unknown".to_string());
+    // Under the process's crate name (by instance path on a collision, #543).
+    let parent_name = crate::naming::parent_crate_dir(inst, thread_idx, "unknown");
 
     GeneratedFile {
         path: format!("tests/{parent_name}/{name}_test.rs"),
