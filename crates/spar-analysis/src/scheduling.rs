@@ -442,7 +442,10 @@ impl ModalAnalysis for SchedulingAnalysis {
                 continue;
             }
 
-            let props = instance.properties_for(comp_idx);
+            // The thread's values in THIS SOM: a modal association gives the
+            // value of the mode the SOM selects for its declarer
+            // (REQ-AADL-MODAL-PROPERTY-VALUES-001).
+            let props = &*instance.properties_in_som(comp_idx, som);
             let period_ps = get_timing_property(props, "Period");
             let exec_ps = get_execution_time(props);
             let binding = get_processor_binding(props);

@@ -386,6 +386,7 @@ fn lower_async_function(
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
+        modal_values: Vec::new(),
     });
 
     tree.component_types.alloc(ComponentTypeItem {
@@ -609,6 +610,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 is_append: false,
                 applies_to: None,
                 in_modes: Vec::new(),
+                modal_values: Vec::new(),
             });
 
             let enum_prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
@@ -626,6 +628,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 is_append: false,
                 applies_to: None,
                 in_modes: Vec::new(),
+                modal_values: Vec::new(),
             });
 
             let ct_idx = tree.component_types.alloc(ComponentTypeItem {
@@ -697,6 +700,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 is_append: false,
                 applies_to: None,
                 in_modes: Vec::new(),
+                modal_values: Vec::new(),
             });
 
             let flags_prop_idx = tree.property_associations.alloc(PropertyAssociationItem {
@@ -714,6 +718,7 @@ fn lower_type_def(typedef: &WitTypeDef, tree: &mut ItemTree) -> Option<ItemRef> 
                 is_append: false,
                 applies_to: None,
                 in_modes: Vec::new(),
+                modal_values: Vec::new(),
             });
 
             let ct_idx = tree.component_types.alloc(ComponentTypeItem {

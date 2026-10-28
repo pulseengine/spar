@@ -7753,3 +7753,59 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-28T07:37:10Z
     release: v0.48.0
+
+  - id: REQ-AADL-MODAL-PROPERTY-VALUES-001
+    type: requirement
+    title: A modal property value shall apply in the modes it lists, per system operation mode
+    status: implemented
+    description: |-
+      A property association may give one value per mode: `Period => 10 ms in modes (fast), 40 ms in modes (slow);`.
+      MEASURED on origin/main 15645a8 before this change: the parser kept every value with its `in modes` clause (MODAL_PROPERTY_VALUE nodes), but the item-tree lowering stopped at the first clause. The first value won in every mode, the others were dropped, and no diagnostic said so. `spar instance` showed `"Period": "10 ms"`, and `spar analyze --per-som` printed 20.0% utilisation for both SOMs of a 2 ms / (10 | 40 ms) thread.
+      RULE (osate2 @ 87468992ee0d4c4cc856a72bd542899953f088f3):
+      - A modal value applies in the modes it lists. A value with no `in modes` in the same association applies in every other mode. Otherwise there is no value in that mode (PropertyAssociationImpl.java:510-524, valueInMode).
+      - A non-modal value is kept for every SOM; a modal one only for the SOMs its modes map to (CachePropertyAssociationsSwitch.java:328-337).
+      - The first non-append association wins whole; there is no per-mode fall-back to a less specific one (PropertyImpl.java:482-490).
+      - The modes are those of the component that DECLARED the association, selected through the SOM. This is the task statement's rule. OSATE's support for it is partial: CacheContainedPropertyAssociationsSwitch.java:167-168 passes the container as the mode context of a subcomponent's associations, but that parameter is unused in the method body at this commit, and CachePropertyAssociationsSwitch.java:376-381 maps a modal value's modes through the HOLDER's own mode instances.
+      IMPLEMENTATION:
+      - PropertyAssociationItem.modal_values holds every value with its modes. It is filled only when some value has `in modes`, and `value` / `typed_value` / `in_modes` are unchanged.
+      - PropertyMap keeps a side table of ModalBinding (the values plus the declarer) beside the first value, which stays the key's value. A later association or an append clears the table entry.
+      - Declarer: the component itself for type and implementation associations; the enclosing component for subcomponent-level and `applies to` associations; the ancestor's binding for an inherited value.
+      - SystemInstance::properties_in_som(idx, som) returns the map as it reads in one SOM. It is borrowed unchanged when the component has no modal value.
+      - A key whose declarer has no mode selected in the SOM keeps the association's FIRST value, the same as the default path. That is a decision, not OSATE's rule.
+      - `spar analyze --per-som`: scheduling's per-SOM pass reads through it. RTA gained a per-SOM pass, analyze_with with a props closure, that reads Period, Compute_Execution_Time, Deadline, Priority and everything else through it. That pass runs only when the instance has at least one modal value, so the `--per-som` output of every other model is unchanged.
+      - The default (non-per-SOM) path is untouched: it reads the first value as before.
+      - With property provenance (REQ-AADL-PROPERTY-PROVENANCE-001, #535): every value keeps BOTH its PropertySource and its modal binding. PropertyMap::add_modal takes the source, the binding and an optional reference context. insert_inherited carries the ancestor's sources AND its binding, so an inherited modal value is recorded as Inherited and still reads per SOM. PropertyMap equality ignores provenance, which is metadata, but INCLUDES the modal table, because the table decides what a key reads in each SOM. A map without modal values has an empty table, so equality is unchanged for it.
+      EVIDENCE:
+      - crates/spar-cli/tests/modal_property_values.rs has 6 tests. Each counts its SOMs, and each expected figure is hand-computed and differs between the modes. On origin/main: 4 FAILED, 1 passed. The test that passed is the guard for no modal value / no per-SOM RTA, green by construction. The inherited-value test, written later, was checked separately: the main binary prints 20.0% in all 4 SOMs, where 5.0% is expected in two.
+      - Unit tests: 5 lowering tests (lower.rs) and 6 PropertyMap tests (properties.rs). They are new and do not compile on main, so they have no red run.
+      - HAND-CHECK on two corpus models made analysable (a processor, a binding, the missing timing), both binaries, `--per-som`:
+        - Issue1616.aadl (CET 200 ms in LO / 300 ms in HI on thread1; Period 1000 ms added). Main prints 20.0% in all 8 SOMs. The branch prints 20.0% where group1, the declarer and middle SOM component, is LO and 30.0% where it is HI, with RTA 200 / 300 ms to match.
+        - ExplicitMapping.aadl (CET 100 ms added). t2's own Period (10000 ms in x1 / 2000 ms in x2): main 1.0% everywhere, branch 1.0% / 5.0% by t2's mode. t1's value is declared in main.impl, which has no modes, so the branch keeps the FIRST value, 1000 ms (10.0%), in every SOM. OSATE maps it through t1's derived modes. This is the not-covered case below.
+      - CORPUS, default analyze (runfull.sh + cmpdirs.sh over all 2091 tracked .aadl): 1554 runs, 1514 instantiated, 1550 output files, differing=0, binary=0, only_in=0, both against 15645a8 and, after the rebase onto #535, against b2225ea.
+      - `--per-som` over the 32 files containing `in modes`, less multiModalPingPong.aadl (a debug per-SOM run passed 20 minutes and was stopped): 39 runs, differing=0. No corpus model has a modal value on a property that scheduling or RTA reads together with the rest of the inputs those analyses need.
+      - MUTANTS: cargo-mutants 27, --in-diff against base 15645a8, --test-workspace=true. origin/main moved to ef4141c (#535) mid-task, so `git diff origin/main` would have mutated #535's code; the base was pinned instead.
+        - Run 1 (77 mutants, split in two by a full disk, the second half with --iterate, --timeout 300): 43 caught, 24 unviable, 8 timeouts (the workspace test took up to 276 s under load), 2 missed.
+        - Run 2 (the 10 not caught, --timeout 900, with a new lowering test comparing each modal value with the same value written alone): 4 caught, including the value-arm survivor; 5 missed; 1 not run (disk full).
+        - Of the 4 lowering misses, 3 were equivalent guards on tokens before `=>`. The 4th, deleting the CONSTANT_KW arm, was a real gap: `constant` would have leaked into the value text. A constant / `+=>` test closes it, and the loop was rewritten to skip to the arrow.
+        - Run 3 (extract_modal_values as rewritten): 11 mutants, 9 caught, 2 unviable, 0 missed. It supersedes the 3 equivalent guards and the mutant run 2 did not run.
+        - Remaining survivor: the pre-existing `applies to` whitespace guard in push_property_association (instance.rs). It is equivalent for any parsable input, because the lowering never yields a whitespace-only path.
+        - FINAL, after the rebase onto b2225ea (#535 provenance): remote_mutants.sh on mini-one, --in-diff against origin/main b2225ea, --test-workspace=true, --timeout 300. 77 mutants: 71 caught, 6 unviable, 0 missed, 0 timeouts. The whitespace-guard mutant is now caught, both `true` and `false`: with #535 a queued value's provenance differs from a direct one.
+      NOT COVERED:
+      - Modal values on connections, features and flows: not recorded (mode context None).
+      - `in binding`.
+      - `+=>` on a modal value: OSATE rejects it; here the key reverts to its non-modal reading.
+      - Mode mappings `in modes (a => b)` inside a value.
+      - Derived `requires modes`, whose modes belong to the holder rather than the declarer (osate2 ExplicitMapping.aadl): the declarer has no selected mode, so the association's FIRST value is kept (a named decision, not OSATE's rule). The same happens on a SOM-truncated model, where compute_soms stops before the later modal components.
+      - Analyses other than scheduling and RTA, and `spar instance` JSON, still show the first value.
+      - The default path's "modal property evaluation is not yet fully supported" note is unchanged.
+    tags: [aadl, properties, modes, analysis]
+    links:
+      - type: traces-to
+        target: REQ-HIR-SOM-COUNT-CHECKED-001
+      - type: traces-to
+        target: REQ-AADL-PROPERTY-INHERIT-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T05:13:21Z
+    release: v0.48.0

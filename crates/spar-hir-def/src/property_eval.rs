@@ -248,6 +248,7 @@ mod tests {
             is_append: false,
             applies_to: None,
             in_modes: vec![],
+            modal_values: Vec::new(),
         }
     }
 
