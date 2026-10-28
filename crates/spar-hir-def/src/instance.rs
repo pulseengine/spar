@@ -6808,4 +6808,36 @@ end Pv;
             }]
         );
     }
+
+    /// A blank `applies to` path is no contained association: the value stays
+    /// on its declarer as an implementation value, not routed through the
+    /// applies-to resolver as an unresolved path. The AADL parser never yields
+    /// a blank path, but spar-sysml2 builds `PropertyAssociationItem`s
+    /// directly, so the guard in `push_property_association` is reachable.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_blank_applies_to_path_stays_an_implementation_value() {
+        let src = "package P\npublic\n  system S\n  end S;\n  system implementation S.i\n    properties\n      Period => 10 ms;\n  end S.i;\nend P;\n";
+        let db = crate::HirDefDatabase::default();
+        let file = spar_base_db::SourceFile::new(&db, "blank.aadl".to_string(), src.to_string());
+        let root = spar_base_db::parse_file(&db, file).syntax_node();
+        let mut tree = crate::item_tree::lower::lower_file(&root);
+        let pas: Vec<_> = tree.property_associations.iter().map(|(i, _)| i).collect();
+        assert_eq!(pas.len(), 1, "the model declares exactly one association");
+        tree.property_associations[pas[0]].applies_to = Some("   ".to_string());
+        let scope = GlobalScope::from_trees(vec![std::sync::Arc::new(tree)]);
+        let inst =
+            SystemInstance::instantiate(&scope, &Name::new("P"), &Name::new("S"), &Name::new("i"));
+        let props = inst.properties_for(inst.root);
+        let key = (
+            crate::resolver::CiName::from_str(""),
+            crate::resolver::CiName::new(&Name::new("Period")),
+        );
+        assert_eq!(
+            props.sources_for_key(&key),
+            &[PropertySource::Implementation {
+                classifier: "P::S.i".to_string()
+            }]
+        );
+    }
 }
