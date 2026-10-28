@@ -40,14 +40,18 @@
 //! |---|---|
 //! | 0 | Move is admissible: no overlay violations, no error-severity diagnostics |
 //! | 1 | One or more analysis diagnostics at `Severity::Error` |
-//! | 2 | Overlay violations (frozen / allowed-targets) |
-//! | 2 | Usage error: an unknown option or subcommand (#508) |
+//! | 2 | Usage error: an unknown option or subcommand (#508), and nothing else |
+//! | 3 | Overlay violations (frozen / allowed-targets) |
 //!
-//! Exit 2 is overloaded: an unknown option or subcommand exits 2 as on every
-//! other spar command (#508), so a caller cannot tell it from an overlay
-//! violation by the code alone. The two are told apart on stderr
-//! (`Unknown option:` / `Unknown moves subcommand:`). Every other argument
-//! error (a missing value, a missing `--root`) still exits 1.
+//! One code per failure kind, the PulseEngine CLI convention: 2 is a usage
+//! error on every spar command, so a caller can branch on the code alone.
+//! Until v0.48.0 an overlay violation also exited 2, which made a FINDING
+//! indistinguishable from a mistyped flag except by scraping stderr; it now
+//! exits 3. This was a deliberate BREAKING change: a script that tested for
+//! `2` to detect an overlay violation must test for `3`. The MCP tool
+//! `spar.verify_move` mirrors the code as `cli_exit_code`, so it reports 3
+//! too. The other argument errors (a missing value, a missing `--root`, a
+//! name that does not resolve) still exit 1; they are not split out here.
 //!
 //! Overlay violations dominate analysis errors for exit-code purposes
 //! because they are *constraint-layer* rejections — the move would never
@@ -445,7 +449,8 @@ pub fn run_verify(args: VerifyArgs) -> Result<i32, MovesError> {
 /// code documented in the module-level table.
 fn exit_code_for(report: &MoveVerifyReport, overlay_diags: &[OverlayDiagnostic]) -> i32 {
     if !overlay_diags.is_empty() {
-        return 2;
+        // 3, not 2: 2 is the usage-error code on every spar command.
+        return 3;
     }
     let any_error = report.violations.iter().any(|v| {
         matches!(
@@ -917,7 +922,8 @@ pub fn print_verify_usage() {
     eprintln!("Exit codes:");
     eprintln!("  0  move is admissible (no violations, no analysis errors)");
     eprintln!("  1  one or more analysis-error-severity diagnostics");
-    eprintln!("  2  overlay violations (Frozen / Allowed_Targets), or an unknown option");
+    eprintln!("  2  usage error (an unknown option)");
+    eprintln!("  3  overlay violations (Frozen / Allowed_Targets)");
 }
 
 /// Manual-arg parser for `spar moves` matching the rest of `main.rs`'s
@@ -1184,8 +1190,11 @@ pub struct MoveEnumerateReport {
 /// | Code | Meaning |
 /// |---|---|
 /// | 0 | At least one admissible candidate (`valid >= 1`) |
-/// | 1 | All candidates failed analysis or produced no admissible move |
-/// | 2 | Input resolution failed (component / model / format) |
+/// | 1 | All candidates failed analysis or produced no admissible move, or input resolution failed (component / model / format) |
+/// | 2 | Usage error: an unknown option (#508) |
+///
+/// Enumerate never exits 3: a candidate's overlay violation is reported in
+/// that candidate's record, not as the process exit code.
 pub fn run_enumerate(args: EnumerateArgs) -> Result<i32, MovesError> {
     let format = args.format.clone();
     let report = enumerate_pipeline(&args)?;

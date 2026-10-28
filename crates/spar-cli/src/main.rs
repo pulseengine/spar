@@ -129,16 +129,13 @@ fn main() {
             // Exit 2, not 1 (#422): one failure, one exit code across the
             // toolchain, and ordeal already uses 2.
             //
-            // NOT claimed: that 2 means "usage error" binary-wide. It does
-            // not. `spar moves verify` returns 2 for a FINDING (overlay
-            // diagnostics, moves.rs `exit_code_for`) and 1 for argument
-            // errors — the opposite convention, in this same executable. An
-            // earlier version of this comment asserted the clean split and
-            // was simply wrong. Reconciling `moves` is out of scope for #422;
-            // what is fixed here is that the top-level dispatcher matches the
-            // org baseline. Since #508 an unknown option or subcommand under
-            // `moves` exits 2 as well, so for `moves` 2 means EITHER a finding
-            // or a usage error; its other argument errors are still 1.
+            // Until v0.48.0 `spar moves verify` also returned 2 for a FINDING
+            // (overlay diagnostics), so 2 did not mean "usage error"
+            // binary-wide. It now returns 3 for that finding (moves.rs
+            // `exit_code_for`), one code per failure kind, so 2 is a usage
+            // error everywhere. NOT claimed: that every other argument error
+            // is 2. Under `moves`, a missing value, a missing `--root` or a
+            // name that does not resolve still exits 1.
             process::exit(2);
         }
     }

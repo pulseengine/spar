@@ -16,8 +16,11 @@
 //! Output: the same `MoveVerifyReport` shape produced by
 //! `spar moves verify --format json`. The exit-code field is preserved
 //! as `cli_exit_code` so an agent can quickly distinguish overlay
-//! violations (2) from analysis errors (1) from clean runs (0) without
-//! re-deriving from `violations[*].kind`.
+//! violations (3) from analysis errors (1) from clean runs (0) without
+//! re-deriving from `violations[*].kind`. Overlay violations were 2 until
+//! v0.48.0; they moved to 3 so that 2 means a usage error on every spar
+//! command (BREAKING for an agent that branched on `cli_exit_code == 2`).
+//! This tool never yields a usage error: bad input is a `ToolResult::Error`.
 
 use serde_json::{Value, json};
 use spar_cli::moves::{VerifyArgs, verify_pipeline};

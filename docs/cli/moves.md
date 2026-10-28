@@ -41,9 +41,17 @@ spar moves verify \
 - `0` — OK, no violations.
 - `1` — Analysis-error severity diagnostic produced (e.g. RTA reports a
   deadline miss after the move).
-- `2` — Binding-violation detected (Frozen / Allowed_Targets).
-- non-zero from `1`/`2` — argument errors (missing component, unknown
-  target, etc.) report descriptive text on stderr.
+- `2` — usage error: an unknown option or subcommand. `2` means a usage
+  error on every spar command and nothing else.
+- `3` — Binding-violation detected (Frozen / Allowed_Targets).
+- other argument errors (a missing value, a missing `--root`, a component or
+  target that does not resolve) exit `1` with descriptive text on stderr.
+
+One code per failure kind, the PulseEngine CLI convention, so a caller can
+branch on the code without reading stderr. **BREAKING in v0.48.0:** a
+binding violation exited `2` before, the same code as a mistyped flag; it now
+exits `3`. A script that tested for `2` must test for `3`. The MCP tool
+`spar.verify_move` mirrors this code as `cli_exit_code`.
 
 ### Output (JSON)
 
@@ -133,8 +141,11 @@ is better), then by FQN.
 ### Exit codes
 
 - `0` — at least one valid candidate found.
-- `1` — argument errors (unknown component, malformed flag).
-- enumeration with zero valid candidates still exits `0`, with `valid: 0`.
+- `1` — zero valid candidates (the report still prints, with `valid: 0`), or
+  an argument error (unknown component, a missing value).
+- `2` — usage error: an unknown option.
+- enumerate never exits `3`: a candidate's binding violation is recorded in
+  that candidate, not raised as the exit code.
 
 ## Worked example
 

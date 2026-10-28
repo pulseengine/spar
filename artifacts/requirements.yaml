@@ -1249,28 +1249,7 @@ artifacts:
   - id: REQ-MIGRATION-005
     type: requirement
     title: spar moves verify CLI — hypothetical-rebinding oracle
-    description: >
-      System shall expose a `spar moves verify --component X --to Y`
-      CLI subcommand that returns a structured pass/fail report with
-      violations, using the BindingOverlay from REQ-MIGRATION-004.
-      The pipeline parses the AADL model, instantiates the requested
-      root, resolves --component and --to to ComponentInstanceIdx
-      values via FQN matching against the instance hierarchy, builds a
-      single-move overlay, runs overlay validation (frozen /
-      allowed-targets), and runs the standard analysis-pass suite
-      (RTA, latency, bandwidth, EMV2, ARINC653, …) against the
-      un-overlayed instance for commit 3. The report carries `ok`,
-      component / target FQNs, a Violation list (Frozen /
-      AllowedTargets / AnalysisError variants), and a per-pass
-      diagnostic stream keyed by analysis name. Output is rendered as
-      either text (developer-friendly) or JSON (canonical
-      machine-readable contract for the v0.9.0 MCP `spar.verify_move`
-      tool surface). Exit codes: 0 = ok, 1 = analysis errors, 2 =
-      overlay violations. For commit 3 only the HIR-level
-      property-lookup helper (`actual_processor_binding_with_overlay`)
-      is overlay-aware; widening the analysis suite itself to consume
-      the overlay is commit 4. Per Track E commit 3/8 of the v0.8.0
-      migration design research (§6.3).
+    description: "System shall expose a `spar moves verify --component X --to Y` CLI subcommand that returns a structured pass/fail report with violations, using the BindingOverlay from REQ-MIGRATION-004. The pipeline parses the AADL model, instantiates the requested root, resolves --component and --to to ComponentInstanceIdx values via FQN matching against the instance hierarchy, builds a single-move overlay, runs overlay validation (frozen / allowed-targets), and runs the standard analysis-pass suite (RTA, latency, bandwidth, EMV2, ARINC653, …) against the un-overlayed instance for commit 3. The report carries `ok`, component / target FQNs, a Violation list (Frozen / AllowedTargets / AnalysisError variants), and a per-pass diagnostic stream keyed by analysis name. Output is rendered as either text (developer-friendly) or JSON (canonical machine-readable contract for the v0.9.0 MCP `spar.verify_move` tool surface). Exit codes as first shipped: 0 = ok, 1 = analysis errors, 2 = overlay violations. For commit 3 only the HIR-level property-lookup helper (`actual_processor_binding_with_overlay`) is overlay-aware; widening the analysis suite itself to consume the overlay is commit 4. Per Track E commit 3/8 of the v0.8.0 migration design research (§6.3). UPDATE (v0.48.0, BREAKING): overlay violations now exit 3, not 2. Exit codes are 0 = ok, 1 = analysis errors (or an argument error such as a missing value or an unresolved name), 2 = usage error (an unknown option or subcommand, #508), 3 = overlay violations. Reason: one code per failure kind, the PulseEngine CLI convention; under the old table 2 meant both a FINDING and a mistyped flag, which a caller could tell apart only on stderr. #422 set the org baseline that an unknown command exits 2; this makes `moves` conform to it. The MCP `spar.verify_move` tool mirrors the code as `cli_exit_code` (3 for an overlay violation)."
     status: implemented
     tags: [migration, track-e, v080, cli]
 
@@ -7646,7 +7625,7 @@ artifacts:
     type: requirement
     title: Every spar subcommand shall reject an unknown option with exit 2, naming it on stderr
     status: implemented
-    description: "The PulseEngine CLI baseline: `--help` exits 0, an unknown option or subcommand exits 2 with usage on stderr. Measured on the published v0.47.1 binary over the 19 subcommands `spar --help` lists: `--help` exited 0 on all 19 (#512), but an unknown option exited 2 on only 14. `sysml2`, `moves`, `insight` and `mcp` exited 1, and `lsp` exited 0: it ignored the flag and started the server. This holds at every nesting level (`sysml2 parse|lower`, `moves verify|enumerate`, `insight verify-trace`, `mcp serve`), and an unknown nested SUBCOMMAND exits 2 too. `lsp` and `mcp serve` check their arguments BEFORE the server reads stdin. `spar lsp --stdio` is accepted, because vscode-languageclient appends `--stdio` to an executable server under TransportKind.stdio and the VS Code extension launches spar that way. The invariant is derived from the source, not restated: the test reads the subcommand list from `spar --help`, so a new subcommand that does not conform fails it. NOT CLAIMED: (1) a usage block on stderr for the 14 commands that already exited 2; they print `Unknown option: X` only; (2) that 2 means usage error everywhere: under `moves`, 2 is also an overlay-violation FINDING, and moves' other argument errors stay 1; (3) the standalone `spar-mcp` binary, which is not a `spar` subcommand."
+    description: "The PulseEngine CLI baseline: `--help` exits 0, an unknown option or subcommand exits 2 with usage on stderr. Measured on the published v0.47.1 binary over the 19 subcommands `spar --help` lists: `--help` exited 0 on all 19 (#512), but an unknown option exited 2 on only 14. `sysml2`, `moves`, `insight` and `mcp` exited 1, and `lsp` exited 0: it ignored the flag and started the server. This holds at every nesting level (`sysml2 parse|lower`, `moves verify|enumerate`, `insight verify-trace`, `mcp serve`), and an unknown nested SUBCOMMAND exits 2 too. `lsp` and `mcp serve` check their arguments BEFORE the server reads stdin. `spar lsp --stdio` is accepted, because vscode-languageclient appends `--stdio` to an executable server under TransportKind.stdio and the VS Code extension launches spar that way. The invariant is derived from the source, not restated: the test reads the subcommand list from `spar --help`, so a new subcommand that does not conform fails it. NOT CLAIMED: (1) a usage block on stderr for the 14 commands that already exited 2; they print `Unknown option: X` only; (2) that 2 means usage error everywhere: under `moves`, 2 is also an overlay-violation FINDING, and moves' other argument errors stay 1; (3) the standalone `spar-mcp` binary, which is not a `spar` subcommand. UPDATE (v0.48.0, BREAKING): NOT CLAIMED (2) is SUPERSEDED. `spar moves verify` now exits 3 for an overlay-violation FINDING (Frozen / Allowed_Targets), not 2, so 2 means a usage error (an unknown option or subcommand) on every spar command, `moves` included. Reason: one code per failure kind, the PulseEngine CLI convention, so a caller can branch on the code without reading stderr. A script or agent that tested for 2 to detect an overlay violation must test for 3; the MCP tool `spar.verify_move` mirrors the code as `cli_exit_code` and reports 3 too. Still NOT CLAIMED: that every argument error is 2. Under `moves`, a missing value, a missing `--root` or a name that does not resolve still exits 1. Oracle: `an_overlay_violation_exits_3_and_an_unknown_option_exits_2` in crates/spar-cli/tests/moves_verify.rs runs the same `moves verify` invocation with and without a stray `--bogus` and requires 3 and 2 respectively; `verify_tool_reports_cli_exit_code_3_for_an_overlay_violation` in crates/spar-mcp/tests/in_process_tests.rs pins the MCP mirror. The repo keeps no CHANGELOG past 0.9.3 (the signed tag is the release record), so this requirement carries the BREAKING note."
     tags: [cli, ux, guardrail]
     links:
       - type: traces-to
