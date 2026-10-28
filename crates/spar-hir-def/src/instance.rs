@@ -17,7 +17,7 @@ use crate::item_tree::{
     FeatureKind, FlowKind,
 };
 use crate::name::{ClassifierRef, Name};
-use crate::properties::PropertyMap;
+use crate::properties::{PropertyMap, PropertySource};
 use crate::resolver::{GlobalScope, ResolvedClassifier};
 
 pub type ComponentInstanceIdx = Idx<ComponentInstance>;
@@ -1338,6 +1338,21 @@ fn walk_children(
     walk_children(inst, child, rest)
 }
 
+/// `Type.impl` of the implementation in `tree` that declares subcomponent
+/// `si`, for naming a refined-away original (REQ-AADL-PROPERTY-PROVENANCE-001).
+fn declaring_impl_name(
+    tree: &crate::item_tree::ItemTree,
+    si: crate::item_tree::SubcomponentIdx,
+) -> String {
+    tree.component_impls
+        .iter()
+        .find(|(_, ci)| ci.subcomponents.contains(&si))
+        .map_or_else(
+            || "?".to_string(),
+            |(_, ci)| format!("{}.{}", ci.type_name, ci.impl_name),
+        )
+}
+
 fn make_expanded_name(fg_name: &Name, prefix: &Option<Name>, feature_name: &Name) -> Name {
     match prefix {
         Some(p) => Name::new(&format!("{}.{}.{}", fg_name, p, feature_name)),
@@ -1983,6 +1998,7 @@ impl<'a> Builder<'a> {
                                 idx,
                                 &mut map,
                                 &mut self.pending_applies_to,
+                                PropertySource::DeclaredLocal,
                             );
                         }
                         if !map.is_empty() {
@@ -2012,6 +2028,7 @@ impl<'a> Builder<'a> {
                                 idx,
                                 &mut properties,
                                 &mut ignored_applies_to,
+                                PropertySource::DeclaredLocal,
                             );
                         }
                     }
@@ -2591,14 +2608,16 @@ impl<'a> Builder<'a> {
     /// Collect property associations from a component type's extends chain.
     ///
     /// Walks the chain from the root ancestor to the given type, returning
-    /// `(tree_idx, PropertyAssociationIdx)` pairs in inheritance order
-    /// (grandparent first, self last) so that later values override earlier.
+    /// `(tree_idx, PropertyAssociationIdx, declaring classifier)` triples in
+    /// inheritance order (grandparent first, self last) so that later values
+    /// override earlier. The classifier is `Pkg::Type`, the one that wrote the
+    /// association (REQ-AADL-PROPERTY-PROVENANCE-001).
     fn collect_type_chain_properties(
         &self,
         loc: crate::resolver::ItemLoc,
         package: &Name,
         visited: &mut Vec<String>,
-    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx)> {
+    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx, String)> {
         let mut result = Vec::new();
 
         let ct = match self.scope.get_component_type(loc) {
@@ -2627,8 +2646,9 @@ impl<'a> Builder<'a> {
         // Then append own properties (override parent)
         // Re-fetch the type since we can't hold the borrow across the recursive call
         if let Some(ct) = self.scope.get_component_type(loc) {
+            let classifier = format!("{package}::{}", ct.name);
             for &pa_idx in &ct.property_associations {
-                result.push((loc.tree, pa_idx));
+                result.push((loc.tree, pa_idx, classifier.clone()));
             }
         }
 
@@ -2643,7 +2663,7 @@ impl<'a> Builder<'a> {
         loc: crate::resolver::ItemLoc,
         package: &Name,
         visited: &mut Vec<String>,
-    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx)> {
+    ) -> Vec<(usize, crate::item_tree::PropertyAssociationIdx, String)> {
         let mut result = Vec::new();
 
         let ci = match self.scope.get_component_impl(loc) {
@@ -2671,8 +2691,9 @@ impl<'a> Builder<'a> {
 
         // Then append own properties (override parent)
         if let Some(ci) = self.scope.get_component_impl(loc) {
+            let classifier = format!("{package}::{}.{}", ci.type_name, ci.impl_name);
             for &pa_idx in &ci.property_associations {
-                result.push((loc.tree, pa_idx));
+                result.push((loc.tree, pa_idx, classifier.clone()));
             }
         }
 
@@ -2695,7 +2716,7 @@ impl<'a> Builder<'a> {
             let mut visited = Vec::new();
             let type_props =
                 self.collect_type_chain_properties(loc, resolved_package, &mut visited);
-            for (tree_idx, pa_idx) in type_props {
+            for (tree_idx, pa_idx, classifier) in type_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
                     Self::push_property_association(
@@ -2703,6 +2724,7 @@ impl<'a> Builder<'a> {
                         idx,
                         &mut map,
                         &mut self.pending_applies_to,
+                        PropertySource::Classifier { classifier },
                     );
                 }
             }
@@ -2713,7 +2735,7 @@ impl<'a> Builder<'a> {
             let mut visited = Vec::new();
             let impl_props =
                 self.collect_impl_chain_properties(loc, resolved_package, &mut visited);
-            for (tree_idx, pa_idx) in impl_props {
+            for (tree_idx, pa_idx, classifier) in impl_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
                     Self::push_property_association(
@@ -2721,6 +2743,7 @@ impl<'a> Builder<'a> {
                         idx,
                         &mut map,
                         &mut self.pending_applies_to,
+                        PropertySource::Implementation { classifier },
                     );
                 }
             }
@@ -2757,9 +2780,26 @@ impl<'a> Builder<'a> {
         for (t, si) in decls {
             if let Some(tree) = self.scope.tree(t) {
                 let sub = &tree.subcomponents[si];
+                // The refinement's own block is local; a refined-away
+                // original's values reach it by refinement.
+                let refined_away = (t, si) != (tree_idx, sub_idx);
                 for &pa_idx in &sub.property_associations {
                     let pa = &tree.property_associations[pa_idx];
-                    Self::push_property_association(pa, idx, map, &mut self.pending_applies_to);
+                    let source = if refined_away {
+                        PropertySource::Refined {
+                            subcomponent: sub.name.as_str().to_string(),
+                            declared_in: declaring_impl_name(tree, si),
+                        }
+                    } else {
+                        PropertySource::DeclaredLocal
+                    };
+                    Self::push_property_association(
+                        pa,
+                        idx,
+                        map,
+                        &mut self.pending_applies_to,
+                        source,
+                    );
                 }
             }
         }
@@ -2782,7 +2822,7 @@ impl<'a> Builder<'a> {
         if let ResolvedClassifier::ComponentType { loc, .. } = &type_resolved {
             let mut visited = Vec::new();
             let type_props = self.collect_type_chain_properties(*loc, package, &mut visited);
-            for (tree_idx, pa_idx) in type_props {
+            for (tree_idx, pa_idx, classifier) in type_props {
                 if let Some(tree) = self.scope.tree(tree_idx) {
                     let pa = &tree.property_associations[pa_idx];
                     Self::push_property_association(
@@ -2790,6 +2830,7 @@ impl<'a> Builder<'a> {
                         idx,
                         &mut map,
                         &mut self.pending_applies_to,
+                        PropertySource::Classifier { classifier },
                     );
                 }
             }
@@ -2826,6 +2867,9 @@ impl<'a> Builder<'a> {
     /// `owner` is the component on which the association is declared; the
     /// pending queue later walks the dotted `applies_to` path starting from
     /// `owner` to find the target instance.
+    ///
+    /// `source` is where a value added to `map` came from. A queued
+    /// `applies to` value takes its source when it is attached instead.
     fn push_property_association(
         pa: &crate::item_tree::PropertyAssociationItem,
         owner: ComponentInstanceIdx,
@@ -2835,6 +2879,7 @@ impl<'a> Builder<'a> {
             String,
             crate::properties::PropertyValue,
         )>,
+        source: PropertySource,
     ) {
         let prop = crate::properties::PropertyValue {
             name: pa.name.clone(),
@@ -2846,7 +2891,7 @@ impl<'a> Builder<'a> {
             Some(path) if !path.trim().is_empty() => {
                 pending.push((owner, path.to_string(), prop));
             }
-            _ => map.add(prop),
+            _ => map.add_from(prop, source),
         }
     }
 
@@ -2941,12 +2986,17 @@ impl<'a> Builder<'a> {
         use crate::resolver::CiName;
 
         type Key = (CiName, CiName);
-        let mut additions: Vec<(
+        /// `(inheritor, key, values, reference context, ancestor, the
+        /// ancestor's sources for the values)`.
+        type Addition = (
             ComponentInstanceIdx,
             Key,
             Vec<PropertyValue>,
             ComponentInstanceIdx,
-        )> = Vec::new();
+            ComponentInstanceIdx,
+            Vec<PropertySource>,
+        );
+        let mut additions: Vec<Addition> = Vec::new();
 
         for (idx, comp) in self.components.iter() {
             let is_impl = comp.impl_name.is_some();
@@ -2990,7 +3040,8 @@ impl<'a> Builder<'a> {
                         for key in from {
                             if let Some(values) = map.values_for_key(key) {
                                 let ctx = map.reference_context_for_key(key).unwrap_or(a);
-                                additions.push((idx, key.clone(), values.clone(), ctx));
+                                let origins = map.sources_for_key(key).to_vec();
+                                additions.push((idx, key.clone(), values.clone(), ctx, a, origins));
                             }
                         }
                         break;
@@ -2999,11 +3050,11 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        for (idx, key, values, ctx) in additions {
+        for (idx, key, values, ctx, ancestor, origins) in additions {
             self.property_maps
                 .entry(idx)
                 .or_default()
-                .insert_inherited(key, values, ctx);
+                .insert_inherited(key, values, ctx, ancestor, &origins);
         }
     }
 
@@ -3039,7 +3090,7 @@ impl<'a> Builder<'a> {
                 self.feature_property_maps
                     .entry(feature)
                     .or_default()
-                    .add(prop);
+                    .add_from(prop, PropertySource::Contained { declarer: owner });
             }
             AppliesTarget::Connection(connection) => {
                 // Last segment named a connection — store per-connection (#237).
@@ -3066,7 +3117,12 @@ impl<'a> Builder<'a> {
                 if !(prop.is_append && holds) {
                     self.applies_to_fallbacks.insert((owner, key));
                 }
-                self.property_maps.entry(owner).or_default().add(prop);
+                self.property_maps.entry(owner).or_default().add_from(
+                    prop,
+                    PropertySource::ContainedUnresolved {
+                        path: path.to_string(),
+                    },
+                );
                 self.diagnostics.push(InstanceDiagnostic {
                     message: format!(
                         "applies_to path '{path}' could not be resolved to a component instance or feature"
@@ -6581,6 +6637,89 @@ end A;
         assert_eq!(
             inst.properties_for(t).get("", "Dispatch_Offset"),
             Some("3 ms")
+        );
+    }
+
+    // ── provenance (REQ-AADL-PROPERTY-PROVENANCE-001) ───────────────────
+
+    // rivet: verifies REQ-AADL-PROPERTY-PROVENANCE-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn feature_connection_and_unresolved_values_record_their_source() {
+        use crate::properties::PropertySource;
+        use crate::resolver::CiName;
+        let src = r#"
+package Pv
+public
+  data D
+  end D;
+  thread T
+    features
+      tin: in data port D;
+      tout: out data port D;
+  end T;
+  thread implementation T.i
+  end T.i;
+  process Proc
+    features
+      pin: in data port D;
+  end Proc;
+  process implementation Proc.i
+    subcomponents
+      a: thread T.i;
+      b: thread T.i;
+    connections
+      c1: port a.tout -> b.tin { Latency => 1 ms .. 2 ms; };
+      c2: port a.tout -> b.tin;
+    properties
+      Latency => 3 ms .. 4 ms applies to c2;
+      Source_Name => "x" applies to pin;
+      Source_Text => ("y") applies to nosuch;
+  end Proc.i;
+  system S
+  end S;
+  system implementation S.i
+    subcomponents
+      proc: process Proc.i;
+  end S.i;
+end Pv;
+"#;
+        let inst = instantiate_aadl(src, "Pv", "S", "i");
+        let proc_ = by_path(&inst, "S.i/proc");
+        let key = |n: &str| (CiName::from_str(""), CiName::from_str(n));
+        let conn = |n: &str| {
+            inst.connections
+                .iter()
+                .find(|(_, c)| c.name.as_str() == n)
+                .unwrap()
+                .0
+        };
+        assert_eq!(
+            inst.properties_for_connection(conn("c1"))
+                .sources_for_key(&key("Latency")),
+            [PropertySource::DeclaredLocal]
+        );
+        assert_eq!(
+            inst.properties_for_connection(conn("c2"))
+                .sources_for_key(&key("Latency")),
+            [PropertySource::Contained { declarer: proc_ }]
+        );
+        let (pin, _) = inst
+            .features
+            .iter()
+            .find(|(_, f)| f.name.as_str() == "pin")
+            .unwrap();
+        assert_eq!(
+            inst.properties_for_feature(pin)
+                .sources_for_key(&key("Source_Name")),
+            [PropertySource::Contained { declarer: proc_ }]
+        );
+        assert_eq!(
+            inst.properties_for(proc_)
+                .sources_for_key(&key("Source_Text")),
+            [PropertySource::ContainedUnresolved {
+                path: "nosuch".to_string()
+            }]
         );
     }
 }

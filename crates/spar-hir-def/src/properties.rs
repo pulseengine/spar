@@ -30,12 +30,61 @@ pub struct PropertyValue {
     pub is_append: bool,
 }
 
+/// WHERE a property value came from: the mechanism that put it in a map
+/// (REQ-AADL-PROPERTY-PROVENANCE-001).
+///
+/// Recorded at the moment the value is inserted, never reconstructed: each
+/// variant names one of the ways instantiation layers values onto a
+/// component instance. It is metadata only — no analysis reads it, and it
+/// takes no part in [`PropertyMap`] equality.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropertySource {
+    /// Written on the component's classifier: its component TYPE, or a type
+    /// that type extends. `classifier` names the type that wrote it.
+    Classifier { classifier: String },
+    /// Written on the component's IMPLEMENTATION, or an implementation it
+    /// extends. `classifier` names the implementation that wrote it.
+    Implementation { classifier: String },
+    /// Written on the declaration itself: the subcomponent's `{ ... }` block,
+    /// or a connection's / end-to-end flow's own block.
+    DeclaredLocal,
+    /// Written on a subcomponent that this one `refined to` (#496): the
+    /// refinement inherits the original's values. `subcomponent` is the
+    /// original's name, `declared_in` the implementation that declared it.
+    Refined {
+        subcomponent: String,
+        declared_in: String,
+    },
+    /// A contained association, `... applies to <path>`, declared on
+    /// `declarer` — also the component its `reference (...)` terms resolve
+    /// from (REQ-AADL-REF-CONTEXT-001).
+    Contained {
+        declarer: crate::instance::ComponentInstanceIdx,
+    },
+    /// A contained association whose `applies to` path named nothing, kept on
+    /// its declarer as spar's recovery (not AADL semantics).
+    ContainedUnresolved { path: String },
+    /// An `inherit` property taken from the nearest containing component that
+    /// has a value (#460, REQ-AADL-PROPERTY-INHERIT-001). `origin` is how the
+    /// value reached `ancestor`.
+    Inherited {
+        ancestor: crate::instance::ComponentInstanceIdx,
+        origin: Box<PropertySource>,
+    },
+    /// Inserted through [`PropertyMap::add`] by code that states no source:
+    /// tests, overlays, analysis-side rebinding. Never a guess.
+    Unrecorded,
+}
+
 /// A collection of resolved property values for a model element.
 ///
 /// Properties are keyed by `(property_set_ci, property_name_ci)` where
 /// the property set key is empty string for unqualified properties.
 /// Multiple values for the same key are possible via `+=>` append.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// Equality compares the values and their reference contexts only; the
+/// provenance of a value is metadata and never makes two maps differ.
+#[derive(Debug, Clone, Default)]
 pub struct PropertyMap {
     props: FxHashMap<(CiName, CiName), Vec<PropertyValue>>,
     /// The component a key's `reference (...)` values resolve from, when
@@ -44,7 +93,18 @@ pub struct PropertyMap {
     /// the holder itself, which is OSATE's context for every association
     /// that has no `applies to`.
     ref_ctx: FxHashMap<(CiName, CiName), crate::instance::ComponentInstanceIdx>,
+    /// Where each value came from, index-aligned with the key's value list
+    /// in `props` (REQ-AADL-PROPERTY-PROVENANCE-001).
+    sources: FxHashMap<(CiName, CiName), Vec<PropertySource>>,
 }
+
+impl PartialEq for PropertyMap {
+    fn eq(&self, other: &Self) -> bool {
+        self.props == other.props && self.ref_ctx == other.ref_ctx
+    }
+}
+
+impl Eq for PropertyMap {}
 
 impl PropertyMap {
     /// Create a new empty property map.
@@ -61,6 +121,11 @@ impl PropertyMap {
     /// skipped so that downstream analysis passes do not have to guard
     /// against blank strings.
     pub fn add(&mut self, prop: PropertyValue) {
+        self.add_from(prop, PropertySource::Unrecorded);
+    }
+
+    /// [`Self::add`], recording where the value came from.
+    pub fn add_from(&mut self, prop: PropertyValue, source: PropertySource) {
         let value = prop.value.trim().to_string();
         if value.is_empty() {
             return; // Skip empty property values
@@ -75,12 +140,14 @@ impl PropertyMap {
         let key = (set_key, name_key);
 
         if prop.is_append {
+            self.sources.entry(key.clone()).or_default().push(source);
             self.props.entry(key).or_default().push(prop);
         } else {
             // Override: replace all existing values. The replaced values'
-            // reference context goes with them, so a context can never
+            // reference context and sources go with them, so neither can
             // outlive the value it was recorded for.
             self.ref_ctx.remove(&key);
+            self.sources.insert(key.clone(), vec![source]);
             self.props.insert(key, vec![prop]);
         }
     }
@@ -91,7 +158,8 @@ impl PropertyMap {
     /// OSATE resolves a contained association's references "in the context
     /// of the contained PA's owner" (osate2 @ 87468992,
     /// CacheContainedPropertyAssociationsSwitch), so a value attached through
-    /// `applies to` records the declaring component here.
+    /// `applies to` records the declaring component here, and records the
+    /// value's source as [`PropertySource::Contained`] from `ctx`.
     pub fn add_with_reference_context(
         &mut self,
         prop: PropertyValue,
@@ -105,7 +173,7 @@ impl PropertyMap {
             CiName::new(&prop.name.property_name),
         );
         let had_value = !prop.value.trim().is_empty();
-        self.add(prop);
+        self.add_from(prop, PropertySource::Contained { declarer: ctx });
         if had_value {
             self.ref_ctx.insert(key, ctx);
         }
@@ -134,23 +202,49 @@ impl PropertyMap {
     /// the component its `reference (...)` terms resolve from, which is the
     /// DECLARER's context, never the inheriting component. OSATE's inherited
     /// value is already instantiated in the ancestor's context.
+    ///
+    /// `origins` are the ancestor's sources for those values, index-aligned;
+    /// each value is recorded as [`PropertySource::Inherited`] from
+    /// `ancestor`, carrying how it reached the ancestor.
     pub(crate) fn insert_inherited(
         &mut self,
         key: (CiName, CiName),
         values: Vec<PropertyValue>,
         ctx: crate::instance::ComponentInstanceIdx,
+        ancestor: crate::instance::ComponentInstanceIdx,
+        origins: &[PropertySource],
     ) {
+        let sources = (0..values.len())
+            .map(|i| PropertySource::Inherited {
+                ancestor,
+                origin: Box::new(
+                    origins
+                        .get(i)
+                        .cloned()
+                        .unwrap_or(PropertySource::Unrecorded),
+                ),
+            })
+            .collect();
         self.ref_ctx.insert(key.clone(), ctx);
+        self.sources.insert(key.clone(), sources);
         self.props.insert(key, values);
     }
 
+    /// Where each value stored under the key `(set, name)` exactly came
+    /// from, index-aligned with [`Self::values_for_key`]
+    /// (REQ-AADL-PROPERTY-PROVENANCE-001).
+    pub fn sources_for_key(&self, key: &(CiName, CiName)) -> &[PropertySource] {
+        self.sources.get(key).map_or(&[], Vec::as_slice)
+    }
+
     /// The values stored under the key `(set, name)` exactly.
-    pub(crate) fn values_for_key(&self, key: &(CiName, CiName)) -> Option<&Vec<PropertyValue>> {
+    pub fn values_for_key(&self, key: &(CiName, CiName)) -> Option<&Vec<PropertyValue>> {
         self.props.get(key)
     }
 
-    /// The reference context recorded for the key `(set, name)` exactly.
-    pub(crate) fn reference_context_for_key(
+    /// The reference context recorded for the key `(set, name)` exactly,
+    /// when it is not the holder of this map.
+    pub fn reference_context_for_key(
         &self,
         key: &(CiName, CiName),
     ) -> Option<crate::instance::ComponentInstanceIdx> {
@@ -358,5 +452,103 @@ mod tests {
         map.add(make_prop(Some("Timing"), "Period", "10 ms", false));
         assert_eq!(map.get("Timing", "Period"), Some("10 ms"));
         assert_eq!(map.len(), 1);
+    }
+
+    // ── provenance (REQ-AADL-PROPERTY-PROVENANCE-001) ───────────────────
+
+    fn key(set: &str, name: &str) -> (CiName, CiName) {
+        (CiName::from_str(set), CiName::from_str(name))
+    }
+
+    fn cls(c: &str) -> PropertySource {
+        PropertySource::Classifier {
+            classifier: c.to_string(),
+        }
+    }
+
+    fn idx(n: u32) -> crate::instance::ComponentInstanceIdx {
+        la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(n))
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-PROVENANCE-001
+    #[test]
+    fn sources_follow_override_and_append() {
+        let mut map = PropertyMap::new();
+        map.add_from(make_prop(None, "Ports", "p1", false), cls("A"));
+        map.add_from(
+            make_prop(None, "Ports", "p2", true),
+            PropertySource::DeclaredLocal,
+        );
+        assert_eq!(
+            map.sources_for_key(&key("", "Ports")),
+            [cls("A"), PropertySource::DeclaredLocal],
+            "an append adds its own source beside the existing one"
+        );
+        map.add_from(make_prop(None, "Ports", "p3", false), cls("B"));
+        assert_eq!(
+            map.sources_for_key(&key("", "Ports")),
+            [cls("B")],
+            "an override replaces every source with its own"
+        );
+        // An empty value records nothing, so the sources stay aligned.
+        map.add_from(make_prop(None, "Ports", "  ", true), cls("C"));
+        assert_eq!(map.sources_for_key(&key("", "Ports")), [cls("B")]);
+        assert_eq!(map.sources_for_key(&key("", "Other")), []);
+        // Plain `add` states no source.
+        map.add(make_prop(None, "Other", "x", false));
+        assert_eq!(
+            map.sources_for_key(&key("", "Other")),
+            [PropertySource::Unrecorded]
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-PROVENANCE-001
+    #[test]
+    fn a_contained_value_records_its_declarer_and_an_inherited_one_its_ancestor() {
+        let mut map = PropertyMap::new();
+        map.add_with_reference_context(make_prop(None, "B", "reference (x)", false), idx(3));
+        assert_eq!(
+            map.sources_for_key(&key("", "B")),
+            [PropertySource::Contained { declarer: idx(3) }]
+        );
+        map.insert_inherited(
+            key("", "I"),
+            vec![
+                make_prop(None, "I", "a", false),
+                make_prop(None, "I", "b", true),
+            ],
+            idx(1),
+            idx(2),
+            &[cls("T"), PropertySource::DeclaredLocal],
+        );
+        assert_eq!(
+            map.sources_for_key(&key("", "I")),
+            [
+                PropertySource::Inherited {
+                    ancestor: idx(2),
+                    origin: Box::new(cls("T")),
+                },
+                PropertySource::Inherited {
+                    ancestor: idx(2),
+                    origin: Box::new(PropertySource::DeclaredLocal),
+                },
+            ]
+        );
+        assert_eq!(map.reference_context_for_key(&key("", "I")), Some(idx(1)));
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-PROVENANCE-001
+    #[test]
+    fn provenance_takes_no_part_in_equality() {
+        let mut a = PropertyMap::new();
+        let mut b = PropertyMap::new();
+        a.add_from(make_prop(None, "P", "1", false), cls("A"));
+        b.add_from(make_prop(None, "P", "1", false), cls("B"));
+        assert_eq!(a, b, "the same values from different sources are equal");
+        b.add(make_prop(None, "P", "2", false));
+        assert_ne!(a, b, "different values are not");
+        let mut c = PropertyMap::new();
+        c.add_with_reference_context(make_prop(None, "P", "1", false), idx(0));
+        assert_ne!(a, c, "a different reference context is not");
     }
 }
