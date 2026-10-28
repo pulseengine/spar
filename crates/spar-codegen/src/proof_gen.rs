@@ -672,6 +672,9 @@ end DefaultPkg;
     /// letter, so `<name>_scheduling` is a Lean module and namespace stem and
     /// `<name>_meets_deadline` a Lean theorem name.
     fn assert_valid_stem(encoded: &str, from: &[String]) {
+        // `from` is read only by the assert messages, which Kani's build
+        // drops; without this the Kani job fails on `-D unused-variables`.
+        let _ = from;
         assert!(
             encoded
                 .chars()
