@@ -111,6 +111,52 @@ impl PropertyMap {
         }
     }
 
+    /// The map key a property reference is stored under: `(set, name)`,
+    /// case-folded, with `""` as the set of an unqualified reference.
+    pub(crate) fn key_of(name: &PropertyRef) -> (CiName, CiName) {
+        (
+            match &name.property_set {
+                Some(ps) => CiName::new(ps),
+                None => CiName::from_str(""),
+            },
+            CiName::new(&name.property_name),
+        )
+    }
+
+    /// Whether the map holds a value under the key `(set, name)` exactly.
+    pub(crate) fn has_key(&self, key: &(CiName, CiName)) -> bool {
+        self.props.contains_key(key)
+    }
+
+    /// Install a value INHERITED from a containing component (`inherit`
+    /// properties, REQ-AADL-PROPERTY-INHERIT-001): the ancestor's values for
+    /// `key`, verbatim — including any `+=>` list it built — together with
+    /// the component its `reference (...)` terms resolve from, which is the
+    /// DECLARER's context, never the inheriting component. OSATE's inherited
+    /// value is already instantiated in the ancestor's context.
+    pub(crate) fn insert_inherited(
+        &mut self,
+        key: (CiName, CiName),
+        values: Vec<PropertyValue>,
+        ctx: crate::instance::ComponentInstanceIdx,
+    ) {
+        self.ref_ctx.insert(key.clone(), ctx);
+        self.props.insert(key, values);
+    }
+
+    /// The values stored under the key `(set, name)` exactly.
+    pub(crate) fn values_for_key(&self, key: &(CiName, CiName)) -> Option<&Vec<PropertyValue>> {
+        self.props.get(key)
+    }
+
+    /// The reference context recorded for the key `(set, name)` exactly.
+    pub(crate) fn reference_context_for_key(
+        &self,
+        key: &(CiName, CiName),
+    ) -> Option<crate::instance::ComponentInstanceIdx> {
+        self.ref_ctx.get(key).copied()
+    }
+
     /// The component the value at `(set, name)` resolves its references
     /// from, if it is not the holder of this map.
     pub fn reference_context(

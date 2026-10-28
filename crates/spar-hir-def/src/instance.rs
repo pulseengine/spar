@@ -265,6 +265,7 @@ impl SystemInstance {
             emv2_models: FxHashMap::default(),
             pending_applies_to: Vec::new(),
             refined_origins: FxHashMap::default(),
+            applies_to_fallbacks: FxHashSet::default(),
             depth: 0,
             max_depth: 100,
         };
@@ -293,6 +294,11 @@ impl SystemInstance {
         // Resolve properties declared with `applies to <path>` onto their
         // target component instances (AS5506B §8.3/§10.6; fixes #128, #129).
         builder.resolve_pending_applies_to();
+
+        // `inherit` properties take the containing component's value where a
+        // component declares none (REQ-AADL-PROPERTY-INHERIT-001). After the
+        // applies-to pass, because `applies to` values land on ancestors too.
+        builder.inherit_properties();
 
         let mut instance = SystemInstance {
             root: root_idx,
@@ -1633,6 +1639,14 @@ struct Builder<'a> {
         String,
         crate::properties::PropertyValue,
     )>,
+    /// `(owner, key)` of each value an UNRESOLVABLE `applies to` left on its
+    /// declarer (see [`Self::attach_applies_to`]). That is spar's recovery,
+    /// not AADL: the association applies to nothing, so the value is not the
+    /// owner's and is not inherited from it (REQ-AADL-PROPERTY-INHERIT-001).
+    applies_to_fallbacks: FxHashSet<(
+        ComponentInstanceIdx,
+        (crate::resolver::CiName, crate::resolver::CiName),
+    )>,
     depth: u32,
     max_depth: u32,
 }
@@ -2897,6 +2911,102 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Post-instantiation pass: give every component instance the value of
+    /// each `inherit` property it has none of, from the NEAREST containing
+    /// component that has one (REQ-AADL-PROPERTY-INHERIT-001, #460).
+    ///
+    /// Semantics, from osate2 @ 87468992 rather than prose:
+    /// - Only `inherit` properties, the 34 of
+    ///   [`INHERIT_PROPERTIES`](crate::standard_properties::INHERIT_PROPERTIES),
+    ///   inherit (PropertyImpl.getPropertyValueInternal: local value first,
+    ///   then `if (isInherit()) io = io.eContainer()` and recurse).
+    /// - A component receives a value only if it accepts the property
+    ///   (CachePropertyAssociationsSwitch caches only where
+    ///   `io.acceptsProperty`), but the walk up passes through containers that
+    ///   do not accept it, as OSATE's recursion does.
+    /// - A local value wins. "Local" means the PROPERTY, not the map key: a
+    ///   bare `Period` and a `Timing_Properties::Period` are one property, so
+    ///   either blocks inheritance of the other.
+    /// - The inherited value keeps its DECLARER's reference context: the
+    ///   ancestor's recorded context for that key, or the ancestor itself.
+    ///   OSATE caches the ancestor's value with its references already
+    ///   instantiated, so `reference (cpu)` inherited by a thread names the
+    ///   `cpu` its declarer named, never one resolved from the thread.
+    ///
+    /// The walk reads the maps as they were BEFORE this pass, so the nearest
+    /// ancestor that declares a value is found directly, whatever order the
+    /// components are visited in.
+    fn inherit_properties(&mut self) {
+        use crate::properties::PropertyValue;
+        use crate::resolver::CiName;
+
+        type Key = (CiName, CiName);
+        let mut additions: Vec<(
+            ComponentInstanceIdx,
+            Key,
+            Vec<PropertyValue>,
+            ComponentInstanceIdx,
+        )> = Vec::new();
+
+        for (idx, comp) in self.components.iter() {
+            let is_impl = comp.impl_name.is_some();
+            for prop in crate::standard_properties::INHERIT_PROPERTIES {
+                if !prop.accepts(comp.category, is_impl) {
+                    continue;
+                }
+                let keys: [Key; 2] = [
+                    (CiName::from_str(""), CiName::from_str(prop.name)),
+                    (
+                        CiName::from_str(prop.property_set),
+                        CiName::from_str(prop.name),
+                    ),
+                ];
+                // A component's own value — including a recovery value an
+                // unresolvable `applies to` left on it — blocks inheritance.
+                let own = self
+                    .property_maps
+                    .get(&idx)
+                    .is_some_and(|m| keys.iter().any(|k| m.has_key(k)));
+                if own {
+                    continue;
+                }
+                // An ancestor's value is a source only if it is its own: a
+                // recovery value is skipped and the walk goes on up.
+                let source_keys = |a: ComponentInstanceIdx| -> Vec<&Key> {
+                    self.property_maps.get(&a).map_or_else(Vec::new, |m| {
+                        keys.iter()
+                            .filter(|k| {
+                                m.has_key(k)
+                                    && !self.applies_to_fallbacks.contains(&(a, (*k).clone()))
+                            })
+                            .collect()
+                    })
+                };
+                let mut ancestor = comp.parent;
+                while let Some(a) = ancestor {
+                    let from = source_keys(a);
+                    if !from.is_empty() {
+                        let map = &self.property_maps[&a];
+                        for key in from {
+                            if let Some(values) = map.values_for_key(key) {
+                                let ctx = map.reference_context_for_key(key).unwrap_or(a);
+                                additions.push((idx, key.clone(), values.clone(), ctx));
+                            }
+                        }
+                        break;
+                    }
+                    ancestor = self.components[a].parent;
+                }
+            }
+        }
+        for (idx, key, values, ctx) in additions {
+            self.property_maps
+                .entry(idx)
+                .or_default()
+                .insert_inherited(key, values, ctx);
+        }
+    }
+
     /// Resolve a single `applies to` containment path and attach `prop` to the
     /// element it names, or — when it resolves to nothing — keep it on `owner`
     /// and record a diagnostic naming that one path.
@@ -2911,6 +3021,12 @@ impl<'a> Builder<'a> {
                 // The value's `reference (...)` terms resolve from `owner`,
                 // the component that declared the association, not from
                 // `target` (REQ-AADL-REF-CONTEXT-001).
+                //
+                // A recovery value recorded in `applies_to_fallbacks` is never
+                // replaced here: every value attached to a component through
+                // `applies to` comes from a STRICT ancestor, whose associations
+                // are queued before the component's own (instantiation is
+                // top-down), so they are attached before its recovery value.
                 self.property_maps
                     .entry(target)
                     .or_default()
@@ -2938,6 +3054,18 @@ impl<'a> Builder<'a> {
                 // Unresolvable path: keep on owner (prior behavior) and
                 // emit a diagnostic so the author notices. The diagnostic names
                 // this one path, not the whole comma-joined clause (#459).
+                // The value is not the owner's own, so it is not inherited
+                // from the owner either (REQ-AADL-PROPERTY-INHERIT-001).
+                // An append (`+=>`) leaves an existing value the owner's own;
+                // only an assignment replaces it with the recovery value.
+                let key = PropertyMap::key_of(&prop.name);
+                let holds = self
+                    .property_maps
+                    .get(&owner)
+                    .is_some_and(|m| m.has_key(&key));
+                if !(prop.is_append && holds) {
+                    self.applies_to_fallbacks.insert((owner, key));
+                }
                 self.property_maps.entry(owner).or_default().add(prop);
                 self.diagnostics.push(InstanceDiagnostic {
                     message: format!(
@@ -6119,6 +6247,340 @@ end Anon;
                 .get("Memory_Properties", "Code_Size")
                 .or_else(|| props.get("", "Code_Size")),
             Some("4 KByte")
+        );
+    }
+
+    // ── `inherit` properties (REQ-AADL-PROPERTY-INHERIT-001, #460) ──────
+
+    const INHERIT_MODEL: &str = r#"
+package I
+public
+  processor Cpu
+  end Cpu;
+  memory Mem
+  end Mem;
+  data D
+  end D;
+  thread T
+  end T;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread T;
+      t2 : thread T { Priority => 5; Period => 5 ms; };
+      d : data D;
+    properties
+      Priority => 9;
+      Timing_Properties::Period => 10 ms;
+      Compute_Execution_Time => 1 ms .. 2 ms;
+  end P.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      cpu : processor Cpu;
+      cpu2 : processor Cpu;
+      mem : memory Mem;
+      app : process P.impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu)) applies to app;
+      Actual_Processor_Binding => (reference (cpu2)) applies to app.t2;
+      Period => 100 ms;
+      Dispatch_Offset => 3 ms;
+  end Top.impl;
+end I;
+"#;
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_thread_inherits_its_process_binding_applied_with_applies_to() {
+        // (a) `Actual_Processor_Binding` is `inherit` (osate2 @ 87468992,
+        // Deployment_Properties.aadl:41): `t` declares none, so it takes
+        // `app`'s, which `applies to app` put there.
+        let inst = instantiate_aadl(INHERIT_MODEL, "I", "Top", "impl");
+        let t = by_path(&inst, "Top.impl/app/t");
+        let cpu = by_path(&inst, "Top.impl/cpu");
+        assert_eq!(
+            inst.properties_for(t).get("", "Actual_Processor_Binding"),
+            Some("(reference (cpu))")
+        );
+        let ctx = inst.reference_context(t, "Deployment_Properties", "Actual_Processor_Binding");
+        assert_eq!(ctx, inst.root, "the declarer of the applies-to is Top.impl");
+        assert_eq!(inst.resolve_reference(ctx, "cpu"), Some(cpu));
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_inherited_reference_resolves_from_its_declarer_not_the_inheritor() {
+        // (b) The association is on `sub` with NO `applies to`, so it
+        // resolves from `sub` (its holder), where `cpu` is a processor. The
+        // root also has a `cpu`, a memory. Three candidate contexts give three
+        // different answers: the thread (none), the root (the memory), `sub`
+        // (the processor). Only `sub` is right.
+        let src = r#"
+package J
+public
+  processor Cpu
+  end Cpu;
+  memory Mem
+  end Mem;
+  thread T
+  end T;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread T;
+  end P.impl;
+  system S
+  end S;
+  system implementation S.impl
+    subcomponents
+      cpu : processor Cpu;
+      app : process P.impl;
+  end S.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      cpu : memory Mem;
+      sub : system S.impl { Actual_Processor_Binding => (reference (cpu)); };
+  end Top.impl;
+end J;
+"#;
+        let inst = instantiate_aadl(src, "J", "Top", "impl");
+        let sub = by_path(&inst, "Top.impl/sub");
+        let app = by_path(&inst, "Top.impl/sub/app");
+        let t = by_path(&inst, "Top.impl/sub/app/t");
+        let sub_cpu = by_path(&inst, "Top.impl/sub/cpu");
+        let top_cpu = by_path(&inst, "Top.impl/cpu");
+        for c in [app, t] {
+            let ctx =
+                inst.reference_context(c, "Deployment_Properties", "Actual_Processor_Binding");
+            assert_eq!(ctx, sub, "inherited by {}", inst.component_instance_path(c));
+            assert_eq!(inst.resolve_reference(ctx, "cpu"), Some(sub_cpu));
+        }
+        // Negative controls: the wrong contexts give different answers.
+        assert_eq!(inst.resolve_reference(t, "cpu"), None);
+        assert_eq!(inst.resolve_reference(inst.root, "cpu"), Some(top_cpu));
+        // A processor does not accept the binding at all.
+        assert!(
+            inst.properties_for(sub_cpu)
+                .get("", "Actual_Processor_Binding")
+                .is_none()
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_local_value_wins_over_the_inherited_one() {
+        // (c) `t2` has its own Priority, its own bare `Period` (while `app`'s
+        // is QUALIFIED — a different map key, the same property), and its own
+        // binding, applied by Top.impl to `app.t2`.
+        let inst = instantiate_aadl(INHERIT_MODEL, "I", "Top", "impl");
+        let t2 = by_path(&inst, "Top.impl/app/t2");
+        let cpu2 = by_path(&inst, "Top.impl/cpu2");
+        let p = inst.properties_for(t2);
+        assert_eq!(p.get("", "Priority"), Some("5"));
+        assert_eq!(p.get("", "Period"), Some("5 ms"));
+        assert_eq!(
+            p.get("Timing_Properties", "Period"),
+            None,
+            "a bare local Period blocks the ancestor's qualified one"
+        );
+        assert_eq!(
+            p.get("", "Actual_Processor_Binding"),
+            Some("(reference (cpu2))")
+        );
+        let ctx = inst.reference_context(t2, "Deployment_Properties", "Actual_Processor_Binding");
+        assert_eq!(inst.resolve_reference(ctx, "cpu2"), Some(cpu2));
+        // Nearest ancestor wins: `t` takes `app`'s 10 ms, not Top's 100 ms.
+        let t = by_path(&inst, "Top.impl/app/t");
+        assert_eq!(
+            inst.properties_for(t).get("Timing_Properties", "Period"),
+            Some("10 ms")
+        );
+        assert_eq!(inst.properties_for(t).get("", "Period"), None);
+        assert_eq!(inst.properties_for(t).get("", "Priority"), Some("9"));
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_unresolvable_applies_to_value_is_not_inherited() {
+        // `mid`'s `applies to nosuch` resolves to nothing; spar keeps the value
+        // on `mid` as a recovery (and reports the path). In AADL it applies to
+        // nothing, so `mid`'s descendants must look past it, to Top's own
+        // value — not spread the unresolvable one to every child (measured on
+        // the corpus: UAV.aadl, FlightGuidanceIMA.aadl, arinc653.aadl).
+        let src = r#"
+package U
+public
+  memory Mem
+  end Mem;
+  thread T
+  end T;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread T;
+  end P.impl;
+  system M
+  end M;
+  system implementation M.impl
+    subcomponents
+      app : process P.impl;
+    properties
+      Actual_Memory_Binding => (reference (bogus)) applies to nosuch;
+  end M.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      mem : memory Mem;
+      mid : system M.impl;
+    properties
+      Actual_Memory_Binding => (reference (mem));
+  end Top.impl;
+end U;
+"#;
+        let inst = instantiate_aadl(src, "U", "Top", "impl");
+        let mid = by_path(&inst, "Top.impl/mid");
+        let t = by_path(&inst, "Top.impl/mid/app/t");
+        let mem = by_path(&inst, "Top.impl/mem");
+        assert_eq!(
+            inst.properties_for(mid).get("", "Actual_Memory_Binding"),
+            Some("(reference (bogus))"),
+            "the recovery value stays on its declarer, as before"
+        );
+        assert_eq!(
+            inst.properties_for(t).get("", "Actual_Memory_Binding"),
+            Some("(reference (mem))")
+        );
+        let ctx = inst.reference_context(t, "Deployment_Properties", "Actual_Memory_Binding");
+        assert_eq!(inst.resolve_reference(ctx, "mem"), Some(mem));
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn an_unresolvable_append_keeps_the_owners_own_value_inheritable() {
+        // An unresolvable `+=>` onto `mid`'s OWN value appends to it (spar's
+        // recovery, unchanged) and leaves it `mid`'s, so `t` still inherits.
+        // The same append with no own value under it IS the recovery value,
+        // and is not inherited.
+        let model = |own: &str| {
+            format!(
+                r#"
+package A
+public
+  thread T
+  end T;
+  process P
+  end P;
+  process implementation P.impl
+    subcomponents
+      t : thread T;
+  end P.impl;
+  system M
+  end M;
+  system implementation M.impl
+    subcomponents
+      app : process P.impl;
+    properties
+{own}      Source_Text +=> ("b.c") applies to nosuch;
+  end M.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      mid : system M.impl;
+  end Top.impl;
+end A;
+"#
+            )
+        };
+        let inst = instantiate_aadl(
+            &model("      Source_Text => (\"a.c\");\n"),
+            "A",
+            "Top",
+            "impl",
+        );
+        let mid = by_path(&inst, "Top.impl/mid");
+        let t = by_path(&inst, "Top.impl/mid/app/t");
+        assert_eq!(inst.properties_for(mid).get_all("", "Source_Text").len(), 2);
+        assert_eq!(
+            inst.properties_for(t).get_all("", "Source_Text"),
+            inst.properties_for(mid).get_all("", "Source_Text"),
+            "the owner's own list, appended to, is inherited whole"
+        );
+
+        let inst = instantiate_aadl(&model(""), "A", "Top", "impl");
+        let mid = by_path(&inst, "Top.impl/mid");
+        let t = by_path(&inst, "Top.impl/mid/app/t");
+        assert_eq!(inst.properties_for(mid).get_all("", "Source_Text").len(), 1);
+        assert!(
+            inst.properties_for(t).get_all("", "Source_Text").is_empty(),
+            "a recovery value alone is not inherited"
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_non_inherit_property_is_not_inherited() {
+        // (d) Compute_Execution_Time is declared WITHOUT `inherit`
+        // (osate2 @ 87468992, Timing_Properties.aadl), so `app`'s stays there.
+        let inst = instantiate_aadl(INHERIT_MODEL, "I", "Top", "impl");
+        let app = by_path(&inst, "Top.impl/app");
+        let t = by_path(&inst, "Top.impl/app/t");
+        assert_eq!(
+            inst.properties_for(app).get("", "Compute_Execution_Time"),
+            Some("1 ms .. 2 ms")
+        );
+        assert_eq!(
+            inst.properties_for(t).get("", "Compute_Execution_Time"),
+            None
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-INHERIT-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn timing_properties_are_inherited_where_they_apply() {
+        // (e) Period is `inherit` (Timing_Properties.aadl:190): with `app`'s
+        // own Period removed, its thread sees Top's.
+        let src = INHERIT_MODEL.replace("      Timing_Properties::Period => 10 ms;\n", "");
+        assert_ne!(src, INHERIT_MODEL);
+        let inst = instantiate_aadl(&src, "I", "Top", "impl");
+        let app = by_path(&inst, "Top.impl/app");
+        let t = by_path(&inst, "Top.impl/app/t");
+        let d = by_path(&inst, "Top.impl/app/d");
+        let cpu = by_path(&inst, "Top.impl/cpu");
+        let mem = by_path(&inst, "Top.impl/mem");
+        assert_eq!(inst.properties_for(app).get("", "Period"), Some("100 ms"));
+        assert_eq!(inst.properties_for(t).get("", "Period"), Some("100 ms"));
+        // Period does not apply to processor, memory or data.
+        for c in [cpu, mem, d] {
+            assert_eq!(inst.properties_for(c).get("", "Period"), None);
+        }
+        // Priority applies to data; Actual_Processor_Binding does not.
+        assert_eq!(inst.properties_for(d).get("", "Priority"), Some("9"));
+        assert_eq!(
+            inst.properties_for(d).get("", "Actual_Processor_Binding"),
+            None
+        );
+        // Dispatch_Offset applies to threads only (Timing_Properties.aadl:110)
+        // — the walk passes THROUGH the process, which does not accept it.
+        assert_eq!(inst.properties_for(app).get("", "Dispatch_Offset"), None);
+        assert_eq!(
+            inst.properties_for(t).get("", "Dispatch_Offset"),
+            Some("3 ms")
         );
     }
 }
