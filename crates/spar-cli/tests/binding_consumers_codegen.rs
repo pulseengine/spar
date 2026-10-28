@@ -8,9 +8,10 @@
 //! that charges `t` 6 ms of interference from a thread that runs on the OTHER
 //! processor — 6 + 6 = 12 ms against a 10 ms deadline: a FALSE theorem.
 //!
-//! (Both processors also write `proofs/cpu_scheduling.lean`, so one proof
-//! overwrites the other — a separate defect, #510. These assertions hold
-//! whichever file survives.)
+//! (Both processors also wrote `proofs/cpu_scheduling.lean`, so one proof
+//! overwrote the other — a separate defect, #510. Proof files are now named
+//! by instance path, `proofs/left__cpu_scheduling.lean` and
+//! `proofs/right__cpu_scheduling.lean`; see the #510 test at the end.)
 
 use std::process::Command;
 
@@ -89,8 +90,8 @@ public
 end OneCpu;
 "#;
 
-/// The generated Lean scheduling proof for processor `cpu`.
-fn lean_proof(root: &str, name: &str, src: &str) -> String {
+/// Run `spar codegen --verify proof` and return its output directory.
+fn codegen_proofs(root: &str, name: &str, src: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("spar-bind-codegen-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -115,7 +116,13 @@ fn lean_proof(root: &str, name: &str, src: &str) -> String {
         "codegen failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    std::fs::read_to_string(out_dir.join("proofs/cpu_scheduling.lean")).expect("proof file")
+    out_dir
+}
+
+/// The generated Lean scheduling proof for processor `left.cpu`.
+fn lean_proof(root: &str, name: &str, src: &str) -> String {
+    let out_dir = codegen_proofs(root, name, src);
+    std::fs::read_to_string(out_dir.join("proofs/left__cpu_scheduling.lean")).expect("proof file")
 }
 
 // rivet: partially-verifies REQ-AADL-BINDING-CONSUMERS-001
@@ -136,4 +143,38 @@ fn a_processor_named_two_ways_holds_both_its_threads() {
     // and as `left.cpu` / `right.cpu`). Both belong in its proof.
     let lean = lean_proof("OneCpu::Top.impl", "one", ONE_CPU_TWO_SPELLINGS);
     assert_eq!(lean.matches("theorem ").count(), 2, "{lean}");
+}
+
+// rivet: verifies REQ-PROOF-GEN-NAMES-INJECTIVE-001
+#[test]
+fn same_named_processors_each_keep_their_proof_on_disk() {
+    // #510: on main both processors wrote `proofs/cpu_scheduling.lean`, the
+    // second silently overwriting the first. On disk now: one proof file
+    // per processor, each naming its own processor and its own thread.
+    let out_dir = codegen_proofs("TwoCpu::Top.impl", "510", TWO_CPUS_SAME_NAME);
+    let mut lean: Vec<String> = std::fs::read_dir(out_dir.join("proofs"))
+        .expect("proofs dir")
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".lean"))
+        .collect();
+    lean.sort();
+    assert_eq!(
+        lean,
+        ["left__cpu_scheduling.lean", "right__cpu_scheduling.lean"]
+    );
+    for side in ["left", "right"] {
+        let proof =
+            std::fs::read_to_string(out_dir.join(format!("proofs/{side}__cpu_scheduling.lean")))
+                .unwrap();
+        assert!(
+            proof.contains(&format!("-- Instance: Top.impl/{side}/cpu\n")),
+            "{proof}"
+        );
+        assert!(
+            proof.contains(&format!("theorem {side}__app__t_meets_deadline :")),
+            "{proof}"
+        );
+        let harness = out_dir.join(format!("proofs/kani/{side}__app/t_harness.rs"));
+        assert!(harness.is_file(), "missing {}", harness.display());
+    }
 }

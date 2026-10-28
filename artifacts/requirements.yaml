@@ -7641,6 +7641,20 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-28T04:10:22Z
+
+  - id: REQ-PROOF-GEN-NAMES-INJECTIVE-001
+    type: requirement
+    title: Generated proof file, module, namespace and theorem names shall be injective over the instance model
+    status: implemented
+    description: "#510. spar codegen --verify proof named each processor's Lean proof by the processor's NAME (proofs/<name>_scheduling.lean) and each Kani harness by its parent's and its own name (proofs/kani/<process>/<thread>_harness.rs). Two processors named cpu in subsystems left and right wrote one file, and the second silently overwrote the first: on the published binary the #510 repro produced 4 proof artifacts and 2 files on disk. The same flaw declared one theorem t_meets_deadline twice when two threads named t in different processes are bound to one processor, which Lean rejects as already declared. THE REQUIREMENT. Every generated proof name is the processor's or thread's instance path below the root, encoded by an injective map (proof_gen::encode_instance_path): segments are joined with __, lowercase letters and digits stay, an interior single _ stays, and every other character is escaped with z (zz, zc<letter> for uppercase, zu for any other _, zx<6 hex> for non-ASCII and punctuation, ze for an empty segment, zr for the root, zd before a leading digit). The output is lowercase [a-z0-9_] starting with a letter, so names never differ only in case (macOS folds those into one file) and every <name>_scheduling / <name>_meets_deadline is a Lean identifier that is not a keyword. A processor directly under the root keeps its plain name (proofs/cpu_scheduling.lean). Each proof also names its instance path in a header comment. VERIFICATION. proof_gen tests: a test-only decoder recovers every one of 76449 tricky paths (all strings up to length 3 over a, A, z, Z, _, ., -, 1, é, in 1 to 3 segments) from its encoding, with distinct encodings; the #510 model gives proofs/left__cpu_scheduling.lean and proofs/right__cpu_scheduling.lean, each with its own instance and theorem, and two Kani harness directories; two threads t on one cpu give p1__t_meets_deadline and p2__t_meets_deadline. The CLI test reads both files from disk. All three model tests are red on origin/main. Lean 4.29.0-rc6, mathlib-free stub of Proofs.Scheduling.RTA: lake build of both models' generated proofs plus a root importing all of them fails on origin/main (`Cpu.t_meets_deadline` has already been declared; only one TwoCpu module exists) and succeeds after. NOT CLAIMED. WIT, Rust crate and config paths are still named by process name and still collide when a process name repeats (the #510 repro reports 20 files written; 11 reached disk before this fix and 13 after, the 7 lost being WIT, crate and config files); the generated Lean proofs reference compute_response_time, which proofs/Proofs/Scheduling/RTA.lean does not define, so they do not elaborate against the real library (checked here against a stub)."
+    tags: [codegen, verification, formal, bug]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-VERIFY-PROOF
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T05:33:08Z
     release: v0.48.0
   - id: REQ-ARINC-ISOLATION-FP-001
     type: requirement
