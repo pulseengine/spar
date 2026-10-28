@@ -7620,6 +7620,28 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-28T04:10:22Z
+
+  - id: REQ-INTEROP-OSATE-INSTANCE-ORACLE-001
+    type: requirement
+    title: spar instance models shall match the committed OSATE instance models component for component, with every divergence pinned in a shrink-only ledger
+    status: implemented
+    description: |-
+      The OSATE-generated instance models in test-data/osate2/instances (11 *.aaxl2) were used once, by hand, as a count oracle (PR #517, REQ-AADL-SUBCOMPONENT-REFINE-001). A count can agree while the trees differ, and a one-off reading does not notice spar moving afterwards. This makes them a permanent CI-gated differential test. crates/spar-cli/tests/osate_instance_oracle.rs reads each .aaxl2 with a minimal XML scanner (no XML crate is a workspace dependency), takes the root from its componentImplementation href, instantiates that root with spar's library against exactly the .aadl files the .aaxl2 references, and compares: the root-relative component path sets; each component's category; each classifier OSATE resolved; and five component property values where both sides hold one, Timing_Properties::Period (in picoseconds) and Deployment_Properties::Actual_Processor_Binding, Actual_Memory_Binding, Actual_Connection_Binding and Actual_Function_Binding (reference targets as instance paths).
+      LEDGER. Every mismatch must be listed in test-data/osate2/instances/KNOWN_DIVERGENCES.toml, one entry per (file, path, kind) with a measured reason. An unlisted mismatch fails; a listed entry that no longer occurs also fails, so the ledger only shrinks. A missing, malformed or duplicate-keyed ledger fails rather than reading as empty. An entry is not a verdict that spar is wrong: OSATE is a test, not the authority.
+      EVIDENCE, 2026-10-28, on origin/main 15645a8. 11 of 11 files processed (asserted equal to the number found and at least 10; each OSATE tree asserted to have a non-root node). 74 components compared; 62 classifiers compared, 12 skipped because OSATE left them as unresolved Xtext proxies (packages such as GPSParts, Platform and Software are absent from its workspace, and from spar's); 11 property values compared: 3 Period (all SCS.Phys), 1 each of Actual_Processor, Actual_Memory, Actual_Function and Actual_Connection_Binding on BasicBinding, 4 Actual_Connection_Binding on Complicated (2 of them empty lists on both sides). 0 OSATE-only values; 1 spar-only (DCS.dualtier2 app's Actual_Processor_Binding, whose target hw.pc1 OSATE could not instantiate because hw's classifier did not resolve). 0 divergences, so the ledger is empty.
+      SCS.Phys. The "SCS.Phys has fewer components than OSATE" note from PR #517 was a harness artefact, not a spar defect: SCS.Phys's dcs subcomponent is classified in DigitalControlSystem.aadl. From SimpleControlSystem.aadl alone spar yields 5 components; from both files, the two the .aaxl2 references, it yields OSATE's 7, path for path, with matching categories, classifiers and all 3 Period values.
+      MUTANTS, by hand; each made the test fail: drop spar's ps/t (1 missing-in-spar); add a spar component (11 extra-in-spar); a constant category (46 divergences); a skewed classifier (35); Period + 1 ps (3); bind to the target's parent (6); a bogus ledger entry (reported STALE); a duplicate entry; a malformed ledger; a missing ledger.
+      NOT COMPARED: features, connections, flows, modes, SOMs and EMV2 instances; property values on feature and connection instances (where most of the corpus's Actual_Connection_Binding and Data_Size values live); every other property; Compute_Execution_Time (no .aaxl2 here carries one); modal values; values held by only one side (counted and printed, not failed). No compared value arrives through inheritance, so REQ-AADL-PROPERTY-INHERIT-001 is traced for the property-map surface this reads, not verified by it.
+    tags: [interop, instance, oracle, test]
+    links:
+      - type: traces-to
+        target: REQ-AADL-SUBCOMPONENT-REFINE-001
+      - type: traces-to
+        target: REQ-AADL-PROPERTY-INHERIT-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-28T04:58:12Z
     release: v0.48.0
 
   - id: REQ-SYSML2-CORPUS-RATCHET-001
