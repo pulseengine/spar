@@ -52,7 +52,7 @@ except the "programs" it compiles are **system architectures**.
   the kind of timing analysis usually reserved for tools like tsnkit, RTaW-Pegase or pegase.
 - **Back-ends — generate & visualize.** WIT/WASM components, Lean 4 and Kani proof skeletons,
   Bazel build files, SVG and Mermaid architecture diagrams.
-- **Verified by construction.** Every capability is traced to a requirement (rivet artifacts),
+- **Traced and gated.** Every capability is traced to a requirement (rivet artifacts),
   oracle-gated in CI, and exposed read-only to AI agents over MCP.
 
 This is why it has outgrown the "AADL toolchain" label: AADL is one of several front-ends, and
@@ -261,6 +261,6 @@ MIT License -- see [LICENSE](LICENSE).
 
 <div align="center">
 
-<sub>Part of <a href="https://github.com/pulseengine">PulseEngine</a> -- formally verified WebAssembly toolchain for safety-critical systems</sub>
+<sub>Part of <a href="https://github.com/pulseengine">PulseEngine</a> -- a WebAssembly Component Model engine for safety-critical systems, with machine-checked proofs for parts of it</sub>
 
 </div>
