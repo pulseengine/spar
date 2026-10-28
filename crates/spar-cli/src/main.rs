@@ -851,9 +851,10 @@ fn cmd_analyze(args: &[String]) {
     let mut per_som = false;
     // v0.9.2: `--allow <category>` (comma-separated) demotes specific
     // analysis findings from Error to Warning. Today the only recognised
-    // category is `arinc-partition-isolation` (Tier A #9 promoted ARINC
-    // 653 cross-partition direct connections from Warning to Error;
-    // legitimate IMA bypasses can opt out here).
+    // category is `arinc-partition-isolation`: data shared by access
+    // connections across ARINC 653 partitions is an Error (a port
+    // connection across partitions is the approved channel and is not
+    // reported, #504); legitimate IMA bypasses can opt out here.
     let mut allow_categories: Vec<String> = Vec::new();
     // v0.9.3 NC tightness #2: opt-in PMOO/LUDB analysis path for the
     // WCTT pass. When `--pmoo` is set we enable Pay-Multiplexing-Only-
