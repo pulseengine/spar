@@ -138,6 +138,9 @@ Use `rivet validate --format json` for machine-readable output.
 Spar-specific guidance for contributors and agents (outside the rivet-managed
 section above):
 
+- **Merging**: PRs merge through GitHub's merge queue. When a PR is green, use
+  `gh pr merge --squash --auto`. Don't rebase after every merge, and never use
+  `gh pr update-branch`, because it drops commit signatures.
 - **Build**: `cargo build --workspace`. Single-binary CLI: `cargo build --release -p spar`.
 - **Tests**: `cargo test --workspace`. Per-crate fixtures live under each crate's `tests/` directory.
 - **Salsa graph**: query definitions and the incremental DB live in
