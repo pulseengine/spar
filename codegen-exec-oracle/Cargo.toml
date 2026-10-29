@@ -14,7 +14,32 @@ license = "MIT"
 
 [dependencies]
 anyhow = "1"
-wasmtime = { version = "36", features = ["component-model", "cranelift", "runtime", "std"] }
+# default-features = false + wasmtime 36's full default set MINUS `cache`.
+# `cache` (on-disk compiled-module cache) pulls wasmtime-internal-cache ->
+# zstd 0.13 / zstd-safe 7 / zstd-sys 2.0, which carry RUSTSEC-2026-0391,
+# -0398, -0403, -0410 (and a run of unsound advisories) with no fix
+# reachable on the 0.13 line. This oracle never configures a module cache.
+# Keep this list in sync with wasmtime's `default` on every wasmtime bump.
+wasmtime = { version = "36", default-features = false, features = [
+    "async",
+    "gc",
+    "gc-drc",
+    "gc-null",
+    "wat",
+    "profiling",
+    "parallel-compilation",
+    "cranelift",
+    "pooling-allocator",
+    "demangle",
+    "addr2line",
+    "coredump",
+    "debug-builtins",
+    "runtime",
+    "component-model",
+    "threads",
+    "stack-switching",
+    "std",
+] }
 wasmtime-wasi = "36"
 
 spar-codegen = { path = "../crates/spar-codegen" }
