@@ -753,7 +753,11 @@ fn cmd_instance(args: &[String]) {
     // It warned on stderr, which is better than the JSON path's silence, but a
     // caller checking the exit code still saw success. Fixing one path and not
     // the other would have fixed the instance and left the class.
-    let sources: Vec<_> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+    //
+    // #552: refuse a model that does not parse BEFORE anything is built, so no
+    // format, `--analyze` or `--explain` can print an instance of a tree the
+    // parser rejected (a feature named `out` used to vanish and exit 0).
+    let sources = load_sources_or_exit("instance", &files);
     let hir_db = spar_hir::Database::from_aadl(&sources);
     let Some(instance) = hir_db.instantiate(&root) else {
         die_unresolvable_root(&root, &hir_db);
@@ -768,9 +772,8 @@ fn cmd_instance(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in &sources {
+        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source.clone());
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -975,18 +978,8 @@ fn cmd_analyze(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
-            }
-            eprintln!("Cannot analyze: parse errors in {}", file_path);
-            process::exit(1);
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("analyze", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -1158,18 +1151,8 @@ fn cmd_allocate(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
-            }
-            eprintln!("Cannot allocate: parse errors in {}", file_path);
-            process::exit(1);
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("allocate", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -1497,6 +1480,13 @@ fn cmd_diff(args: &[String]) {
         process::exit(1);
     };
 
+    // #552: both sides must parse. `build_model` used to print the errors as a
+    // raw byte offset (`m.aadl:93:`) and carry on, so a base or head that
+    // `spar parse` rejected was diffed with its broken declarations missing,
+    // and the comparison exited 0.
+    refuse_parse_errors("diff", &base_sources.files);
+    refuse_parse_errors("diff", &head_sources.files);
+
     eprintln!("Building base model...");
     let (base_inst, base_diags) = diff::build_model(&base_sources, &root);
     eprintln!(
@@ -1602,9 +1592,8 @@ fn cmd_modes(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("modes", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -1840,9 +1829,8 @@ fn cmd_emit(args: &[String]) {
         let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
         let db = spar_hir_def::HirDefDatabase::default();
         let mut trees = Vec::new();
-        for file_path in &files {
-            let source = read_file(file_path);
-            let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+        for (file_path, source) in load_sources_or_exit("emit", &files) {
+            let sf = spar_base_db::SourceFile::new(&db, file_path, source);
             trees.push(spar_hir_def::file_item_tree(&db, sf));
         }
         let scope = spar_hir_def::GlobalScope::from_trees(trees);
@@ -1883,9 +1871,8 @@ fn cmd_emit(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("emit", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -2002,9 +1989,8 @@ fn cmd_render(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("render", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -2121,18 +2107,8 @@ fn cmd_verify(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in files {
-        let source = read_file(file_path);
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
-            }
-            eprintln!("Cannot verify: parse errors in {}", file_path);
-            process::exit(1);
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("verify", files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -2481,18 +2457,8 @@ fn cmd_codegen(args: &[String]) {
     let db = spar_hir_def::HirDefDatabase::default();
     let mut trees = Vec::new();
 
-    for file_path in &files {
-        let source = read_file(file_path);
-        let parsed = spar_syntax::parse(&source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                let (line, col) = spar_base_db::offset_to_line_col(&source, err.offset);
-                eprintln!("{}:{}:{}: {}", file_path, line, col, err.msg);
-            }
-            eprintln!("Cannot codegen: parse errors in {}", file_path);
-            process::exit(1);
-        }
-        let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+    for (file_path, source) in load_sources_or_exit("codegen", &files) {
+        let sf = spar_base_db::SourceFile::new(&db, file_path, source);
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
 
@@ -2699,6 +2665,37 @@ pub(crate) fn parse_root_ref(s: &str) -> (String, String, String) {
         process::exit(1);
     }
     (pkg, type_impl[0].to_string(), type_impl[1].to_string())
+}
+
+/// Read every model file and refuse the model if any of them does not parse.
+///
+/// THE parse gate for every subcommand that loads an AADL model (#552). A
+/// parse error is fatal: the command prints exactly the lines `spar parse`
+/// prints for the first file that fails, then `Cannot <verb>: parse errors in
+/// <file>`, and exits 1 (as `parse` does) before it builds an instance or
+/// writes any output. Before this, each command carried its own load loop and
+/// only some checked `parsed.ok()`: `instance`, `modes`, `emit`, `render` and
+/// `diff` lowered the error-recovered tree and exited 0 on a model `parse`
+/// rejected, with the offending declaration silently gone.
+///
+/// A new command that loads a model goes through here; the CLI test
+/// `load_refuses_parse_errors.rs` iterates `spar --help` so one that does not
+/// is caught.
+fn load_sources_or_exit(verb: &str, files: &[String]) -> Vec<(String, String)> {
+    let sources: Vec<(String, String)> = files.iter().map(|f| (f.clone(), read_file(f))).collect();
+    refuse_parse_errors(verb, &sources);
+    sources
+}
+
+/// Exit 1 with `spar parse`'s diagnostic if any of `sources` does not parse.
+/// See [`load_sources_or_exit`]; this is the half for sources that were not
+/// read from the file system (`diff` resolves them from refs or directories).
+fn refuse_parse_errors(verb: &str, sources: &[(String, String)]) {
+    if let Some((path, report)) = spar_cli::load::first_parse_failure(sources) {
+        eprint!("{report}");
+        eprintln!("Cannot {verb}: parse errors in {path}");
+        process::exit(1);
+    }
 }
 
 fn read_file(path: &str) -> String {

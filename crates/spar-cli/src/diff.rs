@@ -159,6 +159,9 @@ pub fn resolve_fs_sources(aadl_files: &[String]) -> AadlSources {
 // ── Build pipeline ──────────────────────────────────────────────────
 
 /// Parse and instantiate AADL sources into a system instance and its diagnostics.
+///
+/// The caller refuses sources that do not parse first (`refuse_parse_errors`
+/// in `cmd_diff`, #552); this function lowers whatever it is given.
 pub fn build_model(sources: &AadlSources, root: &str) -> (SystemInstance, Vec<AnalysisDiagnostic>) {
     let (pkg_name, type_name, impl_name) = parse_root_ref(root);
 
@@ -166,12 +169,6 @@ pub fn build_model(sources: &AadlSources, root: &str) -> (SystemInstance, Vec<An
     let mut trees = Vec::new();
 
     for (file_path, source) in &sources.files {
-        let parsed = spar_syntax::parse(source);
-        if !parsed.ok() {
-            for err in parsed.errors() {
-                eprintln!("{}:{}: {}", file_path, err.offset, err.msg);
-            }
-        }
         let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source.clone());
         trees.push(spar_hir_def::file_item_tree(&db, sf));
     }
