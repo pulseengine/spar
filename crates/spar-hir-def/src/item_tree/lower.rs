@@ -1799,13 +1799,16 @@ fn lower_property_expr(node: &SyntaxNode) -> Option<PropertyExpr> {
 /// to its first operand. An operand a parse error left unlowerable is kept
 /// as `Opaque`, so the value is still recognised as arithmetic.
 fn lower_binary_expr(node: &SyntaxNode) -> PropertyExpr {
+    // The parser bumps exactly one operator token directly into each
+    // BINARY_EXPR (operands, and their signs, are child nodes), so the first
+    // `+`, `-` or `/` token is the operator and its absence means `*`. A
+    // separate `STAR` arm would be indistinguishable from that default.
     let op = node
         .children_with_tokens()
         .filter_map(|e| e.into_token())
         .find_map(|t| match t.kind() {
             SyntaxKind::PLUS => Some(BinaryOpKind::Add),
             SyntaxKind::MINUS => Some(BinaryOpKind::Sub),
-            SyntaxKind::STAR => Some(BinaryOpKind::Mul),
             SyntaxKind::SLASH => Some(BinaryOpKind::Div),
             _ => None,
         })

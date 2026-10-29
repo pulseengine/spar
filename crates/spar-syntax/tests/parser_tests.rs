@@ -882,6 +882,32 @@ fn test_data_property_value_arithmetic() {
     check_file_no_errors("../../test-data/parser/property_value_arithmetic.aadl");
 }
 
+// `not` is a boolean term, not an arithmetic operator: the #546 expression
+// grammar must still parse it as one BOOLEAN_VALUE, with no error.
+// rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+#[test]
+fn property_value_boolean_not_parses() {
+    let input = "\
+package P
+public
+  system S
+    properties
+      Flag => not true;
+  end S;
+end P;
+";
+    check_no_errors(input);
+    check_lossless(input);
+    let parsed = parse(input);
+    let booleans = parsed
+        .syntax_node()
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::BOOLEAN_VALUE)
+        .map(|n| n.text().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(booleans, ["not true", "true"]);
+}
+
 // AS-5506B §9.2: a non-refined connection must have source and destination.
 // Previously `c1 : port ;` parsed cleanly (the instance-level check caught it
 // later, but the diagnostic locality was poor).

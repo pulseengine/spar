@@ -1910,6 +1910,26 @@ mod tests {
 
     // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
     #[test]
+    fn range_order_compares_real_lowered_bounds() {
+        // A real bound is a literal, not arithmetic: the lowered range is
+        // still compared, and the message names both bounds with units.
+        let real = |v: &str| PropertyExpr::Real(v.to_string(), Some(Name::new("ms")));
+        let d = run("2.5 ms .. 1.5 ms", range(real("2.5"), real("1.5")));
+        assert_eq!(range_errors(&d), 1, "{d:?}");
+        assert!(
+            d.iter().any(|d| d
+                .message
+                .contains("lower bound (2.5 ms) > upper bound (1.5 ms)")),
+            "{d:?}"
+        );
+        assert_eq!(
+            range_errors(&run("1.5 ms .. 2.5 ms", range(real("1.5"), real("2.5")))),
+            0
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
     fn arithmetic_is_an_error_saying_it_is_not_aadl() {
         let d = run("5 * 8 ms", arith(int(5, None), int(8, Some("ms"))));
         let errs = arith_errors(&d);

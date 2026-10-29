@@ -3622,6 +3622,52 @@ end MyProps;
 
     // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
     #[test]
+    fn subtraction_and_signed_groups_lower_with_their_operator_and_sign() {
+        use item_tree::{BinaryOpKind, PropertyExpr as E};
+        assert_eq!(
+            lower_value("100 - 50"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Sub,
+                lhs: Box::new(int(100, None)),
+                rhs: Box::new(int(50, None)),
+            })
+        );
+        // A signed operand's sign belongs to the operand, not the operator.
+        assert_eq!(
+            lower_value("-3 + 10"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Add,
+                lhs: Box::new(int(-3, None)),
+                rhs: Box::new(int(10, None)),
+            })
+        );
+        // `-(…)` keeps its sign as the `-1` factor; `+(…)` is `1`.
+        for (src, factor) in [("-(40 ms)", -1), ("+(40 ms)", 1)] {
+            assert_eq!(
+                lower_value(src),
+                Some(E::BinaryOp {
+                    op: BinaryOpKind::Mul,
+                    lhs: Box::new(int(factor, None)),
+                    rhs: Box::new(E::List(vec![int(40, Some("ms"))])),
+                }),
+                "`{src}`"
+            );
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn boolean_not_lowers_to_a_boolean_not_arithmetic() {
+        use item_tree::PropertyExpr as E;
+        for (src, want) in [("not true", false), ("not false", true)] {
+            let got = lower_value(src);
+            assert_eq!(got, Some(E::Boolean(want)), "`{src}`");
+            assert!(!property_arith::is_arithmetic(&got.unwrap()), "`{src}`");
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
     fn arithmetic_in_ranges_lists_and_records_is_found() {
         for src in [
             "1 ms .. 2 * 1 ms",

@@ -136,9 +136,9 @@ pub fn eval_numeric(expr: &PropertyExpr) -> Option<f64> {
         PropertyExpr::Integer(v, _unit) => Some(*v as f64),
         PropertyExpr::Real(v, _unit) => v.parse::<f64>().ok(),
         PropertyExpr::UnitValue(inner, _unit) => eval_numeric(inner),
-        // Arithmetic is not AADL and has no value (#546,
-        // `crate::property_arith`): it is never evaluated, here or anywhere.
-        PropertyExpr::BinaryOp { .. } => None,
+        // Everything else has no numeric value — `BinaryOp` among them:
+        // arithmetic is not AADL (#546, `crate::property_arith`) and is
+        // never evaluated, here or anywhere.
         _ => None,
     }
 }
