@@ -5922,7 +5922,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -6027,7 +6027,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6053,7 +6053,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6084,7 +6084,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6109,7 +6109,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6147,7 +6147,7 @@ artifacts:
       form, spar adopts it; until then spar's expression is a proposal and must
       be labelled as one wherever it is emitted.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
       - type: traces-to
@@ -7194,7 +7194,7 @@ artifacts:
       the output. The evaluator did not test a switch or a NETCONF session and
       neither has this triage. Schema-valid is necessary, not sufficient.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [tsn, yang, interop, bug, deployment]
 
   - id: REQ-TSN-CLI-SURFACE-001
@@ -7224,7 +7224,7 @@ artifacts:
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [tsn, cli, synthesis, interop]
 
   - id: REQ-DBC-CYCLE-TIME-001
@@ -7247,7 +7247,7 @@ artifacts:
       time present in the source reaches the model, and that its ABSENCE is
       reported rather than silently yielding an unrated frame.
     status: proposed
-    release: v0.48.0
+    release: v0.49.0
     tags: [dbc, can, ingest, interop]
   - id: REQ-TSN-WCTT-PROVENANCE-001
     type: requirement
@@ -7478,7 +7478,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-16T03:14:13Z
-    release: v0.48.0
+    release: v0.49.0
 
   - id: REQ-CI-MUTANTS-IN-DIFF-001
     type: requirement
@@ -7519,8 +7519,10 @@ artifacts:
   - id: REQ-WRPC-BINDING-MEMORY-001
     type: requirement
     title: wrpc-binding shall accept a memory (shared-memory seam) as a connection's transport, as AS5506 permits
-    status: implemented
-    description: "#515, second point. Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares Actual_Connection_Binding as a list of reference (processor, virtual processor, bus, virtual bus, device, memory, system, abstract). wrpc-binding warns \"which is a memory — not a bus or virtual bus\" on a legal binding. Shared on-chip RAM is the real inter-core transport on dual-core MCUs (relay#587, i.MX RT1176). This needs a decision: accept memory as a transport (Info), or keep a Warning only for target categories that cannot carry data at all. Proposed; not scheduled into v0.47.0. IMPLEMENTED (v0.48.0), decision: accept memory as a transport, at Info. wrpc-binding resolves an Actual_Connection_Binding reference BY IDENTITY from the component its association was declared on (connection_reference_context for a connection-own value, reference_context for the owner value), replacing the model-wide unique-name search. A memory target yields Info \"... through shared memory: Actual_Connection_Binding to memory <name>\"; a bus or virtual bus stays silent; every other resolved category still warns (\"not a bus, virtual bus or memory\"). Evidence: crates/spar-cli/tests/wrpc_binding_memory.rs, 5 tests (memory gives exactly one INFO line and no \"not a bus\" or \"no binding\" line; inline and applies-to forms agree; negative controls: an unbound crossing still warns \"has no Actual_Connection_Binding\", a binding to a process still warns; a memory on a non-crossing connection is silent), plus 4 unit tests in crates/spar-analysis/src/wrpc_binding.rs. Red on origin/main 15645a8: the memory test failed on \"[WARNING] wrpc-binding: connection nav in S.impl is bound via Actual_Connection_Binding to shared_mem, which is a memory — not a bus or virtual bus\". Corpus (2091 tracked .aadl, 1554 runs, 1514 instantiated): 1 run differs by 3 lines, wording only (\"not a bus or virtual bus\" becomes \"not a bus, virtual bus or memory\", system target EB in test-data/interop/aadlib/examples/multicore/avionicsbusmanagers.aadl). Open: processor, virtual processor, device, system and abstract are also legal targets and still warn; whether they are transports is a separate decision."
+    status: verified
+    description: |-
+      #515, second point. Deployment_Properties.aadl:96-97 (osate2 @ 87468992) declares Actual_Connection_Binding as a list of reference (processor, virtual processor, bus, virtual bus, device, memory, system, abstract). wrpc-binding warns "which is a memory — not a bus or virtual bus" on a legal binding. Shared on-chip RAM is the real inter-core transport on dual-core MCUs (relay#587, i.MX RT1176). This needs a decision: accept memory as a transport (Info), or keep a Warning only for target categories that cannot carry data at all. Proposed; not scheduled into v0.47.0. IMPLEMENTED (v0.48.0), decision: accept memory as a transport, at Info. wrpc-binding resolves an Actual_Connection_Binding reference BY IDENTITY from the component its association was declared on (connection_reference_context for a connection-own value, reference_context for the owner value), replacing the model-wide unique-name search. A memory target yields Info "... through shared memory: Actual_Connection_Binding to memory <name>"; a bus or virtual bus stays silent; every other resolved category still warns ("not a bus, virtual bus or memory"). Evidence: crates/spar-cli/tests/wrpc_binding_memory.rs, 5 tests (memory gives exactly one INFO line and no "not a bus" or "no binding" line; inline and applies-to forms agree; negative controls: an unbound crossing still warns "has no Actual_Connection_Binding", a binding to a process still warns; a memory on a non-crossing connection is silent), plus 4 unit tests in crates/spar-analysis/src/wrpc_binding.rs. Red on origin/main 15645a8: the memory test failed on "[WARNING] wrpc-binding: connection nav in S.impl is bound via Actual_Connection_Binding to shared_mem, which is a memory — not a bus or virtual bus". Corpus (2091 tracked .aadl, 1554 runs, 1514 instantiated): 1 run differs by 3 lines, wording only ("not a bus or virtual bus" becomes "not a bus, virtual bus or memory", system target EB in test-data/interop/aadlib/examples/multicore/avionicsbusmanagers.aadl). Open: processor, virtual processor, device, system and abstract are also legal targets and still warn; whether they are transports is a separate decision.
+      VERIFIED 2026-10-29 on CI: PR #538 (squash ee06804), all 18 required contexts green; CI in-diff mutants 2 selected, 1 caught, 1 unviable, 0 missed (function-level only), plus a hand mutation of the memory arm that turns the CLI test red.
     tags: [wrpc, analysis, binding]
     provenance:
       created-by: ai-assisted
@@ -7554,7 +7556,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-27T18:32:14Z
-    release: v0.48.0
+    release: v0.49.0
     links:
       - type: refines
         target: REQ-AADL-BINDING-CONSUMERS-001
@@ -7597,8 +7599,10 @@ artifacts:
   - id: REQ-SYSML2-ALLOCATE-BINDING-001
     type: requirement
     title: A SysML v2 allocate of a part to a processor shall reach spar's binding analyses as an AADL deployment binding
-    status: implemented
-    description: "Before this, no SysML v2 model could reach binding_rules, scheduling or RTA: a part def lowered only to system, process or abstract (so there was never a thread to bind nor a processor to bind it to), and 'allocate t to cpu;' parsed as ALLOCATE_REQ and was then dropped as ignorable, without a diagnostic. THE REQUIREMENT. (1) A part def that specialises a category type of the official SysML-v2-AADL library (Systems-Modeling/SysML-v2-AADL-Release, package AADL: Abstract, Bus, Data, Device, Memory, Process, Processor, Subprogram, SubprogramGroup, System, Thread, ThreadGroup, VirtualBus, VirtualProcessor), written ':> AADL::X' or ':> X' when the model declares no part def X of its own, lowers to that AADL category and the marker supertype is not emitted as an extends. This follows the library's own examples (part def ThreadWithBinding :> Thread); the library is recognised by name only, not vendored or modified (CC-BY-ND 4.0). Categories are never guessed from attribute or part names; unknown supertypes keep the previous behaviour. (2) 'allocate <src> to <dst>;' in a part def body, with both ends dotted paths to parts of that part def, lowers to an implementation-level association on the enclosing implementation, applies to <src>: dst processor or virtual processor -> Deployment_Properties::Actual_Processor_Binding => (reference (dst)); dst memory -> Actual_Memory_Binding; any other category -> Actual_Processor_Binding plus a lowering diagnostic, so binding_rules judges the target; an unresolvable end -> no binding and a diagnostic. This allocate-to-binding mapping is a spar PROPOSAL, not the RTESC working group's form (the official library's binding examples use flows and bind); if they publish one, spar adopts it. (3) The AADL printer emits implementation-level property associations with their applies-to path, and a part typed by a def that has an implementation names that implementation, so the lowered text round-trips through spar's AADL front end and instantiates the nested parts. ACCEPTANCE: crates/spar-cli/tests/sysml2_allocate_binding.rs lowers one model three ways; without allocate binding_rules reports the thread missing its required processor binding (proving the thread is instantiated), with 'allocate app.t to cpu;' that error is gone, and with 'allocate app.t to board;' (a system) binding_rules reports a wrong-category target. NOT CLAIMED: allocation usages ('allocation a : A allocate x to y;') which do not parse; connection-to-bus allocation (Actual_Connection_Binding); category inheritance through a chain of local supertypes (FastWorker :> Worker :> Thread leaves FastWorker as system extends Worker); lowering of timing attributes so that scheduling and RTA have Period and Compute_Execution_Time to work with."
+    status: verified
+    description: |-
+      Before this, no SysML v2 model could reach binding_rules, scheduling or RTA: a part def lowered only to system, process or abstract (so there was never a thread to bind nor a processor to bind it to), and 'allocate t to cpu;' parsed as ALLOCATE_REQ and was then dropped as ignorable, without a diagnostic. THE REQUIREMENT. (1) A part def that specialises a category type of the official SysML-v2-AADL library (Systems-Modeling/SysML-v2-AADL-Release, package AADL: Abstract, Bus, Data, Device, Memory, Process, Processor, Subprogram, SubprogramGroup, System, Thread, ThreadGroup, VirtualBus, VirtualProcessor), written ':> AADL::X' or ':> X' when the model declares no part def X of its own, lowers to that AADL category and the marker supertype is not emitted as an extends. This follows the library's own examples (part def ThreadWithBinding :> Thread); the library is recognised by name only, not vendored or modified (CC-BY-ND 4.0). Categories are never guessed from attribute or part names; unknown supertypes keep the previous behaviour. (2) 'allocate <src> to <dst>;' in a part def body, with both ends dotted paths to parts of that part def, lowers to an implementation-level association on the enclosing implementation, applies to <src>: dst processor or virtual processor -> Deployment_Properties::Actual_Processor_Binding => (reference (dst)); dst memory -> Actual_Memory_Binding; any other category -> Actual_Processor_Binding plus a lowering diagnostic, so binding_rules judges the target; an unresolvable end -> no binding and a diagnostic. This allocate-to-binding mapping is a spar PROPOSAL, not the RTESC working group's form (the official library's binding examples use flows and bind); if they publish one, spar adopts it. (3) The AADL printer emits implementation-level property associations with their applies-to path, and a part typed by a def that has an implementation names that implementation, so the lowered text round-trips through spar's AADL front end and instantiates the nested parts. ACCEPTANCE: crates/spar-cli/tests/sysml2_allocate_binding.rs lowers one model three ways; without allocate binding_rules reports the thread missing its required processor binding (proving the thread is instantiated), with 'allocate app.t to cpu;' that error is gone, and with 'allocate app.t to board;' (a system) binding_rules reports a wrong-category target. NOT CLAIMED: allocation usages ('allocation a : A allocate x to y;') which do not parse; connection-to-bus allocation (Actual_Connection_Binding); category inheritance through a chain of local supertypes (FastWorker :> Worker :> Thread leaves FastWorker as system extends Worker); lowering of timing attributes so that scheduling and RTA have Period and Compute_Execution_Time to work with.
+      VERIFIED 2026-10-29 on CI: PR #525 (squash 15645a8), all 18 green; CI in-diff mutants 56 selected, 50 caught, 6 unviable, 0 missed.
     release: v0.48.0
     tags: [sysml2, binding, deployment, interop, lowering]
     links:
@@ -7608,8 +7612,10 @@ artifacts:
   - id: REQ-AADL-PROPERTY-PROVENANCE-001
     type: requirement
     title: spar shall say, for a component instance and a property, what value it uses and where that value came from
-    status: implemented
-    description: "spar resolves a component instance property values through six mechanisms: the classifier (component type and its extends chain), the implementation (and its extends chain), the subcomponent declaration itself, contained associations (applies to, resolved per SystemInstance::reference_context), refinement (#496, a refined subcomponent inherits the original values) and inherit properties from containers (#460). Reference values resolve from the DECLARING component. Each is a way a user can be surprised by the value an analysis uses. spar instance --root P::T.Impl --explain <instance.path> [--property Set::Name] [--format text|json] <files> prints, for each property value of that instance, the value text, its SOURCE (classifier <Pkg::Type> | implementation <Pkg::Type.impl> | declared-local | contained (applies to) from <declarer path> | refined from <Impl>/<subcomponent> | inherited from <ancestor path>, with how the value reached the ancestor) and, for each reference (...) term, the resolved target instance path and the context component it was resolved from. Provenance is RECORDED when each value is inserted (a PropertyMap side table index-aligned with the values, enum PropertySource), not reconstructed. It is metadata only: PropertyMap equality ignores it and no analysis reads it. NOT COVERED: modal values (in modes); feature and connection properties in the CLI (recorded, not printed); default values from property declarations; values added by overlays or analysis-side rebinding (reported as unrecorded)."
+    status: verified
+    description: |-
+      spar resolves a component instance property values through six mechanisms: the classifier (component type and its extends chain), the implementation (and its extends chain), the subcomponent declaration itself, contained associations (applies to, resolved per SystemInstance::reference_context), refinement (#496, a refined subcomponent inherits the original values) and inherit properties from containers (#460). Reference values resolve from the DECLARING component. Each is a way a user can be surprised by the value an analysis uses. spar instance --root P::T.Impl --explain <instance.path> [--property Set::Name] [--format text|json] <files> prints, for each property value of that instance, the value text, its SOURCE (classifier <Pkg::Type> | implementation <Pkg::Type.impl> | declared-local | contained (applies to) from <declarer path> | refined from <Impl>/<subcomponent> | inherited from <ancestor path>, with how the value reached the ancestor) and, for each reference (...) term, the resolved target instance path and the context component it was resolved from. Provenance is RECORDED when each value is inserted (a PropertyMap side table index-aligned with the values, enum PropertySource), not reconstructed. It is metadata only: PropertyMap equality ignores it and no analysis reads it. NOT COVERED: modal values (in modes); feature and connection properties in the CLI (recorded, not printed); default values from property declarations; values added by overlays or analysis-side rebinding (reported as unrecorded).
+      VERIFIED 2026-10-29 on CI: PR #535 (squash ef4141c), all 18 green; CI in-diff mutants 83 selected, 69 caught, 12 unviable, 2 timeout, 0 missed.
     tags: [aadl, properties, cli, provenance]
     links:
       - type: traces-to
@@ -7625,7 +7631,7 @@ artifacts:
   - id: REQ-INTEROP-OSATE-INSTANCE-ORACLE-001
     type: requirement
     title: spar instance models shall match the committed OSATE instance models component for component, with every divergence pinned in a shrink-only ledger
-    status: implemented
+    status: verified
     description: |-
       The OSATE-generated instance models in test-data/osate2/instances (11 *.aaxl2) were used once, by hand, as a count oracle (PR #517, REQ-AADL-SUBCOMPONENT-REFINE-001). A count can agree while the trees differ, and a one-off reading does not notice spar moving afterwards. This makes them a permanent CI-gated differential test. crates/spar-cli/tests/osate_instance_oracle.rs reads each .aaxl2 with a minimal XML scanner (no XML crate is a workspace dependency), takes the root from its componentImplementation href, instantiates that root with spar's library against exactly the .aadl files the .aaxl2 references, and compares: the root-relative component path sets; each component's category; each classifier OSATE resolved; and five component property values where both sides hold one, Timing_Properties::Period (in picoseconds) and Deployment_Properties::Actual_Processor_Binding, Actual_Memory_Binding, Actual_Connection_Binding and Actual_Function_Binding (reference targets as instance paths).
       LEDGER. Every mismatch must be listed in test-data/osate2/instances/KNOWN_DIVERGENCES.toml, one entry per (file, path, kind) with a measured reason. An unlisted mismatch fails; a listed entry that no longer occurs also fails, so the ledger only shrinks. A missing, malformed or duplicate-keyed ledger fails rather than reading as empty. An entry is not a verdict that spar is wrong: OSATE is a test, not the authority.
@@ -7633,6 +7639,7 @@ artifacts:
       SCS.Phys. The "SCS.Phys has fewer components than OSATE" note from PR #517 was a harness artefact, not a spar defect: SCS.Phys's dcs subcomponent is classified in DigitalControlSystem.aadl. From SimpleControlSystem.aadl alone spar yields 5 components; from both files, the two the .aaxl2 references, it yields OSATE's 7, path for path, with matching categories, classifiers and all 3 Period values.
       MUTANTS, by hand; each made the test fail: drop spar's ps/t (1 missing-in-spar); add a spar component (11 extra-in-spar); a constant category (46 divergences); a skewed classifier (35); Period + 1 ps (3); bind to the target's parent (6); a bogus ledger entry (reported STALE); a duplicate entry; a malformed ledger; a missing ledger.
       NOT COMPARED: features, connections, flows, modes, SOMs and EMV2 instances; property values on feature and connection instances (where most of the corpus's Actual_Connection_Binding and Data_Size values live); every other property; Compute_Execution_Time (no .aaxl2 here carries one); modal values; values held by only one side (counted and printed, not failed). No compared value arrives through inheritance, so REQ-AADL-PROPERTY-INHERIT-001 is traced for the property-map surface this reads, not verified by it.
+      VERIFIED 2026-10-29 on CI: PR #536 (squash 2f3a8db), all 18 green; test-only (in-diff: nothing to mutate); negative controls (stale ledger entry, perturbed OSATE Period) turn it red.
     tags: [interop, instance, oracle, test]
     links:
       - type: traces-to
@@ -7648,40 +7655,14 @@ artifacts:
   - id: REQ-SYSML2-CORPUS-RATCHET-001
     type: requirement
     title: The official SysML v2 corpus gate shall name every file that parses, so a regression cannot hide behind a win
-    status: implemented
-    description: >
-      The corpus gate in crates/spar-sysml2/tests/official_corpus.rs compared
-      the NUMBER of parsing official files to an exact constant
-      (OFFICIAL_PARSING = 16 of 310). A count cannot see a swap: a change that
-      made two files parse and broke one that used to would raise it by one and
-      read as a pure win.
-
-      The gate is now a checked-in list,
-      crates/spar-sysml2/tests/official_corpus_parsing.txt, of every official
-      file that parses, by corpus-relative path. It FAILS if a listed file
-      stops parsing; FAILS if an unlisted file starts parsing and is not added,
-      so the list cannot fall behind the parser; FAILS on a stale, duplicate,
-      unsorted or padded entry; and keeps the exact corpus-size guard (310,
-      stronger than a floor of 300).
-
-      Raised by three grammar constructs chosen from a first-error histogram
-      of the 294 failing files, each cited to the textual BNF at the corpus
-      pin 29a3d2ac: SysML FeatureSpecializationPart, a multiplicity after the
-      typing (clause 8.2.2.6.5); KerML Class / Classifier / DataType /
-      Behavior with ClassifierDeclaration and SuperclassingPart (8.2.4.2.1,
-      8.2.5.1, 8.2.5.2, 8.2.5.6.1); and SysML PerformActionUsage
-      (8.2.2.17.2). MEASURED: 16 to 24 of 310. Every new positive snippet was
-      run against origin/main first and failed there.
-
-      Lowering has no AADL mapping for a classifier or a performed action. A
-      post-pass now reports every such node as an unsupported construct
-      wherever it sits, including inside part usage bodies that the per-body
-      walks never enter.
-
-      NOT CLAIMED: that the newly parsing files lower correctly. KNOWN
-      OVER-ACCEPTANCE: a multiplicity both before and after the typing
-      (`part x [1] : T [2];`) parses, although the production allows one
-      MultiplicityPart.
+    status: verified
+    description: |-
+      The corpus gate in crates/spar-sysml2/tests/official_corpus.rs compared the NUMBER of parsing official files to an exact constant (OFFICIAL_PARSING = 16 of 310). A count cannot see a swap: a change that made two files parse and broke one that used to would raise it by one and read as a pure win.
+      The gate is now a checked-in list, crates/spar-sysml2/tests/official_corpus_parsing.txt, of every official file that parses, by corpus-relative path. It FAILS if a listed file stops parsing; FAILS if an unlisted file starts parsing and is not added, so the list cannot fall behind the parser; FAILS on a stale, duplicate, unsorted or padded entry; and keeps the exact corpus-size guard (310, stronger than a floor of 300).
+      Raised by three grammar constructs chosen from a first-error histogram of the 294 failing files, each cited to the textual BNF at the corpus pin 29a3d2ac: SysML FeatureSpecializationPart, a multiplicity after the typing (clause 8.2.2.6.5); KerML Class / Classifier / DataType / Behavior with ClassifierDeclaration and SuperclassingPart (8.2.4.2.1, 8.2.5.1, 8.2.5.2, 8.2.5.6.1); and SysML PerformActionUsage (8.2.2.17.2). MEASURED: 16 to 24 of 310. Every new positive snippet was run against origin/main first and failed there.
+      Lowering has no AADL mapping for a classifier or a performed action. A post-pass now reports every such node as an unsupported construct wherever it sits, including inside part usage bodies that the per-body walks never enter.
+      NOT CLAIMED: that the newly parsing files lower correctly. KNOWN OVER-ACCEPTANCE: a multiplicity both before and after the typing (`part x [1] : T [2];`) parses, although the production allows one MultiplicityPart.
+      VERIFIED 2026-10-29 on CI: PR #540 (squash 56bdd90), all 18 green; CI in-diff mutants 32 selected, 26 caught, 5 timeout, 1 unviable, 0 missed; list equals an independent per-file CLI count.
     links:
       - type: traces-to
         target: REQ-SYSML2-CONFORMANCE-001
@@ -7694,8 +7675,10 @@ artifacts:
   - id: REQ-CLI-UNKNOWN-OPTION-001
     type: requirement
     title: Every spar subcommand shall reject an unknown option with exit 2, naming it on stderr
-    status: implemented
-    description: "The PulseEngine CLI baseline: `--help` exits 0, an unknown option or subcommand exits 2 with usage on stderr. Measured on the published v0.47.1 binary over the 19 subcommands `spar --help` lists: `--help` exited 0 on all 19 (#512), but an unknown option exited 2 on only 14. `sysml2`, `moves`, `insight` and `mcp` exited 1, and `lsp` exited 0: it ignored the flag and started the server. This holds at every nesting level (`sysml2 parse|lower`, `moves verify|enumerate`, `insight verify-trace`, `mcp serve`), and an unknown nested SUBCOMMAND exits 2 too. `lsp` and `mcp serve` check their arguments BEFORE the server reads stdin. `spar lsp --stdio` is accepted, because vscode-languageclient appends `--stdio` to an executable server under TransportKind.stdio and the VS Code extension launches spar that way. The invariant is derived from the source, not restated: the test reads the subcommand list from `spar --help`, so a new subcommand that does not conform fails it. NOT CLAIMED: (1) a usage block on stderr for the 14 commands that already exited 2; they print `Unknown option: X` only; (2) that 2 means usage error everywhere: under `moves`, 2 is also an overlay-violation FINDING, and moves' other argument errors stay 1; (3) the standalone `spar-mcp` binary, which is not a `spar` subcommand. UPDATE (v0.48.0, BREAKING): NOT CLAIMED (2) is SUPERSEDED. `spar moves verify` now exits 3 for an overlay-violation FINDING (Frozen / Allowed_Targets), not 2, so 2 means a usage error (an unknown option or subcommand) on every spar command, `moves` included. Reason: one code per failure kind, the PulseEngine CLI convention, so a caller can branch on the code without reading stderr. A script or agent that tested for 2 to detect an overlay violation must test for 3; the MCP tool `spar.verify_move` mirrors the code as `cli_exit_code` and reports 3 too. Still NOT CLAIMED: that every argument error is 2. Under `moves`, a missing value, a missing `--root` or a name that does not resolve still exits 1. Oracle: `an_overlay_violation_exits_3_and_an_unknown_option_exits_2` in crates/spar-cli/tests/moves_verify.rs runs the same `moves verify` invocation with and without a stray `--bogus` and requires 3 and 2 respectively; `verify_tool_reports_cli_exit_code_3_for_an_overlay_violation` in crates/spar-mcp/tests/in_process_tests.rs pins the MCP mirror. The repo keeps no CHANGELOG past 0.9.3 (the signed tag is the release record), so this requirement carries the BREAKING note."
+    status: verified
+    description: |-
+      The PulseEngine CLI baseline: `--help` exits 0, an unknown option or subcommand exits 2 with usage on stderr. Measured on the published v0.47.1 binary over the 19 subcommands `spar --help` lists: `--help` exited 0 on all 19 (#512), but an unknown option exited 2 on only 14. `sysml2`, `moves`, `insight` and `mcp` exited 1, and `lsp` exited 0: it ignored the flag and started the server. This holds at every nesting level (`sysml2 parse|lower`, `moves verify|enumerate`, `insight verify-trace`, `mcp serve`), and an unknown nested SUBCOMMAND exits 2 too. `lsp` and `mcp serve` check their arguments BEFORE the server reads stdin. `spar lsp --stdio` is accepted, because vscode-languageclient appends `--stdio` to an executable server under TransportKind.stdio and the VS Code extension launches spar that way. The invariant is derived from the source, not restated: the test reads the subcommand list from `spar --help`, so a new subcommand that does not conform fails it. NOT CLAIMED: (1) a usage block on stderr for the 14 commands that already exited 2; they print `Unknown option: X` only; (2) that 2 means usage error everywhere: under `moves`, 2 is also an overlay-violation FINDING, and moves' other argument errors stay 1; (3) the standalone `spar-mcp` binary, which is not a `spar` subcommand. UPDATE (v0.48.0, BREAKING): NOT CLAIMED (2) is SUPERSEDED. `spar moves verify` now exits 3 for an overlay-violation FINDING (Frozen / Allowed_Targets), not 2, so 2 means a usage error (an unknown option or subcommand) on every spar command, `moves` included. Reason: one code per failure kind, the PulseEngine CLI convention, so a caller can branch on the code without reading stderr. A script or agent that tested for 2 to detect an overlay violation must test for 3; the MCP tool `spar.verify_move` mirrors the code as `cli_exit_code` and reports 3 too. Still NOT CLAIMED: that every argument error is 2. Under `moves`, a missing value, a missing `--root` or a name that does not resolve still exits 1. Oracle: `an_overlay_violation_exits_3_and_an_unknown_option_exits_2` in crates/spar-cli/tests/moves_verify.rs runs the same `moves verify` invocation with and without a stray `--bogus` and requires 3 and 2 respectively; `verify_tool_reports_cli_exit_code_3_for_an_overlay_violation` in crates/spar-mcp/tests/in_process_tests.rs pins the MCP mirror. The repo keeps no CHANGELOG past 0.9.3 (the signed tag is the release record), so this requirement carries the BREAKING note.
+      VERIFIED 2026-10-29 on CI: PR #534 (squash 51d2438), all 18 green; CI in-diff mutants 35 selected, 35 caught, 0 missed (matches the Mac mini run).
     tags: [cli, ux, guardrail]
     links:
       - type: traces-to
@@ -7709,8 +7692,10 @@ artifacts:
   - id: REQ-PROOF-GEN-NAMES-INJECTIVE-001
     type: requirement
     title: Generated proof file, module, namespace and theorem names shall be injective over the instance model
-    status: implemented
-    description: "#510. spar codegen --verify proof named each processor's Lean proof by the processor's NAME (proofs/<name>_scheduling.lean) and each Kani harness by its parent's and its own name (proofs/kani/<process>/<thread>_harness.rs). Two processors named cpu in subsystems left and right wrote one file, and the second silently overwrote the first: on the published binary the #510 repro produced 4 proof artifacts and 2 files on disk. The same flaw declared one theorem t_meets_deadline twice when two threads named t in different processes are bound to one processor, which Lean rejects as already declared. THE REQUIREMENT. Every generated proof name is the processor's or thread's instance path below the root, encoded by an injective map (proof_gen::encode_instance_path): segments are joined with __, lowercase letters and digits stay, an interior single _ stays, and every other character is escaped with z (zz, zc<letter> for uppercase, zu for any other _, zx<6 hex> for non-ASCII and punctuation, ze for an empty segment, zr for the root, zd before a leading digit). The output is lowercase [a-z0-9_] starting with a letter, so names never differ only in case (macOS folds those into one file) and every <name>_scheduling / <name>_meets_deadline is a Lean identifier that is not a keyword. A processor directly under the root keeps its plain name (proofs/cpu_scheduling.lean). Each proof also names its instance path in a header comment. VERIFICATION. proof_gen tests: a test-only decoder recovers every one of 76449 tricky paths (all strings up to length 3 over a, A, z, Z, _, ., -, 1, é, in 1 to 3 segments) from its encoding, with distinct encodings; the #510 model gives proofs/left__cpu_scheduling.lean and proofs/right__cpu_scheduling.lean, each with its own instance and theorem, and two Kani harness directories; two threads t on one cpu give p1__t_meets_deadline and p2__t_meets_deadline. The CLI test reads both files from disk. All three model tests are red on origin/main. Lean 4.29.0-rc6, mathlib-free stub of Proofs.Scheduling.RTA: lake build of both models' generated proofs plus a root importing all of them fails on origin/main (`Cpu.t_meets_deadline` has already been declared; only one TwoCpu module exists) and succeeds after. NOT CLAIMED. WIT, Rust crate and config paths are still named by process name and still collide when a process name repeats (the #510 repro reports 20 files written; 11 reached disk before this fix and 13 after, the 7 lost being WIT, crate and config files); the generated Lean proofs reference compute_response_time, which proofs/Proofs/Scheduling/RTA.lean does not define, so they do not elaborate against the real library (checked here against a stub)."
+    status: verified
+    description: |-
+      #510. spar codegen --verify proof named each processor's Lean proof by the processor's NAME (proofs/<name>_scheduling.lean) and each Kani harness by its parent's and its own name (proofs/kani/<process>/<thread>_harness.rs). Two processors named cpu in subsystems left and right wrote one file, and the second silently overwrote the first: on the published binary the #510 repro produced 4 proof artifacts and 2 files on disk. The same flaw declared one theorem t_meets_deadline twice when two threads named t in different processes are bound to one processor, which Lean rejects as already declared. THE REQUIREMENT. Every generated proof name is the processor's or thread's instance path below the root, encoded by an injective map (proof_gen::encode_instance_path): segments are joined with __, lowercase letters and digits stay, an interior single _ stays, and every other character is escaped with z (zz, zc<letter> for uppercase, zu for any other _, zx<6 hex> for non-ASCII and punctuation, ze for an empty segment, zr for the root, zd before a leading digit). The output is lowercase [a-z0-9_] starting with a letter, so names never differ only in case (macOS folds those into one file) and every <name>_scheduling / <name>_meets_deadline is a Lean identifier that is not a keyword. A processor directly under the root keeps its plain name (proofs/cpu_scheduling.lean). Each proof also names its instance path in a header comment. VERIFICATION. proof_gen tests: a test-only decoder recovers every one of 76449 tricky paths (all strings up to length 3 over a, A, z, Z, _, ., -, 1, é, in 1 to 3 segments) from its encoding, with distinct encodings; the #510 model gives proofs/left__cpu_scheduling.lean and proofs/right__cpu_scheduling.lean, each with its own instance and theorem, and two Kani harness directories; two threads t on one cpu give p1__t_meets_deadline and p2__t_meets_deadline. The CLI test reads both files from disk. All three model tests are red on origin/main. Lean 4.29.0-rc6, mathlib-free stub of Proofs.Scheduling.RTA: lake build of both models' generated proofs plus a root importing all of them fails on origin/main (`Cpu.t_meets_deadline` has already been declared; only one TwoCpu module exists) and succeeds after. NOT CLAIMED. WIT, Rust crate and config paths are still named by process name and still collide when a process name repeats (the #510 repro reports 20 files written; 11 reached disk before this fix and 13 after, the 7 lost being WIT, crate and config files); the generated Lean proofs reference compute_response_time, which proofs/Proofs/Scheduling/RTA.lean does not define, so they do not elaborate against the real library (checked here against a stub).
+      VERIFIED 2026-10-29 on CI: PR #541 (squash 137f915), all 18 green plus Kani/Bazel advisory; CI in-diff mutants 28 selected, 26 caught, 2 unviable, 0 missed.
     tags: [codegen, verification, formal, bug]
     links:
       - type: traces-to
@@ -7723,8 +7708,10 @@ artifacts:
   - id: REQ-ARINC-ISOLATION-FP-001
     type: requirement
     title: ARINC-PARTITION-ISOLATION shall accept a port connection between partitions and report data shared across partitions
-    status: implemented
-    description: "Refs #504. check_partition_isolation reported EVERY semantic connection between processes bound to different virtual processors as an Error ('should use approved mechanisms'), plus a name-matched declarative duplicate. In the ARINC 653 annex mapping a partition is a process bound to a virtual processor, and an AADL data port connected across processes IS an ARINC 653 sampling port, an event data port a queueing port (Delange et al., 'Validate, Simulate, and Implement ARINC653 Systems using the AADL', SIGAda 2009, sections 3.1 and 3.4; AADLib arinc653_annex/example_1, 'adapted from the ARINC653 annex document', connects its partitions exactly so). The annex text itself (SAE AS5506/1A) was NOT obtained; see DEC-ARINC-ANNEX-VS-OSATE-001 for the sources used. The rule masked itself: owning_partition compared the whole binding text cpu.p1 with VP names, so partitions almost never resolved. This requirement also lands the identity-based owning_partition (REQ-AADL-BINDING-CONSUMERS-002 item 1) through the resolver ProcessorGroups uses (overlay::actual_processor_binding_with_overlay). RULE NOW: a port connection across partitions passes; a DATA component reached by access connections from processes of two or more partitions is an Error (shared data is intra-partition only: SIGAda 2009 section 3.3; partitions cannot create covert channels: Delange, Pautet, Kordon, ERTS 2010 section 2.3.2), including system-level data that main never checked because it lies in no process; bus and subprogram access across partitions is not reported, because the sources forbid shared data and say nothing of those; a pure event port across partitions is a Warning (ARINC 653 has sampling and queueing ports only). The declarative second pass, which matched endpoints by global name and merged two different processes both called process_part1, is removed. RED on main: 12 of the 21 new spar-analysis unit tests fail against main's implementation (including annex_shaped_two_partition_model_has_no_isolation_or_assignment_finding and the shared-data negative controls), and so do both CLI tests in crates/spar-cli/tests/arinc_isolation.rs: on the published-shape model main prints 2 false ASSIGNMENT warnings and no shared-data Error; with only the binding fixed, main's rule prints both port connections as Errors. NEGATIVE CONTROLS: data inside partition A accessed from B (main also reported it, under its generic 'direct connection' message); data at the system level reached by both partitions (main MISSED it, since the data lies in no process: a new detection); --allow arinc-partition-isolation demotes the Error to a Warning. CORPUS (49 tracked .aadl files mentioning ARINC653, 50 runs, all instantiate): main vs branch differs in 25 runs, only by 45 false ARINC-PARTITION-ASSIGNMENT warnings removed; no error count changes. Binding-fix-only vs branch: 19 ARINC-PARTITION-ISOLATION Errors in 13 runs removed, every one a port connection on OSATE's, AADLib's or the annex's own examples. MUTANTS (cargo-mutants --in-diff, workspace tests, base ef4141c): 35 mutants, 30 caught, 5 unviable, 0 missed; a first run missed the data-access test `||`->`&&` (one access end only), now caught by one_data_access_end_is_enough_for_shared_data. NOT CLAIMED: memory-segment segregation (two partitions bound to one memory), Partition_Identifier uniqueness and Module_Schedule checks are not implemented (DEC-ARINC-ANNEX-VS-OSATE-001)."
+    status: verified
+    description: |-
+      Refs #504. check_partition_isolation reported EVERY semantic connection between processes bound to different virtual processors as an Error ('should use approved mechanisms'), plus a name-matched declarative duplicate. In the ARINC 653 annex mapping a partition is a process bound to a virtual processor, and an AADL data port connected across processes IS an ARINC 653 sampling port, an event data port a queueing port (Delange et al., 'Validate, Simulate, and Implement ARINC653 Systems using the AADL', SIGAda 2009, sections 3.1 and 3.4; AADLib arinc653_annex/example_1, 'adapted from the ARINC653 annex document', connects its partitions exactly so). The annex text itself (SAE AS5506/1A) was NOT obtained; see DEC-ARINC-ANNEX-VS-OSATE-001 for the sources used. The rule masked itself: owning_partition compared the whole binding text cpu.p1 with VP names, so partitions almost never resolved. This requirement also lands the identity-based owning_partition (REQ-AADL-BINDING-CONSUMERS-002 item 1) through the resolver ProcessorGroups uses (overlay::actual_processor_binding_with_overlay). RULE NOW: a port connection across partitions passes; a DATA component reached by access connections from processes of two or more partitions is an Error (shared data is intra-partition only: SIGAda 2009 section 3.3; partitions cannot create covert channels: Delange, Pautet, Kordon, ERTS 2010 section 2.3.2), including system-level data that main never checked because it lies in no process; bus and subprogram access across partitions is not reported, because the sources forbid shared data and say nothing of those; a pure event port across partitions is a Warning (ARINC 653 has sampling and queueing ports only). The declarative second pass, which matched endpoints by global name and merged two different processes both called process_part1, is removed. RED on main: 12 of the 21 new spar-analysis unit tests fail against main's implementation (including annex_shaped_two_partition_model_has_no_isolation_or_assignment_finding and the shared-data negative controls), and so do both CLI tests in crates/spar-cli/tests/arinc_isolation.rs: on the published-shape model main prints 2 false ASSIGNMENT warnings and no shared-data Error; with only the binding fixed, main's rule prints both port connections as Errors. NEGATIVE CONTROLS: data inside partition A accessed from B (main also reported it, under its generic 'direct connection' message); data at the system level reached by both partitions (main MISSED it, since the data lies in no process: a new detection); --allow arinc-partition-isolation demotes the Error to a Warning. CORPUS (49 tracked .aadl files mentioning ARINC653, 50 runs, all instantiate): main vs branch differs in 25 runs, only by 45 false ARINC-PARTITION-ASSIGNMENT warnings removed; no error count changes. Binding-fix-only vs branch: 19 ARINC-PARTITION-ISOLATION Errors in 13 runs removed, every one a port connection on OSATE's, AADLib's or the annex's own examples. MUTANTS (cargo-mutants --in-diff, workspace tests, base ef4141c): 35 mutants, 30 caught, 5 unviable, 0 missed; a first run missed the data-access test `||`->`&&` (one access end only), now caught by one_data_access_end_is_enough_for_shared_data. NOT CLAIMED: memory-segment segregation (two partitions bound to one memory), Partition_Identifier uniqueness and Module_Schedule checks are not implemented (DEC-ARINC-ANNEX-VS-OSATE-001).
+      VERIFIED 2026-10-29 on CI: PR #544 (squash 9d2daca), all 18 green; CI in-diff mutants 35 selected, 30 caught, 5 unviable, 0 missed.
     tags: [arinc653, analysis, safety, bug]
     links:
       - type: traces-to
