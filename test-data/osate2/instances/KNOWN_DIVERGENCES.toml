@@ -1,0 +1,30 @@
+# Pinned divergences between spar's instance models and OSATE's
+# (REQ-INTEROP-OSATE-INSTANCE-ORACLE-001).
+#
+# Read by crates/spar-cli/tests/osate_instance_oracle.rs. One entry per
+# (file, path, kind); `path` is root-relative and lowercase, `""` is the root.
+# `kind` is one of: missing-in-spar, extra-in-spar, category, classifier,
+# property:<Set>::<Name>. Every entry needs a measured `reason`.
+#
+# The test FAILS on a divergence not listed here, and ALSO on a listed entry
+# that no longer occurs: the ledger only shrinks. A divergence is not a
+# verdict that spar is wrong — OSATE is a test, not the authority (AS5506 is);
+# say in `reason` which side the standard supports when that is known.
+#
+# Example shape:
+#
+#   [[divergence]]
+#   file = "X_Instance.aaxl2"
+#   path = "dcs/app"
+#   kind = "classifier"
+#   reason = "measured: ...; AS5506 §x.y supports ..."
+#
+# EMPTY as of v0.48.0: all 11 files agree on 74 component paths, their
+# categories, 62 classifiers and 11 property values.
+#
+# The "SCS.Phys has fewer components than OSATE" note from PR #517
+# (REQ-AADL-SUBCOMPONENT-REFINE-001) was a harness artefact, not a spar
+# defect: SCS.Phys's subcomponent `dcs: system DCS.singletier0` lives in
+# DigitalControlSystem.aadl. Instantiated from SimpleControlSystem.aadl alone,
+# spar yields 5 components; given both files — the two the .aaxl2 itself
+# references — it yields OSATE's 7, path for path.
