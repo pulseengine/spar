@@ -5,6 +5,7 @@ mod insight;
 mod lsp;
 mod refactor;
 mod sarif;
+mod tsn;
 mod verify;
 
 // Re-export shared modules from the library so the binary keeps using
@@ -259,6 +260,16 @@ const COMMANDS: &[(&str, &str, CmdFn)] = &[
         cmd_dbc,
     ),
     (
+        "gcl",
+        "Synthesize an 802.1Qbv gate-control list from per-class demands",
+        tsn::cmd_gcl,
+    ),
+    (
+        "yang",
+        "Export a gate-control list as an 802.1Qcw YANG document (NETCONF XML)",
+        tsn::cmd_yang,
+    ),
+    (
         "moves",
         "Hypothetical-rebinding oracle (verify a move under the migration overlay)",
         moves::cmd_moves_dispatch,
@@ -342,6 +353,13 @@ fn print_usage() {
     );
     eprintln!(
         "  codegen  --root Package::Type.Impl [--output dir] [--format rust|wit|both] [--verify all|build|test|proof] [--rivet] [--dry-run] <file...>"
+    );
+    eprintln!(
+        "  gcl      --cycle-ns N --link-rate-bps R --max-windows K --guard-ns G \
+         --class COS:BURST_BYTES:RATE_BPS:DEADLINE_NS [--class ...] [--format text|json]"
+    );
+    eprintln!(
+        "  yang     --port NAME (--gcl BLOB | --root Package::Type.Impl --bus NAME <file...>)"
     );
     eprintln!(
         "  moves    verify --root Package::Type.Impl --component <fqn> --to <processor> [--format text|json] <file...>"

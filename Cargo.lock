@@ -1391,6 +1391,7 @@ dependencies = [
  "spar-hir-def",
  "spar-insight",
  "spar-mermaid",
+ "spar-network",
  "spar-parser",
  "spar-render",
  "spar-solver",

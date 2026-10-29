@@ -4385,40 +4385,9 @@ artifacts:
   - id: REQ-TSN-SYNTH-QBV-GUARDBAND-001
     type: requirement
     title: "802.1Qbv guard-band-aware window-splitting (deployable GCL claim)"
-    description: >
-      Follow-up to REQ-TSN-SYNTH-QBV-SPLIT-BASE-001, which synthesizes
-      split GCLs over a guard-band-FREE model (sound at the NC
-      service-curve level, but NOT a deployable-hardware claim — real
-      802.1Qbv loses ~K guard bands of transmit time to frame-straddle
-      protection per IEEE 802.1Q §8.6.8.4 TransmissionOverrun, which the
-      baseline model does not see, so it can over-state available rate by
-      ~N·K·g/cycle). spar shall charge the per-window guard band
-      g (≈ queueMaxSDU·8 / link_rate) so the synthesizer's
-      "meets deadline" claim becomes deployment-sound.
-      Implementation (synthesize_gcl_split_guarded): each class's USABLE
-      open window is sized by the same validated single-window search the
-      guard-free path uses (the guard does not change the service a class
-      receives — open w, latency cycle/K − w — only the PACKING budget),
-      then the emitter reserves an explicit trailing closed guard window
-      of g after every class window so the budget becomes Σwᵢ + N·g ≤
-      cycle/K and the DEPLOYED GCL physically contains the guards a switch
-      enforces. The breakeven/self-starvation cliff (guards growing as
-      N·K·g while latency benefit shrinks as 1/K) is enforced
-      automatically: when no split fits, the oracle returns
-      GuardOversubscribed rather than an unsound GCL. Model soundness is
-      pinned non-circularly by TEST-TSN-GUARDBAND's K=1 anchor — "emit a
-      (D−g)-open window" is proven algebraically identical to the shipped
-      tas_residual_service_with_sync_error at ε = g (open D−g, latency
-      C−D+g, rate R·(D−g)/C from two independent derivations). g rounds UP
-      to a whole ns (sound direction); g = 0 reproduces
-      REQ-TSN-SYNTH-QBV-SPLIT-BASE-001 byte-for-byte. NO new dependency
-      (existing tsn.rs + curves.rs). Precursor to the full
-      dependency-aware REQ-TSN-SYNTH-QBV-001. SCOPE: this is the
-      deployment-sound GCL PRODUCER — the GateSchedule it returns
-      physically carries the guard bands a switch enforces. Like the whole
-      synthesize_gcl* family it is library API; no synthesizer is yet wired
-      into a CLI / AADL→Qbv consumer, so this REQ makes no end-to-end
-      pipeline claim — consumer wiring is separate future work. [SOLID]
+    description: |-
+      Follow-up to REQ-TSN-SYNTH-QBV-SPLIT-BASE-001, which synthesizes split GCLs over a guard-band-FREE model (sound at the NC service-curve level, but NOT a deployable-hardware claim — real 802.1Qbv loses ~K guard bands of transmit time to frame-straddle protection per IEEE 802.1Q §8.6.8.4 TransmissionOverrun, which the baseline model does not see, so it can over-state available rate by ~N·K·g/cycle). spar shall charge the per-window guard band g (≈ queueMaxSDU·8 / link_rate) so the synthesizer's "meets deadline" claim becomes deployment-sound. Implementation (synthesize_gcl_split_guarded): each class's USABLE open window is sized by the same validated single-window search the guard-free path uses (the guard does not change the service a class receives — open w, latency cycle/K − w — only the PACKING budget), then the emitter reserves an explicit trailing closed guard window of g after every class window so the budget becomes Σwᵢ + N·g ≤ cycle/K and the DEPLOYED GCL physically contains the guards a switch enforces. The breakeven/self-starvation cliff (guards growing as N·K·g while latency benefit shrinks as 1/K) is enforced automatically: when no split fits, the oracle returns GuardOversubscribed rather than an unsound GCL. Model soundness is pinned non-circularly by TEST-TSN-GUARDBAND's K=1 anchor — "emit a (D−g)-open window" is proven algebraically identical to the shipped tas_residual_service_with_sync_error at ε = g (open D−g, latency C−D+g, rate R·(D−g)/C from two independent derivations). g rounds UP to a whole ns (sound direction); g = 0 reproduces REQ-TSN-SYNTH-QBV-SPLIT-BASE-001 byte-for-byte. NO new dependency (existing tsn.rs + curves.rs). Precursor to the full dependency-aware REQ-TSN-SYNTH-QBV-001. SCOPE: this is the deployment-sound GCL PRODUCER — the GateSchedule it returns physically carries the guard bands a switch enforces. Like the whole synthesize_gcl* family it is library API; no synthesizer is yet wired into a CLI / AADL→Qbv consumer, so this REQ makes no end-to-end pipeline claim — consumer wiring is separate future work. [SOLID]
+      UPDATE (v0.49.0 backlog, REQ-TSN-CLI-SURFACE-001): the SCOPE sentence above is superseded in one respect. synthesize_gcl_split_guarded now has a CLI consumer, `spar gcl`, which takes per-class demands explicitly. Still NOT claimed: an AADL-to-Qbv consumer that derives those demands from a model, or any end-to-end pipeline claim.
     status: verified
     release: v0.22.0
     tags: [tsn, synthesis, qbv, guard-band, tier2]
@@ -7200,33 +7169,28 @@ artifacts:
   - id: REQ-TSN-CLI-SURFACE-001
     type: requirement
     title: GCL synthesis and YANG export shall be reachable without writing Rust
-    description: >
-      From the same evaluation (#476). MEASURED: `synthesize_gcl` has one
-      defining file and ZERO callers outside spar-network, and
-      crates/spar-cli/src/main.rs mentions neither `yang` nor `gcl`. So the two
-      capabilities the evaluation most wanted are library-only and unconnected
-      to AADL — using them means writing Rust, which is what the evaluator did.
+    description: |
+      From the same evaluation (#476). MEASURED on 6a6c787, BEFORE this change: `synthesize_gcl` has one defining file and ZERO callers outside spar-network, and crates/spar-cli/src/main.rs mentions neither `yang` nor `gcl`. So the two capabilities the evaluation most wanted are library-only and unconnected to AADL — using them means writing Rust, which is what the evaluator did.
+      This is the capability gap behind the evaluation's overall position: usable today as an early bound estimator, with glue code for synthesis and a re-analysis step. The glue code IS the gap.
+      The CLI surface is already guarded: REQ-CLI-SURFACE-001 made one `&[(&str, &str, CmdFn)]` table drive both dispatch and `--help`, so a command cannot exist and be undocumented. Adding subcommands here inherits that, and the deleting-an-entry-stops-compiling property is what keeps the new surface honest.
+      NOT CLAIMED: that a CLI alone closes the evaluation's synthesis gap. The synthesizer's output and the analyzer's bounds currently DISAGREE on the same artifact (a schedule passing the synthesizer's own check measured 254 us end-to-end against a 100 us/hop budget over 2 hops), and exposing a command would make that disagreement easier to reach, not smaller. That mismatch is its own requirement and is not yet reproduced here.
 
-      This is the capability gap behind the evaluation's overall position:
-      usable today as an early bound estimator, with glue code for synthesis and
-      a re-analysis step. The glue code IS the gap.
+      IMPLEMENTED (v0.49.0 backlog) as two commands in the single COMMANDS table, so both appear in `spar --help` by construction. (1) `spar gcl --cycle-ns N --link-rate-bps R --max-windows K --guard-ns G --class COS:BURST_BYTES:RATE_BPS:DEADLINE_NS [--class ...] [--format text|json]` makes ONE library call, `synthesize_gcl_split_guarded`, and prints `GateSchedule::to_gcl_blob` (text) or the windows in ps plus the blob (json). A `GclSynthError` is printed by its Display and exits 1. All four numeric inputs are REQUIRED: there is no agreed default for the window cap or the guard band. (2) `spar yang --port NAME (--gcl BLOB | --root Pkg::Type.Impl --bus NAME <file...>)` makes ONE library call, `GateSchedule::to_qcw_yang`, on a schedule read from the named component's `Spar_TSN::Gate_Control_List` (raw getter plus `GateSchedule::parse`, so a malformed list is reported, not dropped) or given as a blob, which is how `spar gcl` output reaches a switch document without Rust. A model `spar parse` rejects is refused (`path:line:col` lines, then `Cannot export: parse errors in <file>`, exit 1) inline in the shape of #552, because the shared loader (#554) had not merged; it moves onto `load.rs` when it does. Every `spar yang` run warns on stderr that the document has no base-time and no config-change and is not activatable (REQ-TSN-YANG-DEPLOYABLE-001, #475).
+      EVIDENCE: crates/spar-cli/tests/tsn_cli_surface.rs, 11 tests. Each expected value is produced by the spar-network call in the same test from hand-written picosecond inputs, never read back from CLI output. The synthesis fixture is Oversubscribed at K=1 and feasible at K=4 with a 12.144 us guard, so the cap, the guard and both deadlines shape the printed schedule. All 11 fail on origin/main (`Unknown command: gcl` / `yang`). `spar analyze` over the 2091 tracked .aadl files: 1550 runs old and new, differing=0.
+      NOT CLAIMED: (a) AADL-derived synthesis demands. How an end-to-end Deadline splits into per-hop budgets, how flows aggregate per class per port, and where cycle/K/guard come from are undecided, and the 254 us vs 100 us/hop mismatch above lives exactly there. (b) A deployable YANG document (REQ-TSN-YANG-DEPLOYABLE-001). (c) A JSON (RFC 7951) encoding of the YANG document, which the library does not produce. (d) One GCL per port: `--port` names the single interface the bus's one schedule is written to.
 
-      The CLI surface is already guarded: REQ-CLI-SURFACE-001 made one
-      `&[(&str, &str, CmdFn)]` table drive both dispatch and `--help`, so a
-      command cannot exist and be undocumented. Adding subcommands here inherits
-      that, and the deleting-an-entry-stops-compiling property is what keeps the
-      new surface honest.
 
-      NOT CLAIMED: that a CLI alone closes the evaluation's synthesis gap. The
-      synthesizer's output and the analyzer's bounds currently DISAGREE on the
-      same artifact (a schedule passing the synthesizer's own check measured 254
-      us end-to-end against a 100 us/hop budget over 2 hops), and exposing a
-      command would make that disagreement easier to reach, not smaller. That
-      mismatch is its own requirement and is not yet reproduced here.
-    status: proposed
-    release: v0.48.0
+    status: implemented
+    release: v0.49.0
     tags: [tsn, cli, synthesis, interop]
+    links:
+      - type: traces-to
+        target: REQ-CLI-SURFACE-001
 
+      - type: traces-to
+        target: REQ-TSN-SYNTH-QBV-GUARDBAND-001
+      - type: traces-to
+        target: REQ-TSN-EXPORT-YANG-001
   - id: REQ-DBC-CYCLE-TIME-001
     type: requirement
     title: DBC ingest shall carry message cycle times into the AADL model
