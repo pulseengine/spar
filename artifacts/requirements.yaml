@@ -7728,8 +7728,10 @@ artifacts:
   - id: REQ-CI-MERGE-QUEUE-001
     type: requirement
     title: Every required context shall report in a merge-queue run, and a docs-only queue entry shall skip the heavy jobs exactly as its PR run did
-    status: implemented
-    description: "Preparation for GitHub merge queue on main (owner-approved pilot, 2026-10-28). A required context whose workflow does not trigger on `merge_group` reports nothing in the queue, so the entry waits until the queue's check-response timeout evicts it. Every workflow emitting one of the 18 required contexts (ci.yml, proofs.yml, verification-gate.yml) shall therefore trigger on `merge_group`. A job whose job-level `if:` is false there still reports `skipped`, which satisfies the context. The changed-path classifier shall diff a `merge_group` run exactly like a pull_request: base `github.event.merge_group.base_sha`, head the queue checkout. An empty or unresolvable base shall turn the required `Detect changed paths` context red without emitting a verdict, and every other event shall keep running the full suite. Because base_sha is main's tip and not the previous entry, a queue entry's diff includes every entry queued ahead of it. That is the fail-safe direction: a docs-only PR behind a code PR inherits the code verdict. Mutation Testing shall run its in-diff mode in the queue, never the full-crate ratchet. Each event_name test in that job is written against pull_request, so before this change a merge_group run fell into the 240-minute lean-mem ratchet, once per queue entry and again on the push it lands as. `check_mutants_report.py --assert-workflow-threshold` asserts the routing. Fuzz smoke runs in the queue as well as on PRs, because the queue commit is the one that lands. NOT YET EXERCISED: the merge queue ruleset is not enabled when this lands, so the merge_group path is covered by self-tests only until the first queue run."
+    status: verified
+    description: |-
+      Preparation for GitHub merge queue on main (owner-approved pilot, 2026-10-28). A required context whose workflow does not trigger on `merge_group` reports nothing in the queue, so the entry waits until the queue's check-response timeout evicts it. Every workflow emitting one of the 18 required contexts (ci.yml, proofs.yml, verification-gate.yml) shall therefore trigger on `merge_group`. A job whose job-level `if:` is false there still reports `skipped`, which satisfies the context. The changed-path classifier shall diff a `merge_group` run exactly like a pull_request: base `github.event.merge_group.base_sha`, head the queue checkout. An empty or unresolvable base shall turn the required `Detect changed paths` context red without emitting a verdict, and every other event shall keep running the full suite. Because base_sha is main's tip and not the previous entry, a queue entry's diff includes every entry queued ahead of it. That is the fail-safe direction: a docs-only PR behind a code PR inherits the code verdict. Mutation Testing shall run its in-diff mode in the queue, never the full-crate ratchet. Each event_name test in that job is written against pull_request, so before this change a merge_group run fell into the 240-minute lean-mem ratchet, once per queue entry and again on the push it lands as. `check_mutants_report.py --assert-workflow-threshold` asserts the routing. Fuzz smoke runs in the queue as well as on PRs, because the queue commit is the one that lands. NOT YET EXERCISED: the merge queue ruleset is not enabled when this lands, so the merge_group path is covered by self-tests only until the first queue run.
+      VERIFIED 2026-10-29 on CI: PR #545 (squash 11b1c14); the maintainer enabled the merge-queue ruleset 2026-10-29. Observed on merge_group run 40837843519 (#530): event merge_group, the changed-paths classifier's E2E self-test 'a .rs queue entry emits code=true' and code=true, Mutation Testing in the in-diff mode (120 selected, 0 missed). #551 and #530 merged through the queue (f6453af, b78986e).
     tags: [ci, merge-queue, infrastructure, guardrail]
     links:
       - type: traces-to
@@ -7745,7 +7747,7 @@ artifacts:
   - id: REQ-AADL-MODAL-PROPERTY-VALUES-001
     type: requirement
     title: A modal property value shall apply in the modes it lists, per system operation mode
-    status: implemented
+    status: verified
     description: |-
       A property association may give one value per mode: `Period => 10 ms in modes (fast), 40 ms in modes (slow);`.
       MEASURED on origin/main 15645a8 before this change: the parser kept every value with its `in modes` clause (MODAL_PROPERTY_VALUE nodes), but the item-tree lowering stopped at the first clause. The first value won in every mode, the others were dropped, and no diagnostic said so. `spar instance` showed `"Period": "10 ms"`, and `spar analyze --per-som` printed 20.0% utilisation for both SOMs of a 2 ms / (10 | 40 ms) thread.
@@ -7786,6 +7788,7 @@ artifacts:
       - Derived `requires modes`, whose modes belong to the holder rather than the declarer (osate2 ExplicitMapping.aadl): the declarer has no selected mode, so the association's FIRST value is kept (a named decision, not OSATE's rule). The same happens on a SOM-truncated model, where compute_soms stops before the later modal components.
       - Analyses other than scheduling and RTA, and `spar instance` JSON, still show the first value.
       - The default path's "modal property evaluation is not yet fully supported" note is unchanged.
+      VERIFIED 2026-10-29 on CI: PR #547 (squash f35cf78), all 18 required contexts green; CI in-diff mutants 77 selected, 56 caught, 21 unviable, 0 missed — after an earlier CI run's one survivor (the blank applies-to guard) was killed by a direct item-tree test, verified by hand-applying the mutant.
     tags: [aadl, properties, modes, analysis]
     links:
       - type: traces-to
@@ -7801,8 +7804,10 @@ artifacts:
   - id: REQ-SYSML2-PROPERTY-VALUES-001
     type: requirement
     title: "SysML v2 lowering: property values are lowered faithfully or reported, never fabricated or silently dropped"
-    status: implemented
-    description: spar sysml2 lower must (1) print a warning with line:col for every property-bearing construct it does not lower (allocate; an attribute or constraint value in a part-usage body, an attribute redefinition with a value, a package-level value, a value in a definition body that lowering does not walk) instead of dropping it silently; (2) accept the standard SysML v2 quantity notation 'value [unit]' (also [SI::ms] and compound units) and lower it exactly like 'value unit'; (3) check the unit of a value whose property resolves to a predeclared AADL Time- or Size-typed property against AADL_Project Time_Units / Size_Units, reporting a wrong-dimension unit and mapping SI s/h to AADL sec/hr; (4) never emit an attribute or constraint usage's TYPE name as its property value when it has no value. Addresses the silent-drop and lost-property-semantics SysML v2 lowering UCAs. Verified by lower.rs unit tests and crates/spar-cli/tests/sysml2_property_values.rs.
+    status: verified
+    description: |-
+      spar sysml2 lower must (1) print a warning with line:col for every property-bearing construct it does not lower (allocate; an attribute or constraint value in a part-usage body, an attribute redefinition with a value, a package-level value, a value in a definition body that lowering does not walk) instead of dropping it silently; (2) accept the standard SysML v2 quantity notation 'value [unit]' (also [SI::ms] and compound units) and lower it exactly like 'value unit'; (3) check the unit of a value whose property resolves to a predeclared AADL Time- or Size-typed property against AADL_Project Time_Units / Size_Units, reporting a wrong-dimension unit and mapping SI s/h to AADL sec/hr; (4) never emit an attribute or constraint usage's TYPE name as its property value when it has no value. Addresses the silent-drop and lost-property-semantics SysML v2 lowering UCAs. Verified by lower.rs unit tests and crates/spar-cli/tests/sysml2_property_values.rs.
+      VERIFIED 2026-10-29 on CI: PR #530 (squash b78986e), merged through the merge queue; PR CI and the merge_group run 40837843519 both: in-diff mutants 120 selected, 104 caught, 10 unviable, 6 timeout, 0 missed. Corpus ratchet 27 of 310 after reconciliation with #540 (independent per-file CLI count 27).
     release: v0.48.0
     links:
       - type: traces-to
