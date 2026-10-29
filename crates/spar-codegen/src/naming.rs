@@ -291,18 +291,15 @@ pub(crate) fn process_names(inst: &SystemInstance, proc_idx: ComponentInstanceId
 
 /// The crate directory a thread's per-thread outputs go under: its process's
 /// [`ProcessNames::crate_name`]. A thread whose parent is not a process
-/// (a thread group, say) keeps the parent's plain name, as before; a thread
-/// with no parent gets `orphan`.
+/// (a thread group, say) keeps the parent's plain name, as before, through
+/// [`process_names`]' fallback; a thread with no parent gets `orphan`.
 pub(crate) fn parent_crate_dir(
     inst: &SystemInstance,
     thread_idx: ComponentInstanceIdx,
     orphan: &str,
 ) -> String {
     match inst.component(thread_idx).parent {
-        Some(p) if inst.component(p).category == ComponentCategory::Process => {
-            process_names(inst, p).crate_name
-        }
-        Some(p) => sanitize_ident(inst.component(p).name.as_str()),
+        Some(p) => process_names(inst, p).crate_name,
         None => orphan.to_string(),
     }
 }
@@ -597,6 +594,26 @@ mod tests {
         assert_eq!(
             process_names(&inst, at("Top.impl/app/Grp")).crate_name,
             "grp"
+        );
+    }
+
+    // rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+    #[test]
+    fn names_that_collide_only_in_crate_switch_alone() {
+        // `fooBar` and `foobar` are one crate (`foobar`) but different WIT
+        // names (`foo-bar`, `foobar`). The crate clash alone sends both to
+        // their instance-path names; the bystander `sensor_proc` keeps its
+        // plain names (rule 3 would make it `sensorzuproc`).
+        let src = "package K\npublic\n  process P\n  end P;\n  system Top\n  end Top;\n\
+                   system implementation Top.impl\n    subcomponents\n      fooBar : process P;\n\
+                   foobar : process P;\n      sensor_proc : process P;\n  end Top.impl;\nend K;\n";
+        assert_eq!(
+            table(src, "K"),
+            [
+                row("Top.impl/fooBar", "foozcbar", "foozcbar"),
+                row("Top.impl/foobar", "foobar", "foobar"),
+                row("Top.impl/sensor_proc", "sensor_proc", "sensor-proc"),
+            ]
         );
     }
 
