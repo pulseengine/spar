@@ -8,6 +8,8 @@ sysml/examples/Camera Example/Camera.sysml
 sysml/examples/Import Tests/AliasImport.sysml
 sysml/examples/Import Tests/CircularImport.sysml
 sysml/examples/Import Tests/QualifiedNameImportTest.sysml
+sysml/examples/Packet Example/PacketUsage.sysml
+sysml/examples/Packet Example/Packets.sysml
 sysml/examples/Simple Tests/AliasTest.sysml
 sysml/examples/Simple Tests/ImportTest.sysml
 sysml/examples/Simple Tests/RootPackageTest.sysml
@@ -22,3 +24,4 @@ sysml/validation/15-Properties-Values-Expressions/15_02-Basic Value Properties.s
 sysml/validation/15-Properties-Values-Expressions/15_06-System of Quantities.sysml
 sysml/validation/15-Properties-Values-Expressions/15_07-System of Units and Scales.sysml
 sysml/validation/15-Properties-Values-Expressions/15_11-Variable Length Collection Types.sysml
+sysml/validation/15-Properties-Values-Expressions/15_12-Compound Value Type.sysml

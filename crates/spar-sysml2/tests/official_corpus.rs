@@ -49,7 +49,10 @@ const CORPUS: &str = "test-data/sysml2/official";
 /// History of its size: 1 file on 2026-08-26 (the corpus pinned at
 /// `29a3d2ac`); 16 on 2026-10-14 after `REQ-SYSML2-VISIBILITY-001`; 24 on
 /// 2026-10-28 after `REQ-SYSML2-CORPUS-RATCHET-001` (multiplicity after a
-/// type, `perform`, KerML classifiers).
+/// type, `perform`, KerML classifiers); 27 on 2026-10-29 after
+/// `REQ-SYSML2-PROPERTY-VALUES-001` (`Packets.sysml` and `PacketUsage.sysml`,
+/// freed by reading `attribute redefines X` as a redefinition, not a name;
+/// `15_12-Compound Value Type.sysml`).
 const PARSING_LIST: &str = include_str!("official_corpus_parsing.txt");
 
 /// Guards against the corpus vanishing. An empty walk parses nothing and

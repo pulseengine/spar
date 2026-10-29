@@ -479,8 +479,14 @@ fn attribute_usage(p: &mut Parser) {
 
     p.bump(SyntaxKind::ATTRIBUTE_KW);
 
-    // Optional name
-    if super::at_ident_or_kw(p) {
+    // Optional name. `redefines` / `subsets` / `specializes` open the
+    // specialization of an unnamed usage (`attribute redefines period = 5 ms;`)
+    // and are not its name.
+    if super::at_ident_or_kw(p)
+        && !p.at(SyntaxKind::REDEFINES_KW)
+        && !p.at(SyntaxKind::SUBSETS_KW)
+        && !p.at(SyntaxKind::SPECIALIZES_KW)
+    {
         super::name(p);
     }
 
@@ -491,24 +497,7 @@ fn attribute_usage(p: &mut Parser) {
     opt_typing_or_specialization(p);
 
     // Optional default value: `= expr`
-    if p.at(SyntaxKind::EQ) {
-        p.bump(SyntaxKind::EQ);
-        // Simple expression: literal or identifier
-        if p.at(SyntaxKind::INTEGER_LIT)
-            || p.at(SyntaxKind::REAL_LIT)
-            || p.at(SyntaxKind::STRING_LIT)
-            || p.at(SyntaxKind::TRUE_KW)
-            || p.at(SyntaxKind::FALSE_KW)
-        {
-            p.bump_any();
-            // Optional unit identifier after numeric literal (e.g. `10 ms`)
-            if super::at_ident_or_kw(p) {
-                super::bump_as_ident(p);
-            }
-        } else if super::at_ident_or_kw(p) {
-            super::bump_as_ident(p);
-        }
-    }
+    opt_value(p);
 
     // Body or semicolon
     if p.at(SyntaxKind::L_CURLY) {
@@ -518,6 +507,61 @@ fn attribute_usage(p: &mut Parser) {
     }
 
     m.complete(p, SyntaxKind::ATTRIBUTE_USAGE);
+}
+
+/// Parse an optional value: `= literal`, `= literal unit`,
+/// `= literal [unit]` or `= name`.
+///
+/// `10 [ms]` is the standard SysML v2 / KerML quantity notation (a literal
+/// followed by a measurement reference in brackets); `10 ms` is the older
+/// spar shorthand and is kept.
+fn opt_value(p: &mut Parser) {
+    if !p.at(SyntaxKind::EQ) {
+        return;
+    }
+    p.bump(SyntaxKind::EQ);
+    let numeric = p.at(SyntaxKind::INTEGER_LIT) || p.at(SyntaxKind::REAL_LIT);
+    if numeric
+        || p.at(SyntaxKind::STRING_LIT)
+        || p.at(SyntaxKind::TRUE_KW)
+        || p.at(SyntaxKind::FALSE_KW)
+    {
+        p.bump_any();
+        if numeric && p.at(SyntaxKind::L_BRACKET) {
+            unit_ref(p);
+        } else if super::at_ident_or_kw(p) {
+            // Optional unit identifier after the literal (e.g. `10 ms`)
+            super::bump_as_ident(p);
+        }
+    } else if super::at_ident_or_kw(p) {
+        super::bump_as_ident(p);
+    }
+}
+
+/// Parse a bracketed measurement reference: `[ms]`, `[SI::ms]`, `[m/s]`,
+/// `[N * m]`, `['°']`.
+///
+/// The content is a unit EXPRESSION in SysML v2; spar keeps its tokens and
+/// lets lowering decide what it means. It stops at `]`; a `;`, `{`, `}` or end
+/// of input before it is an unclosed bracket, and `[]` is not a unit.
+fn unit_ref(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::L_BRACKET);
+    let mut tokens = 0usize;
+    while !p.at(SyntaxKind::R_BRACKET)
+        && !p.at(SyntaxKind::SEMICOLON)
+        && !p.at(SyntaxKind::L_CURLY)
+        && !p.at(SyntaxKind::R_CURLY)
+        && !p.at_end()
+    {
+        p.bump_any();
+        tokens += 1;
+    }
+    if tokens == 0 {
+        p.error("expected a unit inside `[ ]`");
+    }
+    p.expect(SyntaxKind::R_BRACKET);
+    m.complete(p, SyntaxKind::UNIT_REF);
 }
 
 /// Parse an item usage.
@@ -661,23 +705,7 @@ fn generic_usage(p: &mut Parser, node_kind: SyntaxKind) {
     opt_typing_or_specialization(p);
 
     // Optional default value: `= expr [unit]`
-    if p.at(SyntaxKind::EQ) {
-        p.bump(SyntaxKind::EQ);
-        if p.at(SyntaxKind::INTEGER_LIT)
-            || p.at(SyntaxKind::REAL_LIT)
-            || p.at(SyntaxKind::STRING_LIT)
-            || p.at(SyntaxKind::TRUE_KW)
-            || p.at(SyntaxKind::FALSE_KW)
-        {
-            p.bump_any();
-            // Optional unit identifier after numeric literal (e.g. `500 us`)
-            if super::at_ident_or_kw(p) {
-                super::bump_as_ident(p);
-            }
-        } else if super::at_ident_or_kw(p) {
-            super::bump_as_ident(p);
-        }
-    }
+    opt_value(p);
 
     // Body or semicolon
     if p.at(SyntaxKind::L_CURLY) {

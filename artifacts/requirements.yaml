@@ -7809,3 +7809,13 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-10-28T05:13:21Z
     release: v0.48.0
+
+  - id: REQ-SYSML2-PROPERTY-VALUES-001
+    type: requirement
+    title: "SysML v2 lowering: property values are lowered faithfully or reported, never fabricated or silently dropped"
+    status: implemented
+    description: spar sysml2 lower must (1) print a warning with line:col for every property-bearing construct it does not lower (allocate; an attribute or constraint value in a part-usage body, an attribute redefinition with a value, a package-level value, a value in a definition body that lowering does not walk) instead of dropping it silently; (2) accept the standard SysML v2 quantity notation 'value [unit]' (also [SI::ms] and compound units) and lower it exactly like 'value unit'; (3) check the unit of a value whose property resolves to a predeclared AADL Time- or Size-typed property against AADL_Project Time_Units / Size_Units, reporting a wrong-dimension unit and mapping SI s/h to AADL sec/hr; (4) never emit an attribute or constraint usage's TYPE name as its property value when it has no value. Addresses the silent-drop and lost-property-semantics SysML v2 lowering UCAs. Verified by lower.rs unit tests and crates/spar-cli/tests/sysml2_property_values.rs.
+    release: v0.48.0
+    links:
+      - type: traces-to
+        target: REQ-SYSML2-LOWER

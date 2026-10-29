@@ -160,21 +160,26 @@ fn lower_node(node: &SyntaxNode, ctx: &mut LowerCtx) {
         }
         SyntaxKind::CONNECTION_DEF => {
             lower_connection_def(node, ctx);
+            report_dropped_in_def(node, "connection def", ctx);
         }
         SyntaxKind::CONNECTION_USAGE => {
             lower_connection_usage(node, ctx);
         }
         SyntaxKind::ACTION_DEF => {
             lower_action_def(node, ctx);
+            report_dropped_in_def(node, "action def", ctx);
         }
         SyntaxKind::STATE_DEF => {
             lower_state_def(node, ctx);
+            report_dropped_in_def(node, "state def", ctx);
         }
         SyntaxKind::ATTRIBUTE_DEF => {
             lower_attribute_def(node, ctx);
+            report_dropped_in_def(node, "attribute def", ctx);
         }
         SyntaxKind::ITEM_DEF => {
             lower_item_def(node, ctx);
+            report_dropped_in_def(node, "item def", ctx);
         }
         SyntaxKind::ENUM_DEF => {
             lower_enum_def(node, ctx);
@@ -184,15 +189,32 @@ fn lower_node(node: &SyntaxNode, ctx: &mut LowerCtx) {
         }
         SyntaxKind::REQUIREMENT_DEF => {
             lower_requirement_def(node, ctx);
+            report_dropped_in_def(node, "requirement def", ctx);
         }
         SyntaxKind::CONSTRAINT_DEF => {
             lower_constraint_def(node, ctx);
         }
         SyntaxKind::CALC_DEF => {
             lower_calc_def(node, ctx);
+            report_dropped_in_def(node, "calc def", ctx);
         }
         SyntaxKind::ALLOCATION_DEF => {
             lower_allocation_def(node, ctx);
+            report_dropped_in_def(node, "allocation def", ctx);
+        }
+        // Package-level usages have no AADL counterpart (AADL has no
+        // package-level property associations or bindings). Nothing is lost
+        // by a bare `part top : Sys;` or a valueless `attribute x : T;`, so
+        // those stay quiet; a VALUE or an `allocate` that vanishes is
+        // reported (REQ-SYSML2-PROPERTY-VALUES-001, UCA-17).
+        SyntaxKind::ALLOCATE_REQ => report_dropped(node, "", ctx),
+        SyntaxKind::ATTRIBUTE_USAGE | SyntaxKind::CONSTRAINT_USAGE => {
+            if has_value(node) {
+                report_dropped(node, " at package level", ctx);
+            }
+        }
+        SyntaxKind::PART_USAGE | SyntaxKind::REF_USAGE => {
+            report_dropped_in_part_usage(node, ctx);
         }
         other => {
             // Nodes that are internal structure (trivia, tokens, etc.) are
@@ -379,6 +401,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         let idx = ctx.tree.subcomponents.alloc(sub);
                         subcomponents.push(idx);
                     }
+                    report_dropped_in_part_usage(&child, ctx);
                 }
                 SyntaxKind::REF_USAGE => {
                     // `ref part name : Type;` -> subcomponent
@@ -386,6 +409,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         let idx = ctx.tree.subcomponents.alloc(sub);
                         subcomponents.push(idx);
                     }
+                    report_dropped_in_part_usage(&child, ctx);
                 }
                 SyntaxKind::CONNECTION_USAGE => {
                     if let Some(conn) = lower_connection_node_to_item(&child) {
@@ -394,9 +418,15 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                     }
                 }
                 SyntaxKind::ATTRIBUTE_USAGE => {
-                    if let Some(pa) = lower_attribute_usage_to_property(&child) {
+                    if let Some(pa) =
+                        lower_attribute_usage_to_property(&child, &mut ctx.diagnostics)
+                    {
                         let idx = ctx.tree.property_associations.alloc(pa);
                         property_associations.push(idx);
+                    } else if extract_name(&child).is_none() && has_value(&child) {
+                        // `attribute :>> period = 5 ms;` — a redefinition
+                        // has no NAME of its own.
+                        report_dropped(&child, "", ctx);
                     }
                 }
                 SyntaxKind::STATE_USAGE => {
@@ -406,9 +436,13 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                     }
                 }
                 SyntaxKind::CONSTRAINT_USAGE => {
-                    if let Some(pa) = lower_constraint_usage_to_property(&child) {
+                    if let Some(pa) =
+                        lower_constraint_usage_to_property(&child, &mut ctx.diagnostics)
+                    {
                         let idx = ctx.tree.property_associations.alloc(pa);
                         property_associations.push(idx);
+                    } else if extract_name(&child).is_none() && has_value(&child) {
+                        report_dropped(&child, "", ctx);
                     }
                 }
                 SyntaxKind::ITEM_USAGE => {
@@ -421,6 +455,8 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                 SyntaxKind::ALLOCATE_REQ => {
                     // `allocate src to dst;` -> deployment binding, resolved
                     // once every subcomponent's category is known.
+                    // (An allocate with unreadable ends is a parse error
+                    // before lowering, so it never reaches here silently.)
                     if let Some((src, dst)) = extract_allocate_ends(&child) {
                         allocations.push((src, dst, child.text_range().start().into()));
                     }
@@ -861,7 +897,7 @@ fn lower_constraint_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     if let Some(body) = find_child(node, SyntaxKind::NAMESPACE_BODY) {
         for child in body.children() {
             if child.kind() == SyntaxKind::ATTRIBUTE_USAGE
-                && let Some(pa) = lower_attribute_usage_to_property(&child)
+                && let Some(pa) = lower_attribute_usage_to_property(&child, &mut ctx.diagnostics)
             {
                 let idx = ctx.tree.property_associations.alloc(pa);
                 property_associations.push(idx);
@@ -1033,41 +1069,46 @@ fn lower_ref_usage_to_subcomponent(node: &SyntaxNode) -> Option<SubcomponentItem
     })
 }
 
-/// Convert an `attribute name : Type;` or `attribute name : Type = 10 ms;`
+/// Convert an `attribute name = 10 ms;` / `attribute name : Type = 10 [ms];`
 /// usage to a property association.
-fn lower_attribute_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssociationItem> {
+///
+/// An attribute WITHOUT a value (`attribute mass : Mass;`) declares a
+/// feature; it does not assign one, so it lowers to nothing. (It used to
+/// lower to `mass => Mass;` — its type name emitted as the value, which no
+/// AADL analysis can tell apart from a real value: REQ-SYSML2-PROPERTY-VALUES-001.)
+fn lower_attribute_usage_to_property(
+    node: &SyntaxNode,
+    diags: &mut Vec<LowerDiagnostic>,
+) -> Option<PropertyAssociationItem> {
+    lower_valued_usage_to_property(node, None, diags)
+}
+
+/// Shared body of attribute / constraint usage lowering: name + `= value`
+/// to a property association in `property_set`, with the unit checked
+/// against the AADL property it resolves to. `None` when there is no name
+/// or no value.
+fn lower_valued_usage_to_property(
+    node: &SyntaxNode,
+    property_set: Option<Name>,
+    diags: &mut Vec<LowerDiagnostic>,
+) -> Option<PropertyAssociationItem> {
     let name = extract_name(node)?;
-    let type_ref = extract_type_ref(node);
+    let (value, typed_value) = extract_default_value(node)?;
 
-    // First, try to extract an explicit default value (after `=`).
-    let (value_str, typed_value) = if let Some((v_str, v_expr)) = extract_default_value(node) {
-        (v_str, Some(v_expr))
-    } else {
-        // Fallback: use the type reference text as an opaque value.
-        let vs = type_ref
-            .as_ref()
-            .map(|c| c.type_name.as_str().to_string())
-            .unwrap_or_default();
-        let tv = if vs.is_empty() {
-            None
-        } else {
-            Some(PropertyExpr::Opaque(vs.clone()))
-        };
-        (vs, tv)
-    };
-
-    Some(PropertyAssociationItem {
+    let mut pa = PropertyAssociationItem {
         name: PropertyRef {
-            property_set: None,
+            property_set,
             property_name: name,
         },
-        value: value_str,
-        typed_value,
+        value,
+        typed_value: Some(typed_value),
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
         modal_values: Vec::new(),
-    })
+    };
+    check_property_unit(&mut pa, node.text_range().start().into(), diags);
+    Some(pa)
 }
 
 /// Convert a `state name : StateDef;` usage to an AADL mode.
@@ -1079,41 +1120,16 @@ fn lower_state_usage_to_mode(node: &SyntaxNode) -> Option<spar_hir_def::item_tre
     })
 }
 
-/// Convert a `constraint name : ConstraintDef;` or one with an explicit
-/// value (e.g. `constraint period = 10 ms;`) to a property association.
-fn lower_constraint_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssociationItem> {
-    let name = extract_name(node)?;
-    let type_ref = extract_type_ref(node);
-
-    // First, try to extract an explicit default value (after `=`).
-    let (value_str, typed_value) = if let Some((v_str, v_expr)) = extract_default_value(node) {
-        (v_str, Some(v_expr))
-    } else {
-        // Fallback: use the type reference text as an opaque value.
-        let vs = type_ref
-            .as_ref()
-            .map(|c| c.type_name.as_str().to_string())
-            .unwrap_or_default();
-        let tv = if vs.is_empty() {
-            None
-        } else {
-            Some(PropertyExpr::Opaque(vs.clone()))
-        };
-        (vs, tv)
-    };
-
-    Some(PropertyAssociationItem {
-        name: PropertyRef {
-            property_set: Some(Name::new("Timing_Properties")),
-            property_name: name,
-        },
-        value: value_str,
-        typed_value,
-        is_append: false,
-        applies_to: None,
-        in_modes: Vec::new(),
-        modal_values: Vec::new(),
-    })
+/// Convert a constraint usage with an explicit value (e.g.
+/// `constraint period = 10 ms;`) to a `Timing_Properties::` property
+/// association. A constraint usage without a value
+/// (`constraint timing : TimingConstraint;`) lowers to nothing, for the same
+/// reason as a valueless attribute: its type name is not a value.
+fn lower_constraint_usage_to_property(
+    node: &SyntaxNode,
+    diags: &mut Vec<LowerDiagnostic>,
+) -> Option<PropertyAssociationItem> {
+    lower_valued_usage_to_property(node, Some(Name::new("Timing_Properties")), diags)
 }
 
 /// Convert a `connect a.p to b.p;` to an AADL connection item.
@@ -1552,7 +1568,8 @@ fn extract_default_value(node: &SyntaxNode) -> Option<(String, PropertyExpr)> {
 }
 
 /// After a numeric literal token, skip whitespace and check if the next
-/// token is an identifier (unit name).  Returns the unit string if found.
+/// element is a unit: an identifier (`10 ms`) or a bracketed measurement
+/// reference (`10 [ms]`, `10 [SI::ms]`).  Returns the unit string if found.
 fn extract_following_unit<I>(tokens: &mut std::iter::Peekable<I>) -> Option<String>
 where
     I: Iterator<Item = rowan::NodeOrToken<SyntaxNode, crate::SyntaxToken>>,
@@ -1564,6 +1581,16 @@ where
         .is_some_and(|t| t.kind() == SyntaxKind::WHITESPACE)
     {
         tokens.next();
+    }
+    // `[unit]`
+    if let Some(unit) = tokens
+        .peek()
+        .and_then(|e| e.as_node())
+        .filter(|n| n.kind() == SyntaxKind::UNIT_REF)
+        .map(unit_ref_text)
+    {
+        tokens.next();
+        return Some(unit);
     }
     // Check for IDENT or keyword used as unit (ms, us, ns, s, etc.)
     if let Some(elem) = tokens.peek()
@@ -1577,6 +1604,281 @@ where
         }
     }
     None
+}
+
+/// The unit named by a `UNIT_REF` node (`[ms]`, `[SI::ms]`, `[m/s]`).
+///
+/// A plain or qualified name yields its last segment (`SI::ms` → `ms`: an
+/// AADL unit literal is a bare identifier). Anything else, a compound unit
+/// expression such as `m/s` or `N * m`, is forwarded as its tokens joined
+/// without whitespace; no AADL unit set contains one, so it is never mistaken
+/// for a valid unit by the dimension check.
+fn unit_ref_text(node: &SyntaxNode) -> String {
+    let toks: Vec<crate::SyntaxToken> = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .filter(|t| {
+            !matches!(
+                t.kind(),
+                SyntaxKind::WHITESPACE
+                    | SyntaxKind::LINE_COMMENT
+                    | SyntaxKind::BLOCK_COMMENT
+                    | SyntaxKind::L_BRACKET
+                    | SyntaxKind::R_BRACKET
+            )
+        })
+        .collect();
+    let is_name = |t: &crate::SyntaxToken| t.kind() == SyntaxKind::IDENT || t.kind().is_keyword();
+    let qualified = toks.iter().enumerate().all(|(i, t)| {
+        if i % 2 == 0 {
+            is_name(t)
+        } else {
+            t.kind() == SyntaxKind::COLON_COLON
+        }
+    }) && toks.len() % 2 == 1;
+    if qualified {
+        toks.last()
+            .map(|t| t.text().to_string())
+            .unwrap_or_default()
+    } else {
+        toks.iter().map(|t| t.text()).collect()
+    }
+}
+
+/// A unit family spar knows the AADL unit set of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnitFamily {
+    /// `AADL_Project::Time_Units`
+    Time,
+    /// `AADL_Project::Size_Units`
+    Size,
+}
+
+impl UnitFamily {
+    fn units_type(self) -> &'static str {
+        match self {
+            UnitFamily::Time => "Time_Units",
+            UnitFamily::Size => "Size_Units",
+        }
+    }
+
+    fn unit_list(self) -> &'static str {
+        match self {
+            UnitFamily::Time => "(ps, ns, us, ms, sec, min, hr)",
+            UnitFamily::Size => "(bits, Bytes, KByte, MByte, GByte, TByte)",
+        }
+    }
+
+    /// Whether `unit` is a literal of this family's AADL units type. Asks
+    /// spar's own unit tables (`convert_units`) rather than keeping a copy.
+    fn accepts(self, unit: &str) -> bool {
+        let base = match self {
+            UnitFamily::Time => "ps",
+            UnitFamily::Size => "bits",
+        };
+        spar_hir_def::property_value::convert_units(1.0, unit, base).is_some()
+    }
+
+    /// SysML v2's SI library writes the second and the hour as `s` and `h`;
+    /// AADL's `Time_Units` spells them `sec` and `hr`.
+    fn to_aadl_unit(self, unit: &str) -> String {
+        match (self, unit) {
+            (UnitFamily::Time, "s") => "sec".to_string(),
+            (UnitFamily::Time, "h") => "hr".to_string(),
+            _ => unit.to_string(),
+        }
+    }
+}
+
+/// The unit family of a standard AADL property type description from
+/// [`spar_hir_def::standard_properties`].
+fn unit_family_of_type(ty: &str) -> Option<UnitFamily> {
+    match ty {
+        "Time" | "Time_Range" => Some(UnitFamily::Time),
+        "Size" | "Size_Range" => Some(UnitFamily::Size),
+        _ if ty.ends_with("units Time_Units") => Some(UnitFamily::Time),
+        _ if ty.ends_with("units Size_Units") => Some(UnitFamily::Size),
+        _ => None,
+    }
+}
+
+/// The standard AADL property a lowered property association resolves to,
+/// with its unit family, when that property is unit-typed.
+///
+/// With a property set (constraint usages lower to `Timing_Properties::x`),
+/// only that set is consulted. Without one (attribute usages lower to a bare
+/// `x`), the name is matched case-insensitively — AADL names are — across all
+/// predeclared sets, and a name that would be ambiguous between families is
+/// not checked.
+fn standard_unit_property(property_set: Option<&str>, name: &str) -> Option<(String, UnitFamily)> {
+    unit_property_in(
+        &spar_hir_def::standard_properties::all_standard_properties(),
+        property_set,
+        name,
+    )
+}
+
+/// [`standard_unit_property`] over an explicit property list, so the
+/// ambiguity rule can be tested: no predeclared name is unit-typed in two
+/// families today, but a future spar-defined set could make one so.
+fn unit_property_in(
+    props: &[spar_hir_def::standard_properties::StandardProperty],
+    property_set: Option<&str>,
+    name: &str,
+) -> Option<(String, UnitFamily)> {
+    let mut found: Option<(String, UnitFamily)> = None;
+    for sp in props {
+        if !sp.name.eq_ignore_ascii_case(name)
+            || property_set.is_some_and(|set| !sp.property_set.eq_ignore_ascii_case(set))
+        {
+            continue;
+        }
+        let Some(family) = unit_family_of_type(sp.type_description) else {
+            continue;
+        };
+        match &found {
+            Some((_, f)) if *f != family => return None,
+            Some(_) => {}
+            None => found = Some((format!("{}::{}", sp.property_set, sp.name), family)),
+        }
+    }
+    found
+}
+
+/// Check (and, for SI `s`/`h`, translate) the unit of a lowered property
+/// value against the AADL property it resolves to. A unit of the wrong
+/// dimension is reported; the value is still emitted as written, so nothing
+/// is dropped.
+fn check_property_unit(
+    pa: &mut PropertyAssociationItem,
+    offset: usize,
+    diags: &mut Vec<LowerDiagnostic>,
+) {
+    let unit = match &pa.typed_value {
+        Some(PropertyExpr::Integer(_, Some(u))) | Some(PropertyExpr::Real(_, Some(u))) => {
+            u.as_str().to_string()
+        }
+        _ => return,
+    };
+    let Some((qualified, family)) = standard_unit_property(
+        pa.name.property_set.as_ref().map(|s| s.as_str()),
+        pa.name.property_name.as_str(),
+    ) else {
+        return;
+    };
+    let aadl_unit = family.to_aadl_unit(&unit);
+    if !family.accepts(&aadl_unit) {
+        diags.push(LowerDiagnostic {
+            offset,
+            msg: format!(
+                "unit `{unit}` is not a {} unit: `{}` matches the predeclared AADL property \
+                 {qualified}, whose units are {}",
+                family.units_type(),
+                pa.name.property_name.as_str(),
+                family.unit_list()
+            ),
+        });
+        return;
+    }
+    if aadl_unit != unit {
+        let new = Some(Name::new(&aadl_unit));
+        match &mut pa.typed_value {
+            Some(PropertyExpr::Integer(n, u)) => {
+                *u = new;
+                pa.value = format!("{n} {aadl_unit}");
+            }
+            Some(PropertyExpr::Real(r, u)) => {
+                *u = new;
+                pa.value = format!("{r} {aadl_unit}");
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Whether a usage carries a value (`= …`).
+fn has_value(node: &SyntaxNode) -> bool {
+    node.children_with_tokens()
+        .any(|e| e.as_token().is_some_and(|t| t.kind() == SyntaxKind::EQ))
+}
+
+/// The source text of a member, whitespace-collapsed, without its body or
+/// terminating `;`, for quoting in a diagnostic.
+fn member_text(node: &SyntaxNode) -> String {
+    let mut out = String::new();
+    for elem in node.children_with_tokens() {
+        let text = match &elem {
+            rowan::NodeOrToken::Node(n) if n.kind() == SyntaxKind::NAMESPACE_BODY => break,
+            rowan::NodeOrToken::Node(n) => n.text().to_string(),
+            rowan::NodeOrToken::Token(t) if t.kind() == SyntaxKind::SEMICOLON => break,
+            rowan::NodeOrToken::Token(t) => t.text().to_string(),
+        };
+        out.push_str(&text);
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Report a property-bearing member that lowering drops. `place` is empty
+/// or a phrase like ` in the body of part usage `b``.
+fn report_dropped(node: &SyntaxNode, place: &str, ctx: &mut LowerCtx) {
+    let consequence = if node.kind() == SyntaxKind::ALLOCATE_REQ {
+        "no processor binding is emitted"
+    } else {
+        "the value does not reach the AADL model"
+    };
+    ctx.diagnostics.push(LowerDiagnostic {
+        offset: node.text_range().start().into(),
+        msg: format!(
+            "unsupported: `{}`{place} (not lowered; {consequence})",
+            member_text(node)
+        ),
+    });
+}
+
+/// Whether a member is property-bearing: an attribute or constraint usage
+/// with a value, or an `allocate` (a processor binding).
+fn is_property_bearing(node: &SyntaxNode) -> bool {
+    match node.kind() {
+        SyntaxKind::ATTRIBUTE_USAGE | SyntaxKind::CONSTRAINT_USAGE => has_value(node),
+        SyntaxKind::ALLOCATE_REQ => true,
+        _ => false,
+    }
+}
+
+/// Walk a body that lowering does NOT lower (the body of a part usage, or
+/// of a definition kind whose members are not translated) and report each
+/// property-bearing member in it, recursing into nested part usages.
+fn report_dropped_in_body(owner: &SyntaxNode, owner_desc: &str, ctx: &mut LowerCtx) {
+    let Some(body) = find_child(owner, SyntaxKind::NAMESPACE_BODY) else {
+        return;
+    };
+    let place = format!(" in the body of {owner_desc}");
+    for child in body.children() {
+        if is_property_bearing(&child) {
+            report_dropped(&child, &place, ctx);
+        } else if matches!(child.kind(), SyntaxKind::PART_USAGE | SyntaxKind::REF_USAGE) {
+            report_dropped_in_part_usage(&child, ctx);
+        }
+    }
+}
+
+/// Report the property-bearing members of a part (or `ref part`) usage's
+/// body: a usage-level value such as `part b : Base { attribute period =
+/// 7 ms; }` has no place in the lowered subcomponent.
+fn report_dropped_in_part_usage(node: &SyntaxNode, ctx: &mut LowerCtx) {
+    let name = extract_name(node)
+        .map(|n| n.as_str().to_string())
+        .unwrap_or_else(|| "<anonymous>".to_string());
+    report_dropped_in_body(node, &format!("part usage `{name}`"), ctx);
+}
+
+/// Report the property-bearing members of a definition whose body lowering
+/// does not walk (`item def`, `action def`, …).
+fn report_dropped_in_def(node: &SyntaxNode, kind: &str, ctx: &mut LowerCtx) {
+    let name = extract_name(node)
+        .map(|n| n.as_str().to_string())
+        .unwrap_or_else(|| "<anonymous>".to_string());
+    report_dropped_in_body(node, &format!("{kind} `{name}`"), ctx);
 }
 
 /// Extract the first NAME child's text from a node.
@@ -2340,10 +2642,12 @@ package RequirementsValidation {
         let source = r#"
 package ConstraintsValidation {
     constraint def TimingConstraint {
-        attribute maxLatency : Real;
+        attribute maxLatency : Real = 2.5;
+        attribute unbound : Real;
     }
     part def Controller {
-        constraint timing : TimingConstraint;
+        constraint timing : TimingConstraint = 10 ms;
+        constraint declared : TimingConstraint;
     }
 }
 "#;
@@ -2358,22 +2662,29 @@ package ConstraintsValidation {
         assert!(timing.is_some(), "expected TimingConstraint type");
         let (_, ct) = timing.unwrap();
         assert_eq!(ct.category, ComponentCategory::Data);
-        // Should have the attribute as a property
-        assert!(
-            !ct.property_associations.is_empty(),
-            "expected property associations from attributes"
+        // The valued attribute is a property; the valueless one is not
+        // (REQ-SYSML2-PROPERTY-VALUES-001 — it used to lower to `=> Real`).
+        assert_eq!(ct.property_associations.len(), 1);
+        let pa = &tree.property_associations[ct.property_associations[0]];
+        assert_eq!(pa.name.property_name.as_str(), "maxLatency");
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Real("2.5".to_string(), None))
         );
 
-        // Controller should have a timing property
+        // Controller has the valued timing property only.
         let controller = tree
             .component_types
             .iter()
             .find(|(_, ct)| ct.name.as_str() == "Controller");
         assert!(controller.is_some(), "expected Controller type");
         let (_, ctrl_ct) = controller.unwrap();
-        assert!(
-            !ctrl_ct.property_associations.is_empty(),
-            "expected property associations from constraint usage"
+        assert_eq!(ctrl_ct.property_associations.len(), 1);
+        let pa = &tree.property_associations[ctrl_ct.property_associations[0]];
+        assert_eq!(pa.name.property_name.as_str(), "timing");
+        assert_eq!(
+            pa.typed_value,
+            Some(PropertyExpr::Integer(10, Some(Name::new("ms"))))
         );
     }
 
@@ -2430,7 +2741,10 @@ package AttributesValidation {
         assert!(mass.is_some(), "expected Mass type");
         assert_eq!(mass.unwrap().1.category, ComponentCategory::Data);
 
-        // Sensor should have property associations for its attributes
+        // Both attributes are declared WITHOUT a value, so neither is a
+        // property association. (This test used to require 2 — `mass => Mass`
+        // and `voltage => Voltage`, the types emitted as values; withdrawn by
+        // REQ-SYSML2-PROPERTY-VALUES-001.)
         let sensor = tree
             .component_types
             .iter()
@@ -2439,8 +2753,8 @@ package AttributesValidation {
         let (_, sensor_ct) = sensor.unwrap();
         assert_eq!(
             sensor_ct.property_associations.len(),
-            2,
-            "expected 2 property associations from attributes"
+            0,
+            "a valueless attribute is not a property association"
         );
     }
 
@@ -3264,26 +3578,11 @@ part def Controller {
         );
     }
 
-    #[test]
-    fn attribute_usage_without_default_falls_back_to_opaque() {
-        // No `= value`, so the type reference becomes the opaque value.
-        let source = "part def Sensor { attribute mass : Mass; }";
-        let parse = crate::parse(source);
-        let tree = lower_to_aadl(&parse);
-
-        let sensor = tree
-            .component_types
-            .iter()
-            .find(|(_, ct)| ct.name.as_str() == "Sensor")
-            .unwrap()
-            .1;
-        let pa = &tree.property_associations[sensor.property_associations[0]];
-        assert_eq!(
-            pa.typed_value,
-            Some(PropertyExpr::Opaque("Mass".to_string())),
-            "without default value, should fall back to Opaque(type_name)"
-        );
-    }
+    // `attribute_usage_without_default_falls_back_to_opaque` used to pin
+    // `attribute mass : Mass;` lowering to `mass => Mass` — the TYPE emitted
+    // as the VALUE. That behaviour is withdrawn by
+    // REQ-SYSML2-PROPERTY-VALUES-001; its inverse is
+    // `a_usage_without_a_value_does_not_emit_its_type_as_the_value` below.
 
     /// A construct lowering cannot express is REPORTED, while an `alias`
     /// (no AADL equivalent, but nothing lost) is not — the two directions of
@@ -3308,5 +3607,455 @@ part def Controller {
             "{:?}",
             d.iter().map(|x| &x.msg).collect::<Vec<_>>()
         );
+    }
+
+    // ── REQ-SYSML2-PROPERTY-VALUES-001 ─────────────────────────────────
+    //
+    // Helpers: lower `src` (which must parse cleanly) and return the
+    // diagnostic messages / the property associations of component `ty`.
+
+    fn diag_msgs(src: &str) -> Vec<String> {
+        let parse = crate::parse(src);
+        assert!(parse.ok(), "`{src}`: {:?}", parse.errors());
+        lower_to_aadl_with_diagnostics(&parse)
+            .1
+            .into_iter()
+            .map(|d| d.msg)
+            .collect()
+    }
+
+    fn props_of(src: &str, ty: &str) -> Vec<PropertyAssociationItem> {
+        let parse = crate::parse(src);
+        assert!(parse.ok(), "`{src}`: {:?}", parse.errors());
+        let tree = lower_to_aadl(&parse);
+        let ct = tree
+            .component_types
+            .iter()
+            .find(|(_, ct)| ct.name.as_str() == ty)
+            .unwrap_or_else(|| panic!("no component type {ty}"))
+            .1;
+        ct.property_associations
+            .iter()
+            .map(|&i| tree.property_associations[i].clone())
+            .collect()
+    }
+
+    fn has(msgs: &[String], needle: &str) -> bool {
+        msgs.iter().any(|m| m.contains(needle))
+    }
+
+    // -- G1: property-bearing constructs are reported, not silently dropped --
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn allocate_is_reported_at_package_level_but_not_in_a_part_def() {
+        // In a part def body an allocate IS lowered, to a deployment binding
+        // (REQ-SYSML2-ALLOCATE-BINDING-001), so it must not also be reported
+        // as dropped.
+        let d = diag_msgs("part def S { part t : T; part c : C; allocate t to c; }");
+        assert!(!has(&d, "unsupported: `allocate"), "{d:?}");
+        let d = diag_msgs("package P { allocate x.y to cpu; }");
+        assert!(
+            has(&d, "unsupported: `allocate x.y to cpu` (not lowered"),
+            "{d:?}"
+        );
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_value_in_a_part_usage_body_is_reported() {
+        // Nested part usage inside a part def.
+        let d = diag_msgs("part def S { part b : Base { attribute period = 7 ms; } }");
+        assert!(
+            has(
+                &d,
+                "unsupported: `attribute period = 7 ms` in the body of part usage `b` (not lowered"
+            ),
+            "{d:?}"
+        );
+        // Top-level part usage, and a constraint value one level deeper.
+        let d = diag_msgs(
+            "package P { part top : Sys { part inner : X { constraint deadline = 3 ms; } } }",
+        );
+        assert!(
+            has(
+                &d,
+                "unsupported: `constraint deadline = 3 ms` in the body of part usage `inner` (not lowered"
+            ),
+            "{d:?}"
+        );
+        // `ref part` bodies too.
+        let d = diag_msgs("part def S { ref part r : R { attribute x = 1; } }");
+        assert!(
+            has(&d, "`attribute x = 1` in the body of part usage `r`"),
+            "{d:?}"
+        );
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn an_attribute_redefinition_with_a_value_is_reported() {
+        let d = diag_msgs("part def S :> B { attribute :>> period = 5 ms; }");
+        assert!(
+            has(
+                &d,
+                "unsupported: `attribute :>> period = 5 ms` (not lowered"
+            ),
+            "{d:?}"
+        );
+        let d = diag_msgs("part def S :> B { attribute redefines period = 5 ms; }");
+        assert!(
+            has(&d, "`attribute redefines period = 5 ms` (not lowered"),
+            "{d:?}"
+        );
+        // A redefinition that carries no value: quiet.
+        let d = diag_msgs("part def S :> B { attribute :>> period; }");
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_package_level_value_is_reported() {
+        let d = diag_msgs("package P { attribute budget = 10 ms; constraint c = 2; }");
+        assert!(
+            has(
+                &d,
+                "unsupported: `attribute budget = 10 ms` at package level (not lowered"
+            ),
+            "{d:?}"
+        );
+        assert!(
+            has(
+                &d,
+                "unsupported: `constraint c = 2` at package level (not lowered"
+            ),
+            "{d:?}"
+        );
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_value_in_a_def_whose_body_is_not_lowered_is_reported() {
+        let d = diag_msgs("item def Frame { attribute size = 64; }");
+        assert!(
+            has(
+                &d,
+                "unsupported: `attribute size = 64` in the body of item def `Frame` (not lowered"
+            ),
+            "{d:?}"
+        );
+        let d = diag_msgs("action def Act { allocate a to b; }");
+        assert!(
+            has(&d, "`allocate a to b` in the body of action def `Act`"),
+            "{d:?}"
+        );
+    }
+
+    /// The other direction: constructs that carry no value stay quiet, so the
+    /// new diagnostics are not noise.
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn valueless_and_traceability_constructs_are_not_reported() {
+        let d = diag_msgs(
+            r#"
+package P {
+    requirement def R;
+    part def Base { attribute mass : Real; }
+    part def S {
+        part b : Base { part c : Base; }
+        attribute voltage : Real;
+    }
+    part top : S;
+    part top2 : S { attribute weight : Real; }
+    satisfy R by top;
+    verify R by top;
+    attribute declaredOnly : Real;
+}
+"#,
+        );
+        assert!(d.is_empty(), "{d:?}");
+    }
+
+    // -- G2: `value [unit]` quantity syntax, and the unit check --
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn bracketed_unit_lowers_exactly_like_the_bare_unit() {
+        for (bracketed, bare) in [
+            ("attribute period = 10 [ms];", "attribute period = 10 ms;"),
+            ("attribute period = 2.5 [us];", "attribute period = 2.5 us;"),
+            (
+                "attribute period = 10 [SI::ms];",
+                "attribute period = 10 ms;",
+            ),
+            ("attribute period = 10[ms];", "attribute period = 10 ms;"),
+            (
+                "constraint deadline = 3 [ms];",
+                "constraint deadline = 3 ms;",
+            ),
+        ] {
+            let a = props_of(&format!("part def A {{ {bracketed} }}"), "A");
+            let b = props_of(&format!("part def A {{ {bare} }}"), "A");
+            assert_eq!(a.len(), 1, "{bracketed}");
+            assert_eq!(a[0].typed_value, b[0].typed_value, "{bracketed}");
+            assert_eq!(a[0].value, b[0].value, "{bracketed}");
+            assert_eq!(a[0].name, b[0].name, "{bracketed}");
+        }
+        let a = props_of("part def A { attribute period = 10 [ms]; }", "A");
+        assert_eq!(
+            a[0].typed_value,
+            Some(PropertyExpr::Integer(10, Some(Name::new("ms"))))
+        );
+        assert_eq!(a[0].value, "10 ms");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn compound_and_quoted_units_parse_and_are_forwarded_verbatim() {
+        let a = props_of("part def A { attribute speed = 8 [m/s]; }", "A");
+        assert_eq!(a[0].value, "8 m/s");
+        let a = props_of("part def A { attribute torque = 6 [N * m]; }", "A");
+        assert_eq!(a[0].value, "6 N*m");
+        let a = props_of("part def A { attribute angle = 5 ['°']; }", "A");
+        assert_eq!(a[0].value, "5 '°'");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn an_unclosed_or_empty_unit_bracket_is_a_parse_error() {
+        let parse = crate::parse("part def A { attribute period = 10 [ms; }");
+        assert!(!parse.ok());
+        let parse = crate::parse("part def A { attribute period = 10 []; }");
+        assert!(!parse.ok(), "an empty unit is not a unit");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_wrong_dimension_unit_on_a_time_property_is_reported() {
+        for src in [
+            "part def A { attribute period = 10 [kg]; }",
+            "part def A { attribute period = 10 kg; }",
+            "part def A { attribute Deadline = 1.5 [SI::kg]; }",
+            "part def A { constraint period = 10 [kg]; }",
+            "part def A { attribute Compute_Execution_Time = 2 [m]; }",
+        ] {
+            let d = diag_msgs(src);
+            assert!(has(&d, "is not a Time_Units unit"), "{src}: {d:?}");
+            assert!(has(&d, "(ps, ns, us, ms, sec, min, hr)"), "{src}: {d:?}");
+        }
+        let d = diag_msgs("part def A { attribute period = 10 [kg]; }");
+        assert_eq!(
+            d,
+            vec![
+                "unit `kg` is not a Time_Units unit: `period` matches the predeclared AADL \
+                 property Timing_Properties::Period, whose units are (ps, ns, us, ms, sec, min, hr)"
+                    .to_string()
+            ]
+        );
+        // The value is still emitted as written: reported, not dropped.
+        let a = props_of("part def A { attribute period = 10 [kg]; }", "A");
+        assert_eq!(a[0].value, "10 kg");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_wrong_dimension_unit_on_a_size_property_is_reported() {
+        let d = diag_msgs("part def A { attribute Stack_Size = 4 [ms]; }");
+        assert!(has(&d, "unit `ms` is not a Size_Units unit"), "{d:?}");
+        assert!(has(&d, "Memory_Properties::Stack_Size"), "{d:?}");
+        assert!(
+            has(&d, "(bits, Bytes, KByte, MByte, GByte, TByte)"),
+            "{d:?}"
+        );
+        assert!(diag_msgs("part def A { attribute Stack_Size = 4 [KByte]; }").is_empty());
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_right_dimension_unit_is_accepted_and_si_symbols_map_to_aadl() {
+        for src in [
+            "part def A { attribute period = 10 [ms]; }",
+            "part def A { attribute PERIOD = 10 [MS]; }",
+            "part def A { attribute deadline = 5 us; }",
+            "part def A { attribute Compute_Execution_Time = 2 [SI::ns]; }",
+            "part def A { constraint period = 1 [hr]; }",
+            "part def A { attribute period = 10; }",
+        ] {
+            assert!(diag_msgs(src).is_empty(), "{src}: {:?}", diag_msgs(src));
+        }
+        // SysML's SI second / hour symbols are AADL `sec` / `hr` for a
+        // Time-typed property.
+        let a = props_of("part def A { attribute period = 2 [s]; }", "A");
+        assert_eq!(
+            a[0].typed_value,
+            Some(PropertyExpr::Integer(2, Some(Name::new("sec"))))
+        );
+        assert_eq!(a[0].value, "2 sec");
+        let a = props_of("part def A { attribute deadline = 1.5 [SI::h]; }", "A");
+        assert_eq!(
+            a[0].typed_value,
+            Some(PropertyExpr::Real("1.5".to_string(), Some(Name::new("hr"))))
+        );
+        assert_eq!(a[0].value, "1.5 hr");
+        assert!(diag_msgs("part def A { attribute period = 2 [s]; }").is_empty());
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_property_spar_does_not_know_is_not_unit_checked() {
+        assert!(diag_msgs("part def A { attribute mass = 10 [kg]; }").is_empty());
+        // No mapping applied either: `s` stays `s` outside a Time property.
+        let a = props_of("part def A { attribute timeout = 2 [s]; }", "A");
+        assert_eq!(a[0].value, "2 s");
+    }
+
+    // -- G3: no value, no property --
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_usage_without_a_value_does_not_emit_its_type_as_the_value() {
+        assert!(props_of("part def S { attribute mass : Mass; }", "S").is_empty());
+        assert!(props_of("part def S { attribute biasStability : Real; }", "S").is_empty());
+        assert!(props_of("part def S { constraint timing : TimingConstraint; }", "S").is_empty());
+        // ...while a usage that has a value still lowers.
+        assert_eq!(
+            props_of("part def S { attribute mass : Mass = 3; }", "S")[0].typed_value,
+            Some(PropertyExpr::Integer(3, None))
+        );
+        let parse = crate::parse("part def S { attribute mass : Mass; }");
+        let aadl = item_tree_to_aadl(&lower_to_aadl(&parse));
+        assert!(!aadl.contains("=> Mass"), "{aadl}");
+    }
+
+    // -- Edges pinned by mutation testing --
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn the_dropped_construct_message_is_exact_and_names_its_consequence() {
+        assert_eq!(
+            diag_msgs("package P { allocate t to c; }"),
+            vec![
+                "unsupported: `allocate t to c` (not lowered; no processor binding is emitted)"
+                    .to_string()
+            ]
+        );
+        assert_eq!(
+            diag_msgs("part def S { part b : B { attribute x = 1; } }"),
+            vec![
+                "unsupported: `attribute x = 1` in the body of part usage `b` (not lowered; \
+                 the value does not reach the AADL model)"
+                    .to_string()
+            ]
+        );
+        // The quoted text stops before the member's own body.
+        assert_eq!(
+            diag_msgs("part def S { part b : B { attribute x = 1 { doc /* d */ } } }"),
+            vec![
+                "unsupported: `attribute x = 1` in the body of part usage `b` (not lowered; \
+                 the value does not reach the AADL model)"
+                    .to_string()
+            ]
+        );
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn every_unnamed_specialization_form_and_constraint_redefinition_is_reported() {
+        for src in [
+            "part def S :> B { attribute subsets period = 5 ms; }",
+            "part def S :> B { attribute specializes period = 5 ms; }",
+            "part def S :> B { constraint :>> period = 5 ms; }",
+        ] {
+            let d = diag_msgs(src);
+            assert_eq!(d.len(), 1, "{src}: {d:?}");
+            assert!(d[0].starts_with("unsupported: `"), "{src}: {d:?}");
+        }
+        assert!(diag_msgs("part def S :> B { constraint :>> period; }").is_empty());
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_deeply_qualified_unit_takes_its_last_segment() {
+        let a = props_of("part def A { attribute period = 10 [ISQ::SI::ms]; }", "A");
+        assert_eq!(a[0].value, "10 ms");
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn units_typed_aadlinteger_properties_are_checked_and_plain_ones_are_not() {
+        // `aadlinteger units Time_Units` / `... Size_Units`.
+        let d = diag_msgs("part def A { attribute Sync_Error = 3 [kg]; }");
+        assert!(has(&d, "is not a Time_Units unit"), "{d:?}");
+        let d = diag_msgs("part def A { attribute Max_Frame_Size = 3 [ms]; }");
+        assert!(has(&d, "is not a Size_Units unit"), "{d:?}");
+        // A plain `aadlinteger` has no unit family spar can check against.
+        assert!(diag_msgs("part def A { attribute Queue_Size = 4 [kg]; }").is_empty());
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn a_name_unit_typed_in_two_families_is_not_checked() {
+        use spar_hir_def::standard_properties::StandardProperty;
+        let p = |set, ty| StandardProperty {
+            name: "Window",
+            property_set: set,
+            type_description: ty,
+        };
+        let same = [p("A_Set", "Time"), p("B_Set", "Time_Range")];
+        assert_eq!(
+            unit_property_in(&same, None, "window"),
+            Some(("A_Set::Window".to_string(), UnitFamily::Time))
+        );
+        let mixed = [p("A_Set", "Time"), p("B_Set", "Size")];
+        assert_eq!(unit_property_in(&mixed, None, "window"), None);
+        // ...unless the property set disambiguates.
+        assert_eq!(
+            unit_property_in(&mixed, Some("b_set"), "window"),
+            Some(("B_Set::Window".to_string(), UnitFamily::Size))
+        );
+    }
+
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn boolean_values_still_lower() {
+        assert_eq!(
+            props_of("part def A { attribute on = true; }", "A")[0].typed_value,
+            Some(PropertyExpr::Boolean(true))
+        );
+        assert_eq!(
+            props_of("part def A { attribute on = false; }", "A")[0].typed_value,
+            Some(PropertyExpr::Boolean(false))
+        );
+    }
+
+    /// An unclosed `[` stops at `;`, `{` or `}` so the rest of the file still
+    /// parses: the definition after it is still lowered.
+    // rivet: verifies REQ-SYSML2-PROPERTY-VALUES-001
+    #[test]
+    fn an_unclosed_unit_bracket_does_not_swallow_the_rest_of_the_file() {
+        // `;` ends the member, so the NEXT member of the same body survives.
+        let parse = crate::parse("part def A { attribute x = 1 [ms; attribute y = 2; }");
+        assert!(!parse.ok());
+        let tree = lower_to_aadl(&parse);
+        assert!(
+            tree.property_associations
+                .iter()
+                .any(|(_, pa)| pa.name.property_name.as_str() == "y"),
+            "`attribute y` was swallowed"
+        );
+        for src in [
+            "part def A { attribute x = 1 [ms } part def B { }",
+            "part def A { attribute x = 1 [ms { } } part def B { }",
+        ] {
+            let parse = crate::parse(src);
+            assert!(!parse.ok(), "{src}");
+            let tree = lower_to_aadl(&parse);
+            assert!(
+                tree.component_types
+                    .iter()
+                    .any(|(_, ct)| ct.name.as_str() == "B"),
+                "{src}: B was swallowed"
+            );
+        }
     }
 }
