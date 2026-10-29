@@ -235,6 +235,7 @@ artifacts:
       How many rules are actually enforced against the 50+ target is
       deliberately not asserted here — see REQ-GUARD-STATUS-VOCAB-001.
     status: approved
+    release: v0.50.0
     tags: [analysis, legality]
 
   - id: REQ-ANALYSIS-008
@@ -7806,3 +7807,242 @@ artifacts:
     links:
       - type: traces-to
         target: REQ-SYSML2-LOWER
+
+  - id: REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001
+    type: requirement
+    title: A best-case latency summed over components without timing shall not raise the below-minimum Error
+    status: proposed
+    description: "Refs #516. On main (6a6c787) test-data/osate2/CasePositionControl.aadl, root CasePositionControl::SMS_Operational_Environment.Position, reports '[ERROR] latency: end-to-end flow smcmdflow best-case latency 0.000 ms is below the declared minimum 50.000 ms' while the same run warns that ECS, SM_PCS, SM_ACT and SM carry no timing properties. A best case summed over missing data is only a lower bound, so the below-minimum Error (REQ-ANALYSIS-LATENCY-BEST-CASE-001) asserts a finding the data does not support: a false Error, a wrong result. Requirement: when any flow element lacks timing, the below-minimum comparison shall report the best case as incomplete (Warning) naming those components, and shall not raise the Error. Oracle: the CasePositionControl run gives no below-minimum Error and fails on v0.47.1; positive control: a flow whose every element has timing and whose best case is below the minimum still raises the Error."
+    tags: [analysis, latency, defect]
+    links:
+      - type: traces-to
+        target: REQ-ANALYSIS-LATENCY-BEST-CASE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:38:31Z
+    release: v0.48.1
+
+  - id: REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    type: requirement
+    title: A WCTT_Budget declared on a non-source bus of a stream shall be reported as ignored, never silently dropped
+    status: proposed
+    description: "Refs #481. On main (6a6c787) crates/spar-analysis/src/wctt.rs:881 reads Spar_Network::WCTT_Budget from stream.hops.first() only, so a budget declared on any later bus of a multi-hop stream is never consulted and nothing says so: a declared constraint that is never evaluated renders the same as one that was met (silent failure). SCOPE OF THIS REQUIREMENT is the issue's option 3 only: keep the source-bus semantics, and emit a diagnostic naming each non-source bus whose WCTT_Budget was ignored. Options 1 (per-hop local budgets) and 2 (any budget bounds the end-to-end total) change semantics and are deferred to a successor. Oracle: a two-hop stream with a budget only on the second bus emits the ignored diagnostic and fails on v0.47.1; negative control: a budget on the source bus alone emits no ignored diagnostic."
+    tags: [analysis, tsn, wctt, defect]
+    links:
+      - type: traces-to
+        target: REQ-NETWORK-006
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.48.1
+
+  - id: REQ-TSN-COS-PLACEMENT-001
+    type: requirement
+    title: Spar_TSN::Class_of_Service shall be read where its property set documents it (port and connection), or the documentation shall say where it is read
+    status: proposed
+    description: "Refs #478 (item 2; item 1 shipped as REQ-TSN-WCTT-PROVENANCE-001 in v0.46.0). crates/spar-hir-def/src/standard_properties.rs documents Class_of_Service as 'Applies to port and connection', but collect_streams in wctt.rs reads get_class_of_service(src_props), the source COMPONENT's properties. A user who follows the documentation gets a TSN hop that defers and, since v0.46.0, a WcttNotComputed Error rather than the bound the undocumented device placement gives. Requirement: read Class_of_Service from the connection and the source port (with a stated precedence over the component), or correct the documented applies-to. Oracle: the declared pair from the issue (device placement and documented port/connection placement) yields the same bound; fails on v0.47.1."
+    tags: [tsn, wctt, properties, defect]
+    links:
+      - type: traces-to
+        target: REQ-TSN-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.49.0
+
+  - id: REQ-VERIFY-MEASURED-VALUE-001
+    type: requirement
+    title: spar verify shall be able to compare a computed quantity (latency, WCTT bound, utilisation) against a numeric threshold
+    status: proposed
+    description: "Refs #483. crates/spar-cli/src/assertion/eval.rs compares only counts: the left operand of GE/GT/LE/LT/EQ_EQ is always a cardinality over components or diagnostics, so a WCTT bound, latency, period or utilisation is not a term in the language and a timing budget cannot be stated in the requirement itself; it can only be expressed by making an analysis emit an error. Requirement: expose typed analysis results (per-stream WCTT bound, per-flow latency, per-processor utilisation) as addressable values with units, and allow comparisons against a threshold with units. Oracle: an assertion 'stream ctrl_cmd bound <= 400 us' passes and fails on either side of the computed figure."
+    tags: [verify, assertion, feature]
+    links:
+      - type: traces-to
+        target: REQ-VERIFY-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.50.0
+
+  - id: REQ-RELEASE-OPENVSX-001
+    type: requirement
+    title: The release shall publish the spar-aadl extension to Open VSX, and a missing publish configuration shall be a visible warning
+    status: proposed
+    description: "Refs #453. On main .github/workflows/release.yml has no Open VSX job (0 matches for ovsx/openvsx), so VSCodium, Cursor, Windsurf and Theia users cannot install pulseengine.spar-aadl, and the Marketplace job skips with a plain echo when VSCE_PAT is absent. Requirement: a publish-vsix-openvsx job (continue-on-error, environment openvsx, id-token write) publishing every platform VSIX with ovsx 1.2.0, PAT bootstrap then trusted publishing; no configuration emits ::warning::, a trusted-publishing variable without an OIDC token fails; after publishing, poll the Open VSX API for the version and fail if absent. Needs maintainer setup (namespace ownership, registration) before it can be verified."
+    tags: [release, vscode, distribution]
+    links:
+      - type: traces-to
+        target: REQ-RELEASE-ASSETS-STANDARD
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.49.0
+  - id: REQ-RELEASE-VEX-001
+    type: requirement
+    title: Each release shall publish a CycloneDX VEX document for the shipped lockfile, signed with the other assets, and re-issue it when an advisory lands
+    status: proposed
+    description: "Refs #448. release.yml publishes a CycloneDX SBOM inside the signed SHA256SUMS but no VEX (0 matches on main). A consumer pinned to a varve layer cannot learn whether an advisory affects the spar it runs; only this repo can assert not_affected with a justification. Requirement: generate spar-<version>.vex.json from an audit of the TAG's Cargo.lock (not main's), place it in release-assets before the checksum step so it is signed, and re-issue it for shipped releases when a new matching advisory appears. Oracle: the release asset list includes the VEX, its digest is in SHA256SUMS.txt, and a seeded advisory against a shipped lockfile produces a re-issued document."
+    tags: [release, supply-chain, feature]
+    links:
+      - type: traces-to
+        target: REQ-RELEASE-ASSETS-STANDARD
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.50.0
+
+  - id: REQ-RELEASE-MUSL-001
+    type: requirement
+    title: Linux release assets shall include musl builds beside the glibc ones
+    status: proposed
+    description: "Refs #447. The v0.40.0 x86_64 Linux asset is dynamically linked with a GLIBC_2.39 floor, so it does not run on Ubuntu 22.04, Debian 12, RHEL 9, Ubuntu 20.04 or Alpine; on main release.yml has no musl target (0 matches). Maintainer decision on the issue (2026-09-24): ship musl beside gnu, named <tool>-<tag>-x86_64-unknown-linux-musl.tar.gz and the aarch64 equivalent, entering the signed SHA256SUMS.txt. Oracle: the release lists both musl archives, the binaries are statically linked (file reports no interpreter), and they run in an Alpine container."
+    tags: [release, distribution, linux]
+    links:
+      - type: traces-to
+        target: REQ-RELEASE-ASSETS-STANDARD
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.49.0
+
+  - id: REQ-DEPS-ROWAN-SYNC-001
+    type: requirement
+    title: spar and rivet shall build against one rowan, and spar's own rowan use shall be measured under Miri
+    status: proposed
+    description: "Refs #446. spar declares rowan = \"0.16\" (Cargo.toml:65), which resolves to crates.io 0.16.1, while rivet uses pulseengine/rowan 0.16.2 (branch fix/miri-soundness-v3), so a rivet build with the aadl feature links two rowans, one of them with the Stacked/Tree Borrows failures the fork fixes. Requirement: adopt the shared fork (or a jointly agreed version) through a single workspace pin, and run spar's parser and CST traversal under Miri in both aliasing models. Not claimed: that spar's rowan use triggers the unsoundness; that is what the Miri run is for."
+    tags: [deps, parser, soundness]
+    links:
+      - type: traces-to
+        target: REQ-PARSE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:49Z
+    release: v0.49.0
+
+  - id: REQ-AADL-UNDECLARED-PROPERTY-SET-001
+    type: requirement
+    title: A property association naming a property set that is neither declared nor imported shall be reported, never accepted silently
+    status: proposed
+    description: "Refs #445. Measured on main (6a6c787): a memory with 'Nonsense_Properties::Not_A_Real_Thing => 16#DEADBEEF#;' and no such property set gives 'spar parse' OK (exit 0), 'spar instance' exit 0 and no diagnostic from 'spar analyze'. A typo'd or invented property is indistinguishable from a satisfied one (silent failure). Requirement: an association whose property set qualifier resolves to no declared, imported or built-in property set (spar-hir-def standard_properties) produces a diagnostic naming the set and the association. Scheduled v0.49.0, not v0.48.1, because the severity and the corpus impact need measuring first: OSATE and AADLib models reference plugin-provided sets (e.g. ARINC653) that are not in the file. Oracle: the Nonsense_Properties model produces the diagnostic and fails on v0.47.1; negative control: an association under a declared or standard set stays silent; a corpus diff of every new diagnostic."
+    tags: [aadl, properties, name-resolution, defect]
+    links:
+      - type: traces-to
+        target: REQ-ANALYSIS-007
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-FUZZ-SOLVER-RSS-001
+    type: requirement
+    title: fuzz_scheduler_solver's recurring out-of-memory failures shall be explained by a replay and, if run-level, the fuzz session bounded
+    status: proposed
+    description: "Refs #439. Fuzz (nightly) failed on fuzz_scheduler_solver with an out-of-memory artifact on six nights between 2026-09-28 and 2026-10-10 (runs 36402322506 09-28 oom-a14d1d66, 36844307131 10-01 oom-594af326, 37191524250 10-04 oom-eb8bfeaf, 37293118973 10-05 oom-64a656f1, 37602110901 10-07 oom-702c66c2, 38040897165 10-10 oom-c38bd143), each time only that job, against rss_limit_mb=4096. It has been green on the 18 nightlies since 2026-10-11, and no commit to crates/spar-solver, fuzz/ or fuzz-nightly.yml landed between 10-08 and 10-13, so the failure is DORMANT, not explained. The issue's triage found no single in-domain input above about 13 MB, which points at cumulative libFuzzer RSS over the 1 h session rather than solve_milp. Requirement: replay a saved oom artifact standalone (38040897165's is the newest, inside 30-day retention); if it does not reproduce, bound the session (corpus trim or -runs batching with re-exec) so the nightly measures the solver and not its own growth; if it does, minimise it with cargo fuzz tmin and correct solve_milp. Oracle: the replay's exit status and peak RSS recorded against the artifact; a green streak alone is not evidence, since the target was already green for 18 nights with no change."
+    tags: [fuzz, solver, ci, defect]
+    links:
+      - type: traces-to
+        target: REQ-SOLVER-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
+    type: requirement
+    title: The trace-fixture workflow shall tell 'podman did not start' apart from 'kvm is not usable'
+    status: proposed
+    description: "Refs #425. The 13-night streak itself ended: Trace-Topology Fixture Generation has been green since 2026-09-23 (the host's read-only /run/user/1109 was the cause, and no workflow change was needed). The remaining half of the issue is narrower than its title: on main the first podman call is inside the step named 'Require /dev/kvm openable by a Nix BUILD process', with no podman info preflight before it. When podman cannot start, only podman's own error prints (the KVM/capability ::error:: advice is inside the container script and does not run), but the failing step's name blames /dev/kvm, which is what the run summary shows. Requirement: a separate podman preflight step (podman info, XDG_RUNTIME_DIR writable) before the KVM probe, so a podman start failure is reported under a step that names podman. Oracle: a run with an unwritable XDG_RUNTIME_DIR fails at the preflight step."
+    tags: [ci, fixtures, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-FIXTURE-VM-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-PROOF-LAKE-REACHABLE-001
+    type: requirement
+    title: Every first-party Lean module shall be reachable from a Lake root, so lake build typechecks it
+    status: proposed
+    description: "Refs #397. On main proofs/Proofs.lean imports ten modules and not Proofs.Network.MinPlusPwa; the only matches for MinPlusPwa under proofs/ are its own namespace and end lines, and lakefile.toml declares lean_lib Proofs with the default root. So the required Lean proof typecheck never compiles MinPlusPwa.lean (8 theorems, 8 sorries per the issue). Requirement: import it from Proofs.lean (or move it out of proofs/ if dead), and add a guard that computes import reachability from the Lake roots and fails on any unreachable first-party .lean file. Oracle: the guard fails on the current tree and passes once the module is imported and typechecks."
+    tags: [proofs, lean, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-NETWORK-013
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-CI-MUTANTS-WEEKLY-KILLRATE-001
+    type: requirement
+    title: Mutants Weekly shall run the tests that cover each mutant, or the 1.7% kill rate shall be explained by measurement
+    status: proposed
+    description: "Refs #391. Still reproducing: run 40171999628 (2026-10-25, shard 0/8) reports '1448 mutants tested in 2h: 1327 missed, 23 caught, 98 unviable', against roughly 71% for the gating Mutation Testing job with the same -- --lib flag; every MISSED line in the issue reports 0s test time. Requirement: establish which of the issue's three hypotheses holds (no test binary run, starved test processes, or genuine coverage gap) by measurement, and fix the workflow so a MISSED verdict means a test ran. Oracle: a known-killable mutant in a shard is reported caught."
+    tags: [ci, mutation-testing, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-CI-MUTANTS-RATCHET-WALKDOWN-001
+    type: requirement
+    title: The whole-crate mutation ratchet shall walk down to zero survivors, with the denominator stated at each step
+    status: proposed
+    description: "Refs #382. On main ci.yml's push-to-main Check surviving mutants still runs tools/check_mutants_report.py --max-missed 292 (per-PR runs now mutate only the diff, REQ-CI-MUTANTS-IN-DIFF-001). The issue's checklist (210 -> 142 -> 100 -> 50 -> 0) was set before the baseline moved to 292. Requirement: lower --max-missed in batches as tests kill survivors, stating the mutant population beside each milestone (e.g. 292 of 1755) so a population shift is visible. Oracle: each lowering lands with the measured report that justifies it."
+    tags: [ci, mutation-testing, testing]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-004
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.50.0
+
+  - id: REQ-VERIFY-GATE-SCOPE-001
+    type: requirement
+    title: The Verification Gate shall check every feature artifact that carries a verification step, and a PR body shall not be able to narrow it
+    status: proposed
+    description: "Refs #358, #513. On main .github/workflows/verification-gate.yml:75 still sets DEFAULT='(and (= type \"feature\") (or (has-tag \"v093\") (has-tag \"v0100\")))', a frozen v0.9.3/v0.10.0 slice (20 of 245 features per #513), and line 76 lets a 'Verify-Filter:' line in the PR body replace it. Requirement: derive the default from every feature artifact with fields.steps (or the release being cut), add a MIN_MATCHED floor like the other guards, and allow an override only to widen the set. Oracle: the matched count equals the independently counted population of stepped features; a narrowing override is rejected."
+    tags: [ci, verification, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-VERIFY-GATE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:39:50Z
+    release: v0.49.0
+
+  - id: REQ-CI-ORACLE-WASI-BUMP-001
+    type: requirement
+    title: "The codegen compile oracles shall run on a current nightly: wasmtime in the oracle workspaces shall link wasi:cli/exit@0.2.12"
+    status: proposed
+    description: "Refs #450. Measured in the issue: the Codegen compile oracle exec step passes on stable and on nightly-2026-08-26 and fails on nightly 2026-09-16 with 'component imports instance wasi:cli/exit@0.2.12, but a matching implementation was not found in the linker'. On main both codegen-exec-oracle and codegen-kiln-oracle still lock wasmtime 36.0.12 and every nightly workflow still pins nightly-2026-08-26, so the pin cannot move forward. Requirement: bump the oracles' wasmtime to a release whose linker provides WASI 0.2.12, then move the nightly pin. Oracle: the exec-oracle step passes on the newer nightly."
+    tags: [ci, codegen, toolchain]
+    links:
+      - type: traces-to
+        target: REQ-CODEGEN-WIT-DATAPLANE-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T05:44:46Z
+    release: v0.49.0

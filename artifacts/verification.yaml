@@ -5151,7 +5151,7 @@ artifacts:
       enabled after this lands. The first queue run's `Detect changed paths` log
       shows whether the event and file list were read correctly.
     status: implemented
-    release: v0.49.0
+    release: v0.48.0
     tags: [ci, merge-queue, guardrail, tooling]
     fields:
       method: automated-test
