@@ -1573,9 +1573,9 @@ artifacts:
       (2) unknown --to argument exits non-zero with the offending name
           mentioned on stderr;
       (3) unknown --component argument behaves the same way;
-      (4) Spar_Migration::Frozen component yields exit 2 and a
+      (4) Spar_Migration::Frozen component yields exit 3 and a
           structured Frozen violation carrying the Pinned_Reason;
-      (5) target outside Spar_Migration::Allowed_Targets yields exit 2
+      (5) target outside Spar_Migration::Allowed_Targets yields exit 3
           and an AllowedTargets violation citing the offending target;
       (6) error-severity analysis diagnostics are surfaced into the
           per-pass diagnostic stream and (when present) raised as
@@ -1589,7 +1589,10 @@ artifacts:
           model — `spar analyze` returns identical output before and
           after, and the AADL file on disk is unchanged;
       (10) a trivial move whose target equals the declared binding is
-           reported as ok with no violations.
+           reported as ok with no violations;
+      (11) the same invocation exits 3 for a real Frozen violation and 2
+           when a stray unknown option is added, so 2 is the usage-error
+           code only (v0.48.0, BREAKING: overlay violations were exit 2).
     fields:
       method: automated-test
       steps:
@@ -2985,7 +2988,11 @@ artifacts:
       (10) an unknown tool name returns the JSON-RPC MethodNotFound
           error code (-32601);
       plus one bonus test confirming unknown JSON-RPC methods (e.g.
-      `sampling/createMessage`) also return -32601.
+      `sampling/createMessage`) also return -32601. Since v0.48.0,
+      `verify_tool_reports_cli_exit_code_3_for_an_overlay_violation`
+      pins `spar.verify_move`'s `cli_exit_code` at 3 for a Frozen
+      violation (it mirrors the CLI, which moved overlay violations from
+      2 to 3 so that 2 is the usage-error code only).
     fields:
       method: automated-test
       steps:

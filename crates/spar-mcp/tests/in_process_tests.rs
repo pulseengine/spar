@@ -202,6 +202,72 @@ fn verify_tool_returns_ok_when_move_is_valid() {
     cleanup(&path);
 }
 
+/// `t1` is `Spar_Migration::Frozen`, so moving it is an overlay violation.
+const FROZEN_MODEL: &str = "\
+package Frozen
+public
+  processor CPU
+  end CPU;
+
+  thread Plat
+    properties
+      Spar_Migration::Frozen => true;
+  end Plat;
+
+  process Proc
+  end Proc;
+
+  process implementation Proc.Impl
+    subcomponents
+      t1: thread Plat;
+  end Proc.Impl;
+
+  system Sys
+  end Sys;
+
+  system implementation Sys.Impl
+    subcomponents
+      cpu1: processor CPU;
+      cpu2: processor CPU;
+      app: process Proc.Impl;
+    properties
+      Actual_Processor_Binding => (reference (cpu1)) applies to app.t1;
+  end Sys.Impl;
+end Frozen;
+";
+
+/// The tool mirrors the CLI exit code: an overlay violation is 3, not 2
+/// (2 is the usage-error code on every spar command).
+#[test]
+fn verify_tool_reports_cli_exit_code_3_for_an_overlay_violation() {
+    let path = write_model("frozen", FROZEN_MODEL);
+    let args = json!({
+        "model": path.to_string_lossy(),
+        "root":  "Frozen::Sys.Impl",
+        "component": "t1",
+        "target":    "cpu2",
+    });
+    let result = verify::call(&args);
+    cleanup(&path);
+    let payload = match result {
+        ToolResult::Ok(v) => v,
+        ToolResult::Error { code, message } => {
+            panic!("expected Ok, got Error[{code}] {message}");
+        }
+    };
+    assert!(
+        payload["violations"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|w| w["kind"] == "Frozen")),
+        "expected a Frozen violation; got {payload}",
+    );
+    assert_eq!(
+        payload["cli_exit_code"].as_i64(),
+        Some(3),
+        "an overlay violation must be cli_exit_code 3; got {payload}",
+    );
+}
+
 // ── 2. enumerate_tool_lists_all_processors_no_allowed_targets ────────
 
 #[test]

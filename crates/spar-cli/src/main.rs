@@ -129,24 +129,46 @@ fn main() {
             // Exit 2, not 1 (#422): one failure, one exit code across the
             // toolchain, and ordeal already uses 2.
             //
-            // NOT claimed: that 2 means "usage error" binary-wide. It does
-            // not. `spar moves verify` returns 2 for a FINDING (overlay
-            // diagnostics, moves.rs `exit_code_for`) and 1 for argument
-            // errors — the opposite convention, in this same executable. An
-            // earlier version of this comment asserted the clean split and
-            // was simply wrong. Reconciling `moves` is out of scope for #422;
-            // what is fixed here is that the top-level dispatcher matches the
-            // org baseline.
+            // Until v0.48.0 `spar moves verify` also returned 2 for a FINDING
+            // (overlay diagnostics), so 2 did not mean "usage error"
+            // binary-wide. It now returns 3 for that finding (moves.rs
+            // `exit_code_for`), one code per failure kind, so 2 is a usage
+            // error everywhere. NOT claimed: that every other argument error
+            // is 2. Under `moves`, a missing value, a missing `--root` or a
+            // name that does not resolve still exits 1.
             process::exit(2);
         }
     }
 }
 
-/// A subcommand entry point. Every command takes the argv tail; `lsp` ignores
-/// it and is wrapped rather than special-cased, so the table stays uniform.
+/// A subcommand entry point. Every command takes the argv tail; `lsp` is
+/// wrapped rather than special-cased, so the table stays uniform.
 type CmdFn = fn(&[String]);
 
-fn cmd_lsp_argv(_args: &[String]) {
+/// `spar lsp [--stdio]`.
+///
+/// #508: this used to ignore its arguments, so `spar lsp --typo` started the
+/// server and exited 0. Arguments are checked BEFORE the server reads stdin.
+/// `--stdio` is accepted because vscode-languageclient appends it to an
+/// executable server's args under `TransportKind.stdio`, which is how the
+/// VS Code extension launches spar.
+fn cmd_lsp_argv(args: &[String]) {
+    let usage = || eprintln!("Usage: spar lsp [--stdio]");
+    for arg in args {
+        match arg.as_str() {
+            "--stdio" => {}
+            s if s.starts_with('-') => {
+                eprintln!("Unknown option: {s}");
+                usage();
+                process::exit(2);
+            }
+            s => {
+                eprintln!("Unexpected argument: {s}");
+                usage();
+                process::exit(2);
+            }
+        }
+    }
     cmd_lsp();
 }
 
@@ -362,12 +384,31 @@ fn cmd_mcp(args: &[String]) {
             process::exit(if args.is_empty() { 1 } else { 0 });
         }
         Some("serve") => "serve",
+        // #508: an unknown option or subcommand is a usage error (2), as on
+        // every other command.
+        Some(s) if s.starts_with('-') => {
+            eprintln!("Unknown option: {s}");
+            usage();
+            process::exit(2);
+        }
         Some(other) => {
             eprintln!("Unknown mcp subcommand: {other}");
             usage();
-            process::exit(1);
+            process::exit(2);
         }
     };
+
+    // `serve` takes no options, and spar-mcp reads none: reject them here,
+    // before the server starts reading stdin.
+    if let Some(s) = args.get(1) {
+        if s.starts_with('-') {
+            eprintln!("Unknown option: {s}");
+        } else {
+            eprintln!("Unexpected argument: {s}");
+        }
+        usage();
+        process::exit(2);
+    }
 
     if sub != "serve" {
         // Defensive: should be unreachable given the match above.
@@ -2662,6 +2703,7 @@ fn cmd_sysml2_parse(args: &[String]) {
         match arg.as_str() {
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
+                print_sysml2_usage();
                 // #508: an unknown option is a usage error: exit 2, as the
                 // top-level dispatcher does (#422).
                 process::exit(2);
@@ -2717,6 +2759,7 @@ fn cmd_sysml2_lower(args: &[String]) {
             }
             s if s.starts_with('-') => {
                 eprintln!("Unknown option: {s}");
+                print_sysml2_usage();
                 // #508: an unknown option is a usage error: exit 2, as the
                 // top-level dispatcher does (#422).
                 process::exit(2);
@@ -2998,15 +3041,19 @@ fn cmd_sysml2_generate(args: &[String]) {
     }
 }
 
+fn print_sysml2_usage() {
+    eprintln!("Usage: spar sysml2 <subcommand> [options] <file>");
+    eprintln!();
+    eprintln!("Subcommands:");
+    eprintln!("  parse    Parse a SysML v2 file and show the syntax tree");
+    eprintln!("  lower    [-o out.aadl] Lower SysML v2 to AADL");
+    eprintln!("  extract  Extract requirements to rivet YAML");
+    eprintln!("  generate Generate SysML v2 from rivet YAML (--from-rivet)");
+}
+
 fn cmd_sysml2(args: &[String]) {
     if args.is_empty() {
-        eprintln!("Usage: spar sysml2 <subcommand> [options] <file>");
-        eprintln!();
-        eprintln!("Subcommands:");
-        eprintln!("  parse    Parse a SysML v2 file and show the syntax tree");
-        eprintln!("  lower    Lower SysML v2 to AADL");
-        eprintln!("  extract  Extract requirements to rivet YAML");
-        eprintln!("  generate Generate SysML v2 from rivet YAML (--from-rivet)");
+        print_sysml2_usage();
         process::exit(1);
     }
 
@@ -3015,9 +3062,16 @@ fn cmd_sysml2(args: &[String]) {
         "lower" => cmd_sysml2_lower(&args[1..]),
         "extract" => cmd_sysml2_extract(&args[1..]),
         "generate" => cmd_sysml2_generate(&args[1..]),
+        // #508: an unknown option or subcommand is a usage error (2).
+        s if s.starts_with('-') => {
+            eprintln!("Unknown option: {s}");
+            print_sysml2_usage();
+            process::exit(2);
+        }
         other => {
             eprintln!("Unknown sysml2 subcommand: {other}");
-            process::exit(1);
+            print_sysml2_usage();
+            process::exit(2);
         }
     }
 }

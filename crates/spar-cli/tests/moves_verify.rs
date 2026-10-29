@@ -5,7 +5,7 @@
 //! and shells out to the `spar` binary. Tests assert exit codes and
 //! parse the JSON / text output to verify the report shape.
 //!
-//! Test inventory (10 cases per the commit-3 spec):
+//! Test inventory (10 cases per the commit-3 spec, plus 11):
 //!
 //!  1. `verify_emits_ok_when_move_is_valid`
 //!  2. `verify_emits_fail_when_target_unknown`
@@ -17,6 +17,7 @@
 //!  8. `verify_json_format_parseable`
 //!  9. `verify_doesnt_mutate_underlying_model`
 //! 10. `verify_to_same_target_succeeds`
+//! 11. `an_overlay_violation_exits_3_and_an_unknown_option_exits_2`
 
 use std::env;
 use std::fs;
@@ -331,8 +332,8 @@ fn verify_detects_frozen_violation() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         out.status.code(),
-        Some(2),
-        "expected exit 2 for frozen violation; stdout: {stdout}\nstderr: {}",
+        Some(3),
+        "expected exit 3 for frozen violation; stdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&out.stderr),
     );
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout was not valid JSON");
@@ -378,8 +379,8 @@ fn verify_detects_allowed_targets_violation() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         out.status.code(),
-        Some(2),
-        "expected exit 2 for allowed-targets violation; stdout: {stdout}\nstderr: {}",
+        Some(3),
+        "expected exit 3 for allowed-targets violation; stdout: {stdout}\nstderr: {}",
         String::from_utf8_lossy(&out.stderr),
     );
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout was not valid JSON");
@@ -677,4 +678,71 @@ fn verify_to_same_target_succeeds() {
     );
 
     cleanup(&path);
+}
+
+// ── 11. one exit code per failure kind ────────────────────────────────
+
+/// An overlay violation is a FINDING and exits 3; an unknown option is a
+/// usage error and exits 2. Same command (`moves verify`), same model, same
+/// arguments: the only difference is the stray `--bogus`, so the two codes
+/// differ only if the two failure kinds are told apart.
+#[test]
+fn an_overlay_violation_exits_3_and_an_unknown_option_exits_2() {
+    let path = write_model("exit3", FROZEN_MODEL);
+    let base = [
+        "moves",
+        "verify",
+        "--root",
+        "Frozen::Sys.Impl",
+        "--component",
+        "t1",
+        "--to",
+        "cpu2",
+        "--format",
+        "json",
+    ];
+
+    let finding = spar()
+        .args(base)
+        .arg(&path)
+        .output()
+        .expect("failed to run spar");
+    let usage = spar()
+        .args(base)
+        .arg("--bogus")
+        .arg(&path)
+        .output()
+        .expect("failed to run spar");
+    cleanup(&path);
+
+    let stdout = String::from_utf8_lossy(&finding.stdout);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout was not valid JSON");
+    assert!(
+        v["violations"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|w| w["kind"] == "Frozen")),
+        "the finding run must report a real Frozen violation; got {v}",
+    );
+    assert_eq!(
+        finding.status.code(),
+        Some(3),
+        "an overlay violation must exit 3; stderr: {}",
+        String::from_utf8_lossy(&finding.stderr),
+    );
+
+    let usage_err = String::from_utf8_lossy(&usage.stderr);
+    assert!(
+        usage_err.contains("Unknown option: --bogus"),
+        "stderr: {usage_err}"
+    );
+    // The usage block documents the split it enforces.
+    assert!(
+        usage_err.contains("2  usage error") && usage_err.contains("3  overlay violations"),
+        "usage on stderr must document 2 = usage, 3 = overlay violation: {usage_err}"
+    );
+    assert_eq!(
+        usage.status.code(),
+        Some(2),
+        "an unknown option must exit 2; stderr: {usage_err}",
+    );
 }
