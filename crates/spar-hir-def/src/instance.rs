@@ -266,6 +266,8 @@ impl SystemInstance {
             pending_applies_to: Vec::new(),
             refined_origins: FxHashMap::default(),
             applies_to_fallbacks: FxHashSet::default(),
+            features_complete: FxHashSet::default(),
+            feature_chain_incomplete: false,
             depth: 0,
             max_depth: 100,
         };
@@ -1628,6 +1630,9 @@ struct ImplChainResult {
     modes: Vec<(Name, bool)>,
     mode_transitions: Vec<(Option<Name>, Name, Name, Vec<Name>)>,
     call_map: FxHashMap<String, Name>,
+    /// `internal features` and `processor features` names across the chain:
+    /// legal own connection ends that are not features of the type (#555).
+    local_features: Vec<Name>,
 }
 
 /// Result of resolving an `applies to <dotted-path>` target.
@@ -1686,6 +1691,15 @@ struct Builder<'a> {
         ComponentInstanceIdx,
         (crate::resolver::CiName, crate::resolver::CiName),
     )>,
+    /// Component instances whose feature list is KNOWN to be complete: the
+    /// classifier's type resolved and every `extends` ancestor resolved too.
+    /// Only for these can a connection end that names a missing feature be
+    /// reported (#555); a child whose type is a prototype, anonymous, or
+    /// unresolved has an empty feature list that proves nothing.
+    features_complete: FxHashSet<ComponentInstanceIdx>,
+    /// Set by [`Self::collect_type_chain_features`] when an `extends` link
+    /// does not resolve or is circular, so the collected list is partial.
+    feature_chain_incomplete: bool,
     depth: u32,
     max_depth: u32,
 }
@@ -1788,6 +1802,7 @@ impl<'a> Builder<'a> {
                 let sub_data = impl_chain.subcomponents;
                 let conn_data = impl_chain.connections;
                 let call_map = impl_chain.call_map;
+                let local_features = impl_chain.local_features;
                 let e2e_data = impl_chain.e2e_flows;
                 // Attach each flow implementation to the flow-spec instance it
                 // implements (later = more derived overrides an inherited one).
@@ -2004,6 +2019,24 @@ impl<'a> Builder<'a> {
                         );
                     }
 
+                    // AS5506 Ch.9 (Connections): each end must name a feature of the
+                    // referenced subcomponent or of this component (#555).
+                    // The connection is kept, as an unresolved-subcomponent
+                    // end is: the diagnostic is what refuses the model.
+                    for (role, endpoint) in [("source", &src), ("destination", &dst)] {
+                        if let Some(endpoint) = endpoint {
+                            self.check_connection_end_feature(
+                                idx,
+                                &conn_name,
+                                role,
+                                &child_names,
+                                &local_features,
+                                &call_map,
+                                endpoint,
+                            );
+                        }
+                    }
+
                     let ci = self.connections.alloc(ConnectionInstance {
                         name: conn_name,
                         kind: conn_kind,
@@ -2173,6 +2206,18 @@ impl<'a> Builder<'a> {
             }
         }
 
+        // `internal features` / `processor features` of this impl (#555).
+        if let Some(tree) = self.scope.tree(loc.tree) {
+            let own: crate::item_tree::ComponentImplIdx =
+                la_arena::Idx::from_raw(la_arena::RawIdx::from_u32(loc.raw_idx));
+            result.local_features.extend(
+                tree.impl_local_features
+                    .iter()
+                    .filter(|(ci_idx, _)| *ci_idx == own)
+                    .map(|(_, name)| name.clone()),
+            );
+        }
+
         // Collect own subcomponents. Tag each with `loc.tree` — the tree of the
         // impl currently being walked — so an inherited subcomponent keeps the
         // index space of the file it was declared in (issue #236).
@@ -2320,11 +2365,13 @@ impl<'a> Builder<'a> {
         Vec<crate::item_tree::ArrayDimension>,
     )> {
         let Some(ct) = self.scope.get_component_type(loc) else {
+            self.feature_chain_incomplete = true;
             return Vec::new();
         };
 
         let key = format!("{}::{}", package, ct.name);
         if visited.contains(&key) {
+            self.feature_chain_incomplete = true;
             self.diagnostics.push(InstanceDiagnostic {
                 message: format!("circular extends chain detected: {key}"),
                 path: Vec::new(),
@@ -2345,6 +2392,8 @@ impl<'a> Builder<'a> {
                 let parent_feats =
                     self.collect_type_chain_features(*parent_loc, parent_pkg, visited);
                 all_features.extend(parent_feats);
+            } else {
+                self.feature_chain_incomplete = true;
             }
         }
 
@@ -2359,6 +2408,8 @@ impl<'a> Builder<'a> {
                     feat.access_kind,
                     feat.array_dimensions.clone(),
                 ));
+            } else {
+                self.feature_chain_incomplete = true;
             }
         }
 
@@ -2444,6 +2495,193 @@ impl<'a> Builder<'a> {
         endpoint.subcomponent = None;
     }
 
+    /// Report a connection end that names a feature its target does not have
+    /// (#555, REQ-INSTANCE-CONNECTION-END-RESOLVES-001).
+    ///
+    /// AS5506 Ch.9 (Connections): a connection end names a
+    /// feature of a subcomponent of the containing implementation
+    /// (`sub.feature`) or a feature of the containing component's own type
+    /// (`feature`), or the subcomponent itself where the kind allows it. Before
+    /// this check, `d.zzz` with no feature `zzz` on `d` was instantiated
+    /// silently and every analysis read a connection to nothing.
+    ///
+    /// The check reports ONLY what it can prove absent, so it skips:
+    /// - an empty feature (the access fixup's whole-subcomponent end);
+    /// - a bare end naming a subcomponent, or an `internal features` /
+    ///   `processor features` entry of the implementation chain (`self.ie`
+    ///   lowers to a bare `ie`);
+    /// - a dotted feature (`fg.member` on the owner, already rewritten and
+    ///   checked by [`Self::fixup_own_feature_group_endpoint`]);
+    /// - an end whose subcomponent does not resolve (reported as an
+    ///   unresolved subcomponent, or a `processor.` / call reference);
+    /// - a target whose feature list is not known complete (unresolved,
+    ///   prototype or anonymous classifier, or a broken `extends` chain);
+    /// - a feature found as a member of one of the target's feature groups:
+    ///   lowering keeps only the first and last name of `sub.fg.member`, so
+    ///   the member arrives as `(sub, member)`. It is matched against ANY
+    ///   group of the target, and any group whose type does not expand makes
+    ///   the end unprovable.
+    #[allow(clippy::too_many_arguments)]
+    fn check_connection_end_feature(
+        &mut self,
+        owner: ComponentInstanceIdx,
+        conn_name: &Name,
+        role: &str,
+        child_names: &[Name],
+        local_features: &[Name],
+        call_map: &FxHashMap<String, Name>,
+        endpoint: &ConnectionEnd,
+    ) {
+        let feature = endpoint.feature.as_str();
+        if feature.is_empty() || feature.contains('.') {
+            return;
+        }
+        let same = |declared: &str| base_name_of(declared).eq_ignore_ascii_case(feature);
+
+        let target = match &endpoint.subcomponent {
+            Some(sub) => {
+                let sub = sub.as_str();
+                let found = self.components[owner].children.iter().copied().find(|&c| {
+                    let n = self.components[c].name.as_str();
+                    n.eq_ignore_ascii_case(sub)
+                        || (!sub.contains('[') && base_name_of(n).eq_ignore_ascii_case(sub))
+                });
+                match found {
+                    Some(t) => t,
+                    None => {
+                        self.check_call_end_feature(owner, conn_name, role, call_map, sub, feature);
+                        return;
+                    }
+                }
+            }
+            None => {
+                // A bare name may name a subcomponent (a data, bus or
+                // subprogram subcomponent as an end), for every kind, or an
+                // implementation's internal / processor feature (`self.ie`
+                // lowers to a bare `ie`).
+                if child_names.iter().any(|n| same(n.as_str()))
+                    || local_features.iter().any(|n| same(n.as_str()))
+                {
+                    return;
+                }
+                owner
+            }
+        };
+        if !self.features_complete.contains(&target) {
+            return;
+        }
+
+        let comp = &self.components[target];
+        if comp
+            .features
+            .iter()
+            .any(|&fi| same(self.features[fi].name.as_str()))
+        {
+            return;
+        }
+        let groups: Vec<Option<ClassifierRef>> = comp
+            .features
+            .iter()
+            .map(|&fi| &self.features[fi])
+            .filter(|f| f.kind == FeatureKind::FeatureGroup)
+            .map(|f| f.classifier.clone())
+            .collect();
+        for group in groups {
+            let Some(cls_ref) = group else {
+                return;
+            };
+            let pkg = cls_ref
+                .package
+                .clone()
+                .unwrap_or_else(|| self.components[target].package.clone());
+            let members = expand_feature_group(self.scope, &pkg, &cls_ref.type_name, false);
+            if members.is_empty() {
+                return;
+            }
+            let in_group = members.iter().any(|m| {
+                same(m.name.as_str())
+                    || m.group_prefix
+                        .as_ref()
+                        .is_some_and(|p| p.as_str().split('.').any(same))
+            });
+            if in_group {
+                return;
+            }
+        }
+
+        let comp = &self.components[target];
+        let written = match &endpoint.subcomponent {
+            Some(sub) => format!("{}.{}", sub, feature),
+            None => feature.to_string(),
+        };
+        let holder = match &endpoint.subcomponent {
+            Some(sub) => format!("subcomponent '{}'", sub),
+            None => format!("component '{}'", comp.name),
+        };
+        let message = format!(
+            "connection '{}': {} '{}': {} (classifier '{}::{}') has no feature '{}'",
+            conn_name, role, written, holder, comp.package, comp.type_name, feature,
+        );
+        let owner_name = self.components[owner].name.clone();
+        self.diagnostics.push(InstanceDiagnostic {
+            message,
+            path: vec![owner_name, conn_name.clone()],
+        });
+    }
+
+    /// The subprogram-call half of [`Self::check_connection_end_feature`].
+    ///
+    /// A parameter end `call1.p` arrives here rewritten to `Sp.p` when
+    /// `call1 : subprogram Sp;` (an unqualified, type-only call; the call map
+    /// holds exactly those). Calls are not instantiated, so the parameter is
+    /// looked up in `Sp`'s type chain directly. Skipped, as unprovable: a name
+    /// that is no call target, a type that does not resolve or whose `extends`
+    /// chain is broken, and a type with any feature group.
+    fn check_call_end_feature(
+        &mut self,
+        owner: ComponentInstanceIdx,
+        conn_name: &Name,
+        role: &str,
+        call_map: &FxHashMap<String, Name>,
+        target: &str,
+        feature: &str,
+    ) {
+        let Some(call) = call_map
+            .iter()
+            .filter(|(_, sp)| sp.as_str().eq_ignore_ascii_case(target))
+            .map(|(call, _)| call.clone())
+            .min()
+        else {
+            return;
+        };
+        let package = self.components[owner].package.clone();
+        let cls_ref = ClassifierRef::type_only(Name::new(target));
+        let ResolvedClassifier::ComponentType { loc, package: pkg } =
+            self.scope.resolve_classifier(&package, &cls_ref)
+        else {
+            return;
+        };
+        self.feature_chain_incomplete = false;
+        let feats = self.collect_type_chain_features(loc, &pkg, &mut Vec::new());
+        if self.feature_chain_incomplete
+            || feats.iter().any(|f| f.1 == FeatureKind::FeatureGroup)
+            || feats
+                .iter()
+                .any(|f| f.0.as_str().eq_ignore_ascii_case(feature))
+        {
+            return;
+        }
+        let owner_name = self.components[owner].name.clone();
+        self.diagnostics.push(InstanceDiagnostic {
+            message: format!(
+                "connection '{}': {} '{}.{}': called subprogram '{}' (classifier '{}::{}') \
+                 has no feature '{}'",
+                conn_name, role, call, feature, target, pkg, target, feature,
+            ),
+            path: vec![owner_name, conn_name.clone()],
+        });
+    }
+
     fn resolve_data_size_bytes(
         &self,
         from_package: &Name,
@@ -2526,11 +2764,16 @@ impl<'a> Builder<'a> {
 
         // Collect features from the entire extends chain
         let mut visited = Vec::new();
+        self.feature_chain_incomplete = false;
         let feat_data = self.collect_type_chain_features(loc, type_package, &mut visited);
+        let chain_complete = !self.feature_chain_incomplete;
 
         let Some(ct) = self.scope.get_component_type(loc) else {
             return;
         };
+        if chain_complete {
+            self.features_complete.insert(idx);
+        }
 
         let flow_data: Vec<_> = ct
             .flow_specs
@@ -6838,6 +7081,418 @@ end Pv;
             &[PropertySource::Implementation {
                 classifier: "P::S.i".to_string()
             }]
+        );
+    }
+
+    // ── #555: a connection end names a feature that exists ──────────────
+
+    /// Model for the end-resolution tests; `CONNS` is replaced per test.
+    const END_MODEL: &str = r#"
+package P
+public
+  bus B
+  end B;
+  feature group FG
+    features
+      y : in data port;
+      inner : feature group FG2;
+  end FG;
+  feature group FG2
+    features
+      deep : in data port;
+  end FG2;
+  device Base
+    features
+      inherited : in data port;
+  end Base;
+  device D extends Base
+    features
+      ba : requires bus access B;
+      arr : in data port [2];
+      fgd : feature group FG;
+      o : out data port;
+  end D;
+  device Broken extends NoSuchBase
+    features
+      own_b : in data port;
+  end Broken;
+  device Opaque
+    features
+      g : feature group NoSuchGroup;
+  end Opaque;
+  device Bare
+    features
+      g : feature group;
+  end Bare;
+  system SBase
+    features
+      sin : in data port;
+  end SBase;
+  system S extends SBase
+    features
+      fg : feature group FG;
+  end S;
+  system implementation S.impl
+    subcomponents
+      b : bus B;
+      d : device D;
+      da : device D [2];
+      u : device NoSuchType;
+      br : device Broken;
+      op : device Opaque;
+      bare : device Bare;
+    connections
+      CONNS
+  end S.impl;
+end P;
+"#;
+
+    fn end_instance(conns: &str) -> SystemInstance {
+        instantiate_aadl(&END_MODEL.replace("CONNS", conns), "P", "S", "impl")
+    }
+
+    fn dangling(inst: &SystemInstance) -> Vec<String> {
+        inst.diagnostics
+            .iter()
+            .filter(|d| d.message.contains("has no feature '"))
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn dangling_subcomponent_end_is_reported_with_connection_end_and_feature() {
+        let inst = end_instance("c2 : bus access b -> d.zzz;");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'c2': destination 'd.zzz': subcomponent 'd' (classifier 'P::D') \
+                 has no feature 'zzz'"
+                    .to_string()
+            ]
+        );
+        let d = inst
+            .diagnostics
+            .iter()
+            .find(|d| d.message.contains("has no feature '"))
+            .unwrap();
+        assert_eq!(
+            d.path.iter().map(|n| n.as_str()).collect::<Vec<_>>(),
+            vec!["S.impl", "c2"]
+        );
+        // The connection is kept (as an unresolved-subcomponent end is).
+        assert_eq!(inst.connections.len(), 1);
+        let src_side = end_instance("c2 : port d.nope -> d.inherited;");
+        assert_eq!(dangling(&src_side).len(), 1);
+        assert!(
+            dangling(&src_side)[0].starts_with("connection 'c2': source 'd.nope': "),
+            "{:?}",
+            dangling(&src_side)
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn dangling_own_end_is_reported() {
+        let inst = end_instance("c3 : port nope -> d.inherited;");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'c3': source 'nope': component 'S.impl' (classifier 'P::S') \
+                 has no feature 'nope'"
+                    .to_string()
+            ]
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_featureless_target_still_reports() {
+        // `bus B` declares no features: an empty list is a COMPLETE list, so
+        // `b.zzz` is provably absent.
+        let inst = end_instance("c : bus access b.zzz -> d.ba;");
+        assert_eq!(dangling(&inst).len(), 1, "{:?}", inst.diagnostics);
+        assert!(dangling(&inst)[0].contains("subcomponent 'b'"));
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn resolving_ends_are_silent() {
+        for conns in [
+            // case-insensitive, inherited from an `extends` ancestor
+            "c : port d.o -> d.INHERITED;",
+            // own inherited feature (S extends SBase)
+            "c : port sin -> d.inherited;",
+            // array feature `arr` is instantiated as arr[1], arr[2]
+            "c : port d.o -> d.arr;",
+            // array subcomponent by base name and by element
+            "c : port da.o -> d.inherited;",
+            "c : port da[1].o -> d.inherited;",
+            // whole-subcomponent access end (feature emptied by the fixup)
+            "c : bus access b -> d.ba;",
+            // a bare subcomponent name on a NON-access connection
+            "c : feature b -> d.ba;",
+            // feature group end, own feature-group member, collapsed member
+            "c : feature group fg <-> d.fgd;",
+            "c : port d.o -> fg.y;",
+            "c : port d.o -> d.fgd.y;",
+            // a nested group's name inside a subcomponent's group
+            "c : feature group d.fgd.inner <-> fg;",
+            "c : port d.o -> d.fgd.inner.deep;",
+        ] {
+            let inst = end_instance(conns);
+            assert_eq!(dangling(&inst), Vec::<String>::new(), "{conns}");
+        }
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_member_missing_from_every_group_of_the_target_is_reported() {
+        let inst = end_instance("c : port d.o -> d.fgd.zz;");
+        assert_eq!(dangling(&inst).len(), 1, "{:?}", inst.diagnostics);
+        assert!(dangling(&inst)[0].contains("has no feature 'zz'"));
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn unprovable_ends_are_not_reported() {
+        for conns in [
+            // the child's type does not resolve: its empty list proves nothing
+            "c : port u.x -> d.inherited;",
+            // an `extends` ancestor does not resolve: the list is partial
+            "c : port br.x -> d.inherited;",
+            // a feature group of the target whose type does not resolve
+            "c : port op.x -> d.inherited;",
+            // a feature group of the target with no classifier at all
+            "c : port bare.x -> d.inherited;",
+            // the subcomponent itself is unresolved (reported separately)
+            "c : port q.x -> d.inherited;",
+            // own feature-group member missing: reported as "has no member"
+            "c : port d.o -> fg.nomember;",
+        ] {
+            let inst = end_instance(conns);
+            assert_eq!(dangling(&inst), Vec::<String>::new(), "{conns}");
+        }
+        // Internal and processor features of the implementation (and of an
+        // implementation it extends) are legal own ends; `self.ie` lowers to
+        // a bare `ie`. Found in the corpus: InternalEventTest, isolette,
+        // EMV2TR figure90_93.
+        let src = r#"
+package Q
+public
+  device Leaf
+    features
+      i : in event port;
+      o : out event port;
+  end Leaf;
+  system T
+  end T;
+  system implementation T.base
+    subcomponents
+      l : device Leaf;
+    internal features
+      inherited_ie : event;
+  end T.base;
+  system implementation T.impl extends T.base
+    internal features
+      ie : event;
+    processor features
+      pp : port;
+    connections
+      c1 : port self.ie -> l.i;
+      c2 : port l.o -> self.ie;
+      c3 : port ie -> l.i;
+      c4 : port pp -> l.i;
+      c5 : port inherited_ie -> l.i;
+      c6 : port not_internal -> l.i;
+  end T.impl;
+end Q;
+"#;
+        let inst = instantiate_aadl(src, "Q", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'c6': source 'not_internal': component 'T.impl' (classifier \
+                 'Q::T') has no feature 'not_internal'"
+                    .to_string()
+            ],
+            "{:?}",
+            inst.diagnostics
+        );
+
+        // A parameter end on a subprogram call resolves through the called
+        // subprogram's type; `call1.zz` names no parameter of `Sp`.
+        let src = r#"
+package R
+public
+  subprogram SpBase
+    features
+      a : in parameter;
+  end SpBase;
+  subprogram Sp extends SpBase
+    features
+      r : out parameter;
+  end Sp;
+  subprogram Outer
+    features
+      arg : in parameter;
+      res : out parameter;
+  end Outer;
+  subprogram implementation Outer.impl
+    calls
+      seq : { call1 : subprogram Sp; call2 : subprogram NoSuchSp; };
+    connections
+      p1 : parameter arg -> call1.a;
+      p2 : parameter call1.r -> res;
+      p3 : parameter arg -> call1.zz;
+      p4 : parameter arg -> call2.anything;
+  end Outer.impl;
+  system T
+  end T;
+  system implementation T.impl
+    subcomponents
+      sp : subprogram Outer.impl;
+  end T.impl;
+end R;
+"#;
+        let inst = instantiate_aadl(src, "R", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'p3': destination 'call1.zz': called subprogram 'Sp' (classifier \
+                 'R::Sp') has no feature 'zz'"
+                    .to_string()
+            ],
+            "{:?}",
+            inst.diagnostics
+        );
+
+        // `fg.nomember` is still reported, once, by the feature-group fixup.
+        let inst = end_instance("c : port d.o -> fg.nomember;");
+        assert_eq!(
+            inst.diagnostics
+                .iter()
+                .filter(|d| d.message.contains("has no member 'nomember'"))
+                .count(),
+            1
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_dangling_end_on_an_array_subcomponent_is_reported() {
+        // `da : device D [2]` is instantiated as `da[1]`, `da[2]`: the end
+        // `da.zzz` names no instance exactly, so it is found by base name, and
+        // the missing feature is reported.
+        let inst = end_instance("c : port da.zzz -> d.inherited;");
+        let found = dangling(&inst);
+        assert!(!found.is_empty(), "{:?}", inst.diagnostics);
+        assert!(
+            found
+                .iter()
+                .all(|m| m.starts_with("connection 'c': source 'da.zzz': ")
+                    && m.ends_with("has no feature 'zzz'")),
+            "{found:?}"
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_sibling_implementations_internal_feature_is_no_own_end() {
+        // Local features are taken from the implementations of the extends
+        // chain only, not from every implementation in the same file.
+        let src = r#"
+package Q
+public
+  device Leaf
+    features
+      i : in event port;
+  end Leaf;
+  system T
+  end T;
+  system implementation T.other
+    internal features
+      stray : event;
+  end T.other;
+  system implementation T.impl
+    subcomponents
+      l : device Leaf;
+    internal features
+      ie : event;
+    connections
+      c1 : port ie -> l.i;
+      c2 : port stray -> l.i;
+  end T.impl;
+end Q;
+"#;
+        let inst = instantiate_aadl(src, "Q", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'c2': source 'stray': component 'T.impl' (classifier 'Q::T') \
+                 has no feature 'stray'"
+                    .to_string()
+            ],
+            "{:?}",
+            inst.diagnostics
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_call_end_on_an_unprovable_subprogram_type_is_not_reported() {
+        // Each skip condition alone silences the end: a broken `extends`
+        // chain (partial feature list), and a feature group (members unknown).
+        let src = r#"
+package R
+public
+  feature group FG
+    features
+      m : in parameter;
+  end FG;
+  subprogram SpBroken extends NoSuchBase
+    features
+      a : in parameter;
+  end SpBroken;
+  subprogram SpFg
+    features
+      a : in parameter;
+      g : feature group FG;
+  end SpFg;
+  subprogram Outer
+    features
+      arg : in parameter;
+  end Outer;
+  subprogram implementation Outer.impl
+    calls
+      seq : { call1 : subprogram SpBroken; call2 : subprogram SpFg; };
+    connections
+      p1 : parameter arg -> call1.zz;
+      p2 : parameter arg -> call2.zz;
+  end Outer.impl;
+  system T
+  end T;
+  system implementation T.impl
+    subcomponents
+      sp : subprogram Outer.impl;
+  end T.impl;
+end R;
+"#;
+        let inst = instantiate_aadl(src, "R", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            Vec::<String>::new(),
+            "{:?}",
+            inst.diagnostics
         );
     }
 }

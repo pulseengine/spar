@@ -83,6 +83,13 @@ pub struct ItemTree {
     pub subprogram_calls: Arena<SubprogramCallItem>,
     pub renames: Arena<RenamesItem>,
     pub emv2_subclauses: Arena<Emv2Subclause>,
+    /// Names of the `internal features` (event / event data sources) and
+    /// `processor features` (port and subprogram proxies) an implementation
+    /// declares. They are legal connection ends (`self.ie`, or a bare `ie`)
+    /// that are not features of the component type, so the dangling-end check
+    /// (#555, REQ-INSTANCE-CONNECTION-END-RESOLVES-001) must know them. Only
+    /// the names are lowered.
+    pub impl_local_features: Vec<(ComponentImplIdx, Name)>,
     /// Diagnostics produced during lowering (STPA-REQ-002, STPA-REQ-004).
     pub diagnostics: Vec<LoweringDiagnostic>,
 }
