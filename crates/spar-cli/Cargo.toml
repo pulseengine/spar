@@ -23,6 +23,7 @@ spar-hir-def.workspace = true
 spar-hir.workspace = true
 spar-annex.workspace = true
 spar-analysis.workspace = true
+spar-network = { path = "../spar-network", default-features = false }
 spar-sysml2.workspace = true
 spar-dbc.workspace = true
 spar-solver.workspace = true
