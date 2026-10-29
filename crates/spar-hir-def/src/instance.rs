@@ -7383,4 +7383,116 @@ end R;
             1
         );
     }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_dangling_end_on_an_array_subcomponent_is_reported() {
+        // `da : device D [2]` is instantiated as `da[1]`, `da[2]`: the end
+        // `da.zzz` names no instance exactly, so it is found by base name, and
+        // the missing feature is reported.
+        let inst = end_instance("c : port da.zzz -> d.inherited;");
+        let found = dangling(&inst);
+        assert!(!found.is_empty(), "{:?}", inst.diagnostics);
+        assert!(
+            found
+                .iter()
+                .all(|m| m.starts_with("connection 'c': source 'da.zzz': ")
+                    && m.ends_with("has no feature 'zzz'")),
+            "{found:?}"
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_sibling_implementations_internal_feature_is_no_own_end() {
+        // Local features are taken from the implementations of the extends
+        // chain only, not from every implementation in the same file.
+        let src = r#"
+package Q
+public
+  device Leaf
+    features
+      i : in event port;
+  end Leaf;
+  system T
+  end T;
+  system implementation T.other
+    internal features
+      stray : event;
+  end T.other;
+  system implementation T.impl
+    subcomponents
+      l : device Leaf;
+    internal features
+      ie : event;
+    connections
+      c1 : port ie -> l.i;
+      c2 : port stray -> l.i;
+  end T.impl;
+end Q;
+"#;
+        let inst = instantiate_aadl(src, "Q", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            vec![
+                "connection 'c2': source 'stray': component 'T.impl' (classifier 'Q::T') \
+                 has no feature 'stray'"
+                    .to_string()
+            ],
+            "{:?}",
+            inst.diagnostics
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-CONNECTION-END-RESOLVES-001
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_call_end_on_an_unprovable_subprogram_type_is_not_reported() {
+        // Each skip condition alone silences the end: a broken `extends`
+        // chain (partial feature list), and a feature group (members unknown).
+        let src = r#"
+package R
+public
+  feature group FG
+    features
+      m : in parameter;
+  end FG;
+  subprogram SpBroken extends NoSuchBase
+    features
+      a : in parameter;
+  end SpBroken;
+  subprogram SpFg
+    features
+      a : in parameter;
+      g : feature group FG;
+  end SpFg;
+  subprogram Outer
+    features
+      arg : in parameter;
+  end Outer;
+  subprogram implementation Outer.impl
+    calls
+      seq : { call1 : subprogram SpBroken; call2 : subprogram SpFg; };
+    connections
+      p1 : parameter arg -> call1.zz;
+      p2 : parameter arg -> call2.zz;
+  end Outer.impl;
+  system T
+  end T;
+  system implementation T.impl
+    subcomponents
+      sp : subprogram Outer.impl;
+  end T.impl;
+end R;
+"#;
+        let inst = instantiate_aadl(src, "R", "T", "impl");
+        assert_eq!(
+            dangling(&inst),
+            Vec::<String>::new(),
+            "{:?}",
+            inst.diagnostics
+        );
+    }
 }
