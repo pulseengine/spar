@@ -1654,6 +1654,7 @@ fn extract_modal_values(node: &SyntaxNode) -> Vec<ModalPropertyValueItem> {
                 | SyntaxKind::CLASSIFIER_VALUE
                 | SyntaxKind::REFERENCE_VALUE
                 | SyntaxKind::COMPUTED_VALUE
+                | SyntaxKind::BINARY_EXPR
                 | SyntaxKind::PROPERTY_EXPRESSION => {
                     if current.value_node.is_none() {
                         current.value_node = Some(n.clone());
