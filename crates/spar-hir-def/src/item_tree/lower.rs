@@ -391,6 +391,19 @@ fn lower_component_impl_with_visibility(
         requires_modes,
         emv2,
     });
+    // `internal features` / `processor features`: names only (#555).
+    for section in node.children().filter(|c| {
+        matches!(
+            c.kind(),
+            SyntaxKind::INTERNAL_FEATURES_SECTION | SyntaxKind::PROCESSOR_FEATURES_SECTION
+        )
+    }) {
+        for feat in section.children() {
+            if let Some(tok) = first_ident_token(&feat) {
+                tree.impl_local_features.push((idx, Name::new(tok.text())));
+            }
+        }
+    }
     Some(ItemRef::ComponentImpl(idx))
 }
 
