@@ -14,17 +14,21 @@ if [[ "${1:-}" == "--all" ]]; then
   TARGETS=("darwin-arm64" "darwin-x64" "linux-x64" "linux-arm64" "win32-x64")
 fi
 
-# Map VS Code target to Rust target
-declare -A RUST_TARGETS=(
-  ["darwin-arm64"]="aarch64-apple-darwin"
-  ["darwin-x64"]="x86_64-apple-darwin"
-  ["linux-x64"]="x86_64-unknown-linux-gnu"
-  ["linux-arm64"]="aarch64-unknown-linux-gnu"
-  ["win32-x64"]="x86_64-pc-windows-msvc"
-)
+# Map VS Code target to Rust target. A `case`, not `declare -A`: the default
+# run is local dev on a Mac, whose /bin/bash is 3.2 (no associative arrays).
+rust_target_for() {
+  case "$1" in
+    darwin-arm64) echo "aarch64-apple-darwin" ;;
+    darwin-x64)   echo "x86_64-apple-darwin" ;;
+    linux-x64)    echo "x86_64-unknown-linux-gnu" ;;
+    linux-arm64)  echo "aarch64-unknown-linux-gnu" ;;
+    win32-x64)    echo "x86_64-pc-windows-msvc" ;;
+    *) echo "unknown VS Code target: $1" >&2; return 1 ;;
+  esac
+}
 
 for target in "${TARGETS[@]}"; do
-  rust_target="${RUST_TARGETS[$target]}"
+  rust_target="$(rust_target_for "$target")"
   echo "==> Building spar for $target ($rust_target)..."
 
   binary_name="spar"

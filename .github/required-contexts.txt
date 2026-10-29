@@ -38,6 +38,7 @@ Miri
 Mutation Testing
 Proptest (extended)
 Rivet validate (artifacts)
+Script portability (shellcheck + Python 3.9 floor)
 Security Audit (RustSec)
 Supply Chain (cargo-vet)
 Test

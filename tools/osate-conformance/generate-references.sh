@@ -10,7 +10,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OSATE_DIR="${OSATE_DIR:-$HOME/osate2}"
 WORKSPACE="/tmp/osate-conformance-workspace"
 EASE_SCRIPT="$SCRIPT_DIR/ease-scripts/generate_references.py"
