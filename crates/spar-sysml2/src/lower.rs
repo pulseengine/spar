@@ -72,8 +72,42 @@ pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<Lo
     lower_node(&root, &mut ctx);
     resolve_subcomponent_categories(&mut ctx.tree);
     lower_pending_allocations(&mut ctx);
+    report_unlowered(&root, &mut ctx.diagnostics);
     let diagnostics = std::mem::take(&mut ctx.diagnostics);
     (ctx.tree, diagnostics)
+}
+
+/// Constructs the parser accepts but lowering has no AADL mapping for.
+const UNLOWERED_KINDS: &[SyntaxKind] = &[
+    SyntaxKind::KERML_CLASSIFIER,
+    SyntaxKind::PERFORM_ACTION_USAGE,
+];
+
+/// Report every [`UNLOWERED_KINDS`] node, wherever it sits.
+///
+/// The per-body walks only diagnose what they visit: a `perform` inside a
+/// part *usage* body, or a classifier nested in another classifier, is never
+/// visited, and would vanish from the AADL output with no trace. A node a walk
+/// already reported is not reported twice.
+fn report_unlowered(root: &SyntaxNode, diagnostics: &mut Vec<LowerDiagnostic>) {
+    for node in root.descendants() {
+        let kind = node.kind();
+        if !UNLOWERED_KINDS.contains(&kind) {
+            continue;
+        }
+        let offset: usize = node.text_range().start().into();
+        let name = format!("{kind:?}");
+        if diagnostics
+            .iter()
+            .any(|d| d.offset == offset && d.msg.contains(&name))
+        {
+            continue;
+        }
+        diagnostics.push(LowerDiagnostic {
+            offset,
+            msg: format!("unsupported SysML v2 construct: {name}"),
+        });
+    }
 }
 
 /// Internal lowering context accumulating the AADL item tree.

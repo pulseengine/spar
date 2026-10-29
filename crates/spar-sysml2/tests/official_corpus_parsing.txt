@@ -1,0 +1,24 @@
+kerml/examples/Address Book Example/AddressBookModel.kerml
+kerml/examples/Packet Example/PacketUsage.kerml
+kerml/examples/Simple Tests/Circular.kerml
+kerml/examples/Simple Tests/FeatureInheritance.kerml
+kerml/examples/Simple Tests/Imports.kerml
+kerml/examples/Simple Tests/Inheritance.kerml
+sysml/examples/Camera Example/Camera.sysml
+sysml/examples/Import Tests/AliasImport.sysml
+sysml/examples/Import Tests/CircularImport.sysml
+sysml/examples/Import Tests/QualifiedNameImportTest.sysml
+sysml/examples/Simple Tests/AliasTest.sysml
+sysml/examples/Simple Tests/ImportTest.sysml
+sysml/examples/Simple Tests/RootPackageTest.sysml
+sysml/training/01. Packages/Package Example.sysml
+sysml/training/02. Part Definitions/Part Definition Example.sysml
+sysml/training/04. Subsetting/Subsetting Example.sysml
+sysml/training/10. Ports/Port Example.sysml
+sysml/training/11. Interfaces/Interface Decomposition Example.sysml
+sysml/training/32. Requirements/Requirement Satisfaction.sysml
+sysml/validation/13-Model Containment/13b-Safety and Security Features Element Group.sysml
+sysml/validation/15-Properties-Values-Expressions/15_02-Basic Value Properties.sysml
+sysml/validation/15-Properties-Values-Expressions/15_06-System of Quantities.sysml
+sysml/validation/15-Properties-Values-Expressions/15_07-System of Units and Scales.sysml
+sysml/validation/15-Properties-Values-Expressions/15_11-Variable Length Collection Types.sysml

@@ -329,6 +329,10 @@ pub enum SyntaxKind {
     // Feature declarations
     /// Generic feature declaration: `name : Type;`
     FEATURE_DECL,
+    /// KerML classifier declaration: `class A;`, `classifier B :> A { }`
+    KERML_CLASSIFIER,
+    /// `perform action a;` / `perform a.b;`
+    PERFORM_ACTION_USAGE,
 
     // Specialization / typing
     /// `:>` specialization: `part v :> Vehicle;`

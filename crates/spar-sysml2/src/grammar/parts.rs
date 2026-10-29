@@ -192,6 +192,9 @@ pub(crate) fn member(p: &mut Parser) {
         SyntaxKind::REF_KW => {
             ref_usage(p);
         }
+        SyntaxKind::PERFORM_KW => {
+            perform_action_usage(p);
+        }
         SyntaxKind::ABSTRACT_KW => {
             // `abstract part def ...` or `abstract def ...`
             let m = p.start();
@@ -236,6 +239,9 @@ pub(crate) fn member(p: &mut Parser) {
             // `subject name : Type;` in requirement def bodies
             subject_member(p);
         }
+        SyntaxKind::IDENT if at_kerml_classifier(p) => {
+            kerml_classifier(p);
+        }
         SyntaxKind::IDENT => {
             // Named feature or usage: `name : Type;`
             feature_decl(p);
@@ -277,6 +283,63 @@ fn definition(p: &mut Parser, node_kind: SyntaxKind) {
     }
 
     m.complete(p, node_kind);
+}
+
+/// KerML classifier keywords. None is reserved in SysML v2, so the lexer
+/// yields them as `IDENT` and they are recognised here contextually.
+const KERML_CLASSIFIER_KWS: &[&str] = &["class", "classifier", "datatype", "behavior"];
+
+/// A classifier keyword followed by a name. The name is required here,
+/// although `Identification` may be empty in KerML: without it, `class : T;`
+/// (a feature that happens to be called `class`) would be taken for a
+/// classifier.
+fn at_kerml_classifier(p: &Parser) -> bool {
+    KERML_CLASSIFIER_KWS.iter().any(|kw| p.at_contextual_kw(kw)) && p.nth(1) == SyntaxKind::IDENT
+}
+
+/// Parse a KerML classifier declaration.
+///
+/// KerML textual BNF (`bnf/KerML-textual-bnf.kebnf` at the corpus pin
+/// `29a3d2ac`, clauses 8.2.4.2.1, 8.2.5.1, 8.2.5.2, 8.2.5.6.1):
+///
+/// ```text
+/// Classifier = TypePrefix 'classifier' ClassifierDeclaration TypeBody
+/// DataType   = TypePrefix 'datatype'   ClassifierDeclaration TypeBody
+/// Class      = TypePrefix 'class'      ClassifierDeclaration TypeBody
+/// Behavior   = TypePrefix 'behavior'   ClassifierDeclaration TypeBody
+/// ClassifierDeclaration =
+///     ( 'all' )? Identification OwnedMultiplicity?
+///     ( SuperclassingPart | ConjugationPart )? TypeRelationshipPart*
+/// SuperclassingPart =
+///     SPECIALIZES OwnedSubclassification ( ',' OwnedSubclassification )*
+/// SPECIALIZES = ':>' | 'specializes'
+/// ```
+///
+/// Supported: Identification, OwnedMultiplicity, SuperclassingPart, TypeBody.
+/// Not supported (they stay parse errors): `abstract` / metadata prefixes,
+/// `all`, ConjugationPart, TypeRelationshipPart (`disjoint from`, `unions`,
+/// ...). Lowering has no AADL mapping for a classifier and reports the node as
+/// an unsupported construct.
+fn kerml_classifier(p: &mut Parser) {
+    let m = p.start();
+    p.bump_any(); // classifier keyword
+    super::name(p);
+    opt_multiplicity(p);
+    if p.at(SyntaxKind::COLON_GT) || p.at(SyntaxKind::SPECIALIZES_KW) {
+        let s = p.start();
+        p.bump_any();
+        super::qualified_name(p);
+        while p.eat(SyntaxKind::COMMA) {
+            super::qualified_name(p);
+        }
+        s.complete(p, SyntaxKind::SPECIALIZATION);
+    }
+    if p.at(SyntaxKind::L_CURLY) {
+        super::packages::namespace_body(p);
+    } else {
+        p.expect(SyntaxKind::SEMICOLON);
+    }
+    m.complete(p, SyntaxKind::KERML_CLASSIFIER);
 }
 
 /// Parse a part usage.
@@ -531,6 +594,59 @@ fn ref_usage(p: &mut Parser) {
     m.complete(p, node_kind);
 }
 
+/// Parse a perform action usage.
+///
+/// SysML v2 textual BNF (`bnf/SysML-textual-bnf.kebnf` at the corpus pin
+/// `29a3d2ac`, clause 8.2.2.17.2):
+///
+/// ```text
+/// PerformActionUsage =
+///     OccurrenceUsagePrefix 'perform' PerformActionUsageDeclaration ActionBody
+/// PerformActionUsageDeclaration =
+///     ( OwnedReferenceSubsetting FeatureSpecializationPart?
+///     | 'action' UsageDeclaration )
+///     ValuePart?
+/// OwnedReferenceSubsetting = [QualifiedName] | OwnedFeatureChain
+/// UsageDeclaration = Identification FeatureSpecializationPart?
+/// ```
+///
+/// ```text
+/// perform action providePower;
+/// perform action 'provide power' : 'Provide Power';
+/// perform providePower.generateTorque;
+/// perform 'provide power' :>> VehicleA::'provide power';
+/// ```
+///
+/// Supported: both declaration forms and the body. Not supported: the
+/// OccurrenceUsagePrefix and ValuePart, and a `::`-qualified reference (the
+/// reference is parsed as a dotted feature chain). Lowering has no AADL mapping
+/// for a performed action and reports the node as an unsupported construct.
+fn perform_action_usage(p: &mut Parser) {
+    let m = p.start();
+    p.bump(SyntaxKind::PERFORM_KW);
+    if p.eat(SyntaxKind::ACTION_KW) {
+        // `redefines` / `subsets` open the FeatureSpecializationPart of an
+        // unnamed usage and are not its name.
+        if super::at_ident_or_kw(p)
+            && !p.at(SyntaxKind::REDEFINES_KW)
+            && !p.at(SyntaxKind::SUBSETS_KW)
+        {
+            super::name(p);
+        }
+    } else {
+        let r = p.start();
+        super::feature_chain(p);
+        r.complete(p, SyntaxKind::NAME_REF);
+    }
+    opt_typing_or_specialization(p);
+    if p.at(SyntaxKind::L_CURLY) {
+        super::packages::namespace_body(p);
+    } else {
+        p.expect(SyntaxKind::SEMICOLON);
+    }
+    m.complete(p, SyntaxKind::PERFORM_ACTION_USAGE);
+}
+
 /// Parse a generic usage for keywords we handle uniformly.
 fn generic_usage(p: &mut Parser, node_kind: SyntaxKind) {
     let m = p.start();
@@ -745,7 +861,39 @@ fn opt_direction(p: &mut Parser) {
 /// :>> RedefType
 /// specializes Type
 /// ```
+///
+/// This is the SysML v2 `FeatureSpecializationPart`
+/// (`bnf/SysML-textual-bnf.kebnf` at the corpus pin `29a3d2ac`, clause
+/// 8.2.2.6.5):
+///
+/// ```text
+/// FeatureSpecializationPart =
+///       FeatureSpecialization+ MultiplicityPart? FeatureSpecialization*
+///     | MultiplicityPart FeatureSpecialization*
+/// FeatureSpecialization = Typings | Subsettings | References | Crosses | Redefinitions
+/// ```
+///
+/// so a multiplicity may follow the typing (`part cylinders : Cylinder[4];`)
+/// and several specializations may follow one another
+/// (`part p : P :> parts;`). At most one multiplicity is taken here. A
+/// multiplicity the caller already parsed before the specialization is not
+/// known to this function, so `part x [1] : T [2];` is accepted although the
+/// production allows only one `MultiplicityPart`.
 fn opt_typing_or_specialization(p: &mut Parser) {
+    let mut multiplicity_seen = false;
+    loop {
+        if feature_specialization(p) {
+            continue;
+        }
+        if multiplicity_seen || !opt_multiplicity(p) {
+            break;
+        }
+        multiplicity_seen = true;
+    }
+}
+
+/// One `FeatureSpecialization`; returns whether one was consumed.
+fn feature_specialization(p: &mut Parser) -> bool {
     match p.current() {
         SyntaxKind::COLON if p.nth(1) != SyntaxKind::COLON => {
             let m = p.start();
@@ -783,8 +931,9 @@ fn opt_typing_or_specialization(p: &mut Parser) {
             super::qualified_name(p);
             m.complete(p, SyntaxKind::SPECIALIZATION);
         }
-        _ => {}
+        _ => return false,
     }
+    true
 }
 
 /// Parse optional specialization for definitions.
@@ -811,8 +960,9 @@ fn opt_specialization(p: &mut Parser) {
     }
 }
 
-/// Parse optional multiplicity: `[n]`, `[0..*]`, `[1..5]`.
-fn opt_multiplicity(p: &mut Parser) {
+/// Parse optional multiplicity: `[n]`, `[0..*]`, `[1..5]`. Returns whether
+/// one was present.
+fn opt_multiplicity(p: &mut Parser) -> bool {
     if p.at(SyntaxKind::L_BRACKET) {
         let m = p.start();
         p.bump(SyntaxKind::L_BRACKET);
@@ -833,5 +983,7 @@ fn opt_multiplicity(p: &mut Parser) {
 
         p.expect(SyntaxKind::R_BRACKET);
         m.complete(p, SyntaxKind::MULTIPLICITY);
+        return true;
     }
+    false
 }
