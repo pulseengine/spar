@@ -1166,6 +1166,28 @@ end OneCpu;
     }
 
     #[test]
+    fn zero_period_task_gets_no_theorem() {
+        // Period exactly 0: `period_pos := by decide` would be false, so no
+        // theorem — not a `_meets_deadline` over a task Lean cannot build.
+        let mut lean = String::new();
+        emit_rta_theorem(&mut lean, "x", &t(1, 0, 10), &[]);
+        assert!(lean.starts_with("-- No theorem"), "{lean}");
+        assert!(!lean.contains("theorem x_"), "{lean}");
+        assert!(!lean.contains("period := 0"), "{lean}");
+    }
+
+    #[test]
+    fn zero_deadline_task_gets_no_theorem() {
+        // Deadline exactly 0: `deadline_pos := by decide` would be false, so
+        // no theorem — not a `_misses_deadline` over a task Lean cannot build.
+        let mut lean = String::new();
+        emit_rta_theorem(&mut lean, "x", &t(1, 10, 0), &[]);
+        assert!(lean.starts_with("-- No theorem"), "{lean}");
+        assert!(!lean.contains("theorem x_"), "{lean}");
+        assert!(!lean.contains("deadline := 0"), "{lean}");
+    }
+
+    #[test]
     fn missed_deadline_emits_a_misses_theorem_not_a_false_one() {
         let mut lean = String::new();
         emit_rta_theorem(&mut lean, "late", &t(5, 20, 8), &[t(1, 5, 5), t(2, 10, 10)]);
