@@ -329,11 +329,9 @@ pub fn generate_rust_component(
     }
     code.push_str("}\n");
 
-    // Determine process parent name; the thread module lives under that crate.
-    let parent_name = comp
-        .parent
-        .map(|p| sanitize_ident(inst.component(p).name.as_str()))
-        .unwrap_or_else(|| "unknown".to_string());
+    // The thread module lives under its process's crate (named by instance
+    // path when another process shares the name, #543).
+    let parent_name = crate::naming::parent_crate_dir(inst, thread_idx, "unknown");
 
     GeneratedFile {
         path: format!("crates/{parent_name}/src/{name}.rs"),
@@ -380,12 +378,13 @@ pub fn generate_process_bindings(
     proc_idx: ComponentInstanceIdx,
 ) -> GeneratedFile {
     let comp = inst.component(proc_idx);
-    // Crate directory matches workspace_gen's `crates/{sanitize_ident(name)}`.
-    let crate_dir = sanitize_ident(comp.name.as_str());
-    // World name + wit file name match wit_gen exactly (kebab-case).
-    let world_name = crate::wit_gen::wit_ident(comp.name.as_str());
+    // Crate directory, world name and wit file name all come from the one
+    // naming table workspace_gen and wit_gen use, so they match (#543).
+    let names = crate::naming::process_names(inst, proc_idx);
+    let crate_dir = names.crate_name;
+    let world_name = names.wit_name;
     // Rust module path at which wit-bindgen exposes the imported ports interface.
-    let boundary_path = boundary_module_path(comp);
+    let boundary_path = boundary_module_path(comp, &world_name);
 
     let child_threads: Vec<_> = comp
         .children
@@ -588,9 +587,12 @@ pub fn generate_process_bindings(
 /// `crate::{ns}::{pkg}::{pkg}_ports`. Derived from the SAME `wit_ident` wit_gen uses
 /// so the path stays in lock-step with the emitted WIT (empirically confirmed
 /// against `wit-bindgen rust`, 2026-07-10).
-fn boundary_module_path(proc_comp: &spar_hir_def::instance::ComponentInstance) -> String {
+fn boundary_module_path(
+    proc_comp: &spar_hir_def::instance::ComponentInstance,
+    wit_name: &str,
+) -> String {
     let pkg_mod = crate::wit_gen::wit_ident(proc_comp.package.as_str()).replace('-', "_");
-    let name_mod = crate::wit_gen::wit_ident(proc_comp.name.as_str()).replace('-', "_");
+    let name_mod = wit_name.replace('-', "_");
     format!("crate::{pkg_mod}::{name_mod}::{name_mod}_ports")
 }
 
@@ -783,7 +785,7 @@ pub fn generate_types_module(
     proc_idx: ComponentInstanceIdx,
 ) -> GeneratedFile {
     let comp = inst.component(proc_idx);
-    let crate_dir = sanitize_ident(comp.name.as_str());
+    let crate_dir = crate::naming::process_names(inst, proc_idx).crate_name;
 
     // Collect record shapes from every child thread's classifier-typed ports.
     let mut structs: Vec<(String, Vec<(String, String)>)> = Vec::new();

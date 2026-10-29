@@ -24,7 +24,7 @@ fn toml_escape(s: &str) -> String {
 /// Generate a TOML configuration file for a process instance.
 pub fn generate_config(inst: &SystemInstance, proc_idx: ComponentInstanceIdx) -> GeneratedFile {
     let comp = inst.component(proc_idx);
-    let name = sanitize_ident(comp.name.as_str());
+    let name = crate::naming::process_names(inst, proc_idx).crate_name;
 
     let mut toml = String::new();
     toml.push_str(&format!(

@@ -11,7 +11,7 @@
 use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::ComponentCategory;
 
-use crate::{GeneratedFile, extract_timing, format_time_ps, sanitize_ident};
+use crate::{GeneratedFile, extract_timing, format_time_ps};
 
 /// Escape a string for safe interpolation into a YAML double-quoted string value.
 ///
@@ -32,8 +32,7 @@ pub fn generate_design_doc(
     inst: &SystemInstance,
     proc_idx: ComponentInstanceIdx,
 ) -> (GeneratedFile, GeneratedFile) {
-    let comp = inst.component(proc_idx);
-    let name = sanitize_ident(comp.name.as_str());
+    let name = crate::naming::process_names(inst, proc_idx).crate_name;
     let upper_name = name.to_uppercase();
 
     // ── Design document ─────────────────────────────────────────────

@@ -2569,14 +2569,19 @@ fn cmd_codegen(args: &[String]) {
 ///
 /// `(extension_tag, count_label)` — the tag is used for the empty-WIT
 /// hint, the label is what shows up in the summary line.
+///
+/// Counts each output PATH once (#543): two entries for one path are one file
+/// on disk, the second having overwritten the first, so they must not count
+/// twice. (`spar_codegen::generate` already refuses a duplicate path; this
+/// keeps the summary honest for any caller that does not.)
 fn codegen_file_categories(files: &[spar_codegen::GeneratedFile]) -> [(u32, &'static str); 5] {
     let mut wit = 0u32;
     let mut rust = 0u32;
     let mut workspace = 0u32;
     let mut config = 0u32;
     let mut other = 0u32;
-    for file in files {
-        let path = std::path::Path::new(&file.path);
+    for file in unique_paths(files) {
+        let path = std::path::Path::new(file);
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
         match (ext, name) {
@@ -2594,6 +2599,11 @@ fn codegen_file_categories(files: &[spar_codegen::GeneratedFile]) -> [(u32, &'st
         (config, "config"),
         (other, "other"),
     ]
+}
+
+/// The distinct output paths of `files`: what actually lands on disk.
+fn unique_paths(files: &[spar_codegen::GeneratedFile]) -> std::collections::BTreeSet<&str> {
+    files.iter().map(|f| f.path.as_str()).collect()
 }
 
 /// One-line summary like
@@ -2625,7 +2635,7 @@ fn summarise_codegen_output(
     } else {
         parts.join(", ")
     };
-    let total = files.len();
+    let total = unique_paths(files).len();
     let noun = if total == 1 { "file" } else { "files" };
     format!("wrote {total} {noun} ({body}) (format: {format_label})")
 }
@@ -3081,5 +3091,33 @@ fn cmd_sysml2(args: &[String]) {
             print_sysml2_usage();
             process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod codegen_summary_tests {
+    use super::*;
+
+    fn file(path: &str) -> spar_codegen::GeneratedFile {
+        spar_codegen::GeneratedFile {
+            path: path.to_string(),
+            content: String::new(),
+        }
+    }
+
+    // rivet: verifies REQ-CODEGEN-OUTPUT-PATHS-UNIQUE-001
+    #[test]
+    fn summary_counts_each_output_path_once() {
+        // #543: two entries for one path are ONE file on disk (the second
+        // overwrote the first), so the summary must say 2 files, not 3.
+        let files = [
+            file("wit/app.wit"),
+            file("config/app.toml"),
+            file("wit/app.wit"),
+        ];
+        assert_eq!(
+            summarise_codegen_output(&files, spar_codegen::OutputFormat::Both),
+            "wrote 2 files (1 .wit, 1 config) (format: both)"
+        );
     }
 }

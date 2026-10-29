@@ -156,7 +156,8 @@ pub fn generate_wit(
     proc_idx: ComponentInstanceIdx,
 ) -> Result<GeneratedFile, crate::CodegenError> {
     let comp = inst.component(proc_idx);
-    let name = wit_ident(comp.name.as_str());
+    // By instance path when another process shares this name (#543).
+    let name = crate::naming::process_names(inst, proc_idx).wit_name;
     let pkg_name = wit_ident(comp.package.as_str());
 
     let mut wit = String::new();
@@ -422,10 +423,15 @@ pub(crate) fn wit_ident(name: &str) -> String {
     let joined = words.join("-");
 
     // `%`-escape WIT keywords (only meaningful for single-word identifiers).
-    if WIT_KEYWORDS.contains(&joined.as_str()) {
+    if is_wit_keyword(&joined) {
         return format!("%{joined}");
     }
     joined
+}
+
+/// True when `id` is a WIT keyword and must be `%`-escaped as an identifier.
+pub(crate) fn is_wit_keyword(id: &str) -> bool {
+    WIT_KEYWORDS.contains(&id)
 }
 
 #[cfg(test)]
