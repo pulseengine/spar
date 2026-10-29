@@ -1663,18 +1663,46 @@ fn cmd_moves_enumerate(args: &[String]) -> i32 {
 /// error that is not a rendered report (its text does not end in a newline,
 /// e.g. the `(no files)` guard) keeps the generic form.
 fn eprint_moves_error(verb: &str, e: &MovesError) {
+    eprint!("{}", render_moves_error(verb, e));
+}
+
+/// The exact stderr bytes [`eprint_moves_error`] writes.
+fn render_moves_error(verb: &str, e: &MovesError) -> String {
     match e {
         MovesError::Parse(path, report) if report.ends_with('\n') => {
-            eprint!("{report}");
-            eprintln!("Cannot {verb}: parse errors in {path}");
+            format!("{report}Cannot {verb}: parse errors in {path}\n")
         }
-        _ => eprintln!("error: {e}"),
+        _ => format!("error: {e}\n"),
     }
 }
 
 #[cfg(test)]
 mod enumerate_tests {
     use super::*;
+
+    // rivet: verifies REQ-CLI-LOAD-REFUSES-PARSE-ERRORS-001
+    #[test]
+    fn render_moves_error_keeps_generic_form_for_unrendered_parse_text() {
+        // The `(no files)` guard's text does not end in a newline: it is not a
+        // `spar parse` report, so it keeps the generic `error:` line rather
+        // than being glued to a `Cannot …` footer.
+        let guard = MovesError::Parse(
+            "(no files)".to_string(),
+            "spar moves verify requires at least one .aadl file".to_string(),
+        );
+        assert_eq!(
+            render_moves_error("moves verify", &guard),
+            "error: Parse error in (no files): spar moves verify requires at least one .aadl file\n"
+        );
+
+        // A rendered report (newline-terminated) is printed verbatim, then the
+        // footer, with no doubled or missing newline between them.
+        let rendered = MovesError::Parse("r.aadl".to_string(), "r.aadl:8:5: boom\n".to_string());
+        assert_eq!(
+            render_moves_error("moves verify", &rendered),
+            "r.aadl:8:5: boom\nCannot moves verify: parse errors in r.aadl\n"
+        );
+    }
 
     #[test]
     fn summarise_violations_groups_by_kind() {
