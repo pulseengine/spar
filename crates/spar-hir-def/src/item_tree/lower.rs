@@ -1820,7 +1820,10 @@ fn lower_binary_expr(node: &SyntaxNode) -> PropertyExpr {
             None => opaque(String::new()),
         }
     };
-    let mut operands = node.children().filter(|c| is_value_node(c.kind()));
+    // Every child node is an operand: a parse error's ERROR node is kept
+    // as `Opaque` rather than skipped, so a bad left operand never lets the
+    // right one take its place.
+    let mut operands = node.children();
     let lhs = operand(operands.next());
     let rhs = operand(operands.next());
     PropertyExpr::BinaryOp {
@@ -2013,14 +2016,11 @@ fn lower_boolean_value(node: &SyntaxNode) -> Option<PropertyExpr> {
 fn lower_list_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     let mut items = Vec::new();
     for child in node.children() {
-        if let Some(expr) = lower_property_expr(&child) {
-            items.push(expr);
-        } else if is_value_node(child.kind()) {
-            // Fallback: store as opaque
-            items.push(PropertyExpr::Opaque(
-                child.text().to_string().trim().to_string(),
-            ));
-        }
+        // An element that does not lower (a parse error's ERROR node among
+        // them) is kept as `Opaque`, never dropped: the list keeps its length.
+        let expr = lower_property_expr(&child)
+            .unwrap_or_else(|| PropertyExpr::Opaque(child.text().to_string().trim().to_string()));
+        items.push(expr);
     }
     Some(PropertyExpr::List(items))
 }
@@ -2081,7 +2081,10 @@ fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     for child in node.children() {
         if child.kind() == SyntaxKind::DELTA_VALUE {
             delta_node = Some(child);
-        } else if is_value_node(child.kind()) {
+        } else {
+            // Every other child is a bound, a parse error's ERROR node
+            // included, so it becomes an `Opaque` bound rather than
+            // shifting the next bound into its place.
             value_nodes.push(child);
         }
     }
@@ -2332,25 +2335,6 @@ fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
         }
         other => other,
     }
-}
-
-/// Check whether a SyntaxKind represents a property value node.
-fn is_value_node(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::INTEGER_VALUE
-            | SyntaxKind::REAL_VALUE
-            | SyntaxKind::STRING_VALUE
-            | SyntaxKind::BOOLEAN_VALUE
-            | SyntaxKind::LIST_VALUE
-            | SyntaxKind::RECORD_VALUE
-            | SyntaxKind::RANGE_VALUE
-            | SyntaxKind::CLASSIFIER_VALUE
-            | SyntaxKind::REFERENCE_VALUE
-            | SyntaxKind::COMPUTED_VALUE
-            | SyntaxKind::BINARY_EXPR
-            | SyntaxKind::PROPERTY_EXPRESSION
-    )
 }
 
 /// Parse a PROPERTY_REF node into a PropertyRef.

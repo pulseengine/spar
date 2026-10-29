@@ -3691,6 +3691,36 @@ end MyProps;
 
     // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
     #[test]
+    fn a_parse_error_operand_is_kept_in_place_not_dropped() {
+        use item_tree::PropertyExpr as E;
+        let opaque = |s: &str| Box::new(E::Opaque(s.to_string()));
+        // The unlowerable left operand stays on the left: `2` never takes
+        // its place.
+        match lower_value("0x40 * 2") {
+            Some(E::BinaryOp { op, lhs, rhs }) => {
+                assert_eq!(op, item_tree::BinaryOpKind::Mul);
+                assert_eq!(lhs, opaque("0x40"));
+                assert!(!matches!(*rhs, E::Opaque(_)), "{rhs:?}");
+            }
+            other => panic!("expected a BinaryOp, got {other:?}"),
+        }
+        // A list keeps every element.
+        match lower_value("(0x40, 2)") {
+            Some(E::List(items)) => {
+                assert_eq!(items.len(), 2, "{items:?}");
+                assert_eq!(items[0], *opaque("0x40"));
+            }
+            other => panic!("expected a 2-element list, got {other:?}"),
+        }
+        // A range's bad bound is an opaque bound, not a name.
+        match lower_value("0x40 .. 2") {
+            Some(E::Range { min, .. }) => assert_eq!(min, opaque("0x40")),
+            other => panic!("expected a Range, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
     fn signed_literals_ranges_and_constants_are_not_arithmetic() {
         use item_tree::PropertyExpr as E;
         let range = |min, max| E::Range {
