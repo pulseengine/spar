@@ -55,6 +55,11 @@ pub fn generate_lean4_proof(
     // REQ-PROOF-GEN-COMPILES-001 (#542).
     lean.push_str("import Proofs.Scheduling.RTA\n\n");
     lean.push_str("open Spar.Scheduling.RTA\n\n");
+    // A theorem name carries its thread's instance path, `__`-separated so
+    // the encoding is injective (#510). Mathlib's `nameCheck` style linter
+    // warns on `__`, and a build with `warningAsError` would reject every
+    // generated proof for it, so the linter is turned off for this file.
+    lean.push_str("set_option linter.style.nameCheck false\n\n");
 
     // Collect thread timing data for higher-priority set
     let mut thread_data: Vec<(String, u64, u64, u64)> = Vec::new();
@@ -1307,6 +1312,11 @@ end OneCpu;
             "Nat.lt_of_lt_of_le",
             "Nat.le_of_eq",
             "_",
+            // The file-level linter switch: `set_option` is Lean syntax and
+            // `linter.style.nameCheck` is mathlib's, which `proofs/` requires.
+            "set_option",
+            "linter.style.nameCheck",
+            "false",
         ];
         let lib = library_names();
         let code: String = content
