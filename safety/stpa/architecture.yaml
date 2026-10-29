@@ -723,3 +723,20 @@ artifacts:
     links:
       - type: satisfies
         target: STPA-REQ-039
+
+  - id: DEC-RELEASE-V048-SCOPE-001
+    type: design-decision
+    title: v0.48.0 ships what was in flight; twelve unstarted or unverifiable items move to v0.49.0
+    status: accepted
+    tags: [release, planning]
+    fields:
+      rationale: "Maintainer decision 2026-10-28: ship what is in flight. v0.48.0 is property semantics (provenance, modal values, inheritance follow-ups), SysML v2 (allocate to binding, bracket units and no silent drops, the corpus ratchet 16 -> 27 of 310), interop (the OSATE instance oracle, ARINC 653 isolation per the annex authors' public papers), binding and codegen correctness (connection-to-memory binding, injective Lean proof names), and the CLI surface (unknown option exits 2 everywhere; moves reports a violation with exit 3 — BREAKING). Ten requirements were never started (claim ledger, findings layer, render metrics/compound/golden, SysML2 flows/modes, TSN YANG deployable, TSN CLI surface, DBC cycle time, rivet.yaml config) and move to v0.49.0. REQ-AADL-BINDING-CONSUMERS-002 is only partly done (item 1, the ARINC partition, shipped in #544) and moves too. REQ-CI-MERGE-QUEUE-001 and TEST-CI-MERGE-QUEUE (#545) were first deferred as unverifiable; the maintainer then enabled the merge-queue ruleset on 2026-10-29, so they stay in v0.48.0 and are verified on an observed merge_group run. A release is cut only when its scope is all verified."
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-10-29T03:47:53Z
+    links:
+      - type: satisfies
+        target: REQ-AADL-PROPERTY-PROVENANCE-001
+      - type: satisfies
+        target: REQ-SYSML2-CORPUS-RATCHET-001
