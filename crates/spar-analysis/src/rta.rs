@@ -48,9 +48,13 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
-use spar_hir_def::item_tree::ComponentCategory;
+use std::borrow::Cow;
 
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
+use spar_hir_def::item_tree::ComponentCategory;
+use spar_hir_def::properties::PropertyMap;
+
+use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
     LockingProtocol, ProcessorGroups, UNBOUND, get_bottom_half_server,
     get_critical_section_blocking, get_dispatch_jitter, get_dispatch_protocol, get_execution_time,
@@ -59,7 +63,7 @@ use crate::property_accessors::{
     get_timing_property,
 };
 use crate::scheduling_verified::{self, RtaResult};
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
 /// Default ISR-utilization threshold above which `IsrOverloadedCpu` fires.
 /// Value is a percentage (30 = 30%).
@@ -73,7 +77,52 @@ impl Analysis for RtaAnalysis {
         "rta"
     }
 
+    fn as_modal(&self) -> Option<&dyn ModalAnalysis> {
+        Some(self)
+    }
+
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
+        self.analyze_with(
+            instance,
+            &|idx| Cow::Borrowed(instance.properties_for(idx)),
+            &|_| true,
+        )
+    }
+}
+
+impl ModalAnalysis for RtaAnalysis {
+    /// RTA in one SOM: the threads active in it, with the values the SOM
+    /// selects (Period, Compute_Execution_Time, Deadline, Priority and every
+    /// other property RTA reads; REQ-AADL-MODAL-PROPERTY-VALUES-001).
+    ///
+    /// Only a modal property value can make a SOM's RTA differ from the
+    /// default pass, so a model without one gets no per-SOM RTA and its
+    /// `--per-som` output stays what it was before modal values were read.
+    fn analyze_in_mode(
+        &self,
+        instance: &SystemInstance,
+        som: &SystemOperationMode,
+    ) -> Vec<AnalysisDiagnostic> {
+        if !instance.has_modal_property_values() {
+            return Vec::new();
+        }
+        self.analyze_with(
+            instance,
+            &|idx| instance.properties_in_som(idx, som),
+            &|idx| is_component_active_in_som(instance, idx, som),
+        )
+    }
+}
+
+impl RtaAnalysis {
+    /// The RTA pass over the components `active` admits, reading each one's
+    /// properties through `props_of`.
+    fn analyze_with<'a>(
+        &self,
+        instance: &'a SystemInstance,
+        props_of: &dyn Fn(ComponentInstanceIdx) -> Cow<'a, PropertyMap>,
+        active: &dyn Fn(ComponentInstanceIdx) -> bool,
+    ) -> Vec<AnalysisDiagnostic> {
         let mut diags = Vec::new();
 
         // Collect thread timing info grouped by processor binding.
@@ -99,7 +148,7 @@ impl Analysis for RtaAnalysis {
         for (idx, comp) in instance.all_components() {
             component_name_index.insert(comp.name.as_str().to_string(), idx);
             if comp.category == ComponentCategory::Processor {
-                let props = instance.properties_for(idx);
+                let props = &*props_of(idx);
                 if let Some(lat) = get_interrupt_latency_bound(props) {
                     processor_latency.insert(comp.name.as_str().to_string(), lat);
                     processor_latency.insert(ProcessorGroups::processor_key(instance, idx), lat);
@@ -118,7 +167,10 @@ impl Analysis for RtaAnalysis {
         // For devices, we don't run Tier 2 RTA on them; their
         // Bottom_Half_Server (if any) points to the handler thread.
         for (idx, comp) in instance.all_components() {
-            let props = instance.properties_for(idx);
+            if !active(idx) {
+                continue;
+            }
+            let props = &*props_of(idx);
 
             // ── ISR detection (Tier 1) ────────────────────────────
             if get_isr_priority(props).is_some() {

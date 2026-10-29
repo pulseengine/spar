@@ -1566,6 +1566,8 @@ fn lower_single_property_association(node: &SyntaxNode) -> Option<PropertyAssoci
             }
         });
 
+    let modal_values = extract_modal_values(node);
+
     Some(PropertyAssociationItem {
         name,
         value,
@@ -1573,7 +1575,89 @@ fn lower_single_property_association(node: &SyntaxNode) -> Option<PropertyAssoci
         is_append,
         applies_to,
         in_modes,
+        modal_values,
     })
+}
+
+/// Every value of a modal property association, each with its `in modes`
+/// list (REQ-AADL-MODAL-PROPERTY-VALUES-001).
+///
+/// The values are the comma-separated segments between `=>` and the first of
+/// `applies to`, `in binding` or `;`. A list value's own commas sit inside a
+/// LIST_VALUE node, so a top-level COMMA token always separates two values.
+/// Returns an empty vector when no segment carries `in modes`: a non-modal
+/// association keeps its single value in `value` / `typed_value` alone.
+fn extract_modal_values(node: &SyntaxNode) -> Vec<ModalPropertyValueItem> {
+    #[derive(Default)]
+    struct Segment {
+        parts: Vec<String>,
+        value_node: Option<SyntaxNode>,
+        in_modes: Vec<Name>,
+    }
+    fn finish(seg: Segment) -> ModalPropertyValueItem {
+        let value = seg.parts.join(" ");
+        let value = value.split_whitespace().collect::<Vec<_>>().join(" ");
+        let typed_value = seg
+            .value_node
+            .as_ref()
+            .and_then(lower_property_expr)
+            .or_else(|| parse_property_value_from_text(&value));
+        ModalPropertyValueItem {
+            value,
+            typed_value,
+            in_modes: seg.in_modes,
+        }
+    }
+
+    let mut segments = Vec::new();
+    let mut current = Segment::default();
+    // Before the arrow there is only the property reference and trivia.
+    let after_arrow = node
+        .children_with_tokens()
+        .skip_while(|e| !matches!(e.kind(), SyntaxKind::FAT_ARROW | SyntaxKind::PLUS_ARROW))
+        .skip(1);
+    for elem in after_arrow {
+        if let Some(tok) = elem.as_token() {
+            match tok.kind() {
+                SyntaxKind::SEMICOLON => break,
+                SyntaxKind::CONSTANT_KW => {}
+                SyntaxKind::COMMA => segments.push(finish(std::mem::take(&mut current))),
+                // Trivia too: `finish` normalises the whitespace away.
+                _ => current.parts.push(tok.text().to_string()),
+            }
+        } else if let Some(n) = elem.as_node() {
+            match n.kind() {
+                SyntaxKind::APPLIES_TO | SyntaxKind::IN_BINDING => break,
+                SyntaxKind::MODAL_PROPERTY_VALUE => {
+                    current.in_modes = extract_mode_names_from_modal(n);
+                }
+                SyntaxKind::INTEGER_VALUE
+                | SyntaxKind::REAL_VALUE
+                | SyntaxKind::STRING_VALUE
+                | SyntaxKind::BOOLEAN_VALUE
+                | SyntaxKind::LIST_VALUE
+                | SyntaxKind::RECORD_VALUE
+                | SyntaxKind::RANGE_VALUE
+                | SyntaxKind::CLASSIFIER_VALUE
+                | SyntaxKind::REFERENCE_VALUE
+                | SyntaxKind::COMPUTED_VALUE
+                | SyntaxKind::PROPERTY_EXPRESSION => {
+                    if current.value_node.is_none() {
+                        current.value_node = Some(n.clone());
+                    }
+                    current.parts.push(n.text().to_string());
+                }
+                _ => current.parts.push(n.text().to_string()),
+            }
+        }
+    }
+    segments.push(finish(current));
+
+    if segments.iter().any(|s| !s.in_modes.is_empty()) {
+        segments
+    } else {
+        Vec::new()
+    }
 }
 
 /// Extract the raw text of the property value from a PROPERTY_ASSOCIATION node.
@@ -3459,5 +3543,124 @@ END up_pkg;
             .expect("T lowered");
         let feat_idx = *t.features.first().expect("feature lowered");
         assert_eq!(tree.features[feat_idx].direction, Some(Direction::In));
+    }
+}
+
+#[cfg(test)]
+mod modal_value_lowering_tests {
+    use super::*;
+    use spar_syntax::{SyntaxKind, parse};
+
+    fn lower_assoc(props: &str) -> PropertyAssociationItem {
+        let src = format!(
+            "package P\npublic\n  thread T\n    properties\n      {props}\n  end T;\nend P;\n"
+        );
+        let parsed = parse(&src);
+        let node = parsed
+            .syntax_node()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::PROPERTY_ASSOCIATION)
+            .expect("property association node");
+        lower_single_property_association(&node).expect("association lowers")
+    }
+
+    fn modes(v: &ModalPropertyValueItem) -> Vec<&str> {
+        v.in_modes.iter().map(Name::as_str).collect()
+    }
+
+    // rivet: verifies REQ-AADL-MODAL-PROPERTY-VALUES-001
+    #[test]
+    fn every_modal_value_keeps_its_modes() {
+        let pa = lower_assoc(
+            "Period => 10 ms in modes (fast, boost), 5 * 8 ms in modes (slow), 25 ms applies to t;",
+        );
+        // The non-modal reading is unchanged: the first value and its modes.
+        assert_eq!(pa.value, "10 ms");
+        assert_eq!(pa.in_modes, vec![Name::new("fast"), Name::new("boost")]);
+        assert_eq!(pa.applies_to.as_deref(), Some("t"));
+
+        let mv = &pa.modal_values;
+        assert_eq!(mv.len(), 3, "{mv:#?}");
+        assert_eq!(mv[0].value, "10 ms");
+        assert_eq!(modes(&mv[0]), ["fast", "boost"]);
+        assert!(matches!(
+            mv[0].typed_value,
+            Some(PropertyExpr::Integer(10, _))
+        ));
+        // A binary expression is one value, not two.
+        assert_eq!(mv[1].value, "5 * 8 ms");
+        assert_eq!(modes(&mv[1]), ["slow"]);
+        assert!(mv[1].typed_value.is_some());
+        // The value with no `in modes`; the `applies to` is not part of it.
+        assert_eq!(mv[2].value, "25 ms");
+        assert!(mv[2].in_modes.is_empty());
+        assert!(matches!(
+            mv[2].typed_value,
+            Some(PropertyExpr::Integer(25, _))
+        ));
+    }
+
+    // rivet: verifies REQ-AADL-MODAL-PROPERTY-VALUES-001
+    #[test]
+    fn a_modal_value_lowers_as_the_same_value_alone() {
+        // Each value, written modally, must get the typed value the same text
+        // gets as a plain association's first value.
+        for value in [
+            "5 * 8 ms",
+            "reference (cpu)",
+            "(reference (cpu))",
+            "classifier (P::T)",
+            "[x => 1; y => 2;]",
+            "0.5 ms .. 2.0 ms",
+            "Periodic",
+            "\"s\"",
+            "true",
+            "-3",
+        ] {
+            let alone = lower_assoc(&format!("X => {value};"));
+            let modal = lower_assoc(&format!("X => {value} in modes (m), {value};"));
+            assert_eq!(modal.modal_values.len(), 2, "{value}");
+            for mv in &modal.modal_values {
+                assert_eq!(mv.value, alone.value, "{value}");
+                assert_eq!(mv.typed_value, alone.typed_value, "{value}");
+            }
+        }
+    }
+
+    // rivet: verifies REQ-AADL-MODAL-PROPERTY-VALUES-001
+    #[test]
+    fn constant_and_append_arrows_are_not_part_of_a_value() {
+        for props in [
+            "X => constant 10 ms in modes (m), 20 ms;",
+            "X +=> 10 ms in modes (m), 20 ms;",
+        ] {
+            let pa = lower_assoc(props);
+            let values: Vec<&str> = pa.modal_values.iter().map(|v| v.value.as_str()).collect();
+            assert_eq!(values, ["10 ms", "20 ms"], "{props}");
+            assert_eq!(pa.value, "10 ms", "{props}");
+        }
+    }
+
+    // rivet: verifies REQ-AADL-MODAL-PROPERTY-VALUES-001
+    #[test]
+    fn a_non_modal_association_records_no_modal_values() {
+        // No value is modal — and a list value's commas are inside the
+        // LIST_VALUE — so nothing beyond `value` / `typed_value`.
+        let pa = lower_assoc("Period => 10 ms;");
+        assert!(pa.modal_values.is_empty());
+        let pa = lower_assoc("Source_Text => (\"a.c\", \"b.c\");");
+        assert!(pa.modal_values.is_empty());
+    }
+
+    // rivet: verifies REQ-AADL-MODAL-PROPERTY-VALUES-001
+    #[test]
+    fn a_list_value_in_a_modal_association_is_one_value() {
+        let pa = lower_assoc("Source_Text => (\"a.c\", \"b.c\") in modes (m), (\"c.c\");");
+        let mv = &pa.modal_values;
+        assert_eq!(mv.len(), 2, "{mv:#?}");
+        assert!(matches!(&mv[0].typed_value, Some(PropertyExpr::List(l)) if l.len() == 2));
+        assert_eq!(modes(&mv[0]), ["m"]);
+        assert!(matches!(&mv[1].typed_value, Some(PropertyExpr::List(l)) if l.len() == 1));
+        assert!(mv[1].in_modes.is_empty());
     }
 }

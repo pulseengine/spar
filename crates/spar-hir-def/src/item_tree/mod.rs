@@ -709,5 +709,27 @@ pub struct PropertyAssociationItem {
     /// Optional `applies to` path (e.g., `sub1.feat1`).
     pub applies_to: Option<String>,
     /// Modes in which this property value applies.
+    ///
+    /// For a modal association these are the FIRST value's modes only, and
+    /// `value` / `typed_value` are that first value; [`Self::modal_values`]
+    /// holds every value with its own modes.
+    pub in_modes: Vec<Name>,
+    /// Every value of a MODAL association (`v1 in modes (m1), v2 in modes
+    /// (m2), v3`), in source order, each with its `in modes` list — empty for
+    /// the value that applies in every other mode. Empty when no value of the
+    /// association has an `in modes` clause
+    /// (REQ-AADL-MODAL-PROPERTY-VALUES-001).
+    pub modal_values: Vec<ModalPropertyValueItem>,
+}
+
+/// One value of a modal property association and the modes it applies in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModalPropertyValueItem {
+    /// Raw text of this value's expression.
+    pub value: String,
+    /// Typed expression of this value (None if it could not be lowered).
+    pub typed_value: Option<PropertyExpr>,
+    /// The modes this value applies in; empty for the non-modal value that
+    /// applies in every mode no other value names.
     pub in_modes: Vec<Name>,
 }

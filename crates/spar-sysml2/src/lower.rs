@@ -716,6 +716,7 @@ fn lower_enum_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
             is_append: false,
             applies_to: None,
             in_modes: Vec::new(),
+            modal_values: Vec::new(),
         };
         let idx = ctx.tree.property_associations.alloc(pa);
         property_associations.push(idx);
@@ -820,6 +821,7 @@ fn lower_requirement_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         is_append: false,
                         applies_to: None,
                         in_modes: Vec::new(),
+                        modal_values: Vec::new(),
                     };
                     let idx = ctx.tree.property_associations.alloc(pa);
                     property_associations.push(idx);
@@ -1064,6 +1066,7 @@ fn lower_attribute_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssoci
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
+        modal_values: Vec::new(),
     })
 }
 
@@ -1109,6 +1112,7 @@ fn lower_constraint_usage_to_property(node: &SyntaxNode) -> Option<PropertyAssoc
         is_append: false,
         applies_to: None,
         in_modes: Vec::new(),
+        modal_values: Vec::new(),
     })
 }
 
@@ -1441,6 +1445,7 @@ fn lower_pending_allocations(ctx: &mut LowerCtx) {
                 is_append: false,
                 applies_to: Some(src),
                 in_modes: Vec::new(),
+                modal_values: Vec::new(),
             });
         ctx.tree.component_impls[owner]
             .property_associations

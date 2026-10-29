@@ -368,6 +368,34 @@ impl SystemInstance {
         self.property_maps.get(&idx).unwrap_or(&EMPTY)
     }
 
+    /// The property map of a component instance as it reads in one system
+    /// operation mode (REQ-AADL-MODAL-PROPERTY-VALUES-001).
+    ///
+    /// A value from a modal association is the one that applies in the mode
+    /// `som` selects for the component that DECLARED the association — never
+    /// a mode merely named alike on another component. A component with no
+    /// modal value gets [`Self::properties_for`] itself, borrowed.
+    pub fn properties_in_som(
+        &self,
+        idx: ComponentInstanceIdx,
+        som: &SystemOperationMode,
+    ) -> std::borrow::Cow<'_, PropertyMap> {
+        self.properties_for(idx).in_mode(|declarer| {
+            som.mode_selections
+                .iter()
+                .map(|&(_, mi)| &self.mode_instances[mi])
+                .find(|m| m.owner == declarer)
+                .map(|m| m.name.as_str())
+        })
+    }
+
+    /// Whether any component's value came from a modal property association.
+    pub fn has_modal_property_values(&self) -> bool {
+        self.property_maps
+            .values()
+            .any(PropertyMap::has_modal_values)
+    }
+
     /// Projected EMV2 models for a component instance (empty slice if none).
     pub fn emv2_for(&self, idx: ComponentInstanceIdx) -> &[spar_annex::emv2::Emv2Model] {
         self.emv2_models.get(&idx).map(Vec::as_slice).unwrap_or(&[])
@@ -1649,11 +1677,7 @@ struct Builder<'a> {
     /// their resolved target components in a post-pass, so that downstream
     /// analyses (and JSON export) see the property on the target instance
     /// rather than on the declaring ancestor (fixes #128, #129).
-    pending_applies_to: Vec<(
-        ComponentInstanceIdx,
-        String,
-        crate::properties::PropertyValue,
-    )>,
+    pending_applies_to: Vec<PendingAppliesTo>,
     /// `(owner, key)` of each value an UNRESOLVABLE `applies to` left on its
     /// declarer (see [`Self::attach_applies_to`]). That is spar's recovery,
     /// not AADL: the association applies to nothing, so the value is not the
@@ -1665,6 +1689,15 @@ struct Builder<'a> {
     depth: u32,
     max_depth: u32,
 }
+
+/// A property association queued for its `applies to` target: the declaring
+/// component, the path, the value, and the association's modal values.
+type PendingAppliesTo = (
+    ComponentInstanceIdx,
+    String,
+    crate::properties::PropertyValue,
+    Option<crate::properties::ModalBinding>,
+);
 
 impl<'a> Builder<'a> {
     #[allow(clippy::too_many_arguments)]
@@ -1996,6 +2029,7 @@ impl<'a> Builder<'a> {
                             Self::push_property_association(
                                 pa,
                                 idx,
+                                None,
                                 &mut map,
                                 &mut self.pending_applies_to,
                                 PropertySource::DeclaredLocal,
@@ -2026,6 +2060,7 @@ impl<'a> Builder<'a> {
                             Self::push_property_association(
                                 pa,
                                 idx,
+                                None,
                                 &mut properties,
                                 &mut ignored_applies_to,
                                 PropertySource::DeclaredLocal,
@@ -2722,6 +2757,7 @@ impl<'a> Builder<'a> {
                     Self::push_property_association(
                         pa,
                         idx,
+                        Some(idx),
                         &mut map,
                         &mut self.pending_applies_to,
                         PropertySource::Classifier { classifier },
@@ -2741,6 +2777,7 @@ impl<'a> Builder<'a> {
                     Self::push_property_association(
                         pa,
                         idx,
+                        Some(idx),
                         &mut map,
                         &mut self.pending_applies_to,
                         PropertySource::Implementation { classifier },
@@ -2777,6 +2814,11 @@ impl<'a> Builder<'a> {
             .cloned()
             .unwrap_or_default();
         decls.push((tree_idx, sub_idx));
+        // A subcomponent-level association's `in modes` names modes of the
+        // ENCLOSING implementation (osate2 @ 87468992,
+        // CacheContainedPropertyAssociationsSwitch.java:167-168 passes the
+        // container as the mode context of a subcomponent's associations).
+        let mode_context = self.components[idx].parent.unwrap_or(idx);
         for (t, si) in decls {
             if let Some(tree) = self.scope.tree(t) {
                 let sub = &tree.subcomponents[si];
@@ -2796,6 +2838,7 @@ impl<'a> Builder<'a> {
                     Self::push_property_association(
                         pa,
                         idx,
+                        Some(mode_context),
                         map,
                         &mut self.pending_applies_to,
                         source,
@@ -2828,6 +2871,7 @@ impl<'a> Builder<'a> {
                     Self::push_property_association(
                         pa,
                         idx,
+                        Some(idx),
                         &mut map,
                         &mut self.pending_applies_to,
                         PropertySource::Classifier { classifier },
@@ -2870,15 +2914,18 @@ impl<'a> Builder<'a> {
     ///
     /// `source` is where a value added to `map` came from. A queued
     /// `applies to` value takes its source when it is attached instead.
+    ///
+    /// `mode_context` is the component whose modes the association's
+    /// `in modes` lists name; a modal association records its values against
+    /// it (REQ-AADL-MODAL-PROPERTY-VALUES-001). `None` records no modal
+    /// values — connection and flow associations, whose modal values are not
+    /// modelled. A value keeps both its source and its modal binding.
     fn push_property_association(
         pa: &crate::item_tree::PropertyAssociationItem,
         owner: ComponentInstanceIdx,
+        mode_context: Option<ComponentInstanceIdx>,
         map: &mut PropertyMap,
-        pending: &mut Vec<(
-            ComponentInstanceIdx,
-            String,
-            crate::properties::PropertyValue,
-        )>,
+        pending: &mut Vec<PendingAppliesTo>,
         source: PropertySource,
     ) {
         let prop = crate::properties::PropertyValue {
@@ -2887,11 +2934,29 @@ impl<'a> Builder<'a> {
             typed_expr: pa.typed_value.clone(),
             is_append: pa.is_append,
         };
+        let modal = mode_context
+            .filter(|_| !pa.modal_values.is_empty())
+            .map(|ctx| crate::properties::ModalBinding {
+                mode_context: ctx,
+                values: pa
+                    .modal_values
+                    .iter()
+                    .map(|mv| crate::properties::ModalValue {
+                        in_modes: mv.in_modes.clone(),
+                        value: crate::properties::PropertyValue {
+                            name: pa.name.clone(),
+                            value: mv.value.clone(),
+                            typed_expr: mv.typed_value.clone(),
+                            is_append: false,
+                        },
+                    })
+                    .collect(),
+            });
         match pa.applies_to.as_deref() {
             Some(path) if !path.trim().is_empty() => {
-                pending.push((owner, path.to_string(), prop));
+                pending.push((owner, path.to_string(), prop, modal));
             }
-            _ => map.add_from(prop, source),
+            _ => map.add_modal(prop, source, modal, None),
         }
     }
 
@@ -2922,7 +2987,7 @@ impl<'a> Builder<'a> {
     /// on the declaring component and a diagnostic is recorded for that path.
     fn resolve_pending_applies_to(&mut self) {
         let pending = std::mem::take(&mut self.pending_applies_to);
-        for (owner, path, prop) in pending {
+        for (owner, path, prop, modal) in pending {
             // AS5506D §11.3: a `contained_property_association`'s `applies to`
             // clause is a LIST of containment paths —
             //   `applies to` contained_model_element_path { `,` contained_model_element_path }*
@@ -2941,15 +3006,15 @@ impl<'a> Builder<'a> {
             match elements.as_slice() {
                 // Degenerate (all-whitespace) path: preserve the historical
                 // single-element behavior by resolving the string as-is.
-                [] => self.attach_applies_to(owner, &path, prop),
-                [single] => self.attach_applies_to(owner, single, prop),
+                [] => self.attach_applies_to(owner, &path, prop, modal),
+                [single] => self.attach_applies_to(owner, single, prop, modal),
                 // A genuine list: the property applies to each element, so each
                 // target gets its own copy. Resolving per element also means a
                 // partial list reports only the elements that failed, naming a
                 // path the author actually wrote rather than the joined string.
                 many => {
                     for element in many {
-                        self.attach_applies_to(owner, element, prop.clone());
+                        self.attach_applies_to(owner, element, prop.clone(), modal.clone());
                     }
                 }
             }
@@ -2987,7 +3052,7 @@ impl<'a> Builder<'a> {
 
         type Key = (CiName, CiName);
         /// `(inheritor, key, values, reference context, ancestor, the
-        /// ancestor's sources for the values)`.
+        /// ancestor's sources for the values, the ancestor's modal binding)`.
         type Addition = (
             ComponentInstanceIdx,
             Key,
@@ -2995,6 +3060,7 @@ impl<'a> Builder<'a> {
             ComponentInstanceIdx,
             ComponentInstanceIdx,
             Vec<PropertySource>,
+            Option<crate::properties::ModalBinding>,
         );
         let mut additions: Vec<Addition> = Vec::new();
 
@@ -3041,7 +3107,19 @@ impl<'a> Builder<'a> {
                             if let Some(values) = map.values_for_key(key) {
                                 let ctx = map.reference_context_for_key(key).unwrap_or(a);
                                 let origins = map.sources_for_key(key).to_vec();
-                                additions.push((idx, key.clone(), values.clone(), ctx, a, origins));
+                                // A modal value is inherited with its
+                                // modes, still named by its declarer, AND
+                                // with its provenance.
+                                let modal = map.modal_for_key(key).cloned();
+                                additions.push((
+                                    idx,
+                                    key.clone(),
+                                    values.clone(),
+                                    ctx,
+                                    a,
+                                    origins,
+                                    modal,
+                                ));
                             }
                         }
                         break;
@@ -3050,11 +3128,11 @@ impl<'a> Builder<'a> {
                 }
             }
         }
-        for (idx, key, values, ctx, ancestor, origins) in additions {
+        for (idx, key, values, ctx, ancestor, origins, modal) in additions {
             self.property_maps
                 .entry(idx)
                 .or_default()
-                .insert_inherited(key, values, ctx, ancestor, &origins);
+                .insert_inherited(key, values, ctx, ancestor, &origins, modal);
         }
     }
 
@@ -3066,6 +3144,7 @@ impl<'a> Builder<'a> {
         owner: ComponentInstanceIdx,
         path: &str,
         prop: crate::properties::PropertyValue,
+        modal: Option<crate::properties::ModalBinding>,
     ) {
         match self.resolve_applies_to_path(owner, path) {
             AppliesTarget::Component(target) => {
@@ -3078,10 +3157,15 @@ impl<'a> Builder<'a> {
                 // `applies to` comes from a STRICT ancestor, whose associations
                 // are queued before the component's own (instantiation is
                 // top-down), so they are attached before its recovery value.
-                self.property_maps
-                    .entry(target)
-                    .or_default()
-                    .add_with_reference_context(prop, owner);
+                //
+                // Its `in modes` lists name `owner`'s modes too: the binding
+                // was recorded against the declarer when it was queued.
+                self.property_maps.entry(target).or_default().add_modal(
+                    prop,
+                    PropertySource::Contained { declarer: owner },
+                    modal,
+                    Some(owner),
+                );
             }
             AppliesTarget::Feature(feature) => {
                 // Last segment named a feature (AS5506D §11.3). Store on the
@@ -3117,11 +3201,13 @@ impl<'a> Builder<'a> {
                 if !(prop.is_append && holds) {
                     self.applies_to_fallbacks.insert((owner, key));
                 }
-                self.property_maps.entry(owner).or_default().add_from(
+                self.property_maps.entry(owner).or_default().add_modal(
                     prop,
                     PropertySource::ContainedUnresolved {
                         path: path.to_string(),
                     },
+                    modal,
+                    None,
                 );
                 self.diagnostics.push(InstanceDiagnostic {
                     message: format!(
@@ -6719,6 +6805,38 @@ end Pv;
                 .sources_for_key(&key("Source_Text")),
             [PropertySource::ContainedUnresolved {
                 path: "nosuch".to_string()
+            }]
+        );
+    }
+
+    /// A blank `applies to` path is no contained association: the value stays
+    /// on its declarer as an implementation value, not routed through the
+    /// applies-to resolver as an unresolved path. The AADL parser never yields
+    /// a blank path, but spar-sysml2 builds `PropertyAssociationItem`s
+    /// directly, so the guard in `push_property_association` is reachable.
+    #[test]
+    #[cfg_attr(miri, ignore = "parses via rowan — upstream rowan#192 UB under Miri")]
+    fn a_blank_applies_to_path_stays_an_implementation_value() {
+        let src = "package P\npublic\n  system S\n  end S;\n  system implementation S.i\n    properties\n      Period => 10 ms;\n  end S.i;\nend P;\n";
+        let db = crate::HirDefDatabase::default();
+        let file = spar_base_db::SourceFile::new(&db, "blank.aadl".to_string(), src.to_string());
+        let root = spar_base_db::parse_file(&db, file).syntax_node();
+        let mut tree = crate::item_tree::lower::lower_file(&root);
+        let pas: Vec<_> = tree.property_associations.iter().map(|(i, _)| i).collect();
+        assert_eq!(pas.len(), 1, "the model declares exactly one association");
+        tree.property_associations[pas[0]].applies_to = Some("   ".to_string());
+        let scope = GlobalScope::from_trees(vec![std::sync::Arc::new(tree)]);
+        let inst =
+            SystemInstance::instantiate(&scope, &Name::new("P"), &Name::new("S"), &Name::new("i"));
+        let props = inst.properties_for(inst.root);
+        let key = (
+            crate::resolver::CiName::from_str(""),
+            crate::resolver::CiName::new(&Name::new("Period")),
+        );
+        assert_eq!(
+            props.sources_for_key(&key),
+            &[PropertySource::Implementation {
+                classifier: "P::S.i".to_string()
             }]
         );
     }
