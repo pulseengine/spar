@@ -1103,6 +1103,7 @@ end OneCpu;
         }
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn rta_outcome_matches_hand_computed_response_times() {
         let fast = t(1, 5, 5);
@@ -1141,6 +1142,7 @@ end OneCpu;
         );
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn rta_outcome_is_undecided_past_the_step_bound() {
         // ⌈r/1⌉·1 = r, so rtaStep r = 1 + r: one picosecond a step, never a
@@ -1162,6 +1164,7 @@ end OneCpu;
         assert!(!lean.contains("sorry"), "{lean}");
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn non_positive_task_gets_no_theorem() {
         let mut lean = String::new();
@@ -1170,6 +1173,7 @@ end OneCpu;
         assert!(!lean.contains("theorem x_"), "{lean}");
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn zero_period_task_gets_no_theorem() {
         // Period exactly 0: `period_pos := by decide` would be false, so no
@@ -1181,6 +1185,7 @@ end OneCpu;
         assert!(!lean.contains("period := 0"), "{lean}");
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn zero_deadline_task_gets_no_theorem() {
         // Deadline exactly 0: `deadline_pos := by decide` would be false, so
@@ -1192,6 +1197,7 @@ end OneCpu;
         assert!(!lean.contains("deadline := 0"), "{lean}");
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn missed_deadline_emits_a_misses_theorem_not_a_false_one() {
         let mut lean = String::new();
@@ -1452,6 +1458,7 @@ public
 end Rta;
 ";
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn rta_fixture_matches_the_ci_gate_copy() {
         let tool = repo_root().join("tools/check_generated_proofs.py");
@@ -1484,6 +1491,7 @@ end Rta;
         generate_lean4_proof(&inst, idx).content
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn generated_proof_names_only_what_proofs_library_declares() {
         // #542: the generator called `compute_response_time`, which no file
@@ -1511,6 +1519,7 @@ end Rta;
         }
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn name_check_rejects_an_undeclared_library_name() {
         // The check must be able to fail: the #542 shape is caught.
@@ -1530,6 +1539,7 @@ end Rta;
         );
     }
 
+    // rivet: verifies REQ-PROOF-GEN-COMPILES-001
     #[test]
     fn fixture_proof_covers_both_theorem_shapes() {
         let content = fixture_proof();

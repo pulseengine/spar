@@ -740,3 +740,16 @@ artifacts:
         target: REQ-AADL-PROPERTY-PROVENANCE-001
       - type: satisfies
         target: REQ-SYSML2-CORPUS-RATCHET-001
+
+  - id: DEC-RELEASE-V0481-SCOPE-001
+    type: design-decision
+    title: v0.48.1 ships the six in-flight correctness fixes; two unstarted items move to v0.49.0
+    status: accepted
+    tags: [release, planning]
+    fields:
+      rationale: "Maintainer decision 2026-10-29: cut v0.48.0 now, v0.48.1 next with the in-flight fixes for #539, #542, #543, #546, #552 and #555. Four of their requirements (CONNECTION-BINDING-RESOLVE, CLI-LOAD-REFUSES-PARSE-ERRORS, CODEGEN-OUTPUT-PATHS-UNIQUE, PROOF-GEN-COMPILES) were scoped to v0.48.0 but merged after its tag, so they move to the release that ships them. Each is verified on its PR's in-diff mutation gate (zero missed after the survivors CI reported were killed and re-checked by hand) and on the merge_group run that landed it; PROOF-GEN-COMPILES additionally on the lake build of the generated proofs with three negative controls. REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001 (#516) and REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001 were scoped to v0.48.1 but never started; they move to v0.49.0. A release is cut only when its scope is all verified."
+    links:
+      - type: satisfies
+        target: REQ-PROOF-GEN-COMPILES-001
+      - type: satisfies
+        target: REQ-INSTANCE-CONNECTION-END-RESOLVES-001
