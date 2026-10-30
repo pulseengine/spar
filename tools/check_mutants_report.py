@@ -406,6 +406,11 @@ def diff_mutable_lines(diff_text: str) -> dict[str, int]:
                 current = None
             continue
         if current and line.startswith("+") and not line.startswith("+++"):
+            # A blank or `//` comment line (doc comments, `rivet:` markers)
+            # holds nothing cargo-mutants can mutate, so it selects nothing.
+            body = line[1:].strip()
+            if not body or body.startswith("//"):
+                continue
             out[current] = out.get(current, 0) + 1
     return out
 
@@ -1082,6 +1087,12 @@ def self_test() -> int:
     TEST_DIFF = ("diff --git a/crates/spar-cli/tests/t.rs b/crates/spar-cli/tests/t.rs\n"
                  "--- a/crates/spar-cli/tests/t.rs\n+++ b/crates/spar-cli/tests/t.rs\n"
                  "@@ -1 +1,2 @@\n #[test]\n+fn t() {}\n")
+    COMMENT_ONLY = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
+                    "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
+                    "@@ -1,2 +1,4 @@\n+    // rivet: verifies REQ-X-001\n+\n #[test]\n fn f() {}\n")
+    CODE_AND_COMMENT = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
+                        "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
+                        "@@ -1,2 +1,3 @@\n fn f() {\n+    let y = 2; // a trailing comment\n }\n")
     DELETE_ONLY = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
                    "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
                    "@@ -1,3 +1,2 @@\n fn f() {\n-    let y = 1;\n }\n")
@@ -1114,6 +1125,10 @@ def self_test() -> int:
           TEST_DIFF, no_report, "nothing to mutate")
     dcase("in-diff: a removal-only diff with no report is labelled, not scored", 0,
           DELETE_ONLY, no_report, "nothing to mutate")
+    dcase("in-diff: a comment-only diff with no report is labelled, not scored", 0,
+          COMMENT_ONLY, no_report, "nothing to mutate")
+    dcase("in-diff: code with a trailing comment, ZERO selected, still fails", 1,
+          CODE_AND_COMMENT, no_report, "selected ZERO mutants")
     dcase("in-diff: every selected mutant killed passes", 0,
           SRC_DIFF, lambda t: _fixture(t, missed=0, caught=4, unviable=1), "Every in-diff mutant was killed")
     dcase("in-diff: ONE survivor in the diff fails (zero tolerance)", 1,
