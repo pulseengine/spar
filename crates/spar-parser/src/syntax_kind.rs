@@ -59,6 +59,8 @@ pub enum SyntaxKind {
     MINUS,
     /// `*`
     STAR,
+    /// `/` — division in a property value (a spar extension; not in AS5506)
+    SLASH,
     /// `::`
     COLON_COLON,
     /// `{**`
@@ -366,6 +368,9 @@ pub enum SyntaxKind {
     DELTA_VALUE,
     /// Numeric value with units: `20 ms`
     UNIT_VALUE,
+    /// Binary arithmetic in a property value: `lhs (+|-|*|/) rhs`
+    /// (a spar extension; AS5506 property values have no arithmetic)
+    BINARY_EXPR,
     /// Reference value: `reference (path)`
     REFERENCE_VALUE,
     /// Classifier value: `classifier (path)`

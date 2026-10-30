@@ -36,6 +36,15 @@ pub struct PropertyValue {
     pub is_append: bool,
 }
 
+impl PropertyValue {
+    /// Is this value arithmetic, which is not AADL and has no value (#546)?
+    pub fn is_arithmetic(&self) -> bool {
+        self.typed_expr
+            .as_ref()
+            .is_some_and(crate::property_arith::is_arithmetic)
+    }
+}
+
 /// WHERE a property value came from: the mechanism that put it in a map
 /// (REQ-AADL-PROPERTY-PROVENANCE-001).
 ///
@@ -415,12 +424,19 @@ impl PropertyMap {
     /// Returns the value text of the most recent assignment, or `None`.
     /// For append properties, returns the first value; use `get_all` for
     /// the complete list.
+    ///
+    /// A value that is arithmetic (`5 * 8 ms`) is not AADL and reads as
+    /// ABSENT here, in [`Self::get_typed`] and in [`Self::get_all`] (#546,
+    /// [`crate::property_arith`]): no analysis, typed or text-parsing, can
+    /// compute anything from it. [`Self::iter`] still yields it, so
+    /// `property_rules` can report it and instance output can show it.
     pub fn get(&self, set: &str, name: &str) -> Option<&str> {
         let set_key = CiName::from_str(set);
         let name_key = CiName::from_str(name);
         self.props
             .get(&(set_key, name_key))
             .and_then(|vals| vals.first())
+            .filter(|pv| !pv.is_arithmetic())
             .map(|pv| pv.value.as_str())
     }
 
@@ -434,6 +450,7 @@ impl PropertyMap {
         self.props
             .get(&(set_key, name_key))
             .and_then(|vals| vals.first())
+            .filter(|pv| !pv.is_arithmetic())
             .and_then(|pv| pv.typed_expr.as_ref())
     }
 
@@ -445,7 +462,12 @@ impl PropertyMap {
         let name_key = CiName::from_str(name);
         self.props
             .get(&(set_key, name_key))
-            .map(|vals| vals.iter().map(|pv| pv.value.as_str()).collect())
+            .map(|vals| {
+                vals.iter()
+                    .filter(|pv| !pv.is_arithmetic())
+                    .map(|pv| pv.value.as_str())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

@@ -10,8 +10,11 @@
 //!   element types
 //! - **PROP-APPLIES-TO** — Properties are applied to categories they're allowed on
 //! - **PROP-CONSTANT-EXISTS** — Property constant references must resolve
+//! - **PROP-ARITHMETIC** — Arithmetic in a property value (`5 * 8 ms`) is not
+//!   AADL: an error, and the value is ignored (#546)
 
 use spar_hir_def::instance::SystemInstance;
+use spar_hir_def::item_tree::PropertyExpr;
 
 use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
 
@@ -105,10 +108,26 @@ fn check_range_ordering(
     for ((_set_key, _name_key), values) in prop_map.iter() {
         for pv in values {
             let val = pv.value.trim();
+            // Prefer the lowered range: its bounds are the real values. Read
+            // from text, the bound `2 * 30` in `10 .. 2 * 30` would be taken
+            // by `parse_numeric_value` as its first operand, 2, and report a
+            // false inversion (#546). An arithmetic bound is not AADL and is
+            // not compared at all; PROP-ARITHMETIC reports it.
+            let bounds = match &pv.typed_expr {
+                Some(PropertyExpr::Range { min, max, .. }) => {
+                    match (bound_text(min), bound_text(max)) {
+                        (Some(l), Some(h)) => Some((l, h)),
+                        _ => None,
+                    }
+                }
+                _ => val
+                    .split_once("..")
+                    .map(|(l, h)| (l.trim().to_string(), h.trim().to_string())),
+            };
             // Look for range pattern: "number .. number"
-            if let Some((low_str, high_str)) = val.split_once("..") {
-                let low_str = low_str.trim();
-                let high_str = high_str.trim();
+            if let Some((low_str, high_str)) = bounds {
+                let low_str = low_str.as_str();
+                let high_str = high_str.as_str();
                 if range_is_inverted(low_str, high_str) == Some(true) {
                     diags.push(AnalysisDiagnostic {
                         severity: Severity::Error,
@@ -123,6 +142,20 @@ fn check_range_ordering(
             }
         }
     }
+}
+
+/// The text of an evaluated numeric range bound (`40 ms`, `7`), or `None`
+/// for anything else — an unevaluated arithmetic bound among them.
+fn bound_text(expr: &PropertyExpr) -> Option<String> {
+    let (num, unit) = match expr {
+        PropertyExpr::Integer(v, u) => (v.to_string(), u),
+        PropertyExpr::Real(s, u) => (s.clone(), u),
+        _ => return None,
+    };
+    Some(match unit {
+        Some(u) => format!("{num} {u}"),
+        None => num,
+    })
 }
 
 /// Try to parse a numeric value string, stripping any trailing unit.
@@ -302,6 +335,22 @@ fn check_value_types(
                     analysis: "property_rules".to_string(),
                 });
             }
+            // PROP-ARITHMETIC (#546): arithmetic is not AADL. The property
+            // map already reads such a value as absent; say so here, or the
+            // property would silently vanish.
+            if pv.is_arithmetic() {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Error,
+                    message: format!(
+                        "property '{}' value '{}': {}",
+                        pv.name,
+                        val,
+                        spar_hir_def::property_arith::NOT_AADL
+                    ),
+                    path: path.to_vec(),
+                    analysis: "property_rules".to_string(),
+                });
+            }
             // Check for unbalanced parentheses
             let open = val.chars().filter(|&c| c == '(').count();
             let close = val.chars().filter(|&c| c == ')').count();
@@ -461,6 +510,27 @@ mod tests {
 
         fn set_property(&mut self, comp: ComponentInstanceIdx, set: &str, name: &str, value: &str) {
             self.set_property_ext(comp, set, name, value, false);
+        }
+
+        /// A value with its lowered typed expression, as instantiation
+        /// records it.
+        fn set_typed(
+            &mut self,
+            comp: ComponentInstanceIdx,
+            name: &str,
+            value: &str,
+            e: PropertyExpr,
+        ) {
+            let map = self.property_maps.entry(comp).or_default();
+            map.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: None,
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: Some(e),
+                is_append: false,
+            });
         }
 
         fn set_property_ext(
@@ -1769,5 +1839,119 @@ mod tests {
             range_is_inverted("200 ns", "20 us"),
             range_is_inverted("20 us", "200 ns")
         );
+    }
+
+    // ── PROP-ARITHMETIC and range bounds read from the lowered value (#546) ──
+
+    fn int(v: i64, unit: Option<&str>) -> PropertyExpr {
+        PropertyExpr::Integer(v, unit.map(Name::new))
+    }
+
+    fn range(min: PropertyExpr, max: PropertyExpr) -> PropertyExpr {
+        PropertyExpr::Range {
+            min: Box::new(min),
+            max: Box::new(max),
+            delta: None,
+        }
+    }
+
+    fn arith(l: PropertyExpr, r: PropertyExpr) -> PropertyExpr {
+        PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(l),
+            rhs: Box::new(r),
+        }
+    }
+
+    fn run(value: &str, e: PropertyExpr) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        b.set_typed(root, "Weight", value, e);
+        PropertyRuleAnalysis.analyze(&b.build(root))
+    }
+
+    fn range_errors(d: &[AnalysisDiagnostic]) -> usize {
+        d.iter()
+            .filter(|d| d.message.contains("lower bound"))
+            .count()
+    }
+
+    fn arith_errors(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|d| d.message.contains(spar_hir_def::property_arith::NOT_AADL))
+            .collect()
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn range_order_reads_the_lowered_bounds_not_the_first_operand() {
+        // Read from text, `2 * 30` is its first operand, 2 < 10: a false
+        // inversion. The lowered bound is arithmetic and is not compared.
+        let d = run(
+            "10 .. 2 * 30",
+            range(int(10, None), arith(int(2, None), int(30, None))),
+        );
+        assert_eq!(range_errors(&d), 0, "{d:?}");
+        // A real inversion is still caught from the lowered bounds...
+        assert_eq!(
+            range_errors(&run("10 .. 5", range(int(10, None), int(5, None)))),
+            1
+        );
+        // ...and a signed minimum keeps its sign.
+        assert_eq!(
+            range_errors(&run("-180 .. 180", range(int(-180, None), int(180, None)))),
+            0
+        );
+        assert_eq!(
+            range_errors(&run("180 .. -180", range(int(180, None), int(-180, None)))),
+            1
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn range_order_compares_real_lowered_bounds() {
+        // A real bound is a literal, not arithmetic: the lowered range is
+        // still compared, and the message names both bounds with units.
+        let real = |v: &str| PropertyExpr::Real(v.to_string(), Some(Name::new("ms")));
+        let d = run("2.5 ms .. 1.5 ms", range(real("2.5"), real("1.5")));
+        assert_eq!(range_errors(&d), 1, "{d:?}");
+        assert!(
+            d.iter().any(|d| d
+                .message
+                .contains("lower bound (2.5 ms) > upper bound (1.5 ms)")),
+            "{d:?}"
+        );
+        assert_eq!(
+            range_errors(&run("1.5 ms .. 2.5 ms", range(real("1.5"), real("2.5")))),
+            0
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_is_an_error_saying_it_is_not_aadl() {
+        let d = run("5 * 8 ms", arith(int(5, None), int(8, Some("ms"))));
+        let errs = arith_errors(&d);
+        assert_eq!(errs.len(), 1, "{d:?}");
+        assert_eq!(errs[0].severity, Severity::Error);
+        assert!(
+            errs[0].message.contains("'5 * 8 ms'"),
+            "{}",
+            errs[0].message
+        );
+        assert!(errs[0].message.contains("Weight"), "{}", errs[0].message);
+        // Inside a range bound, too: one error for the value.
+        let d = run(
+            "1 ms .. 2 * 1 ms",
+            range(int(1, Some("ms")), arith(int(2, None), int(1, Some("ms")))),
+        );
+        assert_eq!(arith_errors(&d).len(), 1, "{d:?}");
+        // Literals, signed literals and signed constants are not reported.
+        assert!(arith_errors(&run("40 ms", int(40, Some("ms")))).is_empty());
+        assert!(
+            arith_errors(&run("-180 .. 180", range(int(-180, None), int(180, None)))).is_empty()
+        );
+        assert!(arith_errors(&run("-C", PropertyExpr::Enum(Name::new("C")))).is_empty());
     }
 }

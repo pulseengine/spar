@@ -24,6 +24,7 @@ pub mod migration;
 pub mod name;
 pub mod overlay;
 pub mod properties;
+pub mod property_arith;
 pub mod property_check;
 pub mod property_eval;
 pub mod property_value;
@@ -3556,5 +3557,199 @@ end MyProps;
             }
             other => panic!("expected TypeRef(Time_Range), got {:?}", other),
         }
+    }
+
+    // ── Arithmetic property values, parsed and lowered (#546) ──────────
+
+    /// Lower `MyProp => <value>;` through the real parser and lowering.
+    fn lower_value(value: &str) -> Option<item_tree::PropertyExpr> {
+        lower_first_typed_value(&format!(
+            "package P\npublic\n  system S\n    properties\n      MyProp => {value};\n  end S;\nend P;\n"
+        ))
+    }
+
+    fn int(v: i64, unit: Option<&str>) -> item_tree::PropertyExpr {
+        item_tree::PropertyExpr::Integer(v, unit.map(Name::new))
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_lowers_whole_and_unevaluated_never_to_its_first_operand() {
+        use item_tree::{BinaryOpKind, PropertyExpr as E};
+        for src in [
+            "5 * 8 ms",
+            "20 ms + 20 ms",
+            "(2 + 3) * 8 ms",
+            "5 ms * 8 ms",
+            "40 ms / 0",
+            "-1 + 2",
+            "-(40 ms)",
+            "+(40 ms)",
+            "2 * My_Set::Base",
+        ] {
+            let got = lower_value(src);
+            let Some(expr) = &got else {
+                panic!("`{src}` lowered to nothing; the text fallback must not run")
+            };
+            assert!(
+                matches!(expr, E::BinaryOp { .. }),
+                "`{src}` must stay a whole BinaryOp, got {got:?}"
+            );
+            assert!(property_arith::is_arithmetic(expr), "`{src}`");
+        }
+        // The whole tree, with precedence: `2 + 3 * 4` is 2 + (3 * 4).
+        assert_eq!(
+            lower_value("2 + 3 * 4"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Add,
+                lhs: Box::new(int(2, None)),
+                rhs: Box::new(E::BinaryOp {
+                    op: BinaryOpKind::Mul,
+                    lhs: Box::new(int(3, None)),
+                    rhs: Box::new(int(4, None)),
+                }),
+            })
+        );
+        assert_eq!(
+            lower_value("80 ms / 2"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Div,
+                lhs: Box::new(int(80, Some("ms"))),
+                rhs: Box::new(int(2, None)),
+            })
+        );
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn subtraction_and_signed_groups_lower_with_their_operator_and_sign() {
+        use item_tree::{BinaryOpKind, PropertyExpr as E};
+        assert_eq!(
+            lower_value("100 - 50"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Sub,
+                lhs: Box::new(int(100, None)),
+                rhs: Box::new(int(50, None)),
+            })
+        );
+        // A signed operand's sign belongs to the operand, not the operator.
+        assert_eq!(
+            lower_value("-3 + 10"),
+            Some(E::BinaryOp {
+                op: BinaryOpKind::Add,
+                lhs: Box::new(int(-3, None)),
+                rhs: Box::new(int(10, None)),
+            })
+        );
+        // `-(…)` keeps its sign as the `-1` factor; `+(…)` is `1`.
+        for (src, factor) in [("-(40 ms)", -1), ("+(40 ms)", 1)] {
+            assert_eq!(
+                lower_value(src),
+                Some(E::BinaryOp {
+                    op: BinaryOpKind::Mul,
+                    lhs: Box::new(int(factor, None)),
+                    rhs: Box::new(E::List(vec![int(40, Some("ms"))])),
+                }),
+                "`{src}`"
+            );
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn boolean_not_lowers_to_a_boolean_not_arithmetic() {
+        use item_tree::PropertyExpr as E;
+        for (src, want) in [("not true", false), ("not false", true)] {
+            let got = lower_value(src);
+            assert_eq!(got, Some(E::Boolean(want)), "`{src}`");
+            assert!(!property_arith::is_arithmetic(&got.unwrap()), "`{src}`");
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn arithmetic_in_ranges_lists_and_records_is_found() {
+        for src in [
+            "1 ms .. 2 * 1 ms",
+            "2 * 500 us .. 2 ms",
+            "1 ms .. 2 ms delta 1 ms - 500 us",
+            "(1 ms) .. 2 ms",
+            "1 ms .. (2 ms)",
+            "1 ms .. 2 ms delta (1 ms)",
+            "(2 * 3 ms, 4 ms)",
+            "[a => 2 * 3 ms; b => 1;]",
+        ] {
+            let got = lower_value(src).unwrap_or_else(|| panic!("`{src}` lowered to nothing"));
+            assert!(property_arith::is_arithmetic(&got), "`{src}`: {got:?}");
+        }
+        // Each list element is one expression: two elements, not three.
+        match lower_value("(2 * 3 ms, 4 ms)") {
+            Some(item_tree::PropertyExpr::List(items)) => assert_eq!(items.len(), 2),
+            other => panic!("expected a 2-element list, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn a_parse_error_operand_is_kept_in_place_not_dropped() {
+        use item_tree::PropertyExpr as E;
+        let opaque = |s: &str| Box::new(E::Opaque(s.to_string()));
+        // The unlowerable left operand stays on the left: `2` never takes
+        // its place.
+        match lower_value("0x40 * 2") {
+            Some(E::BinaryOp { op, lhs, rhs }) => {
+                assert_eq!(op, item_tree::BinaryOpKind::Mul);
+                assert_eq!(lhs, opaque("0x40"));
+                assert!(!matches!(*rhs, E::Opaque(_)), "{rhs:?}");
+            }
+            other => panic!("expected a BinaryOp, got {other:?}"),
+        }
+        // A list keeps every element.
+        match lower_value("(0x40, 2)") {
+            Some(E::List(items)) => {
+                assert_eq!(items.len(), 2, "{items:?}");
+                assert_eq!(items[0], *opaque("0x40"));
+            }
+            other => panic!("expected a 2-element list, got {other:?}"),
+        }
+        // A range's bad bound is an opaque bound, not a name.
+        match lower_value("0x40 .. 2") {
+            Some(E::Range { min, .. }) => assert_eq!(min, opaque("0x40")),
+            other => panic!("expected a Range, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies REQ-AADL-PROPERTY-ARITHMETIC-001
+    #[test]
+    fn signed_literals_ranges_and_constants_are_not_arithmetic() {
+        use item_tree::PropertyExpr as E;
+        let range = |min, max| E::Range {
+            min: Box::new(min),
+            max: Box::new(max),
+            delta: None,
+        };
+        for (src, want) in [
+            ("40 ms", int(40, Some("ms"))),
+            ("-5 ms", int(-5, Some("ms"))),
+            ("+5", int(5, None)),
+            // The minimum keeps its sign (it was lost before #546).
+            ("-180 .. 180", range(int(-180, None), int(180, None))),
+            ("-1 .. 4", range(int(-1, None), int(4, None))),
+            (
+                "1 ms .. 2 ms",
+                range(int(1, Some("ms")), int(2, Some("ms"))),
+            ),
+            // A signed constant (OSATE SignedConstant) lowers as before.
+            ("-My_Set::Base", E::Enum(Name::new("My_Set::Base"))),
+            ("My_Set::Base", E::Enum(Name::new("My_Set::Base"))),
+        ] {
+            let got = lower_value(src);
+            assert_eq!(got, Some(want), "`MyProp => {src}`");
+            assert!(!property_arith::is_arithmetic(&got.unwrap()), "`{src}`");
+        }
+        assert_eq!(
+            lower_value("-2.5 ms"),
+            Some(E::Real("-2.5".to_string(), Some(Name::new("ms"))))
+        );
     }
 }

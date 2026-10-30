@@ -1,6 +1,8 @@
--- Regression test for GitHub issue #127:
--- property values admit binary arithmetic per AS5506B §11.2.5.
--- Unit suffix applies to the final operand (`5 * 1000 ps` = 5000 ps).
+-- Parser recovery test for GitHub issues #127 and #546. Arithmetic in a
+-- property value is NOT AADL: AS5506 numeric terms are a signed literal
+-- with an optional unit, or a signed property constant, with no operators,
+-- and OSATE rejects this syntax. spar parses it (so the error can name the
+-- whole expression), reports PROP-ARITHMETIC, and ignores the value.
 package Test_Arithmetic
 public
 

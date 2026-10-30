@@ -1654,6 +1654,7 @@ fn extract_modal_values(node: &SyntaxNode) -> Vec<ModalPropertyValueItem> {
                 | SyntaxKind::CLASSIFIER_VALUE
                 | SyntaxKind::REFERENCE_VALUE
                 | SyntaxKind::COMPUTED_VALUE
+                | SyntaxKind::BINARY_EXPR
                 | SyntaxKind::PROPERTY_EXPRESSION => {
                     if current.value_node.is_none() {
                         current.value_node = Some(n.clone());
@@ -1747,6 +1748,7 @@ fn find_property_value_node(node: &SyntaxNode) -> Option<SyntaxNode> {
                 | SyntaxKind::CLASSIFIER_VALUE
                 | SyntaxKind::REFERENCE_VALUE
                 | SyntaxKind::COMPUTED_VALUE
+                | SyntaxKind::BINARY_EXPR
                 | SyntaxKind::PROPERTY_EXPRESSION => {
                     return Some(n.clone());
                 }
@@ -1785,7 +1787,50 @@ fn lower_property_expr(node: &SyntaxNode) -> Option<PropertyExpr> {
         SyntaxKind::REFERENCE_VALUE => lower_reference_value(node),
         SyntaxKind::COMPUTED_VALUE => lower_computed_value(node),
         SyntaxKind::PROPERTY_EXPRESSION => lower_named_value(node),
+        SyntaxKind::BINARY_EXPR => Some(lower_binary_expr(node)),
         _ => None,
+    }
+}
+
+/// Lower a BINARY_EXPR node — `lhs (+|-|*|/) rhs` (#546).
+///
+/// Arithmetic is not AADL ([`crate::property_arith`]), so the expression is
+/// NOT evaluated: the whole tree is kept as a `BinaryOp`, which the property
+/// map treats as absent and `property_rules` reports. It is never cut down
+/// to its first operand. An operand a parse error left unlowerable is kept
+/// as `Opaque`, so the value is still recognised as arithmetic.
+fn lower_binary_expr(node: &SyntaxNode) -> PropertyExpr {
+    // The parser bumps exactly one operator token directly into each
+    // BINARY_EXPR (operands, and their signs, are child nodes), so the first
+    // `+`, `-` or `/` token is the operator and its absence means `*`. A
+    // separate `STAR` arm would be indistinguishable from that default.
+    let op = node
+        .children_with_tokens()
+        .filter_map(|e| e.into_token())
+        .find_map(|t| match t.kind() {
+            SyntaxKind::PLUS => Some(BinaryOpKind::Add),
+            SyntaxKind::MINUS => Some(BinaryOpKind::Sub),
+            SyntaxKind::SLASH => Some(BinaryOpKind::Div),
+            _ => None,
+        })
+        .unwrap_or(BinaryOpKind::Mul);
+    let operand = |n: Option<SyntaxNode>| {
+        let opaque = |t: String| PropertyExpr::Opaque(t.trim().to_string());
+        match n {
+            Some(n) => lower_property_expr(&n).unwrap_or_else(|| opaque(n.text().to_string())),
+            None => opaque(String::new()),
+        }
+    };
+    // Every child node is an operand: a parse error's ERROR node is kept
+    // as `Opaque` rather than skipped, so a bad left operand never lets the
+    // right one take its place.
+    let mut operands = node.children();
+    let lhs = operand(operands.next());
+    let rhs = operand(operands.next());
+    PropertyExpr::BinaryOp {
+        op,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
     }
 }
 
@@ -1972,14 +2017,11 @@ fn lower_boolean_value(node: &SyntaxNode) -> Option<PropertyExpr> {
 fn lower_list_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     let mut items = Vec::new();
     for child in node.children() {
-        if let Some(expr) = lower_property_expr(&child) {
-            items.push(expr);
-        } else if is_value_node(child.kind()) {
-            // Fallback: store as opaque
-            items.push(PropertyExpr::Opaque(
-                child.text().to_string().trim().to_string(),
-            ));
-        }
+        // An element that does not lower (a parse error's ERROR node among
+        // them) is kept as `Opaque`, never dropped: the list keeps its length.
+        let expr = lower_property_expr(&child)
+            .unwrap_or_else(|| PropertyExpr::Opaque(child.text().to_string().trim().to_string()));
+        items.push(expr);
     }
     Some(PropertyExpr::List(items))
 }
@@ -2010,6 +2052,25 @@ fn lower_record_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     Some(PropertyExpr::Record(fields))
 }
 
+/// Lower one bound (or the delta) of a range.
+///
+/// A range bound is a signed literal or a signed constant in AADL. A
+/// parenthesised bound, `(1 ms) .. 2 ms`, is a grouping, which AADL has no
+/// term for (it was a parse error before #546): it is kept as a `1 * (…)`
+/// `BinaryOp` so the whole value is rejected like any other arithmetic,
+/// never read through its other bound.
+fn lower_range_bound(node: &SyntaxNode) -> Option<PropertyExpr> {
+    let bound = lower_property_expr(node)?;
+    if node.kind() == SyntaxKind::LIST_VALUE {
+        return Some(PropertyExpr::BinaryOp {
+            op: BinaryOpKind::Mul,
+            lhs: Box::new(PropertyExpr::Integer(1, None)),
+            rhs: Box::new(bound),
+        });
+    }
+    Some(bound)
+}
+
 /// Lower a RANGE_VALUE node.
 ///
 /// Structure: property_expression DOT_DOT property_expression [DELTA_VALUE]
@@ -2021,7 +2082,10 @@ fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
     for child in node.children() {
         if child.kind() == SyntaxKind::DELTA_VALUE {
             delta_node = Some(child);
-        } else if is_value_node(child.kind()) {
+        } else {
+            // Every other child is a bound, a parse error's ERROR node
+            // included, so it becomes an `Opaque` bound rather than
+            // shifting the next bound into its place.
             value_nodes.push(child);
         }
     }
@@ -2034,16 +2098,19 @@ fn lower_range_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         return lower_range_from_tokens(node);
     }
 
-    let min_expr = lower_property_expr(&value_nodes[0]).unwrap_or_else(|| {
+    // Since #546 each bound is its own value node — a signed literal
+    // (`-180`) keeps its sign, and an arithmetic bound is a whole
+    // BINARY_EXPR that lowers to a rejected `BinaryOp`.
+    let min_expr = lower_range_bound(&value_nodes[0]).unwrap_or_else(|| {
         PropertyExpr::Opaque(value_nodes[0].text().to_string().trim().to_string())
     });
-    let max_expr = lower_property_expr(&value_nodes[1]).unwrap_or_else(|| {
+    let max_expr = lower_range_bound(&value_nodes[1]).unwrap_or_else(|| {
         PropertyExpr::Opaque(value_nodes[1].text().to_string().trim().to_string())
     });
 
     let delta = delta_node.and_then(|dn| {
         dn.children()
-            .find_map(|c| lower_property_expr(&c))
+            .find_map(|c| lower_range_bound(&c))
             .map(Box::new)
     });
 
@@ -2210,6 +2277,19 @@ fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
         let sign_negative = tok.kind() == SyntaxKind::MINUS;
         for child in node.children() {
             if let Some(inner) = lower_property_expr(&child) {
+                // `-(…)` signs a parenthesised group, which AADL has no
+                // term for (#546): it is arithmetic, kept whole and
+                // rejected, never a negated list or a dropped sign.
+                if child.kind() == SyntaxKind::LIST_VALUE {
+                    return Some(PropertyExpr::BinaryOp {
+                        op: BinaryOpKind::Mul,
+                        lhs: Box::new(PropertyExpr::Integer(
+                            if sign_negative { -1 } else { 1 },
+                            None,
+                        )),
+                        rhs: Box::new(inner),
+                    });
+                }
                 return Some(apply_sign(inner, sign_negative));
             }
         }
@@ -2237,6 +2317,10 @@ fn lower_named_value(node: &SyntaxNode) -> Option<PropertyExpr> {
 }
 
 /// Apply a sign to a property expression (negate integers/reals).
+///
+/// A signed constant (`-Some_Constant`, OSATE's `SignedConstant`) is legal
+/// AADL and lowers to its `Enum` name as it always has: constant values are
+/// not resolved, so there is no number to negate.
 fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
     if !negative {
         return expr;
@@ -2252,24 +2336,6 @@ fn apply_sign(expr: PropertyExpr, negative: bool) -> PropertyExpr {
         }
         other => other,
     }
-}
-
-/// Check whether a SyntaxKind represents a property value node.
-fn is_value_node(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::INTEGER_VALUE
-            | SyntaxKind::REAL_VALUE
-            | SyntaxKind::STRING_VALUE
-            | SyntaxKind::BOOLEAN_VALUE
-            | SyntaxKind::LIST_VALUE
-            | SyntaxKind::RECORD_VALUE
-            | SyntaxKind::RANGE_VALUE
-            | SyntaxKind::CLASSIFIER_VALUE
-            | SyntaxKind::REFERENCE_VALUE
-            | SyntaxKind::COMPUTED_VALUE
-            | SyntaxKind::PROPERTY_EXPRESSION
-    )
 }
 
 /// Parse a PROPERTY_REF node into a PropertyRef.
@@ -3181,7 +3247,9 @@ end P;
             .descendants()
             .find(|n| n.kind() == SyntaxKind::RANGE_VALUE)
             .expect("range value node");
-        let lowered = lower_range_from_tokens(&range).expect("range lowers");
+        // Since #546 a range minimum is its own value node, so a parsed
+        // range lowers through `lower_range_value`.
+        let lowered = lower_range_value(&range).expect("range lowers");
         match lowered {
             PropertyExpr::Range { min, .. } => match *min {
                 PropertyExpr::Integer(0, _) => {
@@ -3226,7 +3294,9 @@ end P;
             .descendants()
             .find(|n| n.kind() == SyntaxKind::RANGE_VALUE)
             .expect("range value node");
-        let lowered = lower_range_from_tokens(&range).expect("range lowers");
+        // Since #546 a range minimum is its own value node, so a parsed
+        // range lowers through `lower_range_value`.
+        let lowered = lower_range_value(&range).expect("range lowers");
         match lowered {
             PropertyExpr::Range { min, .. } => match *min {
                 PropertyExpr::Integer(5, _) => {}
