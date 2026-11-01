@@ -33,11 +33,11 @@ jobs:
     # addition can't silently consume hours of runner budget.
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-08-26
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run solver benchmarks (save baseline)
         # --save-baseline nightly stores this run under
         # target/criterion/*/nightly so future runs can diff against it.
@@ -46,7 +46,7 @@ jobs:
         run: cargo bench --bench codegen_benchmarks -p spar-codegen -- --save-baseline nightly
       - name: Upload criterion output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: criterion-nightly
           path: target/criterion/

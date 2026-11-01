@@ -48,7 +48,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       # This job gates the required `Lean proof typecheck (lake build)` context,
@@ -88,7 +88,7 @@ jobs:
       run:
         working-directory: proofs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Cache the Lake build outputs (Mathlib + transitive deps + our proofs).
       # Warm runs reuse this and only recompile changed in-tree modules.
@@ -97,7 +97,7 @@ jobs:
       # ~2 GB of `.olean` files from Mathlib's cloud cache instead of
       # rebuilding them from source (30+ min compile vs ~5 min download).
       - name: Cache Lake build (.lake)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             proofs/.lake
@@ -115,7 +115,7 @@ jobs:
       # the actual fail-on-sorry enforcement (see #wave3-tier-a-1 audit).
       - name: Build proofs (lake build)
         id: lake_build
-        uses: leanprover/lean-action@v1
+        uses: leanprover/lean-action@fe408643ea7367d8c0404a8be3975bb145f5fb64 # v1
         with:
           lake-package-directory: proofs
           # Pull Mathlib's precompiled .olean files instead of rebuilding
@@ -228,7 +228,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2026-08-26
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Generated proofs build against proofs/ (lake build)
         working-directory: ${{ github.workspace }}
         run: |
@@ -255,7 +255,7 @@ jobs:
 
       - name: Upload lake build artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lake-build-log
           path: lake-artifacts/
