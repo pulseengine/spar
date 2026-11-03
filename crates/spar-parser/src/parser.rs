@@ -125,10 +125,17 @@ impl<'t> Parser<'t> {
 
     /// Return the source text of the current token, or `""` if at end.
     pub fn current_text(&self) -> &str {
-        if self.at_end() {
+        self.nth_text(0)
+    }
+
+    /// Return the source text of the token `n` non-trivia tokens ahead, or
+    /// `""` past the end. `nth_text(0)` is [`Parser::current_text`].
+    pub fn nth_text(&self, n: usize) -> &str {
+        let idx = self.pos + n;
+        if idx >= self.non_trivia_indices.len() {
             return "";
         }
-        let token_idx = self.non_trivia_indices[self.pos];
+        let token_idx = self.non_trivia_indices[idx];
         let start = self.token_starts[token_idx];
         let len = self.all_tokens[token_idx].1;
         &self.source[start..start + len]
