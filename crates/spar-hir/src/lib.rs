@@ -51,6 +51,7 @@ pub use spar_hir_def::property_eval::{
 };
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use spar_hir_def::item_tree::{
@@ -416,6 +417,12 @@ pub struct InstanceNode {
     /// inheritance and values attached via `applies to <path>`.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// The same property values as `properties`, under the same keys, as
+    /// TYPED values (REQ-INSTANCE-JSON-TYPED-PROPERTIES-001, #563): see
+    /// [`TypedPropertyValue`]. `properties` is kept unchanged for existing
+    /// consumers.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub typed_properties: std::collections::BTreeMap<String, TypedPropertyValue>,
     pub children: Vec<InstanceNode>,
     pub diagnostics: Vec<String>,
 }
@@ -433,6 +440,9 @@ pub struct InstanceFeature {
     /// (AS5506D §11.3). Keyed `PropSet::Name` or `Name` (issue #237).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// `properties` as typed values (#563), same keys.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub typed_properties: std::collections::BTreeMap<String, TypedPropertyValue>,
 }
 
 /// A connection in the serializable instance tree.
@@ -447,25 +457,210 @@ pub struct InstanceConnection {
     /// `applies to <path>.<connection>` (issue #237).
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// `properties` as typed values (#563), same keys.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty", default)]
+    pub typed_properties: std::collections::BTreeMap<String, TypedPropertyValue>,
+}
+
+/// A property value as a typed, self-describing JSON value
+/// (REQ-INSTANCE-JSON-TYPED-PROPERTIES-001, #563).
+///
+/// Serialized internally tagged by `kind`, so a consumer can tell an
+/// enumeration literal from a string, which a bare JSON string cannot. Built
+/// from the [`PropertyExpr`] the HIR already lowers; the raw AADL text stays
+/// in the sibling `properties` map.
+///
+/// A value with any part that has no faithful typed form is emitted WHOLE
+/// as `Opaque` with its raw text, never dropped and never half-typed: no
+/// typed expression at all, arithmetic (not AADL, #546), a real that is not
+/// a finite `f64`, an "enumeration" that is not an AADL identifier (an
+/// integer literal too large for `i64` lowers to one), a duplicated record
+/// field, or a unit on a non-numeric value. Integers are exact `i64`s (a
+/// consumer that reads every JSON number as `f64` loses precision above
+/// 2^53). An absent unit, delta, package or implementation is omitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TypedPropertyValue {
+    /// `aadlinteger`, with its unit when written.
+    Integer {
+        value: i64,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        unit: Option<String>,
+    },
+    /// `aadlreal`, with its unit when written.
+    Real {
+        value: serde_json::Number,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        unit: Option<String>,
+    },
+    /// `aadlstring`, without its AADL quotes.
+    String { value: String },
+    /// `aadlboolean`.
+    Boolean { value: bool },
+    /// An enumeration literal (or a property-constant name: AADL syntax
+    /// cannot tell the two apart without the property's type).
+    Enum { value: String },
+    /// `list of ...`.
+    List { items: Vec<TypedPropertyValue> },
+    /// `record (...)`: field name to value.
+    Record {
+        fields: std::collections::BTreeMap<String, TypedPropertyValue>,
+    },
+    /// `range of ...`: `min .. max [delta d]`.
+    Range {
+        min: Box<TypedPropertyValue>,
+        max: Box<TypedPropertyValue>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        delta: Option<Box<TypedPropertyValue>>,
+    },
+    /// `classifier (Pkg::Type.Impl)`.
+    Classifier {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        package: Option<String>,
+        type_name: String,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        impl_name: Option<String>,
+    },
+    /// `reference (path)`, the path as written.
+    Reference { path: String },
+    /// `compute (function)`.
+    Computed { function: String },
+    /// `value (Property)`.
+    ValueRef { property: String },
+    /// No typed form: the raw text.
+    Opaque { text: String },
+}
+
+impl TypedPropertyValue {
+    /// The typed value of a property value: its typed expression when every
+    /// part of it is representable, otherwise `Opaque` with the raw text.
+    fn of(pv: &spar_hir_def::properties::PropertyValue) -> Self {
+        pv.typed_expr
+            .as_ref()
+            .and_then(Self::from_expr)
+            .unwrap_or_else(|| TypedPropertyValue::Opaque {
+                text: pv.value.clone(),
+            })
+    }
+
+    /// Convert one expression, or `None` if any part of it has no faithful
+    /// typed form (the caller then emits the whole value raw).
+    fn from_expr(expr: &PropertyExpr) -> Option<Self> {
+        let name = |n: &Name| n.as_str().to_string();
+        Some(match expr {
+            PropertyExpr::Integer(value, unit) => TypedPropertyValue::Integer {
+                value: *value,
+                unit: unit.as_ref().map(name),
+            },
+            PropertyExpr::Real(text, unit) => TypedPropertyValue::Real {
+                value: real_number(text)?,
+                unit: unit.as_ref().map(name),
+            },
+            PropertyExpr::StringLit(value) => TypedPropertyValue::String {
+                value: value.clone(),
+            },
+            PropertyExpr::Boolean(value) => TypedPropertyValue::Boolean { value: *value },
+            PropertyExpr::Enum(lit) => {
+                // An AADL identifier starts with a letter; lowering falls back
+                // to `Enum` for an integer literal that overflows `i64`.
+                if !lit.as_str().starts_with(|c: char| c.is_ascii_alphabetic()) {
+                    return None;
+                }
+                TypedPropertyValue::Enum { value: name(lit) }
+            }
+            PropertyExpr::List(items) => TypedPropertyValue::List {
+                items: items.iter().map(Self::from_expr).collect::<Option<_>>()?,
+            },
+            PropertyExpr::Record(entries) => {
+                let mut fields = std::collections::BTreeMap::new();
+                for (field, value) in entries {
+                    if fields
+                        .insert(name(field), Self::from_expr(value)?)
+                        .is_some()
+                    {
+                        return None;
+                    }
+                }
+                TypedPropertyValue::Record { fields }
+            }
+            PropertyExpr::Range { min, max, delta } => TypedPropertyValue::Range {
+                min: Box::new(Self::from_expr(min)?),
+                max: Box::new(Self::from_expr(max)?),
+                delta: match delta {
+                    Some(d) => Some(Box::new(Self::from_expr(d)?)),
+                    None => None,
+                },
+            },
+            PropertyExpr::ClassifierValue(cref) => TypedPropertyValue::Classifier {
+                package: cref.package.as_ref().map(name),
+                type_name: name(&cref.type_name),
+                impl_name: cref.impl_name.as_ref().map(name),
+            },
+            PropertyExpr::ReferenceValue(path) => {
+                TypedPropertyValue::Reference { path: path.clone() }
+            }
+            PropertyExpr::ComputedValue(function) => TypedPropertyValue::Computed {
+                function: name(function),
+            },
+            PropertyExpr::ValueRef(property) => TypedPropertyValue::ValueRef {
+                property: name(property),
+            },
+            // A unit around a unitless number is that number's unit; a unit on
+            // anything else, or a second unit, has no faithful typed form.
+            PropertyExpr::UnitValue(inner, u) => match Self::from_expr(inner)? {
+                TypedPropertyValue::Integer { value, unit: None } => TypedPropertyValue::Integer {
+                    value,
+                    unit: Some(name(u)),
+                },
+                TypedPropertyValue::Real { value, unit: None } => TypedPropertyValue::Real {
+                    value,
+                    unit: Some(name(u)),
+                },
+                _ => return None,
+            },
+            // Arithmetic is not AADL and has no value (#546).
+            PropertyExpr::BinaryOp { .. } => return None,
+            PropertyExpr::Opaque(text) => TypedPropertyValue::Opaque { text: text.clone() },
+        })
+    }
+}
+
+/// An AADL real literal (`1.5`, `1_000.0`, `-2.5E3`) as a JSON number, or
+/// `None` if it does not parse or is not a finite `f64` (`1.0E999`).
+fn real_number(text: &str) -> Option<serde_json::Number> {
+    let value: f64 = text.replace('_', "").parse().ok()?;
+    serde_json::Number::from_f64(value)
+}
+
+/// The JSON key of a property value: `PropSet::Name`, or `Name` when the
+/// value has no (or an empty) property-set qualifier.
+fn prop_key(pv: &spar_hir_def::properties::PropertyValue) -> String {
+    let name = pv.name.property_name.as_str();
+    match pv.name.property_set.as_ref() {
+        Some(ps) if !ps.as_str().is_empty() => format!("{}::{}", ps.as_str(), name),
+        _ => name.to_string(),
+    }
 }
 
 /// Flatten a resolved property map into a `PropSet::Name`/`Name` → value-text
 /// map for JSON serialization. Shared by component, feature, and connection
 /// nodes (#129, #237).
-fn prop_map_to_btree(
+fn prop_map_to_btree(pmap: &spar_hir_def::properties::PropertyMap) -> BTreeMap<String, String> {
+    pmap.iter()
+        .filter_map(|(_key, values)| values.first())
+        .map(|pv| (prop_key(pv), pv.value.clone()))
+        .collect()
+}
+
+/// [`prop_map_to_btree`] with typed values: the same keys, from the same
+/// (first) value of each property (#563).
+fn prop_map_to_typed(
     pmap: &spar_hir_def::properties::PropertyMap,
-) -> std::collections::BTreeMap<String, String> {
-    let mut out = std::collections::BTreeMap::new();
-    for (_key, values) in pmap.iter() {
-        let Some(pv) = values.first() else { continue };
-        let name = pv.name.property_name.as_str();
-        let key = match pv.name.property_set.as_ref() {
-            Some(ps) if !ps.as_str().is_empty() => format!("{}::{}", ps.as_str(), name),
-            _ => name.to_string(),
-        };
-        out.insert(key, pv.value.clone());
-    }
-    out
+) -> BTreeMap<String, TypedPropertyValue> {
+    pmap.iter()
+        .filter_map(|(_key, values)| values.first())
+        .map(|pv| (prop_key(pv), TypedPropertyValue::of(pv)))
+        .collect()
 }
 
 impl Instance {
@@ -551,6 +746,7 @@ impl Instance {
                     direction: f.direction,
                     array_index: f.array_index,
                     properties: prop_map_to_btree(self.inner.properties_for_feature(fi)),
+                    typed_properties: prop_map_to_typed(self.inner.properties_for_feature(fi)),
                 }
             })
             .collect();
@@ -595,10 +791,12 @@ impl Instance {
                 // Properties come from the ORIGINATING raw connection (the named
                 // one the `applies to` clause targets), not the whole traced
                 // path — avoids mis-attributing a hop's property (#237).
-                let properties = sc
-                    .connection_path
-                    .first()
+                let first_hop = sc.connection_path.first();
+                let properties = first_hop
                     .map(|&ci| prop_map_to_btree(self.inner.properties_for_connection(ci)))
+                    .unwrap_or_default();
+                let typed_properties = first_hop
+                    .map(|&ci| prop_map_to_typed(self.inner.properties_for_connection(ci)))
                     .unwrap_or_default();
                 InstanceConnection {
                     name: sc.name.as_str().to_string(),
@@ -607,6 +805,7 @@ impl Instance {
                     source: Some(src_name),
                     destination: Some(dst_name),
                     properties,
+                    typed_properties,
                 }
             })
             .collect();
@@ -645,6 +844,7 @@ impl Instance {
                 source: end_str(&conn.src),
                 destination: end_str(&conn.dst),
                 properties: props,
+                typed_properties: prop_map_to_typed(self.inner.properties_for_connection(ci)),
             });
         }
         connections.extend(extra);
@@ -657,6 +857,7 @@ impl Instance {
 
         // Resolved property values for this instance (fixes #129).
         let properties = prop_map_to_btree(self.inner.properties_for(idx));
+        let typed_properties = prop_map_to_typed(self.inner.properties_for(idx));
 
         InstanceNode {
             name: comp.name.as_str().to_string(),
@@ -668,6 +869,7 @@ impl Instance {
             features,
             connections,
             properties,
+            typed_properties,
             children,
             diagnostics: vec![],
         }
@@ -2280,6 +2482,7 @@ mod serde_round_trip_tests {
             direction: Some(Direction::In),
             array_index: None,
             properties: Default::default(),
+            typed_properties: Default::default(),
         };
         round_trip(&feat);
 
@@ -2290,6 +2493,7 @@ mod serde_round_trip_tests {
             direction: Some(Direction::Out),
             array_index: Some(3),
             properties: Default::default(),
+            typed_properties: Default::default(),
         };
         round_trip(&feat_arr);
     }
@@ -2305,6 +2509,7 @@ mod serde_round_trip_tests {
             source: Some("sensor.data_out".to_string()),
             destination: Some("controller.data_in".to_string()),
             properties: Default::default(),
+            typed_properties: Default::default(),
         };
         round_trip(&conn);
 
@@ -2316,6 +2521,7 @@ mod serde_round_trip_tests {
             source: None,
             destination: None,
             properties: Default::default(),
+            typed_properties: Default::default(),
         };
         round_trip(&conn2);
     }
@@ -2337,6 +2543,7 @@ mod serde_round_trip_tests {
                 direction: Some(Direction::InOut),
                 array_index: None,
                 properties: Default::default(),
+                typed_properties: Default::default(),
             }],
             connections: vec![InstanceConnection {
                 name: "bus_link".to_string(),
@@ -2345,8 +2552,10 @@ mod serde_round_trip_tests {
                 source: Some("cpu1.data_out".to_string()),
                 destination: Some("cpu2.data_in".to_string()),
                 properties: Default::default(),
+                typed_properties: Default::default(),
             }],
             properties: std::collections::BTreeMap::new(),
+            typed_properties: Default::default(),
             children: vec![
                 InstanceNode {
                     name: "cpu1".to_string(),
@@ -2361,9 +2570,11 @@ mod serde_round_trip_tests {
                         direction: Some(Direction::Out),
                         array_index: None,
                         properties: Default::default(),
+                        typed_properties: Default::default(),
                     }],
                     connections: vec![],
                     properties: std::collections::BTreeMap::new(),
+                    typed_properties: Default::default(),
                     children: vec![],
                     diagnostics: vec![],
                 },
@@ -2380,9 +2591,11 @@ mod serde_round_trip_tests {
                         direction: Some(Direction::In),
                         array_index: Some(2),
                         properties: Default::default(),
+                        typed_properties: Default::default(),
                     }],
                     connections: vec![],
                     properties: std::collections::BTreeMap::new(),
+                    typed_properties: Default::default(),
                     children: vec![],
                     diagnostics: vec!["unresolved classifier".to_string()],
                 },
@@ -2410,9 +2623,11 @@ mod serde_round_trip_tests {
                 direction: Some(Direction::In),
                 array_index: None,
                 properties: Default::default(),
+                typed_properties: Default::default(),
             }],
             connections: vec![],
             properties: std::collections::BTreeMap::new(),
+            typed_properties: Default::default(),
             children: vec![],
             diagnostics: vec![],
         };
@@ -2427,6 +2642,7 @@ mod serde_round_trip_tests {
             features: vec![],
             connections: vec![],
             properties: std::collections::BTreeMap::new(),
+            typed_properties: Default::default(),
             children: vec![thread],
             diagnostics: vec![],
         };
@@ -2441,6 +2657,7 @@ mod serde_round_trip_tests {
             features: vec![],
             connections: vec![],
             properties: std::collections::BTreeMap::new(),
+            typed_properties: Default::default(),
             children: vec![process],
             diagnostics: vec![],
         };
@@ -2511,5 +2728,120 @@ mod serde_round_trip_tests {
         let json = serde_json::to_string_pretty(&tree).unwrap();
         let back: InstanceNode = serde_json::from_str(&json).unwrap();
         assert_eq!(tree, back);
+    }
+}
+
+// ── Typed property values (REQ-INSTANCE-JSON-TYPED-PROPERTIES-001) ──
+//
+// The CLI test `instance_json_typed_properties.rs` covers every form the
+// parser produces. These cover the forms lowering never produces from AADL
+// text today (`ValueRef`, `UnitValue`, a nested `Opaque`, no typed expression
+// at all) and the real-literal parser.
+
+#[cfg(test)]
+mod typed_property_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn typed(expr: PropertyExpr) -> serde_json::Value {
+        serde_json::to_value(TypedPropertyValue::from_expr(&expr)).unwrap()
+    }
+
+    fn pv(
+        value: &str,
+        typed_expr: Option<PropertyExpr>,
+    ) -> spar_hir_def::properties::PropertyValue {
+        spar_hir_def::properties::PropertyValue {
+            name: spar_hir_def::name::PropertyRef {
+                property_set: None,
+                property_name: Name::new("P"),
+            },
+            value: value.to_string(),
+            typed_expr,
+            is_append: false,
+        }
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn value_ref_is_typed() {
+        assert_eq!(
+            typed(PropertyExpr::ValueRef(Name::new("PS::X"))),
+            json!({"kind": "value_ref", "property": "PS::X"})
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn unit_value_becomes_the_numbers_unit() {
+        let unit = |inner| PropertyExpr::UnitValue(Box::new(inner), Name::new("ms"));
+        assert_eq!(
+            typed(unit(PropertyExpr::Integer(10, None))),
+            json!({"kind": "integer", "value": 10, "unit": "ms"})
+        );
+        assert_eq!(
+            typed(unit(PropertyExpr::Real("0.5".into(), None))),
+            json!({"kind": "real", "value": 0.5, "unit": "ms"})
+        );
+        // A second unit, or a unit on a non-number, has no typed form.
+        assert_eq!(
+            typed(unit(PropertyExpr::Integer(10, Some(Name::new("us"))))),
+            json!(null)
+        );
+        assert_eq!(
+            typed(unit(PropertyExpr::Real(
+                "0.5".into(),
+                Some(Name::new("us"))
+            ))),
+            json!(null)
+        );
+        assert_eq!(typed(unit(PropertyExpr::Boolean(true))), json!(null));
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn nested_opaque_keeps_its_text() {
+        assert_eq!(
+            typed(PropertyExpr::List(vec![PropertyExpr::Opaque("??".into())])),
+            json!({"kind": "list", "items": [{"kind": "opaque", "text": "??"}]})
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn untyped_value_is_opaque_raw_text() {
+        assert_eq!(
+            TypedPropertyValue::of(&pv("weird stuff", None)),
+            TypedPropertyValue::Opaque {
+                text: "weird stuff".into()
+            }
+        );
+        assert_eq!(
+            TypedPropertyValue::of(&pv("7", Some(PropertyExpr::Integer(7, None)))),
+            TypedPropertyValue::Integer {
+                value: 7,
+                unit: None
+            }
+        );
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn keys_are_qualified_only_by_a_named_property_set() {
+        let mut v = pv("1", None);
+        assert_eq!(prop_key(&v), "P");
+        v.name.property_set = Some(Name::new(""));
+        assert_eq!(prop_key(&v), "P");
+        v.name.property_set = Some(Name::new("PS"));
+        assert_eq!(prop_key(&v), "PS::P");
+    }
+
+    // rivet: verifies REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
+    #[test]
+    fn real_literals_parse_or_refuse() {
+        assert_eq!(real_number("1_000.5"), serde_json::Number::from_f64(1000.5));
+        assert_eq!(real_number("-2.5E3"), serde_json::Number::from_f64(-2500.0));
+        assert_eq!(real_number("1.0E999"), None);
+        assert_eq!(real_number("2#1.1#"), None);
     }
 }

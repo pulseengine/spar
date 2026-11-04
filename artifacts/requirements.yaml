@@ -8139,7 +8139,7 @@ artifacts:
   - id: REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
     type: requirement
     title: instance --format json carries typed property values, not raw AADL text
-    status: approved
+    status: implemented
     description: "spar instance --format json emits every property value as its raw AADL text: an aadlinteger as \"4\", an aadlstring with its AADL quotes, a list as \"(\\\"a.c\\\")\". Reproduced on spar 0.48.0 (Period => \"4 ms\", Source_Text => \"(\\\"a.c\\\")\"). Consumers must re-parse AADL literal syntax and cannot tell an enumeration from a string. The JSON shall carry the typed value the HIR already lowers (PropertyExpr): integers and reals as numbers, units as {value, unit}, booleans as booleans, strings unquoted, enumerations, lists, records and ranges structured, alongside the existing raw-text map so current consumers keep working. Refs #563 item 1."
     release: v0.49.0
     tags: [instance, json, properties]
