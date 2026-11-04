@@ -162,20 +162,28 @@ fn component_impl(p: &mut Parser) {
 /// position is the name's. The hint proposes the legal alternative: extend
 /// the type in this package and implement the extension.
 fn qualified_realization_error(p: &mut Parser, container: Option<super::categories::Category>) {
-    // Segments `A :: B :: T` sit at even lookahead offsets.
+    // Segments `A :: B :: T` sit at even lookahead offsets; a segment is a
+    // name token, never whatever punctuation happens to follow `::`.
     let mut segments = vec![p.nth_text(0).to_string()];
     let mut n = 1;
-    while p.nth(n) == SyntaxKind::COLON_COLON && !p.nth_text(n + 1).is_empty() {
+    while p.nth(n) == SyntaxKind::COLON_COLON && p.nth(n + 1) == SyntaxKind::IDENT {
         segments.push(p.nth_text(n + 1).to_string());
         n += 2;
     }
+    // Only the complete shape `Pkg::T.i` gets the hint. An incomplete one
+    // (`Q:: ;`, `Q::.i`, `Q::` at end of file) would yield a hint built
+    // from punctuation or an empty package, so it gets the plain statement.
+    // It is still an error: `Q::.i` is otherwise consumed without one.
+    if segments.len() < 2 || p.nth(n) != SyntaxKind::DOT || p.nth(n + 1) != SyntaxKind::IDENT {
+        p.error(
+            "component implementation names its type with a package qualifier: \
+             an implementation names its type by a plain identifier",
+        );
+        return;
+    }
     let ty = segments.pop().unwrap_or_default();
     let pkg = segments.join("::");
-    let imp = if p.nth(n) == SyntaxKind::DOT {
-        p.nth_text(n + 1)
-    } else {
-        ""
-    };
+    let imp = p.nth_text(n + 1);
     let cat = container.map_or("system", |c| c.as_str());
     // The enclosing package is not known here, and it may BE `pkg` (`P::T.i`
     // inside `package P`), so the text must be right either way: declare it

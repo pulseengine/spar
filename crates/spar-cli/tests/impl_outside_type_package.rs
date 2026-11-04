@@ -250,3 +250,41 @@ fn control_extending_the_type_locally_parses_and_instantiates() {
     );
     let _ = fs::remove_dir_all(&d);
 }
+
+// rivet: verifies REQ-PARSE-IMPL-IN-TYPE-PACKAGE-001
+#[test]
+fn an_incomplete_qualified_name_is_an_error_without_a_made_up_hint() {
+    // Each of these qualifies the type but never names it with a plain
+    // identifier after `::`. They must still fail to parse (`Q::.i` is
+    // otherwise consumed with no error at all), and the message must not
+    // build a hint out of punctuation (`system ; extends Q::;`) or an empty
+    // package. `Q::;.i` is the case where a hint WOULD be complete if `;`
+    // were taken as the type's name.
+    let plain = "component implementation names its type with a package qualifier: \
+                 an implementation names its type by a plain identifier";
+    let cases = [
+        ("semicolon", "  system implementation Q:: ;\n"),
+        ("dot", "  system implementation Q::.i;\n  end Q::.i;\n"),
+        ("punct_then_impl", "  system implementation Q::;.i;\n"),
+        ("eof", "  system implementation Q::"),
+    ];
+    for (tag, decl) in cases {
+        let d = tmpdir(tag);
+        let src = format!("package P\npublic\n{decl}");
+        let p = write(&d, "p.aadl", &src);
+        let out = run(&["parse"], &[&p]);
+        let err = stderr(&out);
+
+        assert_eq!(out.status.code(), Some(1), "{tag}: stderr:\n{err}");
+        let expected = format!("{}:3:25: {plain}", p.display());
+        assert!(
+            err.lines().any(|l| l == expected),
+            "{tag}: expected the line\n  {expected}\ngot:\n{err}"
+        );
+        assert!(
+            !err.contains("names the type plainly there"),
+            "{tag}: no hint may be built from an incomplete name:\n{err}"
+        );
+        let _ = fs::remove_dir_all(&d);
+    }
+}
