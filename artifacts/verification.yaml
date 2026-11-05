@@ -5149,3 +5149,21 @@ artifacts:
         target: REQ-CI-MERGE-QUEUE-001
       - type: verifies
         target: REQ-CI-MERGE-QUEUE-001
+
+  - id: TEST-PROOF-LAKE-REACHABLE-001
+    type: feature
+    title: Every first-party Lean file is compiled by a Lake target CI builds
+    status: implemented
+    description: "tools/check_lean_reachable.py computes the import closure of the roots CI compiles (defaultTargets in proofs/lakefile.toml, plus every lean_exe a workflow runs with lake exe) and fails on any first-party .lean file outside it. A lean_lib that is not a default target is not a root, so deleting import Proofs from Main turns it red. Unmodelled lakefile keys (globs, srcDir), a lakefile.lean, an unrecognised import line and an empty population exit 2. MEASURED on the tree before this change: exit 1 naming proofs/Proofs/Network/MinPlusPwa.lean (13 of 14 reachable); with the import, 14 of 14. Importing it exposed that the file no longer elaborated (List.minimum?/List.maximum?, absent from the pinned Lean); renamed to List.min?/List.max?, after which the full lake build passes and lake exe codegen is byte-identical. Sorry count unchanged at 12: the text ratchet counted these 8 all along. Self-test 18 cases; 5 potency mutants, each SURVIVED with its catching case removed and CAUGHT by the full suite. NOT claimed: that MinPlusPwa is proven. All 8 of its theorems are still sorry."
+    release: v0.49.0
+    tags: [proofs, lean, guardrail, ci]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_lean_reachable.py --self-test
+        - run: tools/check_lean_reachable.py
+    links:
+      - type: satisfies
+        target: REQ-PROOF-LAKE-REACHABLE-001
+      - type: verifies
+        target: REQ-PROOF-LAKE-REACHABLE-001
