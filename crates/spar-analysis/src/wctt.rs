@@ -27,6 +27,9 @@
 //! - [`Severity::Error`] `WcttExceedsBudget`: a stream's predicted bound
 //!   exceeds an explicit `Spar_Network::WCTT_Budget` set on the source
 //!   bus.
+//! - [`Severity::Warning`] `WcttBudgetIgnored`: a `WCTT_Budget` declared on
+//!   a bus other than the stream's source bus, which is never evaluated
+//!   (#481); one per such bus per stream.
 //! - [`Severity::Error`] `WcttUnservable`: at some hop the residual
 //!   service for the tagged stream is exhausted by competing flows
 //!   (`ρ_competing ≥ R`); the analysis stops walking that stream.
@@ -892,6 +895,43 @@ impl WcttAnalysis {
                     path: stream_path.clone(),
                     analysis: self.name().to_string(),
                 });
+            }
+
+            // Step 6a (#481): only the source bus's budget is evaluated, so a
+            // WCTT_Budget declared on any later bus of the stream is a
+            // constraint nothing checks. Say so per bus, rather than let it
+            // render the same as one that was met. Semantics are unchanged:
+            // the ignored budget is not compared against anything.
+            if let Some(&first_bus) = stream.hops.first() {
+                let bus_name = |idx: ComponentInstanceIdx| {
+                    graph
+                        .node(idx)
+                        .map(|n| n.name.as_str())
+                        .unwrap_or("<unknown>")
+                };
+                let mut reported: Vec<ComponentInstanceIdx> = Vec::new();
+                for &hop in stream.hops.iter().skip(1) {
+                    if hop == first_bus || reported.contains(&hop) {
+                        continue;
+                    }
+                    if let Some(&ignored_ps) = budget_ps_for_bus.get(&hop) {
+                        reported.push(hop);
+                        diags.push(AnalysisDiagnostic {
+                            severity: Severity::Warning,
+                            message: format!(
+                                "WcttBudgetIgnored: stream '{}' — WCTT_Budget {} ps on bus \
+                                 '{}' is not evaluated; only the source bus '{}' budget is \
+                                 compared against the end-to-end bound",
+                                stream_name,
+                                ignored_ps,
+                                bus_name(hop),
+                                bus_name(first_bus),
+                            ),
+                            path: stream_path.clone(),
+                            analysis: self.name().to_string(),
+                        });
+                    }
+                }
             }
 
             // Step 6b: PROVENANCE (#478). `hops_counted` is the number of hops
@@ -2531,6 +2571,180 @@ end Net;
             info.message.contains("87432000 ps"),
             "expected 87.432 us bound (51 us NC + 36.432 us quantization), got: {}",
             info.message
+        );
+    }
+
+    // ── #481: a WCTT_Budget on a non-source bus is reported as ignored ──
+    //
+    // Two switches in series, `sw1` (source) then `sw2`. `@@B1@@` / `@@B2@@`
+    // are each bus type's budget line, empty when that bus declares none.
+    const TWO_HOP_BUDGET_MODEL: &str = r#"
+package Net
+public
+  bus eth1
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+      @@B1@@
+  end eth1;
+  bus implementation eth1.impl
+  end eth1.impl;
+  bus eth2
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;
+      Spar_Network::Forwarding_Latency => 5 us .. 5 us;
+      Spar_Network::Queue_Depth        => 1;
+      @@B2@@
+  end eth2;
+  bus implementation eth2.impl
+  end eth2.impl;
+  device d
+    features
+      net : requires bus access;
+      out_p : out data port;
+      in_p  : in data port;
+  end d;
+  device implementation d.impl
+  end d.impl;
+  system Sys
+  end Sys;
+  system implementation Sys.impl
+    subcomponents
+      sw1 : bus eth1.impl;
+      sw2 : bus eth2.impl;
+      a   : device d.impl;
+      b   : device d.impl;
+    connections
+      c_sw1_a : bus access sw1 -> a.net;
+      c_sw2_b : bus access sw2 -> b.net;
+      data1   : port a.out_p -> b.in_p;
+    properties
+      Deployment_Properties::Actual_Connection_Binding =>
+        (reference (sw1), reference (sw2));
+  end Sys.impl;
+end Net;
+"#;
+
+    fn two_hop_budget_diags(b1: &str, b2: &str) -> Vec<AnalysisDiagnostic> {
+        let src = TWO_HOP_BUDGET_MODEL
+            .replace("@@B1@@", b1)
+            .replace("@@B2@@", b2);
+        let inst = instantiate(&src, "Net", "Sys", "impl");
+        WcttAnalysis::default().analyze(&inst)
+    }
+
+    fn budget_ignored(diags: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        diags
+            .iter()
+            .filter(|d| d.message.starts_with("WcttBudgetIgnored"))
+            .collect()
+    }
+
+    // rivet: verifies REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    #[test]
+    fn budget_on_a_non_source_bus_is_reported_as_ignored() {
+        // A 1 us budget the ~58 us bound would blow nine times over: before
+        // #481 nothing at all was said about it.
+        let diags = two_hop_budget_diags("", "Spar_Network::WCTT_Budget => 1 us;");
+        let ignored = budget_ignored(&diags);
+        assert_eq!(ignored.len(), 1, "one ignored budget: {diags:#?}");
+        let d = ignored[0];
+        assert_eq!(d.severity, Severity::Warning, "{d:#?}");
+        assert!(
+            d.message.contains("'data1") && d.message.contains("'sw2'"),
+            "must name the stream and the bus whose budget was ignored: {}",
+            d.message
+        );
+        assert!(
+            d.message.contains("1000000 ps"),
+            "must state the ignored budget: {}",
+            d.message
+        );
+        assert!(
+            d.message.contains("'sw1'"),
+            "must name the source bus whose budget is the one evaluated: {}",
+            d.message
+        );
+        // Semantics unchanged (option 3 only): the ignored budget is not
+        // turned into a check.
+        assert!(
+            !diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttExceedsBudget")),
+            "a non-source budget must not be evaluated: {diags:#?}"
+        );
+    }
+
+    // rivet: verifies REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    #[test]
+    fn budget_on_the_source_bus_alone_is_not_reported_as_ignored() {
+        let diags = two_hop_budget_diags("Spar_Network::WCTT_Budget => 1 us;", "");
+        assert!(budget_ignored(&diags).is_empty(), "{diags:#?}");
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.starts_with("WcttExceedsBudget")),
+            "the source budget is still evaluated: {diags:#?}"
+        );
+    }
+
+    // rivet: verifies REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    #[test]
+    fn budgets_on_both_buses_report_only_the_non_source_one() {
+        let diags = two_hop_budget_diags(
+            "Spar_Network::WCTT_Budget => 1000 us;",
+            "Spar_Network::WCTT_Budget => 2 us;",
+        );
+        let ignored = budget_ignored(&diags);
+        assert_eq!(ignored.len(), 1, "{diags:#?}");
+        assert!(
+            ignored[0].message.contains("'sw2'") && ignored[0].message.contains("2000000 ps"),
+            "{}",
+            ignored[0].message
+        );
+    }
+
+    // rivet: verifies REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    #[test]
+    fn a_bus_revisited_by_the_stream_is_reported_at_most_once_and_never_the_source() {
+        // Binding sw1 -> sw2 -> sw2 -> sw1. The source bus's budget is the one
+        // evaluated, so its second visit is not an ignored budget; sw2's
+        // budget is ignored once, not once per visit.
+        let bind = |src: &str| {
+            src.replace(
+                "(reference (sw1), reference (sw2));",
+                "(reference (sw1), reference (sw2), reference (sw2), reference (sw1));",
+            )
+        };
+        let only_source = bind(TWO_HOP_BUDGET_MODEL)
+            .replace("@@B1@@", "Spar_Network::WCTT_Budget => 1 us;")
+            .replace("@@B2@@", "");
+        let diags =
+            WcttAnalysis::default().analyze(&instantiate(&only_source, "Net", "Sys", "impl"));
+        assert!(
+            diags.iter().any(|d| d.message.contains("(4 hops)")),
+            "the binding must yield a four-hop stream, or this case checks nothing: {diags:#?}"
+        );
+        assert!(budget_ignored(&diags).is_empty(), "{diags:#?}");
+
+        let both = bind(TWO_HOP_BUDGET_MODEL)
+            .replace("@@B1@@", "")
+            .replace("@@B2@@", "Spar_Network::WCTT_Budget => 1 us;");
+        let diags = WcttAnalysis::default().analyze(&instantiate(&both, "Net", "Sys", "impl"));
+        assert_eq!(budget_ignored(&diags).len(), 1, "{diags:#?}");
+    }
+
+    // rivet: verifies REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
+    #[test]
+    fn no_budget_anywhere_reports_nothing_ignored() {
+        let diags = two_hop_budget_diags("", "");
+        assert!(budget_ignored(&diags).is_empty(), "{diags:#?}");
+        assert!(
+            diags.iter().any(|d| d.message.starts_with("WcttBound")),
+            "the stream is still bounded: {diags:#?}"
         );
     }
 
