@@ -8139,15 +8139,19 @@ artifacts:
   - id: REQ-INSTANCE-JSON-TYPED-PROPERTIES-001
     type: requirement
     title: instance --format json carries typed property values, not raw AADL text
-    status: implemented
-    description: "spar instance --format json emits every property value as its raw AADL text: an aadlinteger as \"4\", an aadlstring with its AADL quotes, a list as \"(\\\"a.c\\\")\". Reproduced on spar 0.48.0 (Period => \"4 ms\", Source_Text => \"(\\\"a.c\\\")\"). Consumers must re-parse AADL literal syntax and cannot tell an enumeration from a string. The JSON shall carry the typed value the HIR already lowers (PropertyExpr): integers and reals as numbers, units as {value, unit}, booleans as booleans, strings unquoted, enumerations, lists, records and ranges structured, alongside the existing raw-text map so current consumers keep working. Refs #563 item 1."
-    release: v0.49.0
+    status: verified
+    description: |-
+      spar instance --format json emits every property value as its raw AADL text: an aadlinteger as "4", an aadlstring with its AADL quotes, a list as "(\"a.c\")". Reproduced on spar 0.48.0 (Period => "4 ms", Source_Text => "(\"a.c\")"). Consumers must re-parse AADL literal syntax and cannot tell an enumeration from a string. The JSON shall carry the typed value the HIR already lowers (PropertyExpr): integers and reals as numbers, units as {value, unit}, booleans as booleans, strings unquoted, enumerations, lists, records and ranges structured, alongside the existing raw-text map so current consumers keep working. Refs #563 item 1.
+      VERIFIED 2026-11-05 on CI: PR #571 (squash 1d75df0), 11 test markers; merge_group runs CI 41953650365, Verification Gate 41953650450, Lean Proofs 41953650264 and the push runs CI 41962812886, Lean Proofs 41962812869 all success.
+    release: v0.48.2
     tags: [instance, json, properties]
 
   - id: REQ-PARSE-IMPL-IN-TYPE-PACKAGE-001
     type: requirement
     title: an implementation declared outside its type's package is a parse diagnostic, not a later instantiation failure
-    status: implemented
-    description: "A component implementation named with a qualified type (system implementation Other_Pkg::T.i, inside package P) is accepted by spar parse (OK, exit 0) and then fails at instantiation with 'no component implementation with that qualified name'. Reproduced on spar 0.48.0. AS5506 requires an implementation to be declared in the package of its type (extend the type locally instead). spar parse shall report it as an error naming the type's package, with the extend-locally hint. Refs #563 item 2."
-    release: v0.49.0
+    status: verified
+    description: |-
+      A component implementation named with a qualified type (system implementation Other_Pkg::T.i, inside package P) is accepted by spar parse (OK, exit 0) and then fails at instantiation with 'no component implementation with that qualified name'. Reproduced on spar 0.48.0. AS5506 requires an implementation to be declared in the package of its type (extend the type locally instead). spar parse shall report it as an error naming the type's package, with the extend-locally hint. Refs #563 item 2.
+      VERIFIED 2026-11-05 on CI: PR #570 (squash 6b5f7a5), 7 test markers; merge_group runs CI 41961837830, Verification Gate 41961837868, Lean Proofs 41961837828 and the push runs CI 41964324716, Lean Proofs 41964324796 all success.
+    release: v0.48.2
     tags: [parse, naming, legality]
