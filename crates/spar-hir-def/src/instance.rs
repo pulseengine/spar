@@ -1706,6 +1706,10 @@ struct Builder<'a> {
 
 /// A property association queued for its `applies to` target: the declaring
 /// component, the path, the value, and the association's modal values.
+/// A feature's own property associations: the item tree that declares them
+/// and their indices in it.
+type FeatureProps = (usize, Vec<crate::item_tree::PropertyAssociationIdx>);
+
 type PendingAppliesTo = (
     ComponentInstanceIdx,
     String,
@@ -2363,6 +2367,7 @@ impl<'a> Builder<'a> {
         Option<crate::name::ClassifierRef>,
         Option<crate::item_tree::AccessKind>,
         Vec<crate::item_tree::ArrayDimension>,
+        FeatureProps,
     )> {
         let Some(ct) = self.scope.get_component_type(loc) else {
             self.feature_chain_incomplete = true;
@@ -2407,6 +2412,7 @@ impl<'a> Builder<'a> {
                     feat.classifier.clone(),
                     feat.access_kind,
                     feat.array_dimensions.clone(),
+                    (loc.tree, feat.property_associations.clone()),
                 ));
             } else {
                 self.feature_chain_incomplete = true;
@@ -2812,7 +2818,9 @@ impl<'a> Builder<'a> {
 
         // Instantiate features
         let mut feat_indices = Vec::new();
-        for (name, kind, direction, classifier, access_kind, array_dims) in feat_data {
+        for (name, kind, direction, classifier, access_kind, array_dims, (feat_tree, feat_pas)) in
+            feat_data
+        {
             let feat_count = array_element_count(&array_dims, &mut self.diagnostics, &name);
             let feat_is_array = !array_dims.is_empty();
             let data_size_bytes = classifier
@@ -2836,6 +2844,45 @@ impl<'a> Builder<'a> {
                     array_index: feat_array_index,
                     data_size_bytes,
                 });
+                // The feature's own `{ ... }` property associations
+                // (REQ-TSN-COS-PLACEMENT-001). They were never lowered: only
+                // `applies to <sub>.<feature>` reached feature_property_maps,
+                // so `out_p : out data port { Spar_TSN::Class_of_Service => 7; }`
+                // reached no property map at all. Declared in the component's
+                // type, their references resolve from the component itself.
+                // An `applies to` value from an enclosing component is
+                // attached later, in resolve_pending_applies_to, and so
+                // overrides these, the same order as connections.
+                //
+                // An `applies to` inside the feature's own association names
+                // a member of the FEATURE's classifier (OSATE bug-track
+                // issue458: `dp1 : in data port d1 { ps::def1 => true applies
+                // to af1; }`, af1 a feature of data d1). Those members are
+                // not instantiated under a port, so the path cannot resolve
+                // from the component; such associations are skipped, as they
+                // were before this lowering existed.
+                if !feat_pas.is_empty()
+                    && let Some(tree) = self.scope.tree(feat_tree)
+                {
+                    let mut map = PropertyMap::new();
+                    for &pa_idx in &feat_pas {
+                        let pa = &tree.property_associations[pa_idx];
+                        if pa.applies_to.is_some() {
+                            continue;
+                        }
+                        Self::push_property_association(
+                            pa,
+                            idx,
+                            None,
+                            &mut map,
+                            &mut self.pending_applies_to,
+                            PropertySource::DeclaredLocal,
+                        );
+                    }
+                    if !map.is_empty() {
+                        self.feature_property_maps.insert(fi, map);
+                    }
+                }
                 feat_indices.push(fi);
             }
         }
