@@ -2355,7 +2355,6 @@ impl<'a> Builder<'a> {
 
     /// Deduplicates by name (child overrides parent for refined features).
     #[allow(clippy::type_complexity)]
-    #[allow(clippy::type_complexity)]
     fn collect_type_chain_features(
         &mut self,
         loc: crate::resolver::ItemLoc,
