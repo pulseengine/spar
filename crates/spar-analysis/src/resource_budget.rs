@@ -7,7 +7,9 @@
 //!   (Source_Code_Size + Data_Size + Stack_Size) of bound software components
 //!   and compares against Memory_Size capacity.
 //! - **Bandwidth budget**: For each bus, checks if total Data_Rate of bound
-//!   connections exceeds bus bandwidth.
+//!   connections exceeds bus bandwidth. A component bound to the bus adds its
+//!   own Data_Rate; a connection with its own binding to the bus adds the
+//!   connection's.
 //!
 //! This is a v1 implementation focusing on memory budgets since those
 //! properties are most commonly specified in AADL models.
@@ -17,7 +19,8 @@ use spar_hir_def::item_tree::ComponentCategory;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
-    binding_names, extract_reference_target, get_memory_binding, get_size_property,
+    binding_names, connection_own_binding_is, extract_reference_target, get_memory_binding,
+    get_size_property,
 };
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
@@ -230,6 +233,27 @@ fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDi
                 if let Some(rate_raw) = comp_props
                     .get("Communication_Properties", "Data_Rate")
                     .or_else(|| comp_props.get("", "Data_Rate"))
+                    && let Some(rate) = parse_data_rate(rate_raw)
+                {
+                    total_rate += rate;
+                    connection_count += 1;
+                }
+            }
+        }
+
+        // A connection with its OWN binding to this bus (inline on the
+        // connection, or `applies to <conn>`) adds its own `Data_Rate`
+        // (REQ-AADL-BINDING-CONSUMERS-002 item 3, #515). Reading only
+        // component maps made such a connection invisible here.
+        for (_owner, owner_comp) in instance.all_components() {
+            for &conn_idx in &owner_comp.connections {
+                if connection_own_binding_is(instance, conn_idx, bus_idx) != Some(true) {
+                    continue;
+                }
+                let conn_props = instance.properties_for_connection(conn_idx);
+                if let Some(rate_raw) = conn_props
+                    .get("Communication_Properties", "Data_Rate")
+                    .or_else(|| conn_props.get("", "Data_Rate"))
                     && let Some(rate) = parse_data_rate(rate_raw)
                 {
                     total_rate += rate;

@@ -1694,3 +1694,59 @@ pub(crate) fn binding_names(
             .eq_ignore_ascii_case(instance.component(target).name.as_str()),
     }
 }
+
+const ACB: &str = "Actual_Connection_Binding";
+
+/// The name a binding value refers to: the target of `reference (...)`, or
+/// the whole value as a plain name.
+fn binding_target(val: &str) -> &str {
+    extract_reference_target(val).unwrap_or_else(|| val.trim().trim_matches(['(', ')']).trim())
+}
+
+/// The connection's OWN `Actual_Connection_Binding` (inline `{ ... }` on the
+/// connection, or `applies to <conn>`; both lower onto the per-connection
+/// property map), compared with `bus` by identity from the component that
+/// declared it. `None` when the connection has no binding of its own.
+pub(crate) fn connection_own_binding_is(
+    instance: &spar_hir_def::instance::SystemInstance,
+    conn: spar_hir_def::instance::ConnectionInstanceIdx,
+    bus: spar_hir_def::instance::ComponentInstanceIdx,
+) -> Option<bool> {
+    let props = instance.properties_for_connection(conn);
+    let val = props
+        .get("Deployment_Properties", ACB)
+        .or_else(|| props.get("", ACB))?;
+    let name = binding_target(val);
+    let ctx = instance.connection_reference_context(conn, "Deployment_Properties", ACB);
+    Some(match instance.resolve_reference(ctx, name) {
+        Some(idx) => idx == bus,
+        None => name.eq_ignore_ascii_case(instance.component(bus).name.as_str()),
+    })
+}
+
+/// Whether connection `conn`, owned by `owner`, is bound to `bus`.
+///
+/// The connection's own binding governs when it has one; only a connection
+/// with none inherits the owning component's, the legacy form, which applies
+/// to all its connections. Same precedence as `wrpc_binding` and `wctt`.
+pub(crate) fn connection_bound_to(
+    instance: &spar_hir_def::instance::SystemInstance,
+    owner: spar_hir_def::instance::ComponentInstanceIdx,
+    conn: spar_hir_def::instance::ConnectionInstanceIdx,
+    bus: spar_hir_def::instance::ComponentInstanceIdx,
+) -> bool {
+    if let Some(own) = connection_own_binding_is(instance, conn, bus) {
+        return own;
+    }
+    let owner_props = instance.properties_for(owner);
+    match owner_props
+        .get("Deployment_Properties", ACB)
+        .or_else(|| owner_props.get("", ACB))
+    {
+        // By identity, from the declaring component (#498). A value that is
+        // not a `reference (...)` is compared as a whole name; it used to be a
+        // SUBSTRING match, so `bus` matched `can_bus`.
+        Some(val) => binding_names(instance, owner, ACB, binding_target(val), bus),
+        None => false,
+    }
+}

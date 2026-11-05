@@ -41,16 +41,14 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{
-    ComponentInstanceIdx, ConnectionInstanceIdx, SystemInstance, SystemOperationMode,
-};
+use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use spar_hir_def::item_tree::PropertyExpr;
 
 use crate::modal::is_component_active_in_som;
 use crate::property_accessors::{
-    binding_names, extract_real, extract_reference_target, get_size_property, get_timing_property,
+    connection_bound_to, extract_real, get_size_property, get_timing_property,
 };
 use crate::{Analysis, AnalysisDiagnostic, ModalAnalysis, Severity, component_path};
 
@@ -263,53 +261,6 @@ impl BusBandwidthAnalysis {
         }
 
         diags
-    }
-}
-
-const ACB: &str = "Actual_Connection_Binding";
-
-/// The name a binding value refers to: the target of `reference (...)`, or
-/// the whole value as a plain name.
-fn binding_target(val: &str) -> &str {
-    extract_reference_target(val).unwrap_or_else(|| val.trim().trim_matches(['(', ')']).trim())
-}
-
-/// Whether connection `conn_idx`, owned by `owner`, is bound to `bus_idx`.
-///
-/// The connection's own `Actual_Connection_Binding` governs when it has one
-/// (inline `{ ... }` on the connection, or `applies to <conn>` — both lower
-/// onto the per-connection property map), and is resolved from the component
-/// that declared it. Only a connection with no binding of its own inherits the
-/// owning component's, the legacy form, which applies to all its connections.
-/// Same precedence as `wrpc_binding` and `wctt`.
-fn connection_bound_to(
-    instance: &SystemInstance,
-    owner: ComponentInstanceIdx,
-    conn_idx: ConnectionInstanceIdx,
-    bus_idx: ComponentInstanceIdx,
-) -> bool {
-    let conn_props = instance.properties_for_connection(conn_idx);
-    if let Some(val) = conn_props
-        .get("Deployment_Properties", ACB)
-        .or_else(|| conn_props.get("", ACB))
-    {
-        let name = binding_target(val);
-        let ctx = instance.connection_reference_context(conn_idx, "Deployment_Properties", ACB);
-        return match instance.resolve_reference(ctx, name) {
-            Some(idx) => idx == bus_idx,
-            None => name.eq_ignore_ascii_case(instance.component(bus_idx).name.as_str()),
-        };
-    }
-    let owner_props = instance.properties_for(owner);
-    match owner_props
-        .get("Deployment_Properties", ACB)
-        .or_else(|| owner_props.get("", ACB))
-    {
-        // By identity, from the declaring component (#498). A value that is
-        // not a `reference (...)` is compared as a whole name; it used to be a
-        // SUBSTRING match, so `bus` matched `can_bus`.
-        Some(val) => binding_names(instance, owner, ACB, binding_target(val), bus_idx),
-        None => false,
     }
 }
 
