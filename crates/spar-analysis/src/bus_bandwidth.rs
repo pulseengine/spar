@@ -7,7 +7,8 @@
 //! # Algorithm
 //!
 //! For each bus component in the instance model:
-//! 1. Find connections whose owning component has `Actual_Connection_Binding`
+//! 1. Find connections whose own `Actual_Connection_Binding` (inline, or
+//!    `applies to <conn>`) — or, failing that, their owning component's —
 //!    pointing to this bus.
 //! 2. For each bound connection, compute bandwidth demand:
 //!    - `Data_Size` of the data type being transferred, read from the source
@@ -40,7 +41,9 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance, SystemOperationMode};
+use spar_hir_def::instance::{
+    ComponentInstanceIdx, ConnectionInstanceIdx, SystemInstance, SystemOperationMode,
+};
 use spar_hir_def::item_tree::ComponentCategory;
 
 use spar_hir_def::item_tree::PropertyExpr;
@@ -130,40 +133,17 @@ impl BusBandwidthAnalysis {
             // Bound to this bus but contributing nothing, with the reason.
             let mut unaccounted: Vec<(String, Unaccounted)> = Vec::new();
 
-            // Walk all components looking for Actual_Connection_Binding referencing this bus.
-            for (comp_idx, _comp) in instance.all_components() {
-                let comp_props = instance.properties_for(comp_idx);
-
-                let binding = comp_props
-                    .get("Deployment_Properties", "Actual_Connection_Binding")
-                    .or_else(|| comp_props.get("", "Actual_Connection_Binding"));
-
-                // By identity, from the declaring component (#498). A value
-                // that is not a `reference (...)` is compared as a whole name;
-                // it used to be a SUBSTRING match, so `bus` matched `can_bus`.
-                let bound_to_this_bus = match binding {
-                    Some(val) => {
-                        let name = extract_reference_target(val)
-                            .unwrap_or_else(|| val.trim().trim_matches(['(', ')']).trim());
-                        binding_names(
-                            instance,
-                            comp_idx,
-                            "Actual_Connection_Binding",
-                            name,
-                            bus_idx,
-                        )
-                    }
-                    None => false,
-                };
-
-                if !bound_to_this_bus {
-                    continue;
-                }
-
-                // This component has connections bound to this bus.
-                // Walk its connection instances and compute demand for each.
-                let comp = instance.component(comp_idx);
+            // Walk every connection, each with the binding that governs it:
+            // its own `Actual_Connection_Binding` (inline on the connection,
+            // or `applies to <conn>`) first, then the owning component's
+            // (REQ-AADL-BINDING-CONSUMERS-002 item 3, #515). Reading only the
+            // owner's map made a connection-level binding invisible, so a bus
+            // carrying it was scored as idle.
+            for (comp_idx, comp) in instance.all_components() {
                 for &conn_idx in &comp.connections {
+                    if !connection_bound_to(instance, comp_idx, conn_idx, bus_idx) {
+                        continue;
+                    }
                     let conn = &instance.connections[conn_idx];
 
                     // Try to resolve the source subcomponent to get Data_Size and Period.
@@ -283,6 +263,53 @@ impl BusBandwidthAnalysis {
         }
 
         diags
+    }
+}
+
+const ACB: &str = "Actual_Connection_Binding";
+
+/// The name a binding value refers to: the target of `reference (...)`, or
+/// the whole value as a plain name.
+fn binding_target(val: &str) -> &str {
+    extract_reference_target(val).unwrap_or_else(|| val.trim().trim_matches(['(', ')']).trim())
+}
+
+/// Whether connection `conn_idx`, owned by `owner`, is bound to `bus_idx`.
+///
+/// The connection's own `Actual_Connection_Binding` governs when it has one
+/// (inline `{ ... }` on the connection, or `applies to <conn>` — both lower
+/// onto the per-connection property map), and is resolved from the component
+/// that declared it. Only a connection with no binding of its own inherits the
+/// owning component's, the legacy form, which applies to all its connections.
+/// Same precedence as `wrpc_binding` and `wctt`.
+fn connection_bound_to(
+    instance: &SystemInstance,
+    owner: ComponentInstanceIdx,
+    conn_idx: ConnectionInstanceIdx,
+    bus_idx: ComponentInstanceIdx,
+) -> bool {
+    let conn_props = instance.properties_for_connection(conn_idx);
+    if let Some(val) = conn_props
+        .get("Deployment_Properties", ACB)
+        .or_else(|| conn_props.get("", ACB))
+    {
+        let name = binding_target(val);
+        let ctx = instance.connection_reference_context(conn_idx, "Deployment_Properties", ACB);
+        return match instance.resolve_reference(ctx, name) {
+            Some(idx) => idx == bus_idx,
+            None => name.eq_ignore_ascii_case(instance.component(bus_idx).name.as_str()),
+        };
+    }
+    let owner_props = instance.properties_for(owner);
+    match owner_props
+        .get("Deployment_Properties", ACB)
+        .or_else(|| owner_props.get("", ACB))
+    {
+        // By identity, from the declaring component (#498). A value that is
+        // not a `reference (...)` is compared as a whole name; it used to be a
+        // SUBSTRING match, so `bus` matched `can_bus`.
+        Some(val) => binding_names(instance, owner, ACB, binding_target(val), bus_idx),
+        None => false,
     }
 }
 
