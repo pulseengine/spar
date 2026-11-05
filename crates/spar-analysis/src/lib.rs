@@ -334,7 +334,11 @@ impl Default for AnalysisRunner {
 use spar_hir_def::instance::ComponentInstanceIdx;
 
 /// Build the element path for a component instance by walking up through parents.
-pub(crate) fn component_path(instance: &SystemInstance, idx: ComponentInstanceIdx) -> Vec<String> {
+///
+/// This is the `path` every [`AnalysisDiagnostic`] carries, so a consumer can
+/// map a diagnostic back to its component by identity rather than by the
+/// names in its message text.
+pub fn component_path(instance: &SystemInstance, idx: ComponentInstanceIdx) -> Vec<String> {
     let mut path = Vec::new();
     let mut current = Some(idx);
     while let Some(ci) = current {

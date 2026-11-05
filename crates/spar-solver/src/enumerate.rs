@@ -209,7 +209,8 @@ pub fn rank_candidate(
         .into_iter()
         .collect();
 
-    let max_response_ns = compute_max_response_ns(&analysis_diags, &target_names);
+    let max_response_ns =
+        compute_max_response_ns(instance, overlay, &analysis_diags, &target_names);
 
     // Overlay-aware utilisation aggregate. We sum over every thread
     // whose effective binding (under the overlay) is one of the
@@ -247,24 +248,39 @@ fn run_all_analyses(instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
     runner.run_all(instance)
 }
 
-/// Compute `max(response_time)` in picoseconds across threads on a set
-/// of candidate processor names.
+/// Compute `max(response_time)` in picoseconds across the RTA results for
+/// threads that run on one of the overlay's target processors.
 ///
-/// Walks the analysis-diagnostic stream looking for RTA messages of the
-/// form `"thread '...' on processor '<target>': response time <X> <=
-/// deadline <Y>"` (Info, parsed for the response-time value) or
-/// `"thread '...' on processor '<target>' misses deadline"` (Error,
-/// returns the negative-sentinel). Returns:
+/// A thread is matched to a target BY IDENTITY (#498, item 2 of
+/// REQ-AADL-BINDING-CONSUMERS-002): the RTA diagnostic's `path` names the
+/// thread, and the processor its declared binding resolves to (from the
+/// declarer, with no overlay, because the analysis stream was computed on the
+/// un-overlaid instance) must be one of the overlay's targets. Matching the
+/// processor NAME in the message text attributed a deadline miss on one `cpu`
+/// to every other processor called `cpu`, and never matched a binding written
+/// `reference (hw.cpu)`, whose message prints `hw.cpu`. A binding that does not
+/// resolve falls back to that text match, as before.
+///
+/// The response value itself is still parsed from the message
+/// (`"... response time <X> <= deadline <Y>"`, Info) and a miss is read from
+/// `"... misses deadline"` (Error). Returns:
 ///
 /// - `Some(picoseconds)` (positive) — the max response across matched
 ///   threads.
 /// - `Some(-1)` — a deadline miss was found on any matched thread.
-/// - `None` — no RTA diagnostic mentions any candidate target (e.g.,
+/// - `None` — no RTA diagnostic matches any candidate target (e.g.,
 ///   the model has no RTA-visible threads).
-fn compute_max_response_ns(diags: &[AnalysisDiagnostic], target_names: &[String]) -> Option<i64> {
+fn compute_max_response_ns(
+    instance: &SystemInstance,
+    overlay: &BindingOverlay,
+    diags: &[AnalysisDiagnostic],
+    target_names: &[String],
+) -> Option<i64> {
     if target_names.is_empty() {
         return None;
     }
+    let targets: Vec<ComponentInstanceIdx> = overlay.moves.values().copied().collect();
+    let mut thread_at: Option<std::collections::HashMap<Vec<String>, ComponentInstanceIdx>> = None;
     let mut max_response: Option<i64> = None;
     let mut had_miss = false;
     let mut had_match = false;
@@ -273,11 +289,30 @@ fn compute_max_response_ns(diags: &[AnalysisDiagnostic], target_names: &[String]
         if d.analysis != "rta" && d.analysis != "RtaAnalysis" {
             continue;
         }
+        // Only the per-thread RTA results (`thread '…' on processor '…'`) carry
+        // a thread's response; the ISR-overload and IRQ-chain lines do not,
+        // and were never counted. Identity replaces only the NAME test.
         let msg_lower = d.message.to_ascii_lowercase();
-        let mentions_target = target_names
-            .iter()
-            .any(|t| msg_lower.contains(&format!("on processor '{t}'")));
-        if !mentions_target {
+        if !msg_lower.contains("on processor '") {
+            continue;
+        }
+        let threads = thread_at.get_or_insert_with(|| {
+            instance
+                .all_components()
+                .filter(|(_, c)| c.category == ComponentCategory::Thread)
+                .map(|(idx, _)| (spar_analysis::component_path(instance, idx), idx))
+                .collect()
+        });
+        let bound = threads
+            .get(&d.path)
+            .and_then(|&t| actual_processor_binding_with_overlay(instance, t, None));
+        let on_target = match bound {
+            Some(processor) => targets.contains(&processor),
+            None => target_names
+                .iter()
+                .any(|t| msg_lower.contains(&format!("on processor '{t}'"))),
+        };
+        if !on_target {
             continue;
         }
         had_match = true;
