@@ -5937,7 +5937,7 @@ artifacts:
       stated evidence still holds, not that the evidence supports the wording.
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [process, guardrail, claims, documentation]
 
@@ -6042,7 +6042,7 @@ artifacts:
       the correct behaviour for a CI annotator; the defect is the human-facing
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [analysis, ux, diagnostics]
 
@@ -6069,7 +6069,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.49.0
+    release: v0.50.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6100,7 +6100,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.49.0
+    release: v0.50.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6125,7 +6125,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.49.0
+    release: v0.50.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6162,7 +6162,7 @@ artifacts:
       SysML v2. That is the RTESC working group's to settle. If they publish a
       form, spar adopts it; until then spar's expression is a proposal and must
       be labelled as one wherever it is emitted.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
@@ -7209,7 +7209,7 @@ artifacts:
       NOT CLAIMED, and not claimable from this repo: that a real switch accepts
       the output. The evaluator did not test a switch or a NETCONF session and
       neither has this triage. Schema-valid is necessary, not sufficient.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [tsn, yang, interop, bug, deployment]
 
@@ -7239,7 +7239,7 @@ artifacts:
       us end-to-end against a 100 us/hop budget over 2 hops), and exposing a
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [tsn, cli, synthesis, interop]
 
@@ -7262,7 +7262,7 @@ artifacts:
       vendor attribute and may be absent, so the requirement is that a cycle
       time present in the source reaches the model, and that its ABSENCE is
       reported rather than silently yielding an unrated frame.
-    status: proposed
+    status: approved
     release: v0.49.0
     tags: [dbc, can, ingest, interop]
   - id: REQ-TSN-WCTT-PROVENANCE-001
@@ -7494,7 +7494,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-16T03:14:13Z
-    release: v0.49.0
+    release: v0.50.0
 
   - id: REQ-CI-MUTANTS-IN-DIFF-001
     type: requirement
@@ -7831,7 +7831,7 @@ artifacts:
   - id: REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001
     type: requirement
     title: A best-case latency summed over components without timing shall not raise the below-minimum Error
-    status: proposed
+    status: approved
     description: "Refs #516. On main (6a6c787) test-data/osate2/CasePositionControl.aadl, root CasePositionControl::SMS_Operational_Environment.Position, reports '[ERROR] latency: end-to-end flow smcmdflow best-case latency 0.000 ms is below the declared minimum 50.000 ms' while the same run warns that ECS, SM_PCS, SM_ACT and SM carry no timing properties. A best case summed over missing data is only a lower bound, so the below-minimum Error (REQ-ANALYSIS-LATENCY-BEST-CASE-001) asserts a finding the data does not support: a false Error, a wrong result. Requirement: when any flow element lacks timing, the below-minimum comparison shall report the best case as incomplete (Warning) naming those components, and shall not raise the Error. Oracle: the CasePositionControl run gives no below-minimum Error and fails on v0.47.1; positive control: a flow whose every element has timing and whose best case is below the minimum still raises the Error."
     tags: [analysis, latency, defect]
     links:
@@ -7846,7 +7846,7 @@ artifacts:
   - id: REQ-TSN-WCTT-BUDGET-IGNORED-VISIBLE-001
     type: requirement
     title: A WCTT_Budget declared on a non-source bus of a stream shall be reported as ignored, never silently dropped
-    status: proposed
+    status: approved
     description: "Refs #481. On main (6a6c787) crates/spar-analysis/src/wctt.rs:881 reads Spar_Network::WCTT_Budget from stream.hops.first() only, so a budget declared on any later bus of a multi-hop stream is never consulted and nothing says so: a declared constraint that is never evaluated renders the same as one that was met (silent failure). SCOPE OF THIS REQUIREMENT is the issue's option 3 only: keep the source-bus semantics, and emit a diagnostic naming each non-source bus whose WCTT_Budget was ignored. Options 1 (per-hop local budgets) and 2 (any budget bounds the end-to-end total) change semantics and are deferred to a successor. Oracle: a two-hop stream with a budget only on the second bus emits the ignored diagnostic and fails on v0.47.1; negative control: a budget on the source bus alone emits no ignored diagnostic."
     tags: [analysis, tsn, wctt, defect]
     links:
@@ -7861,7 +7861,7 @@ artifacts:
   - id: REQ-TSN-COS-PLACEMENT-001
     type: requirement
     title: Spar_TSN::Class_of_Service shall be read where its property set documents it (port and connection), or the documentation shall say where it is read
-    status: proposed
+    status: approved
     description: "Refs #478 (item 2; item 1 shipped as REQ-TSN-WCTT-PROVENANCE-001 in v0.46.0). crates/spar-hir-def/src/standard_properties.rs documents Class_of_Service as 'Applies to port and connection', but collect_streams in wctt.rs reads get_class_of_service(src_props), the source COMPONENT's properties. A user who follows the documentation gets a TSN hop that defers and, since v0.46.0, a WcttNotComputed Error rather than the bound the undocumented device placement gives. Requirement: read Class_of_Service from the connection and the source port (with a stated precedence over the component), or correct the documented applies-to. Oracle: the declared pair from the issue (device placement and documented port/connection placement) yields the same bound; fails on v0.47.1."
     tags: [tsn, wctt, properties, defect]
     links:
@@ -7901,7 +7901,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:49Z
-    release: v0.49.0
+    release: v0.50.0
   - id: REQ-RELEASE-VEX-001
     type: requirement
     title: Each release shall publish a CycloneDX VEX document for the shipped lockfile, signed with the other assets, and re-issue it when an advisory lands
@@ -7920,7 +7920,7 @@ artifacts:
   - id: REQ-RELEASE-MUSL-001
     type: requirement
     title: Linux release assets shall include musl builds beside the glibc ones
-    status: proposed
+    status: approved
     description: "Refs #447. The v0.40.0 x86_64 Linux asset is dynamically linked with a GLIBC_2.39 floor, so it does not run on Ubuntu 22.04, Debian 12, RHEL 9, Ubuntu 20.04 or Alpine; on main release.yml has no musl target (0 matches). Maintainer decision on the issue (2026-09-24): ship musl beside gnu, named <tool>-<tag>-x86_64-unknown-linux-musl.tar.gz and the aarch64 equivalent, entering the signed SHA256SUMS.txt. Oracle: the release lists both musl archives, the binaries are statically linked (file reports no interpreter), and they run in an Alpine container."
     tags: [release, distribution, linux]
     links:
@@ -7945,12 +7945,12 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:49Z
-    release: v0.49.0
+    release: v0.50.0
 
   - id: REQ-AADL-UNDECLARED-PROPERTY-SET-001
     type: requirement
     title: A property association naming a property set that is neither declared nor imported shall be reported, never accepted silently
-    status: proposed
+    status: approved
     description: "Refs #445. Measured on main (6a6c787): a memory with 'Nonsense_Properties::Not_A_Real_Thing => 16#DEADBEEF#;' and no such property set gives 'spar parse' OK (exit 0), 'spar instance' exit 0 and no diagnostic from 'spar analyze'. A typo'd or invented property is indistinguishable from a satisfied one (silent failure). Requirement: an association whose property set qualifier resolves to no declared, imported or built-in property set (spar-hir-def standard_properties) produces a diagnostic naming the set and the association. Scheduled v0.49.0, not v0.48.1, because the severity and the corpus impact need measuring first: OSATE and AADLib models reference plugin-provided sets (e.g. ARINC653) that are not in the file. Oracle: the Nonsense_Properties model produces the diagnostic and fails on v0.47.1; negative control: an association under a declared or standard set stays silent; a corpus diff of every new diagnostic."
     tags: [aadl, properties, name-resolution, defect]
     links:
@@ -7975,12 +7975,12 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:50Z
-    release: v0.49.0
+    release: v0.50.0
 
   - id: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
     type: requirement
     title: The trace-fixture workflow shall tell 'podman did not start' apart from 'kvm is not usable'
-    status: proposed
+    status: approved
     description: "Refs #425. The 13-night streak itself ended: Trace-Topology Fixture Generation has been green since 2026-09-23 (the host's read-only /run/user/1109 was the cause, and no workflow change was needed). The remaining half of the issue is narrower than its title: on main the first podman call is inside the step named 'Require /dev/kvm openable by a Nix BUILD process', with no podman info preflight before it. When podman cannot start, only podman's own error prints (the KVM/capability ::error:: advice is inside the container script and does not run), but the failing step's name blames /dev/kvm, which is what the run summary shows. Requirement: a separate podman preflight step (podman info, XDG_RUNTIME_DIR writable) before the KVM probe, so a podman start failure is reported under a step that names podman. Oracle: a run with an unwritable XDG_RUNTIME_DIR fails at the preflight step."
     tags: [ci, fixtures, guardrail]
     links:
@@ -7995,7 +7995,7 @@ artifacts:
   - id: REQ-PROOF-LAKE-REACHABLE-001
     type: requirement
     title: Every first-party Lean module shall be reachable from a Lake root, so lake build typechecks it
-    status: proposed
+    status: approved
     description: "Refs #397. On main proofs/Proofs.lean imports ten modules and not Proofs.Network.MinPlusPwa; the only matches for MinPlusPwa under proofs/ are its own namespace and end lines, and lakefile.toml declares lean_lib Proofs with the default root. So the required Lean proof typecheck never compiles MinPlusPwa.lean (8 theorems, 8 sorries per the issue). Requirement: import it from Proofs.lean (or move it out of proofs/ if dead), and add a guard that computes import reachability from the Lake roots and fails on any unreachable first-party .lean file. Oracle: the guard fails on the current tree and passes once the module is imported and typechecks."
     tags: [proofs, lean, guardrail]
     links:
@@ -8010,7 +8010,7 @@ artifacts:
   - id: REQ-CI-MUTANTS-WEEKLY-KILLRATE-001
     type: requirement
     title: Mutants Weekly shall run the tests that cover each mutant, or the 1.7% kill rate shall be explained by measurement
-    status: proposed
+    status: approved
     description: "Refs #391. Still reproducing: run 40171999628 (2026-10-25, shard 0/8) reports '1448 mutants tested in 2h: 1327 missed, 23 caught, 98 unviable', against roughly 71% for the gating Mutation Testing job with the same -- --lib flag; every MISSED line in the issue reports 0s test time. Requirement: establish which of the issue's three hypotheses holds (no test binary run, starved test processes, or genuine coverage gap) by measurement, and fix the workflow so a MISSED verdict means a test ran. Oracle: a known-killable mutant in a shard is reported caught."
     tags: [ci, mutation-testing, guardrail]
     links:
@@ -8040,7 +8040,7 @@ artifacts:
   - id: REQ-VERIFY-GATE-SCOPE-001
     type: requirement
     title: The Verification Gate shall check every feature artifact that carries a verification step, and a PR body shall not be able to narrow it
-    status: proposed
+    status: approved
     description: "Refs #358, #513. On main .github/workflows/verification-gate.yml:75 still sets DEFAULT='(and (= type \"feature\") (or (has-tag \"v093\") (has-tag \"v0100\")))', a frozen v0.9.3/v0.10.0 slice (20 of 245 features per #513), and line 76 lets a 'Verify-Filter:' line in the PR body replace it. Requirement: derive the default from every feature artifact with fields.steps (or the release being cut), add a MIN_MATCHED floor like the other guards, and allow an override only to widen the set. Oracle: the matched count equals the independently counted population of stepped features; a narrowing override is rejected."
     tags: [ci, verification, guardrail]
     links:
@@ -8065,7 +8065,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:44:46Z
-    release: v0.49.0
+    release: v0.50.0
 
   - id: REQ-ANALYSIS-CONNECTION-BINDING-RESOLVE-001
     type: requirement
