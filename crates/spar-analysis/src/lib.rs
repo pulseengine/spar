@@ -46,6 +46,7 @@ pub mod mode_rules;
 pub mod naming_rules;
 pub mod property_accessors;
 pub mod property_rules;
+pub mod property_set_refs;
 pub mod resource_budget;
 pub mod rta;
 pub mod scheduling;

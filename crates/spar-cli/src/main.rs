@@ -992,6 +992,9 @@ fn cmd_analyze(args: &[String]) {
         diagnostics.extend(spar_analysis::naming_rules::check_naming_rules(tree));
         diagnostics.extend(spar_analysis::category_check::check_category_rules(tree));
         diagnostics.extend(spar_analysis::extends_rules::check_extends_rules(tree));
+        diagnostics.extend(spar_analysis::property_set_refs::check_property_set_refs(
+            tree, &scope,
+        ));
     }
 
     // Instantiate root system
@@ -2120,6 +2123,9 @@ fn cmd_verify(args: &[String]) {
         diagnostics.extend(spar_analysis::naming_rules::check_naming_rules(tree));
         diagnostics.extend(spar_analysis::category_check::check_category_rules(tree));
         diagnostics.extend(spar_analysis::extends_rules::check_extends_rules(tree));
+        diagnostics.extend(spar_analysis::property_set_refs::check_property_set_refs(
+            tree, &scope,
+        ));
     }
 
     // Instantiate root system

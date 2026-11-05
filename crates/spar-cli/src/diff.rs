@@ -181,6 +181,9 @@ pub fn build_model(sources: &AadlSources, root: &str) -> (SystemInstance, Vec<An
         diagnostics.extend(spar_analysis::naming_rules::check_naming_rules(tree));
         diagnostics.extend(spar_analysis::category_check::check_category_rules(tree));
         diagnostics.extend(spar_analysis::extends_rules::check_extends_rules(tree));
+        diagnostics.extend(spar_analysis::property_set_refs::check_property_set_refs(
+            tree, &scope,
+        ));
     }
 
     let inst = spar_hir_def::instance::SystemInstance::instantiate(
