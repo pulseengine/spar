@@ -104,7 +104,13 @@ fn component_impl(p: &mut Parser) {
     super::component_category(p);
     p.expect(SyntaxKind::IMPLEMENTATION_KW);
 
-    // Realization: TypeName
+    // Realization: TypeName. The grammar names the type by a plain
+    // identifier (OSATE: `Realization: implemented=[ComponentType|ID]`):
+    // an implementation is declared in the package of its type. A
+    // qualified name is still consumed below so recovery is unchanged.
+    if p.at_name() && p.nth(1) == SyntaxKind::COLON_COLON {
+        qualified_realization_error(p, container);
+    }
     let r = p.start();
     if p.at_name() {
         p.bump_any();
@@ -148,6 +154,49 @@ fn component_impl(p: &mut Parser) {
     p.expect(SyntaxKind::SEMICOLON);
 
     m.complete(p, SyntaxKind::COMPONENT_IMPL);
+}
+
+/// Report `Pkg::T.i` in an implementation declaration (#563): the type's
+/// package is `Pkg`, so the implementation belongs there. Emitted with the
+/// cursor on the qualified name, before it is consumed, so the diagnostic's
+/// position is the name's. The hint proposes the legal alternative: extend
+/// the type in this package and implement the extension.
+fn qualified_realization_error(p: &mut Parser, container: Option<super::categories::Category>) {
+    // Segments `A :: B :: T` sit at even lookahead offsets; a segment is a
+    // name token, never whatever punctuation happens to follow `::`.
+    let mut segments = vec![p.nth_text(0).to_string()];
+    let mut n = 1;
+    while p.nth(n) == SyntaxKind::COLON_COLON && p.nth(n + 1) == SyntaxKind::IDENT {
+        segments.push(p.nth_text(n + 1).to_string());
+        n += 2;
+    }
+    // Only the complete shape `Pkg::T.i` gets the hint. An incomplete one
+    // (`Q:: ;`, `Q::.i`, `Q::T ;`, `Q::T.;`, `Q::` at end of file) would
+    // yield a hint built from punctuation or an empty package, so it gets
+    // the plain statement. It is still an error: `Q::.i` is otherwise
+    // consumed without one. A `.` here implies at least two segments: if the
+    // loop never ran, `n` is 1 and token 1 is `::` (the caller checked).
+    if p.nth(n) != SyntaxKind::DOT || p.nth(n + 1) != SyntaxKind::IDENT {
+        p.error(
+            "component implementation names its type with a package qualifier: \
+             an implementation names its type by a plain identifier",
+        );
+        return;
+    }
+    let ty = segments.pop().unwrap_or_default();
+    let pkg = segments.join("::");
+    let imp = p.nth_text(n + 1);
+    let cat = container.map_or("system", |c| c.as_str());
+    // The enclosing package is not known here, and it may BE `pkg` (`P::T.i`
+    // inside `package P`), so the text must be right either way: declare it
+    // plainly in `pkg`, or extend the type wherever else it is wanted.
+    p.error(format!(
+        "component implementation `{pkg}::{ty}.{imp}` names its type with a package \
+         qualifier: an implementation is declared in the package of its type, `{pkg}`, \
+         and names the type plainly there: `{cat} implementation {ty}.{imp}`; to \
+         implement it in another package, extend the type locally: \
+         `{cat} {ty} extends {pkg}::{ty}`, then `{cat} implementation {ty}.{imp}`"
+    ));
 }
 
 fn type_extension(p: &mut Parser) {

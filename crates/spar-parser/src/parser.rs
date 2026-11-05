@@ -125,10 +125,17 @@ impl<'t> Parser<'t> {
 
     /// Return the source text of the current token, or `""` if at end.
     pub fn current_text(&self) -> &str {
-        if self.at_end() {
+        self.nth_text(0)
+    }
+
+    /// Return the source text of the token `n` non-trivia tokens ahead, or
+    /// `""` past the end. `nth_text(0)` is [`Parser::current_text`].
+    pub fn nth_text(&self, n: usize) -> &str {
+        let idx = self.pos + n;
+        if idx >= self.non_trivia_indices.len() {
             return "";
         }
-        let token_idx = self.non_trivia_indices[self.pos];
+        let token_idx = self.non_trivia_indices[idx];
         let start = self.token_starts[token_idx];
         let len = self.all_tokens[token_idx].1;
         &self.source[start..start + len]
@@ -312,6 +319,22 @@ mod tests {
         assert_eq!(p.nth(1), SyntaxKind::IDENT);
         assert_eq!(p.nth(2), SyntaxKind::SEMICOLON);
         assert_eq!(p.nth(3), SyntaxKind::EOF);
+    }
+
+    #[test]
+    fn current_and_nth_text() {
+        let source = "package Test ;";
+        let tokens = make_tokens();
+        let mut p = Parser::new(&tokens, source);
+        assert_eq!(p.current_text(), "package");
+        assert_eq!(p.nth_text(1), "Test"); // trivia is skipped
+        assert_eq!(p.nth_text(2), ";");
+        assert_eq!(p.nth_text(3), ""); // past the end
+        p.bump_any();
+        assert_eq!(p.current_text(), "Test");
+        p.bump_any();
+        p.bump_any();
+        assert_eq!(p.current_text(), ""); // at the end
     }
 
     #[test]

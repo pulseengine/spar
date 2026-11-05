@@ -8147,7 +8147,7 @@ artifacts:
   - id: REQ-PARSE-IMPL-IN-TYPE-PACKAGE-001
     type: requirement
     title: an implementation declared outside its type's package is a parse diagnostic, not a later instantiation failure
-    status: approved
+    status: implemented
     description: "A component implementation named with a qualified type (system implementation Other_Pkg::T.i, inside package P) is accepted by spar parse (OK, exit 0) and then fails at instantiation with 'no component implementation with that qualified name'. Reproduced on spar 0.48.0. AS5506 requires an implementation to be declared in the package of its type (extend the type locally instead). spar parse shall report it as an error naming the type's package, with the extend-locally hint. Refs #563 item 2."
     release: v0.49.0
     tags: [parse, naming, legality]
