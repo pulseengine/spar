@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 
@@ -127,10 +128,13 @@ end Typed;
 
 /// Run `spar instance --format json` on [`MODEL`] and parse its stdout.
 fn instance_json() -> Value {
+    // One file per call: tests run in parallel, and `fs::write` truncates
+    // before it writes, so a shared file can be read empty mid-rewrite.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("spar-typed-props-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let path: PathBuf = dir.join("typed.aadl");
-    // Every test writes the same bytes, so a concurrent rewrite is harmless.
+    let path: PathBuf = dir.join(format!("typed-{n}.aadl"));
     fs::write(&path, MODEL).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_spar"))
         .args(["instance", "--root", "Typed::Top.impl", "--format", "json"])
