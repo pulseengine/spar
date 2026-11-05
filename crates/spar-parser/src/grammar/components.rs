@@ -171,10 +171,12 @@ fn qualified_realization_error(p: &mut Parser, container: Option<super::categori
         n += 2;
     }
     // Only the complete shape `Pkg::T.i` gets the hint. An incomplete one
-    // (`Q:: ;`, `Q::.i`, `Q::` at end of file) would yield a hint built
-    // from punctuation or an empty package, so it gets the plain statement.
-    // It is still an error: `Q::.i` is otherwise consumed without one.
-    if segments.len() < 2 || p.nth(n) != SyntaxKind::DOT || p.nth(n + 1) != SyntaxKind::IDENT {
+    // (`Q:: ;`, `Q::.i`, `Q::T ;`, `Q::T.;`, `Q::` at end of file) would
+    // yield a hint built from punctuation or an empty package, so it gets
+    // the plain statement. It is still an error: `Q::.i` is otherwise
+    // consumed without one. A `.` here implies at least two segments: if the
+    // loop never ran, `n` is 1 and token 1 is `::` (the caller checked).
+    if p.nth(n) != SyntaxKind::DOT || p.nth(n + 1) != SyntaxKind::IDENT {
         p.error(
             "component implementation names its type with a package qualifier: \
              an implementation names its type by a plain identifier",

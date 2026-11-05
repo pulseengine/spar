@@ -322,6 +322,22 @@ mod tests {
     }
 
     #[test]
+    fn current_and_nth_text() {
+        let source = "package Test ;";
+        let tokens = make_tokens();
+        let mut p = Parser::new(&tokens, source);
+        assert_eq!(p.current_text(), "package");
+        assert_eq!(p.nth_text(1), "Test"); // trivia is skipped
+        assert_eq!(p.nth_text(2), ";");
+        assert_eq!(p.nth_text(3), ""); // past the end
+        p.bump_any();
+        assert_eq!(p.current_text(), "Test");
+        p.bump_any();
+        p.bump_any();
+        assert_eq!(p.current_text(), ""); // at the end
+    }
+
+    #[test]
     fn bump_and_eat() {
         let source = "package Test ;";
         let tokens = make_tokens();

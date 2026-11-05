@@ -267,6 +267,8 @@ fn an_incomplete_qualified_name_is_an_error_without_a_made_up_hint() {
         ("dot", "  system implementation Q::.i;\n  end Q::.i;\n"),
         ("punct_then_impl", "  system implementation Q::;.i;\n"),
         ("eof", "  system implementation Q::"),
+        ("no_impl", "  system implementation Q::T ;\n"),
+        ("no_impl_name", "  system implementation Q::T.;\n"),
     ];
     for (tag, decl) in cases {
         let d = tmpdir(tag);
@@ -287,4 +289,31 @@ fn an_incomplete_qualified_name_is_an_error_without_a_made_up_hint() {
         );
         let _ = fs::remove_dir_all(&d);
     }
+}
+
+// rivet: verifies REQ-PARSE-IMPL-IN-TYPE-PACKAGE-001
+#[test]
+fn a_nested_package_qualifier_is_named_in_full() {
+    // AADL package names have segments (`A::B`): the hint names the whole
+    // package, and the type is the last segment.
+    let d = tmpdir("nested");
+    let src = "package P\npublic\n  system implementation A::B::T.i\n  end A::B::T.i;\nend P;\n";
+    let p = write(&d, "p.aadl", src);
+    let out = run(&["parse"], &[&p]);
+    let err = stderr(&out);
+
+    assert_eq!(out.status.code(), Some(1), "stderr:\n{err}");
+    let expected = format!(
+        "{}:3:25: component implementation `A::B::T.i` names its type with a package \
+         qualifier: an implementation is declared in the package of its type, `A::B`, and \
+         names the type plainly there: `system implementation T.i`; to implement it in \
+         another package, extend the type locally: `system T extends A::B::T`, then \
+         `system implementation T.i`",
+        p.display()
+    );
+    assert!(
+        err.lines().any(|l| l == expected),
+        "expected the line\n  {expected}\ngot:\n{err}"
+    );
+    let _ = fs::remove_dir_all(&d);
 }
