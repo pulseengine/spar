@@ -47,7 +47,7 @@
 
 use rustc_hash::FxHashMap;
 
-use spar_hir_def::instance::{ComponentInstanceIdx, SystemInstance};
+use spar_hir_def::instance::{ComponentInstanceIdx, ConnectionInstanceIdx, SystemInstance};
 use spar_hir_def::item_tree::{ComponentCategory, PropertyExpr};
 use spar_hir_def::name::Name;
 use spar_hir_def::properties::PropertyMap;
@@ -63,7 +63,7 @@ use spar_network::tsn::{
     CbsReservation, ClassOfService, GateSchedule, cbs_residual_service, frame_quantization_ps,
     get_bandwidth_reservation_bps, get_class_of_service, get_frame_preemption, get_gate_schedule,
     get_hi_credit_bytes, get_lo_credit_bytes, get_max_frame_size_bytes, get_sync_error_ps,
-    is_express_stream, preemption_blocking_term_ps, tas_residual_service_with_sync_error,
+    preemption_blocking_term_ps, tas_residual_service_with_sync_error,
 };
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
@@ -1267,6 +1267,62 @@ pub struct NetworkHopLatency {
     pub unservable: bool,
 }
 
+/// The property maps a stream's per-stream TSN metadata is read from, most
+/// specific first: the connection, the source port, the source component.
+///
+/// `Spar_TSN::Class_of_Service` and `Spar_TSN::Frame_Preemption` are
+/// documented as applying to port and connection (REQ-TSN-COS-PLACEMENT-001,
+/// #478). The source component is the legacy carrier, read last so models
+/// that annotate the device keep their output. The connection's map holds
+/// both its inline `{ ... }` and `applies to <conn>` values; the port's holds
+/// its inline values and `applies to <sub>.<port>`.
+fn stream_tsn_carriers(
+    instance: &SystemInstance,
+    conn_idx: ConnectionInstanceIdx,
+    src_idx: ComponentInstanceIdx,
+) -> [&PropertyMap; 3] {
+    let conn = &instance.connections[conn_idx];
+    let port = conn
+        .src
+        .as_ref()
+        .and_then(|end| {
+            instance
+                .component(src_idx)
+                .features
+                .iter()
+                .copied()
+                .find(|&fi| {
+                    instance.features[fi]
+                        .name
+                        .as_str()
+                        .eq_ignore_ascii_case(end.feature.as_str())
+                })
+        })
+        .map(|fi| instance.properties_for_feature(fi));
+    static NO_PORT: std::sync::LazyLock<PropertyMap> = std::sync::LazyLock::new(PropertyMap::new);
+    [
+        instance.properties_for_connection(conn_idx),
+        port.unwrap_or(&NO_PORT),
+        instance.properties_for(src_idx),
+    ]
+}
+
+/// The stream's `Spar_TSN::Class_of_Service`: the first carrier that declares one.
+fn stream_class_of_service(carriers: &[&PropertyMap; 3]) -> Option<ClassOfService> {
+    carriers.iter().find_map(|m| get_class_of_service(m))
+}
+
+/// Whether the stream is express (IEEE 802.1Qbu), by the rule of
+/// [`spar_network::tsn::is_express_stream`] applied across the carriers: an explicit
+/// `Spar_TSN::Frame_Preemption` on the most specific carrier that declares
+/// one, else the stream's Class_of_Service is 6 or 7.
+fn stream_is_express(carriers: &[&PropertyMap; 3]) -> bool {
+    carriers
+        .iter()
+        .find_map(|m| get_frame_preemption(m))
+        .unwrap_or_else(|| stream_class_of_service(carriers).is_some_and(|c| c.0 >= 6))
+}
+
 /// Compute the per-hop end-to-end network traversal-time bound for a
 /// single AADL connection that crosses one or more switched buses.
 ///
@@ -1353,7 +1409,7 @@ pub fn compute_network_hop_latency(
         let burst = read_queue_depth(src_props)
             .map(|q| q.saturating_mul(FRAME_BYTES))
             .unwrap_or(DEFAULT_BURST_BYTES);
-        let express = is_express_stream(src_props);
+        let express = stream_is_express(&stream_tsn_carriers(instance, conn_idx, idx));
         (rate, burst, express)
     } else {
         (0, DEFAULT_BURST_BYTES, false)
@@ -1727,7 +1783,7 @@ pub(crate) struct Stream {
     /// [`Severity::Info`]-emitting `WcttDeferred` path.
     cos: Option<ClassOfService>,
     /// Whether this stream qualifies as "express" for IEEE 802.1Qbu
-    /// preemption purposes (see [`is_express_stream`]). Express
+    /// preemption purposes (see [`spar_network::tsn::is_express_stream`]). Express
     /// streams pay only the preemption-fragment blocking at TSN ports
     /// where the bus also enables `Frame_Preemption`; non-express
     /// streams keep the legacy `max_frame / R` blocking term.
@@ -1915,7 +1971,14 @@ pub(crate) fn collect_streams(
             // reachable carrier in the current property model is the
             // source device's PropertyMap, which the existing rate /
             // queue-depth reads already use.
-            let cos = get_class_of_service(src_props);
+            //
+            // Class_of_Service and Frame_Preemption are documented as
+            // applying to port and connection (REQ-TSN-COS-PLACEMENT-001,
+            // #478): each is read from the connection first, then the
+            // source port, then the source component, the legacy carrier.
+            // Most specific first, as for Actual_Connection_Binding above.
+            let carriers = stream_tsn_carriers(instance, conn_idx, src_idx);
+            let cos = stream_class_of_service(&carriers);
             let cbs_idle_slope_bps = get_bandwidth_reservation_bps(src_props);
 
             // Express-stream classification (IEEE 802.1Qbu). Read from
@@ -1925,7 +1988,7 @@ pub(crate) fn collect_streams(
             // default. A stream that is not express still walks TSN
             // hops below; it just pays the legacy `max_frame / R`
             // blocking term rather than the preemption-fragment term.
-            let is_express = is_express_stream(src_props);
+            let is_express = stream_is_express(&carriers);
 
             streams.push(Stream {
                 name: conn.name.as_str().to_string(),
