@@ -382,7 +382,35 @@ impl Analysis for LatencyAnalysis {
             let owner_props = instance.properties_for(e2e.owner);
             let budget =
                 get_latency_budget(&e2e.properties).or_else(|| get_latency_budget(owner_props));
+            //
+            // A best case summed while some elements had no timing is not
+            // the flow's best case: those elements added nothing, and the real
+            // best case may well reach the minimum. Then `best < min` proves
+            // nothing, so it is a Warning that says the comparison is
+            // incomplete and names the elements, never the Error
+            // (REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001, #516). The
+            // worst-case check below needs no such guard: missing timing only
+            // makes the real worst case LARGER, so an overrun stays an overrun.
             if let Some(budget) = budget
+                && let Some(min_ps) = budget.min_ps
+                && best_case_ps < min_ps
+                && !missing_timing.is_empty()
+            {
+                diags.push(AnalysisDiagnostic {
+                    severity: Severity::Warning,
+                    message: format!(
+                        "end-to-end flow '{}' best-case latency {:.3} ms is below the declared \
+                         minimum {:.3} ms, but it is INCOMPLETE: {} carry no timing, so the \
+                         flow's real best case is unknown and the minimum is unchecked",
+                        e2e.name,
+                        best_ms,
+                        min_ps as f64 / 1_000_000_000.0,
+                        missing_timing.join(", "),
+                    ),
+                    path: owner_path.clone(),
+                    analysis: self.name().to_string(),
+                });
+            } else if let Some(budget) = budget
                 && let Some(min_ps) = budget.min_ps
                 && best_case_ps < min_ps
             {
