@@ -371,6 +371,33 @@ pub enum SyntaxKind {
     /// `10 [ms]`, also `[SI::ms]` and compound `[m/s]`.
     UNIT_REF,
 
+    // State-based behaviour (REQ-SYSML2-FLOWS-MODES-001)
+    /// `transition [name] first S accept T [if g] [do e] then D;`
+    TRANSITION_USAGE,
+    /// `accept T then D;` after a state: a transition whose source is the
+    /// state declared just before it.
+    TARGET_TRANSITION_USAGE,
+    /// The `first S` of a transition.
+    TRANSITION_SOURCE,
+    /// The `then D` of a transition.
+    TRANSITION_TARGET,
+    /// `accept [name] [: Type] [via port]`, or `accept at|after|when expr`.
+    TRIGGER,
+    /// The `via port` of a trigger.
+    TRIGGER_VIA,
+    /// `if expr` on a transition.
+    GUARD,
+    /// `do effect` on a transition.
+    EFFECT,
+    /// `first S then D;` in a state body: the initial state when `S` is
+    /// `start`.
+    SUCCESSION_USAGE,
+    /// `entry ...;`, `do ...;` or `exit ...;` in a state body.
+    STATE_ACTION,
+    /// `then D;` in a state body. After `entry;` it names the initial state;
+    /// after a state it is a succession from that state.
+    TARGET_SUCCESSION,
+
     // Keep this last -- used for bounds checking.
     #[doc(hidden)]
     __LAST,

@@ -7,6 +7,7 @@ mod constraints;
 mod packages;
 mod parts;
 mod requirements;
+mod states;
 
 use crate::parser::Parser;
 use crate::syntax_kind::SyntaxKind;
@@ -88,6 +89,14 @@ fn is_member_start(kind: SyntaxKind, p: &Parser) -> bool {
         SyntaxKind::END_KW => true,
         // `subject` keyword (used in requirement def bodies)
         SyntaxKind::SUBJECT_KW => true,
+        // State-based behaviour: `transition`, `first S then D;`, `then D;`,
+        // `entry`/`exit` actions and `exhibit [state]`.
+        SyntaxKind::TRANSITION_KW
+        | SyntaxKind::FIRST_KW
+        | SyntaxKind::THEN_KW
+        | SyntaxKind::ENTRY_KW
+        | SyntaxKind::EXIT_KW
+        | SyntaxKind::EXHIBIT_KW => true,
         // Check for `connection` not followed by `def` -- this is still a
         // member start, handled in parts::member
         _ => {

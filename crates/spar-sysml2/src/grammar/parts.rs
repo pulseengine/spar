@@ -39,6 +39,10 @@ const MEMBER_RECOVERY: TokenSet = TokenSet::new(&[
     SyntaxKind::FEATURE_KW,
     SyntaxKind::END_KW,
     SyntaxKind::SUBJECT_KW,
+    SyntaxKind::TRANSITION_KW,
+    SyntaxKind::ENTRY_KW,
+    SyntaxKind::EXIT_KW,
+    SyntaxKind::EXHIBIT_KW,
 ]);
 
 /// Parse a member of a namespace body.
@@ -117,9 +121,16 @@ pub(crate) fn member(p: &mut Parser) {
             if p.nth(1) == SyntaxKind::DEF_KW {
                 definition(p, SyntaxKind::STATE_DEF);
             } else {
-                generic_usage(p, SyntaxKind::STATE_USAGE);
+                super::states::state_usage(p);
             }
         }
+        SyntaxKind::EXHIBIT_KW => super::states::state_usage(p),
+        SyntaxKind::TRANSITION_KW => super::states::transition_usage(p),
+        SyntaxKind::FIRST_KW => super::states::succession_usage(p),
+        SyntaxKind::THEN_KW => super::states::target_succession(p),
+        SyntaxKind::ENTRY_KW | SyntaxKind::EXIT_KW => super::states::state_action(p),
+        SyntaxKind::IDENT if super::states::at_accept(p) => super::states::transition_usage(p),
+        SyntaxKind::IDENT if super::states::at_do_action(p) => super::states::state_action(p),
         SyntaxKind::ATTRIBUTE_KW => {
             if p.nth(1) == SyntaxKind::DEF_KW {
                 definition(p, SyntaxKind::ATTRIBUTE_DEF);
@@ -907,7 +918,7 @@ fn opt_direction(p: &mut Parser) {
 /// multiplicity the caller already parsed before the specialization is not
 /// known to this function, so `part x [1] : T [2];` is accepted although the
 /// production allows only one `MultiplicityPart`.
-fn opt_typing_or_specialization(p: &mut Parser) {
+pub(super) fn opt_typing_or_specialization(p: &mut Parser) {
     let mut multiplicity_seen = false;
     loop {
         if feature_specialization(p) {
