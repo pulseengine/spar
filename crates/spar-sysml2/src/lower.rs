@@ -68,6 +68,7 @@ pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<Lo
     let mut ctx = LowerCtx {
         local_part_defs: collect_local_part_def_names(&root),
         state_defs: collect_state_defs(&root),
+        part_def_ports: collect_part_def_ports(&root),
         ..LowerCtx::default()
     };
     lower_node(&root, &mut ctx);
@@ -82,6 +83,10 @@ pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<Lo
 const UNLOWERED_KINDS: &[SyntaxKind] = &[
     SyntaxKind::KERML_CLASSIFIER,
     SyntaxKind::PERFORM_ACTION_USAGE,
+    SyntaxKind::FLOW_DEF,
+    // Only a flow directly in a part def body becomes a connection
+    // ([`lower_flows`]); one in an action body or a part usage is reported.
+    SyntaxKind::FLOW_USAGE,
 ];
 
 /// Report every [`UNLOWERED_KINDS`] node, wherever it sits.
@@ -93,7 +98,9 @@ const UNLOWERED_KINDS: &[SyntaxKind] = &[
 fn report_unlowered(root: &SyntaxNode, diagnostics: &mut Vec<LowerDiagnostic>) {
     for node in root.descendants() {
         let kind = node.kind();
-        if !UNLOWERED_KINDS.contains(&kind) {
+        if !UNLOWERED_KINDS.contains(&kind)
+            || (kind == SyntaxKind::FLOW_USAGE && in_part_def_body(&node))
+        {
             continue;
         }
         let offset: usize = node.text_range().start().into();
@@ -123,6 +130,10 @@ struct LowerCtx {
     /// Every `state def` declared in the source, by name: the machine an
     /// `exhibit state s : VS;` lowers is the body of `VS` (see [`machine_body`]).
     state_defs: std::collections::HashMap<String, SyntaxNode>,
+    /// The port (and directed item) names of every `part def` in the source:
+    /// a flow end `a.p.x` is the port `p` of part `a` only if `a`'s type
+    /// declares `p` (see [`resolve_flow_end`]).
+    part_def_ports: std::collections::HashMap<String, Vec<String>>,
     /// `allocate` relationships found in part def bodies, resolved after
     /// subcomponent categories are known (see [`lower_pending_allocations`]).
     pending_allocations: Vec<PendingAllocation>,
@@ -338,6 +349,14 @@ fn lower_package(node: &SyntaxNode, ctx: &mut LowerCtx) {
     });
 }
 
+/// A member directly in a `part def` body.
+fn in_part_def_body(node: &SyntaxNode) -> bool {
+    node.parent()
+        .filter(|b| b.kind() == SyntaxKind::NAMESPACE_BODY)
+        .and_then(|b| b.parent())
+        .is_some_and(|d| d.kind() == SyntaxKind::PART_DEF)
+}
+
 /// Lower a SysML v2 `part def` to an AADL component type.
 ///
 /// Heuristic for category selection:
@@ -391,6 +410,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     let mut modes = Vec::new();
     let mut mode_transitions = Vec::new();
     let mut state_members: Vec<SyntaxNode> = Vec::new();
+    let mut flows: Vec<SyntaxNode> = Vec::new();
     let mut allocations = Vec::new();
 
     if let Some(body) = find_child(node, SyntaxKind::NAMESPACE_BODY) {
@@ -441,6 +461,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                 | SyntaxKind::SUCCESSION_USAGE
                 | SyntaxKind::TARGET_SUCCESSION
                 | SyntaxKind::STATE_ACTION => state_members.push(child.clone()),
+                SyntaxKind::FLOW_USAGE => flows.push(child.clone()),
                 SyntaxKind::CONSTRAINT_USAGE => {
                     if let Some(pa) =
                         lower_constraint_usage_to_property(&child, &mut ctx.diagnostics)
@@ -477,6 +498,26 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                 _ => {}
             }
         }
+    }
+
+    if !flows.is_empty() {
+        let own: Vec<Name> = features
+            .iter()
+            .map(|f| ctx.tree.features[*f].name.clone())
+            .collect();
+        let subs: Vec<(Name, Option<String>)> = subcomponents
+            .iter()
+            .map(|s| {
+                let s = &ctx.tree.subcomponents[*s];
+                (
+                    s.name.clone(),
+                    s.classifier
+                        .as_ref()
+                        .map(|c| c.type_name.as_str().to_string()),
+                )
+            })
+            .collect();
+        lower_flows(&flows, &own, &subs, &mut connections, ctx);
     }
 
     if !state_members.is_empty() {
@@ -1558,6 +1599,151 @@ fn lower_connection_node_to_item(node: &SyntaxNode) -> Option<ConnectionItem> {
     })
 }
 
+/// Lower the `flow` usages of one part def to AADL port connections
+/// (REQ-SYSML2-FLOWS-MODES-001).
+///
+/// | SysML v2 (part def body)                       | AADL connection          |
+/// |------------------------------------------------|--------------------------|
+/// | `flow f of Fuel from a.p to b.q;`              | `f : port a.p -> b.q;`   |
+/// | `flow from tank.port.fuel to eng.port.fuel;`   | `tank_to_eng : port tank.port -> eng.port;` |
+/// | `flow out1 to b.q;` (`out1` a port of this part) | `out1_to_b : port out1 -> b.q;` |
+///
+/// A SysML flow is a transfer between features; its AADL counterpart is the
+/// port connection, not an AADL `flows` declaration (an end-to-end flow
+/// carries latency, which SysML v2 has no standard form for). The end `a.p.x`
+/// names the item `x` carried by port `p` of part `a`: the connection is
+/// between the ports, and the item is what the port's type carries. An end
+/// is lowered only when it resolves to a feature of this part or a port of
+/// one of its parts; otherwise the flow is REPORTED and dropped, never wired
+/// to a guessed feature. A flow without a declared name gets the name a
+/// `connect` between the same parts would, made unique.
+fn lower_flows(
+    flows: &[SyntaxNode],
+    own: &[Name],
+    subs: &[(Name, Option<String>)],
+    connections: &mut Vec<la_arena::Idx<ConnectionItem>>,
+    ctx: &mut LowerCtx,
+) {
+    for f in flows {
+        let ends: Vec<SyntaxNode> = f
+            .children()
+            .filter(|c| c.kind() == SyntaxKind::CONNECT_ENDPOINT)
+            .collect();
+        let [src, dst] = &ends[..] else {
+            push_diag(
+                ctx,
+                f,
+                format!(
+                    "unsupported: `{}` (not lowered; a flow becomes an AADL connection \
+                     only when it names its ends, `from S to D`)",
+                    member_text(f)
+                ),
+            );
+            continue;
+        };
+        let (src, dst) = match (
+            resolve_flow_end(src, own, subs, ctx),
+            resolve_flow_end(dst, own, subs, ctx),
+        ) {
+            (Ok(s), Ok(d)) => (s, d),
+            (s, d) => {
+                for why in [s.err(), d.err()].into_iter().flatten() {
+                    push_diag(
+                        ctx,
+                        f,
+                        format!("unsupported: `{}` (not lowered; {why})", member_text(f)),
+                    );
+                }
+                continue;
+            }
+        };
+        let label = |e: &ConnectedElementRef| {
+            e.subcomponent
+                .as_ref()
+                .unwrap_or(&e.feature)
+                .as_str()
+                .to_string()
+        };
+        let base = extract_name(f)
+            .map(|n| n.as_str().to_string())
+            .unwrap_or_else(|| format!("{}_to_{}", label(&src), label(&dst)));
+        let taken = |n: &str| {
+            connections
+                .iter()
+                .any(|c| ctx.tree.connections[*c].name.as_str() == n)
+        };
+        let mut name = base.clone();
+        let mut k = 2;
+        while taken(&name) {
+            name = format!("{base}_{k}");
+            k += 1;
+        }
+        let idx = ctx.tree.connections.alloc(ConnectionItem {
+            name: Name::new(&name),
+            kind: ConnectionKind::Port,
+            is_bidirectional: false,
+            is_refined: false,
+            src: Some(src),
+            dst: Some(dst),
+            in_modes: Vec::new(),
+            property_associations: Vec::new(),
+        });
+        connections.push(idx);
+    }
+}
+
+/// Resolve one flow end against this part's features and its parts' ports.
+fn resolve_flow_end(
+    end: &SyntaxNode,
+    own: &[Name],
+    subs: &[(Name, Option<String>)],
+    ctx: &LowerCtx,
+) -> Result<ConnectedElementRef, String> {
+    let idents = chain_idents(end);
+    let text = idents.join(".");
+    let Some(first) = idents.first() else {
+        return Err("an end names nothing".to_string());
+    };
+    if own.iter().any(|n| n.as_str() == first) {
+        return Ok(ConnectedElementRef {
+            subcomponent: None,
+            feature: Name::new(first),
+        });
+    }
+    let Some((_, ty)) = subs.iter().find(|(n, _)| n.as_str() == first) else {
+        return Err(format!(
+            "`{first}` is neither a feature of this part nor one of its parts"
+        ));
+    };
+    let Some(port) = idents.get(1) else {
+        return Err(format!("`{text}` is a part, not a port of one"));
+    };
+    let found = || ConnectedElementRef {
+        subcomponent: Some(Name::new(first)),
+        feature: Name::new(port),
+    };
+    match ty.as_deref().and_then(|t| ctx.part_def_ports.get(t)) {
+        Some(ports) if ports.iter().any(|p| p == port) => Ok(found()),
+        Some(_) => Err(format!("`{port}` is not a port of `{first}`")),
+        None if idents.len() == 2 => Ok(found()),
+        None => Err(format!(
+            "`{text}`: the type of `{first}` is not in this model, so whether \
+             `{port}` is one of its ports cannot be told"
+        )),
+    }
+}
+
+/// The identifiers of the FEATURE_CHAIN under `node`, in order.
+fn chain_idents(node: &SyntaxNode) -> Vec<String> {
+    find_child(node, SyntaxKind::FEATURE_CHAIN)
+        .into_iter()
+        .flat_map(|c| c.children_with_tokens())
+        .filter_map(|e| e.into_token())
+        .filter(|t| t.kind() == SyntaxKind::IDENT || t.kind().is_keyword())
+        .map(|t| t.text().to_string())
+        .collect()
+}
+
 /// Extract a connected element reference from a CONNECT_ENDPOINT node.
 ///
 /// A CONNECT_ENDPOINT contains a FEATURE_CHAIN like `a.b` where `a` is the
@@ -1655,7 +1841,7 @@ fn resolve_subcomponent_categories(tree: &mut ItemTree) {
     }
 }
 
-/// Collect the name of every `part def` anywhere in the source.
+/// Every `state def` in the source, by name (the first declaration wins).
 fn collect_state_defs(root: &SyntaxNode) -> std::collections::HashMap<String, SyntaxNode> {
     let mut defs = std::collections::HashMap::new();
     for n in root
@@ -1669,6 +1855,29 @@ fn collect_state_defs(root: &SyntaxNode) -> std::collections::HashMap<String, Sy
     defs
 }
 
+/// The port and item usage names declared directly in each `part def` body.
+fn collect_part_def_ports(root: &SyntaxNode) -> std::collections::HashMap<String, Vec<String>> {
+    let mut map = std::collections::HashMap::new();
+    for def in root
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::PART_DEF)
+    {
+        let Some(name) = extract_name(&def) else {
+            continue;
+        };
+        let ports: Vec<String> = find_child(&def, SyntaxKind::NAMESPACE_BODY)
+            .into_iter()
+            .flat_map(|b| b.children())
+            .filter(|c| matches!(c.kind(), SyntaxKind::PORT_USAGE | SyntaxKind::ITEM_USAGE))
+            .filter_map(|c| extract_name(&c))
+            .map(|n| n.as_str().to_string())
+            .collect();
+        map.entry(name.as_str().to_string()).or_insert(ports);
+    }
+    map
+}
+
+/// Collect the name of every `part def` anywhere in the source.
 fn collect_local_part_def_names(root: &SyntaxNode) -> std::collections::HashSet<String> {
     root.descendants()
         .filter(|n| n.kind() == SyntaxKind::PART_DEF)
