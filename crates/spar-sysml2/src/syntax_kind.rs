@@ -56,6 +56,8 @@ pub enum SyntaxKind {
     COLON_GT_GT,
     /// `~>`
     TILDE_GT,
+    /// `~` conjugation in a typing: `port p : ~FuelPort;`
+    TILDE,
     /// `::`
     COLON_COLON,
     /// `*`

@@ -3806,6 +3806,21 @@ package FGPkg {
         );
     }
 
+    /// `port p : ~FuelPort;` is typed by `FuelPort`: the `~` is not part of
+    /// the classifier name.
+    #[test]
+    fn a_conjugated_port_is_typed_by_its_port_def() {
+        let parse = crate::parse("part def Eng { port engineFuelPort : ~FuelPort; }");
+        assert!(parse.ok(), "{:?}", parse.errors());
+        let tree = lower_to_aadl(&parse);
+        let ct = tree.component_types.iter().next().unwrap().1;
+        let feat = &tree.features[ct.features[0]];
+        assert_eq!(
+            feat.classifier.as_ref().unwrap().type_name.as_str(),
+            "FuelPort"
+        );
+    }
+
     #[test]
     fn connection_with_local_features() {
         let parse = crate::parse("connect srcPort to dstPort;");

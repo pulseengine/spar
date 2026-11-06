@@ -55,7 +55,8 @@ const CORPUS: &str = "test-data/sysml2/official";
 /// `15_12-Compound Value Type.sysml`); 35 on 2026-11-06 after the state grammar
 /// of `REQ-SYSML2-FLOWS-MODES-001` (`transition`, `accept ... then`,
 /// `first start then`, `entry; then`, state actions, `exhibit state`); 39 on
-/// 2026-11-06 after its flow grammar (`flow [of T] [from] S to D`, `flow def`).
+/// 2026-11-06 after its flow grammar (`flow [of T] [from] S to D`, `flow def`);
+/// 41 on 2026-11-06 after port conjugation (`port p : ~FuelPort;`).
 const PARSING_LIST: &str = include_str!("official_corpus_parsing.txt");
 
 /// Guards against the corpus vanishing. An empty walk parses nothing and
@@ -341,6 +342,16 @@ fn closed_grammar_gaps_stay_closed() {
             "part def P { succession flow s from a.p to b.q; }",
         ),
         ("flow def", "flow def F { end a; end b; }"),
+        // Port conjugation (`training/10. Ports/Port Conjugation Example`).
+        ("conjugated typing", "part def P { port p : ~FuelPort; }"),
+        (
+            "conjugated typing, no space",
+            "part def P { port p :~FuelPort; }",
+        ),
+        (
+            "conjugated qualified typing",
+            "part def P { port p : ~Pkg::FuelPort[2]; }",
+        ),
     ];
     let reopened: Vec<&str> = closed
         .iter()
