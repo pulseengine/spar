@@ -349,9 +349,25 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install yanglint
+        # The package that ships yanglint is renamed across Ubuntu releases
+        # (`libyang2-tools` has no candidate on the current ubuntu-latest:
+        # the first run of this job). Take the first candidate that exists,
+        # say which, and fail loudly with what apt does offer if none does.
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libyang2-tools
+          for pkg in libyang-tools libyang3-tools libyang2-tools yang-tools; do
+            if apt-cache show "$pkg" >/dev/null 2>&1; then
+              sudo apt-get install -y -qq "$pkg"
+              echo "installed $pkg"
+              break
+            fi
+          done
+          if ! command -v yanglint >/dev/null; then
+            echo "::error::no apt package provided yanglint"
+            apt-cache search --names-only libyang || true
+            exit 1
+          fi
           yanglint --version
       - name: check_qcw_yang self-test
         run: tools/check_qcw_yang.py --self-test
