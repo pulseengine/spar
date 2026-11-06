@@ -783,6 +783,9 @@ fn feature_decl_with_direction(p: &mut Parser) {
     // Optional multiplicity
     opt_multiplicity(p);
 
+    // `in x = a.b;`: a parameter bound to a value (`FeatureValue`).
+    opt_feature_value(p);
+
     // Body or semicolon
     if p.at(SyntaxKind::L_CURLY) {
         super::packages::namespace_body(p);
@@ -791,6 +794,32 @@ fn feature_decl_with_direction(p: &mut Parser) {
     }
 
     m.complete(p, SyntaxKind::FEATURE_DECL);
+}
+
+/// `= expr` after a directed feature, as a `FEATURE_VALUE` node. The value is
+/// an expression spar does not evaluate (`a.b`, `'q n'::f`, `profile#(i)`), so
+/// it is kept as tokens: everything up to the depth-0 `;`, the `{` of the
+/// feature's body, or the enclosing body's `}`. Brackets nest, so a `;` or
+/// `{` inside `(...)` or `[...]` does not end it.
+fn opt_feature_value(p: &mut Parser) {
+    if !p.at(SyntaxKind::EQ) {
+        return;
+    }
+    let m = p.start();
+    p.bump(SyntaxKind::EQ);
+    let mut depth = 0usize;
+    while !p.at_end() {
+        match p.current() {
+            SyntaxKind::SEMICOLON | SyntaxKind::L_CURLY | SyntaxKind::R_CURLY if depth == 0 => {
+                break;
+            }
+            SyntaxKind::L_PAREN | SyntaxKind::L_BRACKET => depth += 1,
+            SyntaxKind::R_PAREN | SyntaxKind::R_BRACKET => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        p.bump_any();
+    }
+    m.complete(p, SyntaxKind::FEATURE_VALUE);
 }
 
 /// Parse a comment node: `comment /* text */` or `comment "text"`

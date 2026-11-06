@@ -1,4 +1,5 @@
 kerml/examples/Address Book Example/AddressBookModel.kerml
+kerml/examples/Mass Roll-up Example/MassRollup_2.kerml
 kerml/examples/Packet Example/PacketUsage.kerml
 kerml/examples/Simple Tests/Circular.kerml
 kerml/examples/Simple Tests/FeatureInheritance.kerml
@@ -31,7 +32,9 @@ sysml/training/24. States/State Decomposition-1.sysml
 sysml/training/24. States/State Decomposition-2.sysml
 sysml/training/25. Transitions/Change and Time Triggers.sysml
 sysml/training/25. Transitions/Transition Actions.sysml
+sysml/training/26. State Exhibition/State Exhibition Example.sysml
 sysml/training/32. Requirements/Requirement Satisfaction.sysml
+sysml/validation/05-State-based Behavior/5-State-based Behavior-2.sysml
 sysml/validation/13-Model Containment/13b-Safety and Security Features Element Group.sysml
 sysml/validation/14-Language Extensions/14b-Language Extensions.sysml
 sysml/validation/15-Properties-Values-Expressions/15_02-Basic Value Properties.sysml
