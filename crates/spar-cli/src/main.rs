@@ -2890,10 +2890,16 @@ fn cmd_dbc(args: &[String]) {
     };
 
     let source = read_file(&input);
-    let aadl = spar_dbc::dbc_to_aadl(&source, &package).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        process::exit(1);
-    });
+    let (aadl, warnings) =
+        spar_dbc::dbc_to_aadl_with_report(&source, &package).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            process::exit(1);
+        });
+    // REQ-DBC-CYCLE-TIME-001: a frame that reaches the model without a rate is
+    // said so here, not left for an analysis to find as a silent gap.
+    for w in &warnings {
+        eprintln!("warning: dbc: {w}");
+    }
 
     match output_path {
         Some(path) => {

@@ -189,6 +189,27 @@ fn empty_network_still_instantiates() {
 }
 
 #[test]
+fn cycle_times_emit_a_rate_record_that_instantiates_cleanly() {
+    // REQ-DBC-CYCLE-TIME-001: the emitted Output_Rate record must pass the same
+    // zero-diagnostics oracle as the rest of the package.
+    let dbc = SAMPLE_DBC.to_string()
+        + "\nBA_DEF_ BO_ \"GenMsgCycleTime\" INT 0 65535;\n\
+           BA_DEF_DEF_ \"GenMsgCycleTime\" 0;\n\
+           BA_ \"GenMsgCycleTime\" BO_ 256 30;\n\
+           BA_ \"GenMsgCycleTime\" BO_ 512 100;\n";
+    let (aadl, warnings) =
+        spar_dbc::dbc_to_aadl_with_report(&dbc, "CanDemo").expect("DBC should parse");
+    assert!(
+        aadl.contains("Communication_Properties::Output_Rate => [Value_Range => 10.0 .. 10.0;"),
+        "Status (100 ms) must be 10 frames/s:\n{aadl}"
+    );
+    let _ = instantiate(&aadl, "CanDemo");
+    // Broadcast has no transmitter node, and the default is 0: one warning.
+    let names: Vec<&str> = warnings.iter().map(|w| w.message.as_str()).collect();
+    assert_eq!(names, ["Broadcast"], "{warnings:?}");
+}
+
+#[test]
 fn malformed_dbc_is_an_error() {
     let err = dbc_to_aadl("this is not a dbc file", "X");
     assert!(err.is_err(), "garbage input should be rejected");

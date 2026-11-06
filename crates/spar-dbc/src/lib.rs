@@ -28,6 +28,7 @@
 //! | message tx (the `BO_` node)| an `out event data <Msg>` port on that device   |
 //! | message rx (a `SG_` receiver) | an `in event data <Msg>` port on that device |
 //! | a tx→rx pairing            | a `port` connection bound to the CAN bus        |
+//! | `GenMsgCycleTime` (ms)     | `Communication_Properties::Output_Rate` on the tx port |
 //! | the whole network          | `system CAN_Network` + its implementation        |
 //!
 //! # Message flows (`REQ-INGEST-DBC-FLOWS-001`)
@@ -57,6 +58,28 @@
 //! response-time analysis is a separate (Tindell) track behind its own
 //! soundness gate.
 //!
+//! # Cycle times (`REQ-DBC-CYCLE-TIME-001`)
+//!
+//! A frame's `GenMsgCycleTime` (milliseconds) is resolved as a DBC tool would:
+//! the message's own `BA_` value, else the `BA_DEF_DEF_` default. A positive
+//! cycle becomes `Communication_Properties::Output_Rate => [Value_Range =>
+//! r .. r; Rate_Unit => PerSecond; Rate_Distribution => Fixed;]` on the
+//! transmitter's `out` port, with `r = 1000 / cycle_ms`. It goes on the PORT
+//! because a node sends frames at different rates, so a per-device `Period`
+//! could not hold them. The name is fully qualified because `Spar_Network`
+//! also declares an `Output_Rate`, a bus bit-rate.
+//!
+//! Every frame that does not get a rate is reported through
+//! [`dbc_to_aadl_with_report`], so an ingested model is never timing-blind
+//! without saying so: no cycle time at all, a cycle of `0` (the DBC
+//! convention for a non-cyclic, event-driven frame), a value that is not a
+//! non-negative number, and a cycle time that is present but has no port to
+//! go on because the frame has no modelled flow.
+//!
+//! NOT CLAIMED: that any analysis reads the port's `Output_Rate` yet.
+//! `bus_bandwidth` reads `Period` from the source component, and the CAN bus
+//! is deliberately not a network-calculus switch (see the scope note above).
+//!
 //! [Vector CAN database]: https://en.wikipedia.org/wiki/CAN_bus
 
 #![forbid(unsafe_code)]
@@ -64,7 +87,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use can_dbc::{Dbc, Transmitter};
+use can_dbc::{AttributeValue, Dbc, MessageId, Transmitter};
 
 /// Error raised while ingesting a `.dbc` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,8 +116,90 @@ impl core::error::Error for IngestError {}
 /// spar's pipeline. `package_name` is sanitised to a legal AADL identifier; an
 /// empty or all-symbol name falls back to `Can_Network`.
 pub fn dbc_to_aadl(dbc_text: &str, package_name: &str) -> Result<String, IngestError> {
+    dbc_to_aadl_with_report(dbc_text, package_name).map(|(aadl, _)| aadl)
+}
+
+/// A frame whose source information did not fully reach the emitted model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IngestWarning {
+    /// The DBC message name, as written in the `BO_` line.
+    pub message: String,
+    /// What was lost, and why.
+    pub text: String,
+}
+
+impl fmt::Display for IngestWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "message '{}': {}", self.message, self.text)
+    }
+}
+
+/// [`dbc_to_aadl`], plus a warning for every frame whose cycle time did not
+/// become a rate in the model (REQ-DBC-CYCLE-TIME-001).
+pub fn dbc_to_aadl_with_report(
+    dbc_text: &str,
+    package_name: &str,
+) -> Result<(String, Vec<IngestWarning>), IngestError> {
     let dbc = Dbc::try_from(dbc_text).map_err(|e| IngestError::Parse(format!("{e:?}")))?;
     Ok(emit_aadl(&dbc, package_name))
+}
+
+/// The Vector attribute carrying a frame's transmission cycle, in ms.
+const CYCLE_ATTR: &str = "GenMsgCycleTime";
+
+/// A frame's cycle time, as resolved from the DBC attributes.
+#[derive(Debug, Clone, PartialEq)]
+enum Cycle {
+    /// A positive cycle, in milliseconds.
+    Ms(f64),
+    /// Neither a `BA_` value nor a `BA_DEF_DEF_` default.
+    Missing,
+    /// `0`: the DBC convention for a non-cyclic (event-driven) frame.
+    NonCyclic,
+    /// A value that is not a non-negative number.
+    Invalid(String),
+}
+
+/// The message's own `BA_ "GenMsgCycleTime"` value, else the default.
+fn cycle_time(dbc: &Dbc, id: MessageId) -> Cycle {
+    let own = dbc
+        .attribute_values_message
+        .iter()
+        .rev()
+        .find(|a| a.name == CYCLE_ATTR && a.message_id == id)
+        .map(|a| &a.value);
+    let value = own.or_else(|| {
+        dbc.attribute_defaults
+            .iter()
+            .rev()
+            .find(|d| d.name == CYCLE_ATTR)
+            .map(|d| &d.value)
+    });
+    // can-dbc reads a non-negative integer as `Uint` and only a negative one
+    // as `Int`, so the three numeric kinds are folded into one check rather
+    // than each carrying its own sign guard.
+    let ms = match value {
+        None => return Cycle::Missing,
+        Some(AttributeValue::Uint(u)) => *u as f64,
+        Some(AttributeValue::Int(i)) => *i as f64,
+        Some(AttributeValue::Double(d)) => *d,
+        Some(AttributeValue::String(s)) => return Cycle::Invalid(format!("{s:?}")),
+    };
+    if !ms.is_finite() || ms < 0.0 {
+        return Cycle::Invalid(format!("{ms}"));
+    }
+    if ms == 0.0 {
+        Cycle::NonCyclic
+    } else {
+        Cycle::Ms(ms)
+    }
+}
+
+/// An AADL real literal: Rust's shortest round-trip form, with a `.0` added
+/// when the value is integral (`100` is an aadlinteger, `100.0` a real).
+fn aadl_real(x: f64) -> String {
+    let s = format!("{x}");
+    if s.contains('.') { s } else { format!("{s}.0") }
 }
 
 /// The fixed bus classifier name. Not derived from the DBC (a `.dbc` describes
@@ -114,7 +219,7 @@ struct MessageFlow {
     rx: Vec<(usize, String)>,
 }
 
-fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
+fn emit_aadl(dbc: &Dbc, package_name: &str) -> (String, Vec<IngestWarning>) {
     // One global namespace for *classifier* names (bus, data types, devices,
     // system) so a node accidentally named like a message can never collide.
     let mut classifiers = NameAllocator::new();
@@ -198,7 +303,17 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
         let msg_type = messages[j].0.clone();
         let base = sanitize_ident(&m.name, "Frame");
         let tx_port = dev_port_alloc[txi].alloc(&format!("{base}_tx"), "frame_tx");
-        dev_features[txi].push(format!("{tx_port}: out event data port {msg_type};"));
+        let rate = match cycle_time(dbc, m.id) {
+            Cycle::Ms(ms) => {
+                let r = aadl_real(1000.0 / ms);
+                format!(
+                    " {{Communication_Properties::Output_Rate => [Value_Range => {r} .. {r}; \
+                     Rate_Unit => PerSecond; Rate_Distribution => Fixed;];}}"
+                )
+            }
+            _ => String::new(),
+        };
+        dev_features[txi].push(format!("{tx_port}: out event data port {msg_type}{rate};"));
         let rx: Vec<(usize, String)> = rx_devs
             .iter()
             .map(|&ri| {
@@ -317,7 +432,34 @@ fn emit_aadl(dbc: &Dbc, package_name: &str) -> String {
     out.push('\n');
 
     push_line(&mut out, 0, &format!("end {pkg};"));
-    out
+
+    // -- what did not reach the model (REQ-DBC-CYCLE-TIME-001) ------------
+    let flowed: HashSet<usize> = flows.iter().map(|f| f.msg).collect();
+    let mut warnings = Vec::new();
+    for (j, m) in dbc.messages.iter().enumerate() {
+        let text = match cycle_time(dbc, m.id) {
+            Cycle::Ms(_) if flowed.contains(&j) => continue,
+            Cycle::Ms(ms) => format!(
+                "{CYCLE_ATTR} {} ms is present but not carried: the frame has no modelled \
+                 transmitter-to-receiver flow, so there is no port to put its rate on",
+                aadl_real(ms)
+            ),
+            Cycle::Missing => format!(
+                "no {CYCLE_ATTR} and no BA_DEF_DEF_ default; the frame has no rate in the model"
+            ),
+            Cycle::NonCyclic => {
+                format!("{CYCLE_ATTR} is 0 (non-cyclic, event-driven); no rate is emitted")
+            }
+            Cycle::Invalid(v) => {
+                format!("{CYCLE_ATTR} {v} is not a non-negative number; no rate is emitted")
+            }
+        };
+        warnings.push(IngestWarning {
+            message: m.name.clone(),
+            text,
+        });
+    }
+    (out, warnings)
 }
 
 /// Whether `name` denotes a real DBC node, excluding the `Vector__XXX`
