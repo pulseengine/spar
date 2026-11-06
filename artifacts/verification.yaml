@@ -5185,3 +5185,19 @@ artifacts:
         target: REQ-TSN-YANG-DEPLOYABLE-001
       - type: verifies
         target: REQ-TSN-YANG-DEPLOYABLE-001
+  - id: TEST-CI-FIXTURE-PODMAN-PREFLIGHT-001
+    type: feature
+    title: A podman start failure is reported under a step that names podman
+    status: implemented
+    description: "tools/check_podman_preflight.py runs in trace-fixtures.yml as its own step BEFORE 'Require /dev/kvm openable by a Nix BUILD process'. It creates a file in XDG_RUNTIME_DIR (default /run/user/<uid>), not an os.access test, and runs podman info. Self-test (in PR CI): a chmod 0500 XDG_RUNTIME_DIR fails with 'not a /dev/kvm problem'; a missing one, a failing podman info (its output printed) and no podman each fail; a writable dir plus a working podman passes. Mutant replacing the write test with pass SURVIVED with the read-only case removed and is CAUGHT with it. NOT CLAIMED until a nightly run: that the step runs green on the podman runner; the read-only case is skipped when the self-test runs as root."
+    release: v0.49.0
+    tags: [ci, fixtures, guardrail]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_podman_preflight.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
+      - type: verifies
+        target: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001

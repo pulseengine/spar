@@ -962,6 +962,10 @@ jobs:
       # the 6-hour default. Same steps-of-this-job rationale as above.
       - name: Job-timeout guardrail self-test
         run: tools/check_job_timeouts.py --self-test
+      # The podman preflight runs only in the nightly fixture workflow, so its
+      # self-test runs here, where a PR can turn it red (REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001).
+      - name: Podman preflight self-test
+        run: tools/check_podman_preflight.py --self-test
       - name: Job-timeout guardrail
         run: tools/check_job_timeouts.py
       # Closure MSRV drift (#369). Here rather than in a code-gated job for the

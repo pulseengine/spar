@@ -7950,7 +7950,7 @@ artifacts:
   - id: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
     type: requirement
     title: The trace-fixture workflow shall tell 'podman did not start' apart from 'kvm is not usable'
-    status: approved
+    status: implemented
     description: "Refs #425. The 13-night streak itself ended: Trace-Topology Fixture Generation has been green since 2026-09-23 (the host's read-only /run/user/1109 was the cause, and no workflow change was needed). The remaining half of the issue is narrower than its title: on main the first podman call is inside the step named 'Require /dev/kvm openable by a Nix BUILD process', with no podman info preflight before it. When podman cannot start, only podman's own error prints (the KVM/capability ::error:: advice is inside the container script and does not run), but the failing step's name blames /dev/kvm, which is what the run summary shows. Requirement: a separate podman preflight step (podman info, XDG_RUNTIME_DIR writable) before the KVM probe, so a podman start failure is reported under a step that names podman. Oracle: a run with an unwritable XDG_RUNTIME_DIR fails at the preflight step."
     tags: [ci, fixtures, guardrail]
     links:
