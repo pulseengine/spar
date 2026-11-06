@@ -407,6 +407,8 @@ pub enum SyntaxKind {
     FLOW_DEF,
     /// The `of T` payload of a flow usage.
     FLOW_PAYLOAD,
+    /// `= expr` binding a directed feature (`in x = a.b;`) to a value.
+    FEATURE_VALUE,
 
     // Keep this last -- used for bounds checking.
     #[doc(hidden)]
