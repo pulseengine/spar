@@ -5,6 +5,7 @@ kerml/examples/Simple Tests/FeatureInheritance.kerml
 kerml/examples/Simple Tests/Imports.kerml
 kerml/examples/Simple Tests/Inheritance.kerml
 sysml/examples/Camera Example/Camera.sysml
+sysml/examples/Camera Example/PictureTaking.sysml
 sysml/examples/Import Tests/AliasImport.sysml
 sysml/examples/Import Tests/CircularImport.sysml
 sysml/examples/Import Tests/QualifiedNameImportTest.sysml
@@ -14,11 +15,14 @@ sysml/examples/Simple Tests/AliasTest.sysml
 sysml/examples/Simple Tests/ImportTest.sysml
 sysml/examples/Simple Tests/RootPackageTest.sysml
 sysml/examples/Simple Tests/StateTest.sysml
+sysml/examples/Vehicle Example/VehicleDefinitions.sysml
 sysml/training/01. Packages/Package Example.sysml
 sysml/training/02. Part Definitions/Part Definition Example.sysml
 sysml/training/04. Subsetting/Subsetting Example.sysml
 sysml/training/10. Ports/Port Example.sysml
 sysml/training/11. Interfaces/Interface Decomposition Example.sysml
+sysml/training/13. Flows/Flow Definition Example.sysml
+sysml/training/13. Flows/Flow Usage Example.sysml
 sysml/training/23. State Definitions/State Definition Example-1.sysml
 sysml/training/23. State Definitions/State Definition Example-2.sysml
 sysml/training/24. States/State Actions.sysml

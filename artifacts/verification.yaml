@@ -5217,3 +5217,20 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-SYSML2-FLOWS-MODES-001
+  - id: TEST-SYSML2-FLOW-CONNECTIONS-001
+    type: feature
+    title: A SysML v2 flow usage lowers to an AADL port connection and reaches the instance model
+    status: implemented
+    description: "The CONNECTIONS part of the flows half of REQ-SYSML2-FLOWS-MODES-001; the end-to-end flow and its latency verdict are open, so this satisfies but does not verify the requirement. Grammar: flow [name] [of T] [from] S to D, succession flow, a body-only redefining flow, flow def (official corpus 35 -> 39 parsing); before it, every flow was an ERROR node that swallowed the members after it. Lowering: a flow directly in a part def body becomes a port connection under its declared name, else the name a connect between the same parts would get, made unique. An end resolves to a feature of the part or a port of one of its parts; a.p.x is the port p of part a when a's type declares p (the item x is what the port carries). An end that does not resolve, a flow without ends, a flow in a part usage or action body, and a flow def are reported and not lowered. End to end: spar sysml2 lower then spar instance --format json shows the connection between the two ports. Mutation: the grammar's in-diff mutants 4 survivors -> 0, the lowering's 28 -> 0."
+    release: v0.49.0
+    tags: [sysml2, flows, northstar]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-sysml2 --test flow_connections
+        - run: cargo test -p spar-sysml2 --test flow_grammar
+        - run: cargo test -p spar-sysml2 --test official_corpus
+        - run: cargo test -p spar --test sysml2_cli sysml2_flow_reaches_the_instance_model_as_a_port_connection
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-FLOWS-MODES-001

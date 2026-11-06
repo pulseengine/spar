@@ -54,7 +54,8 @@ const CORPUS: &str = "test-data/sysml2/official";
 /// freed by reading `attribute redefines X` as a redefinition, not a name;
 /// `15_12-Compound Value Type.sysml`); 35 on 2026-11-06 after the state grammar
 /// of `REQ-SYSML2-FLOWS-MODES-001` (`transition`, `accept ... then`,
-/// `first start then`, `entry; then`, state actions, `exhibit state`).
+/// `first start then`, `entry; then`, state actions, `exhibit state`); 39 on
+/// 2026-11-06 after its flow grammar (`flow [of T] [from] S to D`, `flow def`).
 const PARSING_LIST: &str = include_str!("official_corpus_parsing.txt");
 
 /// Guards against the corpus vanishing. An empty walk parses nothing and
@@ -323,6 +324,23 @@ fn closed_grammar_gaps_stay_closed() {
             "state actions",
             "state def S { state a { entry act{ in v = w; } do action d { } exit x; } }",
         ),
+        // REQ-SYSML2-FLOWS-MODES-001 (flow grammar).
+        (
+            "flow of payload",
+            "part def P { flow of Fuel from a.p.f to b.q.f; }",
+        ),
+        ("named flow", "part def P { flow f from a.p to b.q; }"),
+        ("anonymous flow", "part def P { flow from a.p to b.q; }"),
+        ("flow without from", "part def P { flow 'x y'.p to 'z'.q; }"),
+        (
+            "redefining flow",
+            "part def P { flow :>> m from a.p to b.q { } }",
+        ),
+        (
+            "succession flow",
+            "part def P { succession flow s from a.p to b.q; }",
+        ),
+        ("flow def", "flow def F { end a; end b; }"),
     ];
     let reopened: Vec<&str> = closed
         .iter()

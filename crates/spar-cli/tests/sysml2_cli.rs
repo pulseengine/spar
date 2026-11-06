@@ -409,3 +409,59 @@ fn sysml2_state_machine_reaches_mode_reachability() {
     assert!(out.contains("Unreachable modes: isolated"), "{out}");
     assert!(out.contains("on_off (on -> off)"), "{out}");
 }
+
+// ---------------------------------------------------------------------------
+// REQ-SYSML2-FLOWS-MODES-001 (flows half, connections): a SysML v2 flow
+// reaches the instance model as a port connection between the ports.
+// ---------------------------------------------------------------------------
+
+// rivet: partially-verifies REQ-SYSML2-FLOWS-MODES-001
+#[test]
+fn sysml2_flow_reaches_the_instance_model_as_a_port_connection() {
+    let dir = std::env::temp_dir().join(format!("spar-sysml2-flows-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sysml = dir.join("flows.sysml");
+    std::fs::write(
+        &sysml,
+        "package Fl {
+  port def FuelPort;
+  part def Tank { port fuelTankPort : FuelPort; }
+  part def Eng { port engineFuelPort : FuelPort; }
+  part def V {
+    part tank : Tank;
+    part eng : Eng;
+    flow supply of Fuel from tank.fuelTankPort.fuelSupply to eng.engineFuelPort.fuelSupply;
+  }
+}
+",
+    )
+    .unwrap();
+    let lowered = spar()
+        .args(["sysml2", "lower", sysml.to_str().unwrap()])
+        .output()
+        .expect("failed to run spar");
+    assert!(lowered.status.success(), "{lowered:?}");
+    let aadl = dir.join("flows.aadl");
+    std::fs::write(&aadl, &lowered.stdout).unwrap();
+
+    let inst = spar()
+        .args([
+            "instance",
+            "--root",
+            "Fl::V.impl",
+            "--format",
+            "json",
+            aadl.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to run spar");
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(inst.status.success(), "{inst:?}");
+    let v: serde_json::Value = serde_json::from_slice(&inst.stdout).expect("instance JSON");
+    let conns = v["connections"].as_array().expect("connections array");
+    assert_eq!(conns.len(), 1, "{v:#}");
+    assert_eq!(conns[0]["name"], "supply");
+    assert_eq!(conns[0]["kind"], "Port");
+    assert_eq!(conns[0]["source"], "tank.fuelTankPort");
+    assert_eq!(conns[0]["destination"], "eng.engineFuelPort");
+}
