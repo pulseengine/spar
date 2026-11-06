@@ -156,3 +156,44 @@ fn a_flow_outside_a_part_def_and_a_flow_def_are_reported_and_a_lowered_one_is_no
         );
     }
 }
+
+/// REGRESSION: `connect a.b.p` was lowered as `a.p`, a feature `a`'s type does
+/// not have (`Annex A SimpleVehicleModel`: `connect rearAxle.leftHalfAxle.
+/// axleToWheelPort to ...`). An AADL connection end is `part.feature`, so an
+/// end below a part's own feature is reported and the connect is not lowered.
+#[test]
+fn a_connect_end_inside_a_nested_part_is_reported_not_shortened() {
+    let src = "port def FP; part def Tank { port p : FP; } \
+               part def Assy { part tank : Tank; } part def Eng { port q : FP; } \
+               part def V { part assy : Assy; part eng : Eng; connect assy.tank.p to eng.q; }";
+    let (aadl, d) = lower(src);
+    assert!(!aadl.contains("assy.p"), "{aadl}");
+    assert!(!aadl.contains("connections"), "{aadl}");
+    assert!(
+        has(&d, "`assy.tank.p` names a feature below `assy.tank`"),
+        "{d:?}"
+    );
+
+    // Outside a part def the same end is reported the same way.
+    let (aadl, d) = lower("connect a.b.c to d.e;");
+    assert!(!aadl.contains("a.c"), "{aadl}");
+    assert!(has(&d, "`a.b.c` names a feature below `a.b`"), "{d:?}");
+}
+
+/// The one- and two-segment ends a connect has always lowered stay lowered.
+#[test]
+fn a_connect_between_parts_ports_and_own_features_still_lowers() {
+    let (aadl, d) = lower(&with_types(
+        "port feed : FuelPort; connect tank.fuelTankPort to eng.engineFuelPort; \
+         connect feed to eng.engineFuelPort;",
+    ));
+    assert!(
+        aadl.contains("    tank_to_eng : port tank.fuelTankPort -> eng.engineFuelPort;\n"),
+        "{aadl}"
+    );
+    assert!(
+        aadl.contains("    feed_to_eng : port feed -> eng.engineFuelPort;\n"),
+        "{aadl}"
+    );
+    assert!(!has(&d, "names a feature below"), "{d:?}");
+}

@@ -438,7 +438,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                     report_dropped_in_part_usage(&child, ctx);
                 }
                 SyntaxKind::CONNECTION_USAGE => {
-                    if let Some(conn) = lower_connection_node_to_item(&child) {
+                    if let Some(conn) = lower_connection_node_to_item(&child, ctx) {
                         let idx = ctx.tree.connections.alloc(conn);
                         connections.push(idx);
                     }
@@ -1036,7 +1036,7 @@ fn lower_allocation_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
 
 /// Lower a SysML v2 `connect a.p to b.p;` to an AADL connection item.
 fn lower_connection_usage(node: &SyntaxNode, ctx: &mut LowerCtx) {
-    if let Some(conn) = lower_connection_node_to_item(node) {
+    if let Some(conn) = lower_connection_node_to_item(node, ctx) {
         ctx.tree.connections.alloc(conn);
     }
 }
@@ -1560,11 +1560,37 @@ fn lower_constraint_usage_to_property(
 }
 
 /// Convert a `connect a.p to b.p;` to an AADL connection item.
-fn lower_connection_node_to_item(node: &SyntaxNode) -> Option<ConnectionItem> {
+///
+/// An AADL connection end is a feature of this component or of one of its
+/// subcomponents (`p` or `a.p`). An end that names something below that
+/// (`a.b.p`, a port of the part `b` inside `a`) has no AADL end of its own: it
+/// is REPORTED and the connect is not lowered, never shortened to `a.p`.
+fn lower_connection_node_to_item(node: &SyntaxNode, ctx: &mut LowerCtx) -> Option<ConnectionItem> {
     let endpoints: Vec<_> = node
         .children()
         .filter(|c| c.kind() == SyntaxKind::CONNECT_ENDPOINT)
         .collect();
+    let nested: Vec<Vec<String>> = endpoints
+        .iter()
+        .map(chain_idents)
+        .filter(|ids| ids.len() > 2)
+        .collect();
+    if !nested.is_empty() {
+        for ids in nested {
+            push_diag(
+                ctx,
+                node,
+                format!(
+                    "unsupported: `{}` (not lowered; `{}` names a feature below `{}`, \
+                     and an AADL connection end is a feature of a part, `part.feature`)",
+                    member_text(node),
+                    ids.join("."),
+                    ids[..ids.len() - 1].join("."),
+                ),
+            );
+        }
+        return None;
+    }
 
     let src = endpoints.first().map(extract_connected_element);
     let dst = endpoints.get(1).map(extract_connected_element);
