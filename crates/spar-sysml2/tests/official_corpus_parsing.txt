@@ -19,6 +19,7 @@ sysml/examples/Vehicle Example/VehicleDefinitions.sysml
 sysml/training/01. Packages/Package Example.sysml
 sysml/training/02. Part Definitions/Part Definition Example.sysml
 sysml/training/04. Subsetting/Subsetting Example.sysml
+sysml/training/10. Ports/Port Conjugation Example.sysml
 sysml/training/10. Ports/Port Example.sysml
 sysml/training/11. Interfaces/Interface Decomposition Example.sysml
 sysml/training/13. Flows/Flow Definition Example.sysml
@@ -32,6 +33,7 @@ sysml/training/25. Transitions/Change and Time Triggers.sysml
 sysml/training/25. Transitions/Transition Actions.sysml
 sysml/training/32. Requirements/Requirement Satisfaction.sysml
 sysml/validation/13-Model Containment/13b-Safety and Security Features Element Group.sysml
+sysml/validation/14-Language Extensions/14b-Language Extensions.sysml
 sysml/validation/15-Properties-Values-Expressions/15_02-Basic Value Properties.sysml
 sysml/validation/15-Properties-Values-Expressions/15_06-System of Quantities.sysml
 sysml/validation/15-Properties-Values-Expressions/15_07-System of Units and Scales.sysml

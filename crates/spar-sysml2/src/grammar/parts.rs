@@ -943,6 +943,9 @@ fn feature_specialization(p: &mut Parser) -> bool {
         SyntaxKind::COLON if p.nth(1) != SyntaxKind::COLON => {
             let m = p.start();
             p.bump(SyntaxKind::COLON);
+            // `: ~T` types by the conjugate of port def `T`; the `~` stays
+            // outside the QUALIFIED_NAME so the type is still `T`.
+            p.eat(SyntaxKind::TILDE);
             super::qualified_name(p);
             m.complete(p, SyntaxKind::TYPING);
         }

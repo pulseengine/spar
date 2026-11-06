@@ -329,6 +329,12 @@ fn scan_token<'a>(c: &mut Cursor<'a>) -> (SyntaxKind, &'a str) {
             SyntaxKind::TILDE_GT
         }
 
+        // `~` conjugation (`port p : ~FuelPort;`)
+        b'~' => {
+            c.bump_n(1);
+            SyntaxKind::TILDE
+        }
+
         // `..` dot-dot (range)
         b'.' if c.peek(1) == b'.' => {
             c.bump_n(2);
@@ -481,6 +487,23 @@ mod tests {
                 SyntaxKind::PORT_KW,
                 SyntaxKind::WHITESPACE,
                 SyntaxKind::CONNECT_KW,
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_tilde_is_conjugation_unless_followed_by_gt() {
+        let kinds: Vec<_> = lex(":~T ~> ~").iter().map(|(k, _)| *k).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                SyntaxKind::COLON,
+                SyntaxKind::TILDE,
+                SyntaxKind::IDENT,
+                SyntaxKind::WHITESPACE,
+                SyntaxKind::TILDE_GT,
+                SyntaxKind::WHITESPACE,
+                SyntaxKind::TILDE,
             ]
         );
     }
