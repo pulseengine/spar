@@ -4,6 +4,7 @@
 //! Functions take a `&mut Parser` and build nodes via markers.
 
 mod constraints;
+mod flows;
 mod packages;
 mod parts;
 mod requirements;
@@ -97,6 +98,9 @@ fn is_member_start(kind: SyntaxKind, p: &Parser) -> bool {
         | SyntaxKind::ENTRY_KW
         | SyntaxKind::EXIT_KW
         | SyntaxKind::EXHIBIT_KW => true,
+        // `flow ...;`, `succession flow ...;`
+        SyntaxKind::FLOW_KW => true,
+        SyntaxKind::SUCCESSION_KW => p.nth(1) == SyntaxKind::FLOW_KW,
         // Check for `connection` not followed by `def` -- this is still a
         // member start, handled in parts::member
         _ => {

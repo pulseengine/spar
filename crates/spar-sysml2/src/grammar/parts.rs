@@ -43,6 +43,7 @@ const MEMBER_RECOVERY: TokenSet = TokenSet::new(&[
     SyntaxKind::ENTRY_KW,
     SyntaxKind::EXIT_KW,
     SyntaxKind::EXHIBIT_KW,
+    SyntaxKind::FLOW_KW,
 ]);
 
 /// Parse a member of a namespace body.
@@ -125,6 +126,11 @@ pub(crate) fn member(p: &mut Parser) {
             }
         }
         SyntaxKind::EXHIBIT_KW => super::states::state_usage(p),
+        SyntaxKind::FLOW_KW if p.nth(1) == SyntaxKind::DEF_KW => {
+            definition(p, SyntaxKind::FLOW_DEF)
+        }
+        SyntaxKind::FLOW_KW => super::flows::flow_usage(p),
+        SyntaxKind::SUCCESSION_KW => super::flows::flow_usage(p),
         SyntaxKind::TRANSITION_KW => super::states::transition_usage(p),
         SyntaxKind::FIRST_KW => super::states::succession_usage(p),
         SyntaxKind::THEN_KW => super::states::target_succession(p),
@@ -470,7 +476,7 @@ fn connection_usage_named(p: &mut Parser) {
 }
 
 /// Parse a connect endpoint: `a.b.c`
-fn connect_endpoint(p: &mut Parser) {
+pub(super) fn connect_endpoint(p: &mut Parser) {
     let m = p.start();
     super::feature_chain(p);
     m.complete(p, SyntaxKind::CONNECT_ENDPOINT);

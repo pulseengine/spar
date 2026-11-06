@@ -398,6 +398,14 @@ pub enum SyntaxKind {
     /// after a state it is a succession from that state.
     TARGET_SUCCESSION,
 
+    // Flows (REQ-SYSML2-FLOWS-MODES-001)
+    /// `[succession] flow [name] [of T] [from] S to D;`
+    FLOW_USAGE,
+    /// `flow def F { ... }`
+    FLOW_DEF,
+    /// The `of T` payload of a flow usage.
+    FLOW_PAYLOAD,
+
     // Keep this last -- used for bounds checking.
     #[doc(hidden)]
     __LAST,
