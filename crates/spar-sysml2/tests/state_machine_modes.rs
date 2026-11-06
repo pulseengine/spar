@@ -202,3 +202,54 @@ fn a_part_def_after_a_state_machine_survives() {
     let (aadl, _) = lower(CANONICAL);
     assert!(aadl.contains("  system Top\n"), "{aadl}");
 }
+
+/// The official training form (`23. State Definitions`, `26. State
+/// Exhibition`): the machine is a `state def`, exhibited by type. REGRESSION:
+/// before, the body-less usage was itself lowered as one mode `vs` and the
+/// def's states were lost.
+// rivet: partially-verifies REQ-SYSML2-FLOWS-MODES-001
+#[test]
+fn an_exhibited_state_typed_by_a_state_def_takes_its_modes_from_the_def() {
+    let (aadl, d) = lower(
+        "state def VS { entry; then off; state off; state on; } \
+         part def P { exhibit state vs : VS; }",
+    );
+    assert!(aadl.contains("    off : initial mode;\n"), "{aadl}");
+    assert!(aadl.contains("    on : mode;\n"), "{aadl}");
+    assert!(!aadl.contains("vs : "), "the usage is not a mode:\n{aadl}");
+    assert!(!has(&d, "no initial mode"), "{d:?}");
+}
+
+#[test]
+fn an_exhibited_machine_not_in_the_model_is_reported_and_yields_no_modes() {
+    for src in [
+        "part def P { exhibit state vs : Elsewhere; }",
+        "part def P { exhibit vehicleStates; }",
+    ] {
+        let (aadl, d) = lower(src);
+        assert!(!aadl.contains("modes"), "`{src}`:\n{aadl}");
+        assert!(
+            has(&d, "the state machine it exhibits is not declared"),
+            "`{src}`: {d:?}"
+        );
+    }
+}
+
+#[test]
+fn a_typed_state_that_is_not_exhibited_is_still_a_mode() {
+    let (aadl, d) = lower("part def P { entry; then a; state a : Elsewhere; state b; }");
+    assert!(aadl.contains("    a : initial mode;\n"), "{aadl}");
+    assert!(aadl.contains("    b : mode;\n"), "{aadl}");
+    assert!(!has(&d, "exhibits"), "{d:?}");
+}
+
+#[test]
+fn a_nested_state_typed_by_a_state_def_is_one_mode_and_its_substates_are_reported() {
+    let (aadl, d) = lower(
+        "state def Inner { state x; state y; } \
+         part def P { state m { entry; then a; state a; state b : Inner; } }",
+    );
+    assert!(aadl.contains("    b : mode;\n"), "{aadl}");
+    assert!(!aadl.contains("    x : mode"), "{aadl}");
+    assert!(has(&d, "the substates of `state b : Inner`"), "{d:?}");
+}

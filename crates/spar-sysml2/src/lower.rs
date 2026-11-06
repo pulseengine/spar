@@ -67,6 +67,7 @@ pub fn lower_to_aadl_with_diagnostics(parse: &crate::Parse) -> (ItemTree, Vec<Lo
     let root = parse.syntax_node();
     let mut ctx = LowerCtx {
         local_part_defs: collect_local_part_def_names(&root),
+        state_defs: collect_state_defs(&root),
         ..LowerCtx::default()
     };
     lower_node(&root, &mut ctx);
@@ -119,6 +120,9 @@ struct LowerCtx {
     /// unqualified supertype that names one of these is the model's own
     /// type, never an AADL library category (see [`aadl_library_category`]).
     local_part_defs: std::collections::HashSet<String>,
+    /// Every `state def` declared in the source, by name: the machine an
+    /// `exhibit state s : VS;` lowers is the body of `VS` (see [`machine_body`]).
+    state_defs: std::collections::HashMap<String, SyntaxNode>,
     /// `allocate` relationships found in part def bodies, resolved after
     /// subcomponent categories are known (see [`lower_pending_allocations`]).
     pending_allocations: Vec<PendingAllocation>,
@@ -1158,14 +1162,34 @@ fn lower_state_machine(
 ) {
     use spar_hir_def::item_tree::{ModeItem, ModeTransitionItem};
 
-    let containers: Vec<&SyntaxNode> = members
+    // An exhibited state whose machine is not in this model contributes no
+    // modes: lowering it as one mode named after the usage would be a
+    // different machine from the one the model exhibits.
+    let mut kept: Vec<SyntaxNode> = Vec::new();
+    for m in members {
+        if is_exhibit(m) && machine_body(m, ctx).is_none() {
+            push_diag(
+                ctx,
+                m,
+                format!(
+                    "unsupported: `{}` (not lowered; the state machine it exhibits is not \
+                     declared in this model, so no modes are taken from it)",
+                    member_text(m)
+                ),
+            );
+        } else {
+            kept.push(m.clone());
+        }
+    }
+    let members = &kept[..];
+    let containers: Vec<(&SyntaxNode, Vec<SyntaxNode>)> = members
         .iter()
-        .filter(|m| m.kind() == SyntaxKind::STATE_USAGE && has_substates(m))
+        .filter_map(|m| machine_body(m, ctx).map(|b| (m, b)))
         .collect();
     let body: Vec<SyntaxNode> = match containers.first() {
         None => members.to_vec(),
-        Some(c) => {
-            for other in containers.iter().skip(1) {
+        Some((_, machine)) => {
+            for (other, _) in containers.iter().skip(1) {
                 push_diag(
                     ctx,
                     other,
@@ -1178,7 +1202,7 @@ fn lower_state_machine(
             }
             for m in members
                 .iter()
-                .filter(|m| !containers.iter().any(|c| c == m))
+                .filter(|m| !containers.iter().any(|(c, _)| c == m))
             {
                 push_diag(
                     ctx,
@@ -1190,9 +1214,7 @@ fn lower_state_machine(
                     ),
                 );
             }
-            find_child(c, SyntaxKind::NAMESPACE_BODY)
-                .map(|b| b.children().collect())
-                .unwrap_or_default()
+            machine.clone()
         }
     };
 
@@ -1222,7 +1244,7 @@ fn lower_state_machine(
         let was_entry = std::mem::replace(&mut after_entry, false);
         match m.kind() {
             SyntaxKind::STATE_USAGE => {
-                if has_substates(m) {
+                if machine_body(m, ctx).is_some() {
                     push_diag(
                         ctx,
                         m,
@@ -1389,6 +1411,35 @@ fn lower_state_machine(
         })
         .collect();
     (modes, kept)
+}
+
+/// The members of the state machine a state usage declares: its own
+/// substates (`state m { state a; ... }`), or else the body of the local
+/// `state def` it is typed by (`exhibit state vs : VehicleStates;`, the form
+/// of the official training files). `None` when it declares neither.
+fn machine_body(node: &SyntaxNode, ctx: &LowerCtx) -> Option<Vec<SyntaxNode>> {
+    if node.kind() != SyntaxKind::STATE_USAGE {
+        return None;
+    }
+    let def = if has_substates(node) {
+        node.clone()
+    } else {
+        let ty = extract_type_ref(node)?;
+        ctx.state_defs.get(ty.type_name.as_str())?.clone()
+    };
+    if !has_substates(&def) {
+        return None;
+    }
+    find_child(&def, SyntaxKind::NAMESPACE_BODY).map(|b| b.children().collect())
+}
+
+/// `exhibit state s ...;` / `exhibit s { ... }`.
+fn is_exhibit(node: &SyntaxNode) -> bool {
+    node.kind() == SyntaxKind::STATE_USAGE
+        && node
+            .children_with_tokens()
+            .find(|e| !e.kind().is_trivia())
+            .is_some_and(|e| e.kind() == SyntaxKind::EXHIBIT_KW)
 }
 
 /// A state usage whose body declares at least one state.
@@ -1605,6 +1656,19 @@ fn resolve_subcomponent_categories(tree: &mut ItemTree) {
 }
 
 /// Collect the name of every `part def` anywhere in the source.
+fn collect_state_defs(root: &SyntaxNode) -> std::collections::HashMap<String, SyntaxNode> {
+    let mut defs = std::collections::HashMap::new();
+    for n in root
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::STATE_DEF)
+    {
+        if let Some(name) = extract_name(&n) {
+            defs.entry(name.as_str().to_string()).or_insert(n);
+        }
+    }
+    defs
+}
+
 fn collect_local_part_def_names(root: &SyntaxNode) -> std::collections::HashSet<String> {
     root.descendants()
         .filter(|n| n.kind() == SyntaxKind::PART_DEF)
