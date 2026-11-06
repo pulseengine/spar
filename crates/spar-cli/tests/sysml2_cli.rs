@@ -358,3 +358,54 @@ fn sysml2_unknown_subcommand_shows_error() {
         "expected unknown subcommand error: {stderr}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// REQ-SYSML2-FLOWS-MODES-001 (modes half): a SysML v2 state machine reaches
+// the mode-reachability pass. SysML in, `spar modes` verdict out.
+// ---------------------------------------------------------------------------
+
+// REQ-SYSML2-FLOWS-MODES-001, modes half only (no `verifies` marker: the flows half is open)
+#[test]
+fn sysml2_state_machine_reaches_mode_reachability() {
+    let dir = std::env::temp_dir().join(format!("spar-sysml2-modes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let sysml = dir.join("modal.sysml");
+    std::fs::write(
+        &sysml,
+        "package Modal {
+  port def Cmd;
+  part def Ctrl {
+    port cmd : Cmd;
+    exhibit state modes {
+      entry; then off;
+      state off;
+      accept Start via cmd then on;
+      state on;
+      transition on_off first on accept Stop via cmd then off;
+      state isolated;
+    }
+  }
+  part def Top { part c : Ctrl; }
+}
+",
+    )
+    .unwrap();
+    let lowered = spar()
+        .args(["sysml2", "lower", sysml.to_str().unwrap()])
+        .output()
+        .expect("failed to run spar");
+    assert!(lowered.status.success(), "{lowered:?}");
+    let aadl = dir.join("modal.aadl");
+    std::fs::write(&aadl, &lowered.stdout).unwrap();
+
+    let modes = spar()
+        .args(["modes", "--root", "Modal::Top.impl", aadl.to_str().unwrap()])
+        .output()
+        .expect("failed to run spar");
+    let out = String::from_utf8_lossy(&modes.stdout);
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(modes.status.success(), "{modes:?}");
+    assert!(out.contains("(initial: off)"), "{out}");
+    assert!(out.contains("Unreachable modes: isolated"), "{out}");
+    assert!(out.contains("on_off (on -> off)"), "{out}");
+}

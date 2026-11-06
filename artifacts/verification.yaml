@@ -5201,3 +5201,19 @@ artifacts:
         target: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
       - type: verifies
         target: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
+  - id: TEST-SYSML2-STATE-MODES-001
+    type: feature
+    title: A SysML v2 state machine lowers to AADL modes and reaches mode reachability
+    status: implemented
+    description: "The MODES half of REQ-SYSML2-FLOWS-MODES-001; the flows half is open, so this satisfies but does not verify the requirement. Grammar: transition, accept-then, first start then, entry; then, state actions, exhibit state (official corpus 27 -> 35 parsing). Lowering: the substates of the one state usage that declares substates become the part def's modes; entry; then S / first start then S names the initial mode; transition and accept-then become mode transitions; a trigger becomes a port trigger only through via <port of this part def>. Every construct AADL cannot hold (other triggers, guards, effects, state actions, nested states, dotted references, a second machine or initial state) is reported, and no initial mode is invented. End to end: spar sysml2 lower then spar modes reports the initial mode, an unreachable mode and the transitions. Mutation: 29 of the new lowering's mutants survived without these tests, 0 with them (34 caught, 6 unviable)."
+    release: v0.49.0
+    tags: [sysml2, modes, northstar]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-sysml2 --test state_machine_modes
+        - run: cargo test -p spar-sysml2 --test official_corpus
+        - run: cargo test -p spar --test sysml2_cli sysml2_state_machine_reaches_mode_reachability
+    links:
+      - type: satisfies
+        target: REQ-SYSML2-FLOWS-MODES-001

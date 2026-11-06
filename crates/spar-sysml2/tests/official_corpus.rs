@@ -52,7 +52,9 @@ const CORPUS: &str = "test-data/sysml2/official";
 /// type, `perform`, KerML classifiers); 27 on 2026-10-29 after
 /// `REQ-SYSML2-PROPERTY-VALUES-001` (`Packets.sysml` and `PacketUsage.sysml`,
 /// freed by reading `attribute redefines X` as a redefinition, not a name;
-/// `15_12-Compound Value Type.sysml`).
+/// `15_12-Compound Value Type.sysml`); 35 on 2026-11-06 after the state grammar
+/// of `REQ-SYSML2-FLOWS-MODES-001` (`transition`, `accept ... then`,
+/// `first start then`, `entry; then`, state actions, `exhibit state`).
 const PARSING_LIST: &str = include_str!("official_corpus_parsing.txt");
 
 /// Guards against the corpus vanishing. An empty walk parses nothing and
@@ -266,11 +268,11 @@ fn the_known_grammar_gaps_are_the_ones_we_think_they_are() {
             "package P { abstract type A specializes Base::Anything; }",
         ),
         // The next blocker in the specification's Annex A vehicle model
-        // (`SysML v2 Spec Annex A SimpleVehicleModel.sysml:41`), once
-        // `perform action providePower;` stopped it at line 35.
+        // (`SysML v2 Spec Annex A SimpleVehicleModel.sysml:51`), once
+        // `exhibit state` stopped stopping it at line 41.
         (
-            "exhibit state",
-            "part def P { exhibit state s parallel { } }",
+            "anonymous constraint body",
+            "part def P { constraint {x <= 500} }",
         ),
     ];
     let unexpectedly_ok: Vec<&str> = gaps
@@ -299,6 +301,28 @@ fn closed_grammar_gaps_stay_closed() {
             "part def P { perform action providePower; }",
         ),
         ("KerML class", "package P { class ShoppingCart; }"),
+        // REQ-SYSML2-FLOWS-MODES-001 (state grammar).
+        (
+            "exhibit state",
+            "part def P { exhibit state s parallel { } }",
+        ),
+        (
+            "transition",
+            "state def S { state a; state b; transition t first a accept E via p if x do send e to p then b; }",
+        ),
+        (
+            "target transition",
+            "state def S { state a; accept E then b; state b; }",
+        ),
+        (
+            "initial succession",
+            "state def S { first start then a; state a; }",
+        ),
+        ("entry then", "state def S { entry; then a; state a; }"),
+        (
+            "state actions",
+            "state def S { state a { entry act{ in v = w; } do action d { } exit x; } }",
+        ),
     ];
     let reopened: Vec<&str> = closed
         .iter()
