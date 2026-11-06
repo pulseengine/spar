@@ -210,6 +210,26 @@ MUTANTS: list[Mutant] = [
              "`REGRESSION #397: an unimported module FAILS and is named`.",
     ),
     # ── run_verification.py ────────────────────────────────────────────────
+    # REQ-VERIFY-GATE-SCOPE-001 (#513): the two below were confirmed SURVIVED
+    # with their catching cases removed, then CAUGHT, before they were added.
+    Mutant(
+        tool="run_verification.py",
+        id="rv-scope-narrow-ok",
+        old="    missing = sorted(required - matched)\n",
+        new="    missing = []\n",
+        note="#513: a Verify-Filter override that narrows the required gate is "
+             "accepted again. Caught by `REGRESSION #513: a narrowing override "
+             "FAILS` and the swap / drop-one cases.",
+    ),
+    Mutant(
+        tool="run_verification.py",
+        id="rv-scope-floor-off",
+        old="    if len(matched) < min_matched:\n",
+        new="    if False:\n",
+        note="the MIN_MATCHED floor never fires, so a default filter that stops "
+             "matching (a renamed tag) shrinks the gate silently. Caught by "
+             "`below the matched floor fails`.",
+    ),
     Mutant(
         tool="run_verification.py",
         id="rv-zero-executed-lenient",

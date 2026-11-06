@@ -74,6 +74,11 @@ jobs:
           # has-field/in/matches/contains/linked-* (no `has-status`).
           DEFAULT='(and (= type "feature") (or (has-tag "v093") (has-tag "v0100")))'
           OVERRIDE=$(printf '%s' "$PR_BODY" | grep -m1 -E '^Verify-Filter:' | sed 's/^Verify-Filter:[[:space:]]*//' || true)
+          # The override may only WIDEN the default (REQ-VERIFY-GATE-SCOPE-001,
+          # #513): run_verification.py --must-cover fails a filter that drops
+          # any artifact the default checks, so a PR body cannot narrow the
+          # required gate to an artifact of its author's choosing.
+          printf 'default=%s\n' "$DEFAULT" >>"$GITHUB_OUTPUT"
           if [ -n "${OVERRIDE:-}" ]; then
             printf 'filter=%s\n' "$OVERRIDE" >>"$GITHUB_OUTPUT"
           else
@@ -85,9 +90,15 @@ jobs:
         continue-on-error: true
         env:
           FILTER: ${{ steps.pick.outputs.filter }}
+          DEFAULT_FILTER: ${{ steps.pick.outputs.default }}
         run: |
+          # --min-matched 20: the default matched 20 features when this floor
+          # was set (2026-11-06). Below it, the default has stopped matching
+          # what it used to (a tag renamed, a field dropped).
           tools/run_verification.py \
             --filter "$FILTER" \
+            --must-cover "$DEFAULT_FILTER" \
+            --min-matched 20 \
             --results-json verification-results.json
 
       - name: Upload results artifact

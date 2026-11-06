@@ -113,6 +113,41 @@ def decide_exit(total: int, passed: int, failed: int, skipped: int) -> tuple[int
     return 0, f"{passed} passed, {skipped} skipped, 0 failed"
 
 
+def decide_scope(matched: set[str], required: set[str], min_matched: int) -> tuple[int, str]:
+    """Return (exit_code, reason) for whether the matched set may be verified.
+
+    REQ-VERIFY-GATE-SCOPE-001 (#358, #513). The workflow lets a `Verify-Filter:`
+    line in the PR body REPLACE the default filter. Before this check, that line
+    could also NARROW it: `Verify-Filter: (= id "X")` turned the required
+    `Verification Gate (rivet-driven)` context into a check of one artifact,
+    chosen by the author of the PR it gates. The exemption was declared where
+    the exempted party edits it, the shape #385 warned about.
+
+    So an override may only WIDEN. ``required`` is what the default filter
+    matches; every one of those artifacts must still be in ``matched``, and the
+    reason names the ones that were dropped. With no override, ``matched`` IS
+    ``required`` and this holds trivially.
+
+    ``min_matched`` is a floor on the size of the matched set, for the case the
+    widen check cannot see: the default filter itself shrinking (a tag renamed,
+    a field dropped). It does not re-check what the default matches; it stops it
+    quietly matching less.
+    """
+    missing = sorted(required - matched)
+    if missing:
+        shown = ", ".join(missing[:10]) + (" ..." if len(missing) > 10 else "")
+        return 1, (
+            f"the filter drops {len(missing)} artifact(s) the default filter "
+            f"checks ({shown}); a Verify-Filter override may only widen the gate"
+        )
+    if len(matched) < min_matched:
+        return 1, (
+            f"matched {len(matched)} artifact(s), below the declared floor of "
+            f"{min_matched}; the filter has stopped matching what it used to"
+        )
+    return 0, f"matched {len(matched)} artifact(s), covering all {len(required)} default ones"
+
+
 # ── self-test (the decision that turns a run's tallies into an exit code) ────
 #
 # Runs BEFORE the gate it guards, and without rivet or a shell, so a refactor
@@ -163,6 +198,25 @@ def self_test() -> int:
     report("a real pass does not claim 'verified nothing'",
            "verified nothing" not in ok_reason, ok_reason, "no 'verified nothing'")
 
+    # ── decide_scope: a PR-body override may widen the gate, never narrow it ──
+    D = {"A", "B", "C"}
+    scope_cases = [
+        ("no override: matched IS the default", D, D, 3, 0),
+        ("a widening override passes", D | {"X", "Y"}, D, 3, 0),
+        # THE #513 HOLE: `Verify-Filter: (= id "A")` narrowed the required gate.
+        ("REGRESSION #513: a narrowing override FAILS", {"A"}, D, 1, 1),
+        ("an override that swaps the set (same size) FAILS", {"A", "B", "X"}, D, 3, 1),
+        ("dropping ONE default artifact fails", D - {"C"}, D, 2, 1),
+        ("below the matched floor fails", D, D, 4, 1),
+        ("exactly at the floor passes", D, D, 3, 0),
+    ]
+    for desc, matched, required, floor, want_code in scope_cases:
+        got_code, _r = decide_scope(set(matched), set(required), floor)
+        report(f"decide_scope {desc}", got_code == want_code, got_code, want_code)
+    _, why = decide_scope({"A"}, D, 1)
+    report("a narrowing verdict names the dropped artifacts",
+           "B, C" in why and "only widen" in why, why, "...B, C ... only widen")
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
@@ -184,6 +238,18 @@ def main() -> int:
         "--shell",
         default=os.environ.get("VERIFY_SHELL", "bash"),
         help="shell used to execute each step (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--must-cover",
+        default=None,
+        help="a filter whose every match --filter must also match (the gate's "
+             "default); an override may widen the gate, never narrow it",
+    )
+    parser.add_argument(
+        "--min-matched",
+        type=int,
+        default=0,
+        help="fail when --filter matches fewer artifacts than this floor",
     )
     parser.add_argument(
         "--self-test",
@@ -214,6 +280,26 @@ def main() -> int:
         return 1
 
     print(f"matched {len(ids)} artifacts")
+
+    required: set[str] = set(ids)
+    if args.must_cover is not None and args.must_cover != args.filter:
+        try:
+            required = set(rivet_list_ids(args.must_cover))
+        except subprocess.CalledProcessError as e:
+            print(f"rivet list failed for --must-cover: {e.stderr}", file=sys.stderr)
+            return 2
+        if not required:
+            # The default matching nothing would make every override "cover" it.
+            print(f"::error::--must-cover filter matched nothing: {args.must_cover}",
+                  file=sys.stderr)
+            return 2
+    code, why = decide_scope(set(ids), required, args.min_matched)
+    print(f"scope:  {why}")
+    if code:
+        print(f"::error::{why}", file=sys.stderr)
+        result.total = len(ids)
+        args.results_json.write_text(json.dumps(asdict(result), indent=2))
+        return code
     print()
     result.total = len(ids)
 
