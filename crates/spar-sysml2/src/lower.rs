@@ -385,6 +385,8 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
     let mut connections = Vec::new();
     let mut property_associations = Vec::new();
     let mut modes = Vec::new();
+    let mut mode_transitions = Vec::new();
+    let mut state_members: Vec<SyntaxNode> = Vec::new();
     let mut allocations = Vec::new();
 
     if let Some(body) = find_child(node, SyntaxKind::NAMESPACE_BODY) {
@@ -429,12 +431,12 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
                         report_dropped(&child, "", ctx);
                     }
                 }
-                SyntaxKind::STATE_USAGE => {
-                    if let Some(mode) = lower_state_usage_to_mode(&child) {
-                        let idx = ctx.tree.modes.alloc(mode);
-                        modes.push(idx);
-                    }
-                }
+                SyntaxKind::STATE_USAGE
+                | SyntaxKind::TRANSITION_USAGE
+                | SyntaxKind::TARGET_TRANSITION_USAGE
+                | SyntaxKind::SUCCESSION_USAGE
+                | SyntaxKind::TARGET_SUCCESSION
+                | SyntaxKind::STATE_ACTION => state_members.push(child.clone()),
                 SyntaxKind::CONSTRAINT_USAGE => {
                     if let Some(pa) =
                         lower_constraint_usage_to_property(&child, &mut ctx.diagnostics)
@@ -473,6 +475,20 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         }
     }
 
+    if !state_members.is_empty() {
+        let ports: Vec<Name> = features
+            .iter()
+            .map(|f| ctx.tree.features[*f].name.clone())
+            .collect();
+        let (ms, ts) = lower_state_machine(&state_members, &ports, ctx);
+        for m in ms {
+            modes.push(ctx.tree.modes.alloc(m));
+        }
+        for t in ts {
+            mode_transitions.push(ctx.tree.mode_transitions.alloc(t));
+        }
+    }
+
     // If there are subcomponents or connections, create both a type and impl.
     // Otherwise, just a type.
     let type_idx = ctx.tree.component_types.alloc(ComponentTypeItem {
@@ -483,7 +499,7 @@ fn lower_part_def(node: &SyntaxNode, ctx: &mut LowerCtx) {
         features,
         flow_specs: Vec::new(),
         modes: modes.clone(),
-        mode_transitions: Vec::new(),
+        mode_transitions: mode_transitions.clone(),
         prototypes: Vec::new(),
         property_associations: property_associations.clone(),
         requires_modes: false,
@@ -1112,12 +1128,331 @@ fn lower_valued_usage_to_property(
 }
 
 /// Convert a `state name : StateDef;` usage to an AADL mode.
-fn lower_state_usage_to_mode(node: &SyntaxNode) -> Option<spar_hir_def::item_tree::ModeItem> {
-    let name = extract_name(node)?;
-    Some(spar_hir_def::item_tree::ModeItem {
-        name,
-        is_initial: false,
-    })
+/// Lower the state machine of one part def to AADL modes and mode transitions
+/// (REQ-SYSML2-FLOWS-MODES-001).
+///
+/// The machine is either the part def's own state members, or the body of the
+/// ONE state usage among them that declares substates (`state modes { ... }`,
+/// `exhibit state s { ... }`): its substates are the modes, not the container.
+///
+/// | SysML v2 (state body)                  | AADL                         |
+/// |----------------------------------------|------------------------------|
+/// | `state off;`                           | `off : mode;`                |
+/// | `entry; then off;` / `first start then off;` | `off : initial mode;`  |
+/// | `transition t first a accept E via p then b;` | `t : a -[ p ]-> b;`   |
+/// | `state a; accept E via p then b;`      | `a -[ p ]-> b;`              |
+/// | `state a; then b;`                     | `a -[ ]-> b;`                |
+///
+/// An AADL trigger is a port, so a trigger becomes one only through a `via`
+/// naming a port of this part def; any other trigger, a guard, an effect, a
+/// state action, a nested state or a dotted state reference is REPORTED and
+/// not lowered. Nothing is invented: no initial mode is chosen when the model
+/// does not name one.
+fn lower_state_machine(
+    members: &[SyntaxNode],
+    ports: &[Name],
+    ctx: &mut LowerCtx,
+) -> (
+    Vec<spar_hir_def::item_tree::ModeItem>,
+    Vec<spar_hir_def::item_tree::ModeTransitionItem>,
+) {
+    use spar_hir_def::item_tree::{ModeItem, ModeTransitionItem};
+
+    let containers: Vec<&SyntaxNode> = members
+        .iter()
+        .filter(|m| m.kind() == SyntaxKind::STATE_USAGE && has_substates(m))
+        .collect();
+    let body: Vec<SyntaxNode> = match containers.first() {
+        None => members.to_vec(),
+        Some(c) => {
+            for other in containers.iter().skip(1) {
+                push_diag(
+                    ctx,
+                    other,
+                    format!(
+                        "unsupported: a second state machine `{}` (not lowered; an AADL \
+                         component has one set of modes, taken from the first)",
+                        member_text(other)
+                    ),
+                );
+            }
+            for m in members
+                .iter()
+                .filter(|m| !containers.iter().any(|c| c == m))
+            {
+                push_diag(
+                    ctx,
+                    m,
+                    format!(
+                        "unsupported: `{}` beside the state machine (not lowered; the \
+                         modes come from the state usage that declares substates)",
+                        member_text(m)
+                    ),
+                );
+            }
+            find_child(c, SyntaxKind::NAMESPACE_BODY)
+                .map(|b| b.children().collect())
+                .unwrap_or_default()
+        }
+    };
+
+    let mut modes: Vec<Name> = Vec::new();
+    let mut initial: Option<Name> = None;
+    let mut transitions: Vec<(SyntaxNode, ModeTransitionItem)> = Vec::new();
+    let mut prev_state: Option<Name> = None;
+    let mut after_entry = false;
+
+    let mut set_initial = |ctx: &mut LowerCtx, node: &SyntaxNode, dst: Name| {
+        if initial.is_none() {
+            initial = Some(dst);
+        } else {
+            push_diag(
+                ctx,
+                node,
+                format!(
+                    "unsupported: a second initial state `{}` (not lowered; AADL has \
+                     exactly one initial mode)",
+                    member_text(node)
+                ),
+            );
+        }
+    };
+
+    for m in &body {
+        let was_entry = std::mem::replace(&mut after_entry, false);
+        match m.kind() {
+            SyntaxKind::STATE_USAGE => {
+                if has_substates(m) {
+                    push_diag(
+                        ctx,
+                        m,
+                        format!(
+                            "unsupported: the substates of `{}` (not lowered; AADL modes \
+                             are flat, the state itself becomes one mode)",
+                            member_text(m)
+                        ),
+                    );
+                }
+                if let Some(n) = extract_name(m) {
+                    prev_state = Some(n.clone());
+                    modes.push(n);
+                }
+            }
+            SyntaxKind::SUCCESSION_USAGE => {
+                let src = end_name(m, SyntaxKind::TRANSITION_SOURCE);
+                let dst = end_name(m, SyntaxKind::TRANSITION_TARGET);
+                match (src.as_deref(), dst) {
+                    (Some("start"), Some(dst)) => set_initial(ctx, m, Name::new(&dst)),
+                    _ => push_diag(
+                        ctx,
+                        m,
+                        format!(
+                            "unsupported: `{}` (not lowered; only `first start then S;` \
+                             is read, as the initial mode)",
+                            member_text(m)
+                        ),
+                    ),
+                }
+            }
+            SyntaxKind::STATE_ACTION => {
+                let is_entry = m
+                    .first_token()
+                    .is_some_and(|t| t.kind() == SyntaxKind::ENTRY_KW);
+                after_entry = is_entry;
+                let empty = m
+                    .children_with_tokens()
+                    .filter(|e| !e.kind().is_trivia())
+                    .count()
+                    <= 2; // the keyword and `;`
+                if !empty {
+                    push_diag(
+                        ctx,
+                        m,
+                        format!(
+                            "unsupported: `{}` (not lowered; an AADL mode carries no \
+                             behaviour)",
+                            member_text(m)
+                        ),
+                    );
+                }
+            }
+            SyntaxKind::TARGET_SUCCESSION => {
+                let Some(dst) = end_name(m, SyntaxKind::TRANSITION_TARGET) else {
+                    continue;
+                };
+                if was_entry {
+                    set_initial(ctx, m, Name::new(&dst));
+                } else if let Some(src) = prev_state.clone() {
+                    let t = ModeTransitionItem {
+                        name: None,
+                        source: src,
+                        triggers: Vec::new(),
+                        destination: Name::new(&dst),
+                    };
+                    transitions.push((m.clone(), t));
+                } else {
+                    push_diag(
+                        ctx,
+                        m,
+                        format!(
+                            "unsupported: `{}` (not lowered; no state precedes it and it \
+                             does not follow `entry;`)",
+                            member_text(m)
+                        ),
+                    );
+                }
+            }
+            SyntaxKind::TRANSITION_USAGE | SyntaxKind::TARGET_TRANSITION_USAGE => {
+                let src = if m.kind() == SyntaxKind::TRANSITION_USAGE {
+                    end_name(m, SyntaxKind::TRANSITION_SOURCE).map(|s| Name::new(&s))
+                } else {
+                    prev_state.clone()
+                };
+                let (Some(src), Some(dst)) = (src, end_name(m, SyntaxKind::TRANSITION_TARGET))
+                else {
+                    push_diag(
+                        ctx,
+                        m,
+                        format!(
+                            "unsupported: `{}` (not lowered; its source state is unknown)",
+                            member_text(m)
+                        ),
+                    );
+                    continue;
+                };
+                let triggers = transition_triggers(m, ports, ctx);
+                let t = ModeTransitionItem {
+                    name: extract_name(m),
+                    source: src,
+                    triggers,
+                    destination: Name::new(&dst),
+                };
+                transitions.push((m.clone(), t));
+            }
+            _ => {}
+        }
+    }
+
+    let known = |n: &Name| modes.iter().any(|m| m.as_str() == n.as_str());
+    let mut kept = Vec::new();
+    for (node, t) in transitions {
+        if known(&t.source) && known(&t.destination) {
+            kept.push(t);
+        } else {
+            push_diag(
+                ctx,
+                &node,
+                format!(
+                    "unsupported: `{}` (not lowered; `{}` or `{}` is not a state of this \
+                     machine, and a dotted reference into a nested state has no AADL form)",
+                    member_text(&node),
+                    t.source,
+                    t.destination
+                ),
+            );
+        }
+    }
+    if let Some(i) = &initial
+        && !known(i)
+    {
+        if let Some(first) = body.first() {
+            push_diag(
+                ctx,
+                first,
+                format!(
+                    "unsupported: initial state `{i}` is not a state of this machine (no initial mode is lowered)"
+                ),
+            );
+        }
+        initial = None;
+    }
+    if initial.is_none()
+        && !modes.is_empty()
+        && let Some(first) = body.first()
+    {
+        push_diag(
+            ctx,
+            first,
+            "no initial mode: the state machine names none (add `entry; then S;`); \
+             AADL requires exactly one, and none is chosen for you"
+                .to_string(),
+        );
+    }
+
+    let modes = modes
+        .into_iter()
+        .map(|name| ModeItem {
+            is_initial: initial
+                .as_ref()
+                .is_some_and(|i| i.as_str() == name.as_str()),
+            name,
+        })
+        .collect();
+    (modes, kept)
+}
+
+/// A state usage whose body declares at least one state.
+fn has_substates(node: &SyntaxNode) -> bool {
+    find_child(node, SyntaxKind::NAMESPACE_BODY)
+        .is_some_and(|b| b.children().any(|c| c.kind() == SyntaxKind::STATE_USAGE))
+}
+
+/// The state named by a transition end (`TRANSITION_SOURCE` / `_TARGET`).
+fn end_name(node: &SyntaxNode, end: SyntaxKind) -> Option<String> {
+    let chain = find_child(node, end)?;
+    let text: String = chain.text().to_string().split_whitespace().collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The port triggers of a transition: only a `via` naming one of `ports`.
+fn transition_triggers(node: &SyntaxNode, ports: &[Name], ctx: &mut LowerCtx) -> Vec<Name> {
+    let mut triggers = Vec::new();
+    if let Some(trigger) = find_child(node, SyntaxKind::TRIGGER) {
+        let via = find_child(&trigger, SyntaxKind::TRIGGER_VIA)
+            .and_then(|v| find_child(&v, SyntaxKind::FEATURE_CHAIN))
+            .map(|c| c.text().to_string().split_whitespace().collect::<String>());
+        match via {
+            Some(v) if ports.iter().any(|p| p.as_str() == v) => triggers.push(Name::new(&v)),
+            Some(v) => push_diag(
+                ctx,
+                &trigger,
+                format!(
+                    "unsupported: trigger `{}` (not lowered; `{v}` is not a port of this \
+                     part def, so the transition has no trigger)",
+                    member_text(&trigger)
+                ),
+            ),
+            None => push_diag(
+                ctx,
+                &trigger,
+                format!(
+                    "unsupported: trigger `{}` (not lowered; an AADL mode transition is \
+                     triggered by a port: add `via <port>`)",
+                    member_text(&trigger)
+                ),
+            ),
+        }
+    }
+    for (kind, what) in [(SyntaxKind::GUARD, "guard"), (SyntaxKind::EFFECT, "effect")] {
+        if let Some(n) = find_child(node, kind) {
+            push_diag(
+                ctx,
+                &n,
+                format!(
+                    "unsupported: {what} `{}` (not lowered; an AADL mode transition has no {what})",
+                    member_text(&n)
+                ),
+            );
+        }
+    }
+    triggers
+}
+
+fn push_diag(ctx: &mut LowerCtx, node: &SyntaxNode, msg: String) {
+    ctx.diagnostics.push(LowerDiagnostic {
+        offset: node.text_range().start().into(),
+        msg,
+    });
 }
 
 /// Convert a constraint usage with an explicit value (e.g.
@@ -2102,6 +2437,22 @@ pub fn item_tree_to_aadl(tree: &ItemTree) -> String {
                             let initial = if mode.is_initial { " initial" } else { "" };
                             out.push_str(&format!("    {} :{} mode;", mode.name, initial));
                             out.push('\n');
+                        }
+                        for t_idx in &ct.mode_transitions {
+                            let t = &tree.mode_transitions[*t_idx];
+                            let name = t
+                                .name
+                                .as_ref()
+                                .map(|n| format!("{n} : "))
+                                .unwrap_or_default();
+                            let triggers: Vec<&str> =
+                                t.triggers.iter().map(|n| n.as_str()).collect();
+                            out.push_str(&format!(
+                                "    {name}{} -[ {} ]-> {};\n",
+                                t.source,
+                                triggers.join(", "),
+                                t.destination
+                            ));
                         }
                     }
                     if !ct.property_associations.is_empty() {
