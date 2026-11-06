@@ -163,6 +163,52 @@ MUTANTS: list[Mutant] = [
              "count as zero. Caught by `REGRESSION #385(b): axiom COUNTS` (want_msg "
              "'axiom=1').",
     ),
+    # ── check_lean_reachable.py ────────────────────────────────────────────
+    # REQ-PROOF-LAKE-REACHABLE-001 (#397). Each was confirmed SURVIVED with its
+    # catching case removed, then CAUGHT by the full suite, before it was added.
+    Mutant(
+        tool="check_lean_reachable.py",
+        id="lr-lib-as-root",
+        old="    ran = set()\n",
+        new="    found.extend(v for v in libs.values() if v not in found)\n    ran = set()\n",
+        note="counting every declared lean_lib as a root, default target or not. "
+             "Then deleting `import Proofs` from Main keeps the guard green while "
+             "bare `lake build` compiles none of Proofs/. Caught by `a lean_lib "
+             "that is not a default target is NOT a root`.",
+    ),
+    Mutant(
+        tool="check_lean_reachable.py",
+        id="lr-keep-lake",
+        old='if ".lake" not in p.relative_to(proofs).parts)',
+        new="if True)",
+        note="dropping the .lake/ exclusion, which reports Mathlib as unreachable "
+             "first-party code. Caught by `.lake/ (Mathlib, build output) is not "
+             "first-party` (no_msg 'UNREACHABLE').",
+    ),
+    Mutant(
+        tool="check_lean_reachable.py",
+        id="lr-empty-ok",
+        old='not a fully reachable tree.", file=out)\n        return 2',
+        new='not a fully reachable tree.", file=out)\n        return 0',
+        note="an empty population read as a clean one, the error path yielding the "
+             "ideal reading. Caught by `no .lean files is a broken scan`.",
+    ),
+    Mutant(
+        tool="check_lean_reachable.py",
+        id="lr-no-strip",
+        old='strip_comments(path.read_text(encoding="utf-8"))',
+        new='path.read_text(encoding="utf-8")',
+        note="parsing imports from raw text, so a commented-out import reaches a "
+             "module Lake never compiles. Caught by the block-comment and `--` cases.",
+    ),
+    Mutant(
+        tool="check_lean_reachable.py",
+        id="lr-unreachable-pass",
+        old='        return 1\n    print("every',
+        new='        return 0\n    print("every',
+        note="#397 itself: an unreachable file printed but not failed. Caught by "
+             "`REGRESSION #397: an unimported module FAILS and is named`.",
+    ),
     # ── run_verification.py ────────────────────────────────────────────────
     Mutant(
         tool="run_verification.py",
@@ -502,7 +548,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 7
+MIN_COVERED = 8
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`

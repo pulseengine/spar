@@ -83,6 +83,16 @@ closed-form reasoning in min-plus algebra.
 | `Proofs/Network/MinPlus.lean:260` | `output_dominates_input` | The closed-form output curve dominates the input curve at every `t`: burst inflates by `ρ·T`, sustained rate preserved, so `α'(t) ≥ α(t)`. Le Boudec & Thiran 1.4.3. |
 | `Proofs/Network/MinPlus.lean:313` | `compose_delays_dominates` | Naive serial-chain composition: `α(t) ≤ β2(β1(t + D_naive))`. Chains `delay_bound_classical` per hop through `output_dominates_input`; trivial *after* the per-hop sorrys above are discharged. |
 
+`proofs/Proofs/Network/MinPlusPwa.lean` carries **eight** more: every
+theorem in the piecewise-affine (T-SPEC) generalisation is stated and
+`sorry`. Until v0.49.0 nothing imported the file, so `lake build` never
+compiled it and its statements had stopped elaborating (`List.minimum?`,
+gone from the pinned Lean). It is now imported from `Proofs.lean`, and
+`tools/check_lean_reachable.py` fails the build if any first-party
+`.lean` file is unreachable from the Lake targets CI builds
+(REQ-PROOF-LAKE-REACHABLE-001, #397). The sorry ratchet counted these
+eight all along; it reads text, not what Lake compiles.
+
 ### Discharged in v0.9.2
 
 - `arrival_at_zero_is_zero` (was `arrival_at_zero_is_burst` at MinPlus.lean:318): the v0.9.1 spec/impl mismatch (Lean gave `min(σ, 0) = 0` while Rust short-circuited to `σ`) was reconciled by aligning **toward the Lean spec** (causality: a zero-length window admits zero bytes, regardless of σ). The Rust `ArrivalCurve::at` no longer short-circuits to σ at `t = 0`; the Lean spec adds a matching `if t = 0 then 0` short-circuit so the affine-no-peak branch is also 0; the proof discharges via `simp`. Theorem renamed `arrival_at_zero_is_zero` and the Rust unit test renamed `arrival_curve_at_zero_is_zero`.

@@ -8001,7 +8001,7 @@ artifacts:
   - id: REQ-PROOF-LAKE-REACHABLE-001
     type: requirement
     title: Every first-party Lean module shall be reachable from a Lake root, so lake build typechecks it
-    status: approved
+    status: implemented
     description: "Refs #397. On main proofs/Proofs.lean imports ten modules and not Proofs.Network.MinPlusPwa; the only matches for MinPlusPwa under proofs/ are its own namespace and end lines, and lakefile.toml declares lean_lib Proofs with the default root. So the required Lean proof typecheck never compiles MinPlusPwa.lean (8 theorems, 8 sorries per the issue). Requirement: import it from Proofs.lean (or move it out of proofs/ if dead), and add a guard that computes import reachability from the Lake roots and fails on any unreachable first-party .lean file. Oracle: the guard fails on the current tree and passes once the module is imported and typechecks."
     tags: [proofs, lean, guardrail]
     links:

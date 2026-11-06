@@ -27,11 +27,15 @@
   policy that statements are the load-bearing artefact and full
   proof-discharge is post-MVP.
 
-  This file is **not** imported into `Proofs.lean` yet; it is an
-  out-of-tree skeleton for the v1.0.0 sweep.  Once the per-bucket
-  generalisations of MinPlus theorems 1-7 are discharged, this file
-  joins the `Proofs.lean` import list and the v1.0.0 release pulls
-  the piecewise curve into the load-bearing proof corpus.
+  This file is imported from `Proofs.lean` (REQ-PROOF-LAKE-REACHABLE-001,
+  #397) so that `lake build` typechecks its definitions and theorem
+  STATEMENTS.  That is all the import buys: every theorem below is still
+  `sorry`, nothing here is proven, and `Proofs.lean` lists it as stated,
+  not verified.  Until v0.49.0 this file was imported by nothing, and the
+  statements had stopped elaborating at all: they called `List.minimum?`
+  and `List.maximum?`, which the pinned Lean no longer has (now
+  `List.min?` / `List.max?`, same `Option`-valued meaning).  A statement
+  nobody compiles is not a load-bearing artefact.
 -/
 
 import Mathlib.Tactic
@@ -72,9 +76,9 @@ def PwaArrivalCurve.at (α : PwaArrivalCurve) (t_ps : Nat) : Nat :=
   else
     -- Per-bucket readouts; min over the (non-empty) list.
     let readouts := α.buckets.map (fun (s, r) => s + (r * t_ps) / scale)
-    -- `List.minimum?` returns `Option`; defaulting to 0 when the list
+    -- `List.min?` returns `Option`; defaulting to 0 when the list
     -- is empty is safe because `buckets_nonempty` rules that out.
-    readouts.minimum?.getD 0
+    readouts.min?.getD 0
 
 /-! ## Theorem 1 — Causality at t = 0 -/
 
@@ -125,7 +129,7 @@ theorem pwa_at_le_per_bucket (α : PwaArrivalCurve) (t_ps : Nat)
 def pwaBacklogClosedForm (α : PwaArrivalCurve) (β : ServiceCurve) : Nat :=
   let perBucket :=
     α.buckets.map (fun (s, r) => s + (r * β.latency_ps) / scale)
-  perBucket.minimum?.getD 0
+  perBucket.min?.getD 0
 
 /-- **Theorem 4 — Piecewise backlog bound.**  For piecewise α with
     every bucket stable on β, the closed-form `pwaBacklogClosedForm`
@@ -161,7 +165,7 @@ def pwaDelayClosedForm (α : PwaArrivalCurve) (β : ServiceCurve) : Nat :=
     let perBucket :=
       α.buckets.map
         (fun (s, _) => β.latency_ps + (s * scale + β.rate_bps - 1) / β.rate_bps)
-    perBucket.minimum?.getD 0
+    perBucket.min?.getD 0
 
 /-- **Theorem 5 — Piecewise delay bound.**  For piecewise α with
     every bucket stable on β and `0 < R`, the closed-form
@@ -229,11 +233,11 @@ theorem pwa_output_dominates_input
 /-- Maximum bucket rate of a piecewise curve.  Required to be
     less than `β.rate_bps` for the residual to be servable. -/
 def PwaArrivalCurve.maxRho (α : PwaArrivalCurve) : Nat :=
-  (α.buckets.map (fun (_, r) => r)).maximum?.getD 0
+  (α.buckets.map (fun (_, r) => r)).max?.getD 0
 
 /-- Maximum bucket burst of a piecewise curve. -/
 def PwaArrivalCurve.maxSigma (α : PwaArrivalCurve) : Nat :=
-  (α.buckets.map (fun (s, _) => s)).maximum?.getD 0
+  (α.buckets.map (fun (s, _) => s)).max?.getD 0
 
 /-- Closed-form conservative single-bucket residual.  Mirrors the
     Rust `piecewise::residual_service`. -/

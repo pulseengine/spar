@@ -14,6 +14,10 @@
 --   5. Network Calculus min-plus closed-forms (Le Boudec & Thiran 2001)
 --   6. Flow latency monotonicity in component WCETs (Feiertag et al. 2009)
 --   7. ARINC 653 partition isolation (ARINC 653P1-5 §3)
+--
+-- Stated, NOT proven (imported so `lake build` typechecks the statements):
+--   - Piecewise-affine (T-SPEC) min-plus closed forms, Network/MinPlusPwa.lean
+--     (8 theorems, every one `sorry`; REQ-PROOF-LAKE-REACHABLE-001, #397)
 
 import Proofs.Scheduling.RTACore
 import Proofs.Scheduling.RTA
@@ -25,3 +29,4 @@ import Proofs.Scheduling.ArincSupply
 import Proofs.Scheduling.Latency
 import Proofs.Scheduling.Arinc653Isolation
 import Proofs.Network.MinPlus
+import Proofs.Network.MinPlusPwa
