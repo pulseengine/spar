@@ -1204,87 +1204,200 @@ impl GateSchedule {
         out
     }
 
-    /// Serialize this gate schedule as an IEEE 802.1Qcw `ieee802-dot1q-sched`
-    /// YANG instance document (NETCONF XML) for the egress port
-    /// `port_name` — the deployable artifact a TSN switch consumes via
-    /// `edit-config` (REQ-TSN-EXPORT-YANG-001), not a network-calculus bound.
+    /// Serialize this gate schedule as an IEEE 802.1Qcw edit-config document
+    /// (NETCONF XML) for the bridge port `port_name`, starting at
+    /// `base_time` (REQ-TSN-EXPORT-YANG-001, REQ-TSN-YANG-DEPLOYABLE-001).
     ///
-    /// Each [`GateWindow`] becomes one `<gate-control-entry>` with
-    /// `operation-name=set-gate-states`, `time-interval-value` the window
-    /// duration in whole nanoseconds (`duration_ps / 1000`), and
-    /// `gate-states-value` the window's `allowed_cos_mask` (the closed
-    /// guard window emits mask 0). The cycle period is the rational
-    /// `admin-cycle-time` = `cycle_ps / 1e12` seconds. `admin-gate-states`
-    /// initializes all eight queues open (255). NO new dependency —
-    /// hand-emitted XML, mirroring [`GateSchedule::to_gcl_blob`].
+    /// The shape is checked against the published modules
+    /// (`ieee802-dot1q-sched-bridge` 2023-10-26, which augments
+    /// `/if:interfaces/if:interface/dot1q:bridge-port` with
+    /// `sched:sched-parameters`) with `yanglint -t edit`:
     ///
-    /// **Precondition:** every `duration_ps` and `cycle_ps` is a whole
-    /// number of nanoseconds. `time-interval-value` is integer ns, so a
-    /// sub-nanosecond duration would truncate and the emitted intervals
-    /// would no longer sum to `admin-cycle-time` (which is emitted from
-    /// `cycle_ps` directly). Both producers — [`GateSchedule::parse`] and
-    /// [`synthesize_gcl`] — guarantee whole-ns windows, so for any
-    /// schedule they build `Σ time-interval-value == admin-cycle-time`;
-    /// the `debug_assert` upholds that contract at this boundary.
-    pub fn to_qcw_yang(&self, port_name: &str) -> String {
-        // Picoseconds per second — the denominator of the `admin-cycle-time`
-        // rational, since every interval in this crate is stored in ps.
-        const PS_PER_SECOND: u64 = 1_000_000_000_000;
-        debug_assert!(
-            self.cycle_ps.is_multiple_of(1_000)
-                && self
-                    .windows
-                    .iter()
-                    .all(|w| w.duration_ps.is_multiple_of(1_000)),
-            "to_qcw_yang requires whole-nanosecond windows and cycle \
-             (guaranteed by GateSchedule::parse and synthesize_gcl)"
-        );
+    /// * `gate-parameter-table` sits inside `<bridge-port>` and is in the
+    ///   `ieee802-dot1q-sched-bridge` namespace, the module whose `uses`
+    ///   instantiates it. `ieee802-dot1q-sched` only defines the grouping.
+    /// * `operation-name` is an identityref, so the identity is prefixed:
+    ///   `sched:set-gate-states`.
+    /// * `type` is ietf-interfaces' mandatory leaf, `ianaift:ethernetCsmacd`.
+    /// * `admin-cycle-time` is a uint32/uint32 rational in SECONDS, emitted as
+    ///   `cycle_ns / 1e9` reduced by their gcd. (Up to v0.48.2 the
+    ///   denominator was 1e12, which overflows uint32, so no switch could
+    ///   have accepted any export.)
+    /// * `admin-base-time` and `config-change = true` make it ACTIVATABLE: the
+    ///   base time is when gating cycles begin, and config-change tells the
+    ///   port to copy the admin list into the operational one. The schema
+    ///   accepts a document without either, which is why they are required
+    ///   here rather than left to validation.
+    ///
+    /// `base_time` has no default: when a schedule should start is a
+    /// deployment decision this library cannot make. The export FAILS,
+    /// rather than emitting, when a value cannot be represented: a
+    /// sub-nanosecond window or cycle, an interval or cycle beyond uint32,
+    /// or a base time outside the PTP timestamp (48-bit seconds,
+    /// nanoseconds below 1e9; the schema checks neither).
+    ///
+    /// NOT CLAIMED: that a switch accepts it. Schema-valid edit content is
+    /// necessary, not sufficient. 802.1DC's per-interface form
+    /// (`ieee802-dot1dc-sched-if`) is not emitted.
+    pub fn to_qcw_yang(
+        &self,
+        port_name: &str,
+        base_time: PtpTime,
+    ) -> Result<String, YangExportError> {
+        if base_time.nanoseconds >= 1_000_000_000 || base_time.seconds >= 1 << 48 {
+            return Err(YangExportError::BaseTimeOutOfRange(base_time));
+        }
+        if !self.cycle_ps.is_multiple_of(1_000) {
+            return Err(YangExportError::SubNanosecond {
+                cycle_ps: self.cycle_ps,
+                window: None,
+            });
+        }
+        let mut intervals = Vec::with_capacity(self.windows.len());
+        for (i, w) in self.windows.iter().enumerate() {
+            if !w.duration_ps.is_multiple_of(1_000) {
+                return Err(YangExportError::SubNanosecond {
+                    cycle_ps: self.cycle_ps,
+                    window: Some(i),
+                });
+            }
+            let ns = u32::try_from(w.duration_ps / 1_000).map_err(|_| {
+                YangExportError::IntervalTooLong {
+                    window: i,
+                    duration_ps: w.duration_ps,
+                }
+            })?;
+            intervals.push(ns);
+        }
+        let cycle_ns = self.cycle_ps / 1_000;
+        let g = gcd(cycle_ns, 1_000_000_000);
+        let (num, den) = (cycle_ns / g, 1_000_000_000 / g);
+        let num = u32::try_from(num).map_err(|_| YangExportError::CycleTooLong {
+            cycle_ps: self.cycle_ps,
+        })?;
+
         let mut out = String::new();
         out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         out.push_str("<interfaces xmlns=\"urn:ietf:params:xml:ns:yang:ietf-interfaces\">\n");
         out.push_str("  <interface>\n");
         out.push_str(&format!("    <name>{}</name>\n", xml_escape(port_name)));
         out.push_str(
-            "    <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">\n",
+            "    <type xmlns:ianaift=\"urn:ietf:params:xml:ns:yang:iana-if-type\">ianaift:ethernetCsmacd</type>\n",
         );
-        out.push_str("      <gate-enabled>true</gate-enabled>\n");
-        out.push_str("      <admin-gate-states>255</admin-gate-states>\n");
-        out.push_str("      <admin-control-list>\n");
-        for (i, w) in self.windows.iter().enumerate() {
-            // gate-states-value and time-interval-value are DIRECT siblings
-            // of operation-name in the entry (ieee802-dot1q-sched augments
-            // the dot1q-types base-gate-control-entries grouping — there is
-            // no `sgs-params` wrapper, and no `admin-control-list-length`
-            // leaf: length is enforced by a `must` count constraint).
-            out.push_str("        <gate-control-entry>\n");
-            out.push_str(&format!("          <index>{}</index>\n", i));
-            out.push_str("          <operation-name>set-gate-states</operation-name>\n");
+        out.push_str("    <bridge-port xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-bridge\">\n");
+        out.push_str(
+            "      <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched-bridge\" \
+             xmlns:sched=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">\n",
+        );
+        out.push_str("        <gate-enabled>true</gate-enabled>\n");
+        out.push_str("        <admin-gate-states>255</admin-gate-states>\n");
+        out.push_str("        <admin-control-list>\n");
+        for (i, (w, ns)) in self.windows.iter().zip(&intervals).enumerate() {
+            out.push_str("          <gate-control-entry>\n");
+            out.push_str(&format!("            <index>{i}</index>\n"));
+            out.push_str("            <operation-name>sched:set-gate-states</operation-name>\n");
             out.push_str(&format!(
-                "          <time-interval-value>{}</time-interval-value>\n",
-                w.duration_ps / 1_000
+                "            <time-interval-value>{ns}</time-interval-value>\n"
             ));
             out.push_str(&format!(
-                "          <gate-states-value>{}</gate-states-value>\n",
+                "            <gate-states-value>{}</gate-states-value>\n",
                 w.allowed_cos_mask
             ));
-            out.push_str("        </gate-control-entry>\n");
+            out.push_str("          </gate-control-entry>\n");
         }
-        out.push_str("      </admin-control-list>\n");
-        out.push_str("      <admin-cycle-time>\n");
+        out.push_str("        </admin-control-list>\n");
+        out.push_str("        <admin-cycle-time>\n");
+        out.push_str(&format!("          <numerator>{num}</numerator>\n"));
+        out.push_str(&format!("          <denominator>{den}</denominator>\n"));
+        out.push_str("        </admin-cycle-time>\n");
+        out.push_str("        <admin-base-time>\n");
         out.push_str(&format!(
-            "        <numerator>{}</numerator>\n",
-            self.cycle_ps
+            "          <seconds>{}</seconds>\n",
+            base_time.seconds
         ));
         out.push_str(&format!(
-            "        <denominator>{}</denominator>\n",
-            PS_PER_SECOND
+            "          <nanoseconds>{}</nanoseconds>\n",
+            base_time.nanoseconds
         ));
-        out.push_str("      </admin-cycle-time>\n");
-        out.push_str("    </gate-parameter-table>\n");
+        out.push_str("        </admin-base-time>\n");
+        out.push_str("        <config-change>true</config-change>\n");
+        out.push_str("      </gate-parameter-table>\n");
+        out.push_str("    </bridge-port>\n");
         out.push_str("  </interface>\n");
         out.push_str("</interfaces>\n");
-        out
+        Ok(out)
     }
+}
+
+/// A PTP timestamp: when a gate schedule's cycles begin (`admin-base-time`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PtpTime {
+    /// Seconds since the PTP epoch; the PTP field is 48 bits.
+    pub seconds: u64,
+    /// Nanoseconds within the second, below 1e9.
+    pub nanoseconds: u32,
+}
+
+/// Why a gate schedule cannot be exported as a deployable 802.1Qcw document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum YangExportError {
+    /// `nanoseconds >= 1e9`, or `seconds` beyond PTP's 48 bits.
+    BaseTimeOutOfRange(PtpTime),
+    /// The cycle, or window `window`, is not a whole number of nanoseconds,
+    /// so `time-interval-value` (integer ns) cannot represent it exactly.
+    SubNanosecond {
+        cycle_ps: u64,
+        window: Option<usize>,
+    },
+    /// A window longer than `time-interval-value`'s uint32 nanoseconds.
+    IntervalTooLong { window: usize, duration_ps: u64 },
+    /// A cycle whose reduced `cycle_ns / 1e9` numerator exceeds uint32.
+    CycleTooLong { cycle_ps: u64 },
+}
+
+impl std::fmt::Display for YangExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BaseTimeOutOfRange(t) => write!(
+                f,
+                "base time {}s {}ns is not a PTP timestamp (48-bit seconds, nanoseconds below 1e9)",
+                t.seconds, t.nanoseconds
+            ),
+            Self::SubNanosecond {
+                cycle_ps,
+                window: None,
+            } => {
+                write!(
+                    f,
+                    "cycle {cycle_ps} ps is not a whole number of nanoseconds"
+                )
+            }
+            Self::SubNanosecond {
+                window: Some(i), ..
+            } => {
+                write!(f, "window {i} is not a whole number of nanoseconds")
+            }
+            Self::IntervalTooLong {
+                window,
+                duration_ps,
+            } => write!(
+                f,
+                "window {window} ({duration_ps} ps) exceeds time-interval-value's uint32 nanoseconds"
+            ),
+            Self::CycleTooLong { cycle_ps } => {
+                write!(
+                    f,
+                    "cycle {cycle_ps} ps does not fit admin-cycle-time's uint32 rational"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for YangExportError {}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a } else { gcd(b, a % b) }
 }
 
 /// Minimal XML text escaping for values embedded in the
@@ -3380,40 +3493,272 @@ mod tests {
 
     #[test]
     fn qcw_yang_golden_snapshot() {
-        // Pin the EXACT emitted document. Any formatting/structural drift
-        // (a renamed node, a reordered field, a changed namespace) fails
-        // here — the snapshot is the strictest oracle for a serializer.
+        // Pin the EXACT emitted document. This text was validated with
+        // `yanglint -t edit` (libyang 6.4.13) against ietf-interfaces,
+        // ieee802-dot1q-bridge, ieee802-dot1q-sched(-bridge) and iana-if-type
+        // at YangModels 2f719df (REQ-TSN-YANG-DEPLOYABLE-001). A change here
+        // must be re-validated, not just re-pinned.
         let expected = "\
 <?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <interfaces xmlns=\"urn:ietf:params:xml:ns:yang:ietf-interfaces\">
   <interface>
     <name>eth0</name>
-    <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">
-      <gate-enabled>true</gate-enabled>
-      <admin-gate-states>255</admin-gate-states>
-      <admin-control-list>
-        <gate-control-entry>
-          <index>0</index>
-          <operation-name>set-gate-states</operation-name>
-          <time-interval-value>30</time-interval-value>
-          <gate-states-value>4</gate-states-value>
-        </gate-control-entry>
-        <gate-control-entry>
-          <index>1</index>
-          <operation-name>set-gate-states</operation-name>
-          <time-interval-value>70</time-interval-value>
-          <gate-states-value>0</gate-states-value>
-        </gate-control-entry>
-      </admin-control-list>
-      <admin-cycle-time>
-        <numerator>100000</numerator>
-        <denominator>1000000000000</denominator>
-      </admin-cycle-time>
-    </gate-parameter-table>
+    <type xmlns:ianaift=\"urn:ietf:params:xml:ns:yang:iana-if-type\">ianaift:ethernetCsmacd</type>
+    <bridge-port xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-bridge\">
+      <gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched-bridge\" xmlns:sched=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\">
+        <gate-enabled>true</gate-enabled>
+        <admin-gate-states>255</admin-gate-states>
+        <admin-control-list>
+          <gate-control-entry>
+            <index>0</index>
+            <operation-name>sched:set-gate-states</operation-name>
+            <time-interval-value>30</time-interval-value>
+            <gate-states-value>4</gate-states-value>
+          </gate-control-entry>
+          <gate-control-entry>
+            <index>1</index>
+            <operation-name>sched:set-gate-states</operation-name>
+            <time-interval-value>70</time-interval-value>
+            <gate-states-value>0</gate-states-value>
+          </gate-control-entry>
+        </admin-control-list>
+        <admin-cycle-time>
+          <numerator>1</numerator>
+          <denominator>10000000</denominator>
+        </admin-cycle-time>
+        <admin-base-time>
+          <seconds>1700000000</seconds>
+          <nanoseconds>0</nanoseconds>
+        </admin-base-time>
+        <config-change>true</config-change>
+      </gate-parameter-table>
+    </bridge-port>
   </interface>
 </interfaces>
 ";
-        assert_eq!(two_window_schedule().to_qcw_yang("eth0"), expected);
+        assert_eq!(yang(&two_window_schedule(), "eth0"), expected);
+    }
+
+    const BASE: PtpTime = PtpTime {
+        seconds: 1_700_000_000,
+        nanoseconds: 0,
+    };
+
+    fn yang(sched: &GateSchedule, port: &str) -> String {
+        sched
+            .to_qcw_yang(port, BASE)
+            .expect("a whole-ns schedule exports")
+    }
+
+    /// `admin-cycle-time` as seconds, numerator / denominator.
+    fn cycle_rational(doc: &str) -> (u64, u64) {
+        let field = |tag: &str| -> u64 {
+            let open = format!("<{tag}>");
+            let at = doc.find(&open).unwrap() + open.len();
+            doc[at..doc[at..].find('<').unwrap() + at].parse().unwrap()
+        };
+        (field("numerator"), field("denominator"))
+    }
+
+    // rivet: verifies REQ-TSN-YANG-DEPLOYABLE-001
+    #[test]
+    fn qcw_yang_is_activatable_base_time_and_config_change() {
+        // The schema accepts a document without either, so validation alone
+        // would pass an inert schedule; these are the assertions that do not.
+        let doc = yang(&two_window_schedule(), "eth0");
+        assert!(doc.contains("<admin-base-time>\n          <seconds>1700000000</seconds>\n          <nanoseconds>0</nanoseconds>"));
+        assert!(doc.contains("<config-change>true</config-change>"));
+    }
+
+    // rivet: verifies REQ-TSN-YANG-DEPLOYABLE-001
+    #[test]
+    fn qcw_yang_table_is_under_bridge_port_in_the_sched_bridge_namespace() {
+        let doc = yang(&two_window_schedule(), "eth0");
+        let bp = doc
+            .find("<bridge-port xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-bridge\">")
+            .unwrap();
+        let gpt = doc
+            .find("<gate-parameter-table xmlns=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched-bridge\"")
+            .unwrap();
+        assert!(bp < gpt && gpt < doc.find("</bridge-port>").unwrap());
+        assert!(
+            doc.contains("ianaift:ethernetCsmacd</type>"),
+            "ietf-interfaces' mandatory type"
+        );
+        // identityref: prefixed, and the prefix is declared
+        assert_eq!(
+            doc.matches("<operation-name>sched:set-gate-states</operation-name>")
+                .count(),
+            2
+        );
+        assert!(doc.contains("xmlns:sched=\"urn:ieee:std:802.1Q:yang:ieee802-dot1q-sched\""));
+    }
+
+    // rivet: verifies REQ-TSN-YANG-DEPLOYABLE-001
+    #[test]
+    fn qcw_yang_cycle_rational_fits_uint32_and_is_exact() {
+        // 10 us + 7 ns: gcd(10007, 1e9) = 1, so no reduction hides an error.
+        let sched = GateSchedule {
+            windows: vec![GateWindow {
+                offset_ps: 0,
+                duration_ps: 10_007_000,
+                allowed_cos_mask: 0xFF,
+            }],
+            cycle_ps: 10_007_000,
+        };
+        let (n, d) = cycle_rational(&yang(&sched, "p"));
+        assert!(n <= u32::MAX as u64 && d <= u32::MAX as u64);
+        assert_eq!(
+            n * 1_000_000_000_000 / d,
+            sched.cycle_ps,
+            "rational must recover the cycle"
+        );
+        assert_eq!((n, d), (10_007, 1_000_000_000));
+    }
+
+    // rivet: verifies REQ-TSN-YANG-DEPLOYABLE-001
+    #[test]
+    fn qcw_yang_refusals_say_why() {
+        // A refused export is the user-facing result; it must name its cause.
+        let cases = [
+            (
+                YangExportError::BaseTimeOutOfRange(PtpTime {
+                    seconds: 1,
+                    nanoseconds: 1_000_000_000,
+                }),
+                "not a PTP timestamp",
+            ),
+            (
+                YangExportError::SubNanosecond {
+                    cycle_ps: 1_500,
+                    window: None,
+                },
+                "cycle 1500 ps",
+            ),
+            (
+                YangExportError::SubNanosecond {
+                    cycle_ps: 2_000,
+                    window: Some(3),
+                },
+                "window 3",
+            ),
+            (
+                YangExportError::IntervalTooLong {
+                    window: 0,
+                    duration_ps: 9,
+                },
+                "uint32 nanoseconds",
+            ),
+            (
+                YangExportError::CycleTooLong { cycle_ps: 7 },
+                "uint32 rational",
+            ),
+        ];
+        for (e, want) in cases {
+            assert!(e.to_string().contains(want), "{e:?} -> {:?}", e.to_string());
+        }
+    }
+
+    // rivet: verifies REQ-TSN-YANG-DEPLOYABLE-001
+    #[test]
+    fn qcw_yang_refuses_what_it_cannot_represent() {
+        let ok = two_window_schedule();
+        let bad_ns = PtpTime {
+            seconds: 0,
+            nanoseconds: 1_000_000_000,
+        };
+        assert_eq!(
+            ok.to_qcw_yang("p", bad_ns),
+            Err(YangExportError::BaseTimeOutOfRange(bad_ns))
+        );
+        let at_ns_max = PtpTime {
+            seconds: 0,
+            nanoseconds: 999_999_999,
+        };
+        assert!(ok.to_qcw_yang("p", at_ns_max).is_ok());
+        let bad_s = PtpTime {
+            seconds: 1 << 48,
+            nanoseconds: 0,
+        };
+        assert_eq!(
+            ok.to_qcw_yang("p", bad_s),
+            Err(YangExportError::BaseTimeOutOfRange(bad_s))
+        );
+        let at_s_max = PtpTime {
+            seconds: (1 << 48) - 1,
+            nanoseconds: 0,
+        };
+        assert!(ok.to_qcw_yang("p", at_s_max).is_ok());
+
+        let sub_ns_window = GateSchedule {
+            windows: vec![GateWindow {
+                offset_ps: 0,
+                duration_ps: 1_500,
+                allowed_cos_mask: 1,
+            }],
+            cycle_ps: 2_000,
+        };
+        assert_eq!(
+            sub_ns_window.to_qcw_yang("p", BASE),
+            Err(YangExportError::SubNanosecond {
+                cycle_ps: 2_000,
+                window: Some(0)
+            })
+        );
+        let sub_ns_cycle = GateSchedule {
+            windows: vec![],
+            cycle_ps: 1_500,
+        };
+        assert_eq!(
+            sub_ns_cycle.to_qcw_yang("p", BASE),
+            Err(YangExportError::SubNanosecond {
+                cycle_ps: 1_500,
+                window: None
+            })
+        );
+        // uint32 ns ends at 4_294_967_295 ns.
+        let max_ns = u32::MAX as u64 * 1_000;
+        let at_limit = GateSchedule {
+            windows: vec![GateWindow {
+                offset_ps: 0,
+                duration_ps: max_ns,
+                allowed_cos_mask: 1,
+            }],
+            cycle_ps: max_ns,
+        };
+        assert!(at_limit.to_qcw_yang("p", BASE).is_ok());
+        let long = GateSchedule {
+            windows: vec![GateWindow {
+                offset_ps: 0,
+                duration_ps: max_ns + 1_000,
+                allowed_cos_mask: 1,
+            }],
+            cycle_ps: 1_000,
+        };
+        assert_eq!(
+            long.to_qcw_yang("p", BASE),
+            Err(YangExportError::IntervalTooLong {
+                window: 0,
+                duration_ps: max_ns + 1_000
+            })
+        );
+        // A 5 s cycle reduces to 5/1, which fits; a (2^32 + 1) ns cycle cannot:
+        // it is odd and not a multiple of 5, so gcd with 1e9 is 1.
+        let five_s = GateSchedule {
+            windows: vec![],
+            cycle_ps: 5_000_000_000_000,
+        };
+        assert_eq!(cycle_rational(&yang(&five_s, "p")), (5, 1));
+        let huge = GateSchedule {
+            windows: vec![],
+            cycle_ps: ((1u64 << 32) + 1) * 1_000,
+        };
+        assert_eq!(
+            huge.to_qcw_yang("p", BASE),
+            Err(YangExportError::CycleTooLong {
+                cycle_ps: huge.cycle_ps
+            })
+        );
     }
 
     /// Parse out every `<time-interval-value>N</time-interval-value>`.
@@ -3450,16 +3795,15 @@ mod tests {
             ],
             cycle_ps: 100_000,
         };
-        let doc = sched.to_qcw_yang("sw1-p3");
+        let doc = yang(&sched, "sw1-p3");
         // exactly one gate-control-entry (and one index) per window
         assert_eq!(doc.matches("<gate-control-entry>").count(), 3);
         assert_eq!(doc.matches("<index>").count(), 3);
         // Σ time-interval-value (ns) == cycle (ns)
         let sum_ns: u64 = interval_values(&doc).iter().sum();
         assert_eq!(sum_ns, sched.cycle_ps / 1_000);
-        // cycle rational: cycle_ps / 1e12 s
-        assert!(doc.contains("<numerator>100000</numerator>"));
-        assert!(doc.contains("<denominator>1000000000000</denominator>"));
+        // cycle rational, in seconds: 100 ns = 1/10_000_000 s
+        assert_eq!(cycle_rational(&doc), (1, 10_000_000));
     }
 
     #[test]
@@ -3485,9 +3829,10 @@ mod tests {
             },
         ];
         let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
-        let doc = sched.to_qcw_yang("eth2");
+        let doc = yang(&sched, "eth2");
         let sum_ns: u64 = interval_values(&doc).iter().sum();
-        assert!(doc.contains(&format!("<numerator>{}</numerator>", sched.cycle_ps)));
+        let (n, d) = cycle_rational(&doc);
+        assert_eq!(n * 1_000_000_000_000 / d, sched.cycle_ps);
         assert_eq!(sum_ns, sched.cycle_ps / 1_000);
     }
 
@@ -3508,7 +3853,7 @@ mod tests {
             ],
             cycle_ps: 100_000,
         };
-        let doc = sched.to_qcw_yang("p");
+        let doc = yang(&sched, "p");
         assert!(doc.contains("<gate-states-value>128</gate-states-value>"));
         // the closed guard window must still appear, as mask 0
         assert!(doc.contains("<gate-states-value>0</gate-states-value>"));
@@ -3534,7 +3879,7 @@ mod tests {
             },
         ];
         let sched = synthesize_gcl(&demands, cycle_ps, link).expect("feasible");
-        let doc = sched.to_qcw_yang("eth1");
+        let doc = yang(&sched, "eth1");
         assert_eq!(
             doc.matches("<gate-control-entry>").count(),
             sched.windows.len()
@@ -3547,7 +3892,7 @@ mod tests {
     fn qcw_yang_escapes_port_name() {
         // Port names flow into XML text; a `&`/`<` must be entity-escaped
         // so the document stays well-formed.
-        let doc = two_window_schedule().to_qcw_yang("p&<a>\"");
+        let doc = yang(&two_window_schedule(), "p&<a>\"");
         assert!(doc.contains("<name>p&amp;&lt;a&gt;&quot;</name>"));
         assert!(!doc.contains("<name>p&<a>"));
     }
