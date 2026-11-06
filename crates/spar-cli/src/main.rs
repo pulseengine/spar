@@ -521,6 +521,21 @@ fn cmd_parse(args: &[String]) {
     }
 }
 
+/// A connection end as AADL writes it: `sub.feature`, or `feature` for a
+/// feature of the containing component, or `sub` for a bare subcomponent end.
+/// A missing end prints as `?`.
+fn end_text(
+    subcomponent: Option<&spar_hir_def::name::Name>,
+    feature: &spar_hir_def::name::Name,
+) -> String {
+    match subcomponent {
+        // A bare subcomponent end (`bus access bu <-> a.ba`) has no feature.
+        Some(s) if feature.as_str().is_empty() => s.to_string(),
+        Some(s) => format!("{s}.{feature}"),
+        None => feature.to_string(),
+    }
+}
+
 fn cmd_items(args: &[String]) {
     let mut format = None;
     let mut file_args = Vec::new();
@@ -649,7 +664,21 @@ fn print_items(
                 for &coni in &ci.connections {
                     let c = &tree.connections[coni];
                     let arrow = if c.is_bidirectional { "<->" } else { "->" };
-                    println!("{}  connection {} : {:?} {}", prefix, c.name, c.kind, arrow);
+                    let end = |e: &Option<spar_hir_def::item_tree::ConnectedElementRef>| {
+                        e.as_ref().map_or_else(
+                            || "?".to_string(),
+                            |e| end_text(e.subcomponent.as_ref(), &e.feature),
+                        )
+                    };
+                    println!(
+                        "{}  connection {} : {:?} {} {} {}",
+                        prefix,
+                        c.name,
+                        c.kind,
+                        end(&c.src),
+                        arrow,
+                        end(&c.dst)
+                    );
                 }
             }
             ItemRef::FeatureGroupType(idx) => {
@@ -2355,7 +2384,21 @@ fn print_instance_tree(
     for &ci in &comp.connections {
         let c = &inst.connections[ci];
         let arrow = if c.is_bidirectional { "<->" } else { "->" };
-        println!("{}  connection {} : {:?} {}", pad, c.name, c.kind, arrow);
+        let end = |e: &Option<spar_hir_def::instance::ConnectionEnd>| {
+            e.as_ref().map_or_else(
+                || "?".to_string(),
+                |e| end_text(e.subcomponent.as_ref(), &e.feature),
+            )
+        };
+        println!(
+            "{}  connection {} : {:?} {} {} {}",
+            pad,
+            c.name,
+            c.kind,
+            end(&c.src),
+            arrow,
+            end(&c.dst)
+        );
     }
 
     for &child in &comp.children {
