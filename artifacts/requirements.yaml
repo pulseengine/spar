@@ -7163,53 +7163,17 @@ artifacts:
   - id: REQ-TSN-YANG-DEPLOYABLE-001
     type: requirement
     title: An emitted switch configuration shall be activatable, or the export shall fail
-    description: >
-      From an internal TSN evaluation of v0.44.0 on a zonal EE model (2 zone
-      switches, a central switch, 2 streams), #475/#476. The evaluator's verdict
-      on the generated config: "not deployable as it stands".
+    description: |-
+      From an internal TSN evaluation of v0.44.0 on a zonal EE model (2 zone switches, a central switch, 2 streams), #475/#476. The evaluator's verdict on the generated config: "not deployable as it stands".
+      MEASURED against crates/spar-network/src/tsn.rs on 12b4f68, four of five sub-claims confirmed:
+      `base-time` — 0 occurrences. `config-change` — 0 occurrences. Without both, a switch has NOTHING TO ACTIVATE: Qbv is a timed configuration, and an admin control list with no base time and no change trigger is inert. `operation-name` is emitted bare (`<operation-name>set-gate-states</...>`) where ieee802-dot1q-sched types it as an IDENTITYREF, which needs a prefix to resolve. The `interface` carries `name` and `gate-parameter-table` but no `type`, which ietf-interfaces makes a mandatory leaf.
+      ONE SUB-CLAIM IS REFUTED, and it is worth recording because the triage got it wrong first too: the gate table is NOT at the wrong path. It is correctly nested inside the `interface` list entry with its `name` key. A grep window that skipped the `<interface>` line produced the same false reading in triage as in the report. The conclusion stands on base-time and config-change alone.
+      WHY THIS OUTRANKS THE OTHER THIRTEEN GAPS. Most of the evaluation is missing capability — no CLI path to synthesis, no ARXML ingest, coarse CQF output. Those are honest absences: you reach for the feature, it is not there, you know at once. This one EMITS SOMETHING THAT LOOKS DEPLOYABLE AND IS NOT, which is the defect class this project keeps finding in its own gates (#464 tagged a release that published nothing; #403 reported success having executed zero commands; #469 exited 0 on a model carrying errors). An export that cannot be applied shall fail loudly rather than hand back plausible XML.
+      ORACLE — AND ITS HONEST LIMIT. The emission must be pinned by assertions that the PRE-FIX output FAILS, so the bug's own repro is the test. But schema validation against the real models cannot currently be run here: no `yanglint` and no `pyang` are available, and ZERO `.yang` files are vendored in the repo. So structural assertions are the strongest available oracle, and they are weaker than validation — they check the elements we thought of. Closing this requires vendoring and pinning ieee802-dot1q-sched and ietf-interfaces the way the 310-model SysML corpus is pinned (#442), plus a validator in CI.
+      NOT CLAIMED, and not claimable from this repo: that a real switch accepts the output. The evaluator did not test a switch or a NETCONF session and neither has this triage. Schema-valid is necessary, not sufficient.
 
-      MEASURED against crates/spar-network/src/tsn.rs on 12b4f68, four of five
-      sub-claims confirmed:
-
-      `base-time` — 0 occurrences. `config-change` — 0 occurrences. Without
-      both, a switch has NOTHING TO ACTIVATE: Qbv is a timed configuration, and
-      an admin control list with no base time and no change trigger is inert.
-      `operation-name` is emitted bare (`<operation-name>set-gate-states</...>`)
-      where ieee802-dot1q-sched types it as an IDENTITYREF, which needs a prefix
-      to resolve. The `interface` carries `name` and `gate-parameter-table` but
-      no `type`, which ietf-interfaces makes a mandatory leaf.
-
-      ONE SUB-CLAIM IS REFUTED, and it is worth recording because the triage got
-      it wrong first too: the gate table is NOT at the wrong path. It is
-      correctly nested inside the `interface` list entry with its `name` key. A
-      grep window that skipped the `<interface>` line produced the same false
-      reading in triage as in the report. The conclusion stands on base-time and
-      config-change alone.
-
-      WHY THIS OUTRANKS THE OTHER THIRTEEN GAPS. Most of the evaluation is
-      missing capability — no CLI path to synthesis, no ARXML ingest, coarse CQF
-      output. Those are honest absences: you reach for the feature, it is not
-      there, you know at once. This one EMITS SOMETHING THAT LOOKS DEPLOYABLE
-      AND IS NOT, which is the defect class this project keeps finding in its own
-      gates (#464 tagged a release that published nothing; #403 reported success
-      having executed zero commands; #469 exited 0 on a model carrying errors).
-      An export that cannot be applied shall fail loudly rather than hand back
-      plausible XML.
-
-      ORACLE — AND ITS HONEST LIMIT. The emission must be pinned by assertions
-      that the PRE-FIX output FAILS, so the bug's own repro is the test. But
-      schema validation against the real models cannot currently be run here:
-      no `yanglint` and no `pyang` are available, and ZERO `.yang` files are
-      vendored in the repo. So structural assertions are the strongest available
-      oracle, and they are weaker than validation — they check the elements we
-      thought of. Closing this requires vendoring and pinning
-      ieee802-dot1q-sched and ietf-interfaces the way the 310-model SysML corpus
-      is pinned (#442), plus a validator in CI.
-
-      NOT CLAIMED, and not claimable from this repo: that a real switch accepts
-      the output. The evaluator did not test a switch or a NETCONF session and
-      neither has this triage. Schema-valid is necessary, not sufficient.
-    status: approved
+      CORRECTION (2026-11-06, measured with a validator, not a grep). The 'ONE SUB-CLAIM IS REFUTED' paragraph above is itself wrong, and the evaluator's path claim was right. Validated with yanglint 6.4.13 -t edit against ietf-interfaces, ieee802-dot1q-bridge, ieee802-dot1q-sched, ieee802-dot1q-sched-bridge and iana-if-type at YangModels 2f719df: the pre-fix output is rejected with 'Node "gate-parameter-table" not found as a child of "interface" node'. ieee802-dot1q-sched only defines the grouping; ieee802-dot1q-sched-bridge (2023-10-26) instantiates it under /if:interfaces/if:interface/dot1q:bridge-port, so the table belongs inside <bridge-port> and in the sched-bridge namespace. The triage checked spar's output against spar's own nesting, not against the schema. The validator also found a FIFTH defect nobody had reported: admin-cycle-time's denominator was 1e12, and both rational fields are uint32, so every export spar has produced was invalid on that alone. Also measured: the schema ACCEPTS a document with no admin-base-time and no config-change, and accepts nanoseconds = 1e9, so those stay structural assertions in spar's tests rather than being left to validation. License note for the vendoring half: YangModels' standard/ieee/README grants free reproduction for /experimental/ieee/ only, not for published modules, so CI should fetch them at a pinned SHA with checksums rather than vendor them.
+    status: implemented
     release: v0.49.0
     tags: [tsn, yang, interop, bug, deployment]
 
