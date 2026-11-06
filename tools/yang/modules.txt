@@ -1,0 +1,14 @@
+# YANG modules spar's 802.1Qcw export is validated against (REQ-TSN-YANG-DEPLOYABLE-001).
+# Fetched by CI from https://raw.githubusercontent.com/YangModels/yang/<commit>/<path>
+# and checked against these sha256 sums. They are NOT vendored: YangModels'
+# standard/ieee/README grants free reproduction only for experimental/ieee/.
+# Format: <sha256> <path in YangModels/yang>; the file is saved as basename+.yang
+commit 2f719df6786422afbaedb9b5b26f5be6bf534a06
+40cff047183899c5ba3b190067181239704c0626cc5448ec6f56105f6c9521e2 standard/iana/iana-if-type@2026-10-23.yang
+f6faea9938f0341ed48fda93dba9a69aa32ee7142c463342efec3d38f4eb3621 standard/ietf/RFC/ietf-interfaces@2018-02-20.yang
+5e4ff4c837f303050fa46369987f11eb909c24dae2d4ec338342a7aa596f7b2b standard/ietf/RFC/ietf-yang-types@2025-12-22.yang
+c88ae16c9c9b2bd58d781f84de8252c7c866b3c65554aba195befd9c6c28d7de standard/ieee/published/802/ieee802-types.yang
+019af9e03c5ac6e3e91eeb5a8ae76249cfd5f1d9435fb59c1514774a3dbf52d3 standard/ieee/published/802.1/ieee802-dot1q-types.yang
+8a974aa99688b870ae99efd9554db96f3fa5efc81468659b0fac00f3021cfc48 standard/ieee/published/802.1/ieee802-dot1q-bridge.yang
+ee1434658167e87ce705812628c346c64be22df79c1890a4a0ba4fc893e3ce3f standard/ieee/published/802.1/ieee802-dot1q-sched.yang
+63bba9b769ac514b2fd5144817eac930d4ff6de456364494a3cf4de5479af4d7 standard/ieee/published/802.1/ieee802-dot1q-sched-bridge.yang

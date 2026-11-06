@@ -209,6 +209,18 @@ MUTANTS: list[Mutant] = [
         note="#397 itself: an unreachable file printed but not failed. Caught by "
              "`REGRESSION #397: an unimported module FAILS and is named`.",
     ),
+    # ── check_qcw_yang.py ──────────────────────────────────────────────────
+    # REQ-TSN-YANG-DEPLOYABLE-001: confirmed SURVIVED with the two
+    # `control ACCEPTED` cases removed, then CAUGHT, before it was added.
+    Mutant(
+        tool="check_qcw_yang.py",
+        id="qy-control-lenient",
+        old="    if control_rc == 0:\n",
+        new="    if False:\n",
+        note="a validator that ACCEPTS the bare-identityref control is trusted, so "
+             "a yanglint that accepts anything reads as a schema pass. Caught by "
+             "`control ACCEPTED -> 2 even when every doc passes`.",
+    ),
     # ── run_verification.py ────────────────────────────────────────────────
     # REQ-VERIFY-GATE-SCOPE-001 (#513): the two below were confirmed SURVIVED
     # with their catching cases removed, then CAUGHT, before they were added.
@@ -568,7 +580,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 8
+MIN_COVERED = 9
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`

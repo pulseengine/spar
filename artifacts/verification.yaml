@@ -5167,3 +5167,21 @@ artifacts:
         target: REQ-PROOF-LAKE-REACHABLE-001
       - type: verifies
         target: REQ-PROOF-LAKE-REACHABLE-001
+
+  - id: TEST-TSN-YANG-DEPLOYABLE-001
+    type: feature
+    title: The 802.1Qcw export is schema-valid edit content and carries its activation
+    status: implemented
+    description: "Two layers. (1) Structural, in spar-network's qcw_yang tests: the table is under bridge-port in the ieee802-dot1q-sched-bridge namespace, the identity is prefixed, the interface type is present, admin-base-time and config-change are emitted (the schema does NOT require them, measured), the cycle rational fits uint32 and recovers the cycle, and every unrepresentable input is refused. (2) Schema: the advisory CI job '802.1Qcw YANG export schema validation (advisory)' runs tools/check_qcw_yang.py, which fetches the modules at the YangModels commit pinned in tools/yang/modules.txt, checks their sha256, validates the emit_qcw_yang example's documents (hand-built and synthesize_gcl) with yanglint -t edit, and requires a bare-identityref control to be REJECTED. MEASURED locally with yanglint 6.4.13: both documents accepted, control rejected, and the pre-fix document rejected (exit 1). NOT CLAIMED: that a switch accepts it; the CI job's yanglint (Ubuntu libyang2-tools) is a different version from the local one until its first run shows otherwise."
+    release: v0.49.0
+    tags: [tsn, yang, interop, ci]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar-network --lib qcw_yang
+        - run: tools/check_qcw_yang.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-TSN-YANG-DEPLOYABLE-001
+      - type: verifies
+        target: REQ-TSN-YANG-DEPLOYABLE-001

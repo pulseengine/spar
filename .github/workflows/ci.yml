@@ -328,6 +328,56 @@ jobs:
       - name: cargo audit (informational advisories included)
         run: cargo audit --deny warnings
 
+  qcw-yang:
+    name: 802.1Qcw YANG export schema validation (advisory)
+    # REQ-TSN-YANG-DEPLOYABLE-001 (#475, #476). Validates the documents
+    # GateSchedule::to_qcw_yang REALLY emits (the emit_qcw_yang example: a
+    # hand-built and a synthesize_gcl schedule) with `yanglint -t edit`
+    # against the published modules, fetched at the commit pinned in
+    # tools/yang/modules.txt and sha256-checked. They are not vendored: the
+    # published IEEE modules carry no visible redistribution grant.
+    # A bare-identityref control document must be REJECTED, or the run
+    # exits 2: a validator that accepts that accepts anything.
+    # Hosted runner because it needs apt for libyang's yanglint. Advisory
+    # (not a required context) until it has a track record.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # Cold cargo build of spar-network's example plus an apt install; observed
+    # ~3m locally for the build. 20m for hosted-runner variance.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install yanglint
+        # The package that ships yanglint is renamed across Ubuntu releases
+        # (`libyang2-tools` has no candidate on the current ubuntu-latest:
+        # the first run of this job). Take the first candidate that exists,
+        # say which, and fail loudly with what apt does offer if none does.
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          for pkg in libyang-tools libyang3-tools libyang2-tools yang-tools; do
+            if apt-cache show "$pkg" >/dev/null 2>&1; then
+              sudo apt-get install -y -qq "$pkg"
+              echo "installed $pkg"
+              break
+            fi
+          done
+          if ! command -v yanglint >/dev/null; then
+            echo "::error::no apt package provided yanglint"
+            apt-cache search --names-only libyang || true
+            exit 1
+          fi
+          yanglint --version
+      - name: check_qcw_yang self-test
+        run: tools/check_qcw_yang.py --self-test
+      - name: Validate the emitted documents
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/qcw-yang"
+          cargo run -q -p spar-network --example emit_qcw_yang -- "$out"
+          tools/check_qcw_yang.py "$out"/*.xml
+
   deny:
     name: Cargo Deny
     # Smithy has cargo-deny installed (toolchains role, v0.16.4).
