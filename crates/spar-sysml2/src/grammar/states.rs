@@ -83,10 +83,9 @@ fn eat_parallel(p: &mut Parser) {
 pub(crate) fn transition_usage(p: &mut Parser) {
     let m = p.start();
     let kind = if p.eat(SyntaxKind::TRANSITION_KW) {
-        if !p.at(SyntaxKind::FIRST_KW)
-            && super::at_ident_or_kw(p)
-            && p.nth(1) == SyntaxKind::FIRST_KW
-        {
+        // `transition T first S ...` is named; `transition first S ...` and
+        // `transition S then D;` (Annex: `transition initial then off;`) are not.
+        if p.nth(1) == SyntaxKind::FIRST_KW {
             super::name(p);
         }
         p.eat(SyntaxKind::FIRST_KW);
