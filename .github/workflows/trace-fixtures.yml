@@ -163,6 +163,19 @@ jobs:
       # if the committed lock is stale/incomplete — belt-and-suspenders with
       # the guard step above.
 
+      # ── 3. Precondition: rootless podman can start (#425) ────────────────
+      #
+      # The 13-night failure of this workflow was a read-only /run/user/<uid>:
+      # rootless podman needs a writable XDG_RUNTIME_DIR, so its FIRST call
+      # died. That call was inside the KVM step below, so the run summary
+      # blamed /dev/kvm, and that step's KVM advice (inside the container)
+      # never ran. Ask the podman question first, under a step that names it
+      # (REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001). The check creates a file in
+      # XDG_RUNTIME_DIR rather than testing permissions, and runs
+      # `podman info`.
+      - name: Require rootless podman to start (XDG_RUNTIME_DIR writable, podman info)
+        run: tools/check_podman_preflight.py
+
       # ── 3a. Precondition: Nix must actually advertise the `kvm` feature ──
       #
       # `--device /dev/kvm` puts the node in the container; it does NOT make

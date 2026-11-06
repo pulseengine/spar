@@ -221,6 +221,19 @@ MUTANTS: list[Mutant] = [
              "a yanglint that accepts anything reads as a schema pass. Caught by "
              "`control ACCEPTED -> 2 even when every doc passes`.",
     ),
+    # ── check_podman_preflight.py ──────────────────────────────────────────
+    # REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001 (#425): confirmed SURVIVED with the
+    # read-only case removed, then CAUGHT, before it was added.
+    Mutant(
+        tool="check_podman_preflight.py",
+        id="pp-skip-write",
+        old='        with tempfile.NamedTemporaryFile(dir=d, prefix=".podman-preflight-"):\n'
+            '            pass\n',
+        new="        pass\n",
+        note="#425 itself: the XDG_RUNTIME_DIR write test is skipped, so a read-only "
+             "/run/user/<uid> reads as writable. Caught by `REGRESSION #425: a "
+             "READ-ONLY XDG_RUNTIME_DIR fails, naming podman`.",
+    ),
     # ── run_verification.py ────────────────────────────────────────────────
     # REQ-VERIFY-GATE-SCOPE-001 (#513): the two below were confirmed SURVIVED
     # with their catching cases removed, then CAUGHT, before they were added.
@@ -580,7 +593,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 9
+MIN_COVERED = 10
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`
