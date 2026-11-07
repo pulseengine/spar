@@ -2000,6 +2000,98 @@ mod tests {
             "a scalar budget sets no minimum: {d:#?}"
         );
     }
+
+    // ── REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001 ───────────────────
+    //
+    // The oracles for this requirement lived only in spar-cli integration
+    // tests, so `cargo test -p spar-analysis --lib` (what Mutation Testing
+    // runs) could not see the `best_case_ps < min_ps` guard of the
+    // incomplete-best-case Warning.
+
+    /// `sensor` carries 5 ms, `controller` carries NO timing, so the summed
+    /// best case is 5 ms and INCOMPLETE. No Period anywhere: no sampling term.
+    fn incomplete_fixture(budget: &str) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let sensor = b.add_component("sensor", ComponentCategory::Device, Some(root));
+        let ctrl = b.add_component("controller", ComponentCategory::Thread, Some(root));
+        b.set_children(root, vec![sensor, ctrl]);
+        b.add_connection_inst("c1", root);
+        b.add_e2e(
+            "e2e_flow",
+            root,
+            vec!["sensor.src", "c1", "controller.sink"],
+        );
+        b.set_property(
+            sensor,
+            "Timing_Properties",
+            "Compute_Execution_Time",
+            "5 ms",
+        );
+        b.set_property(root, "Timing_Properties", "Latency", budget);
+        let inst = b.build(root);
+        LatencyAnalysis.analyze(&inst)
+    }
+
+    /// An incomplete best case BELOW the minimum is a Warning naming the
+    /// untimed element, never the Error: the real best case may reach the
+    /// minimum. Kills `<` -> `==` / `>` (both drop to the Error branch).
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001
+    #[test]
+    fn an_incomplete_best_case_below_the_minimum_is_a_warning_not_an_error() {
+        let d = incomplete_fixture("6 ms .. 100 ms");
+        let b = below_minimum(&d);
+        assert_eq!(
+            b.len(),
+            1,
+            "best case 5 ms is under 6 ms, but incomplete: {d:#?}"
+        );
+        assert_eq!(b[0].severity, Severity::Warning, "{d:#?}");
+        assert!(b[0].message.contains("INCOMPLETE"), "{}", b[0].message);
+        assert!(b[0].message.contains("controller"), "{}", b[0].message);
+        assert!(
+            b[0].message.contains("best-case latency 5.000 ms"),
+            "{}",
+            b[0].message
+        );
+        assert!(
+            b[0].message.contains("minimum 6.000 ms"),
+            "{}",
+            b[0].message
+        );
+        assert!(
+            !d.iter().any(|x| x.severity == Severity::Error),
+            "an incomplete best case proves nothing, so no Error: {d:#?}"
+        );
+    }
+
+    /// The boundary: an incomplete best case EXACTLY at the minimum says
+    /// nothing about the minimum at all. Kills `<` -> `<=`.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001
+    #[test]
+    fn an_incomplete_best_case_exactly_at_the_minimum_is_silent() {
+        let d = incomplete_fixture("5 ms .. 100 ms");
+        assert!(
+            below_minimum(&d).is_empty(),
+            "best case 5 ms meets a 5 ms minimum: {d:#?}"
+        );
+        assert!(
+            !d.iter().any(|x| x.message.contains("INCOMPLETE")),
+            "{d:#?}"
+        );
+    }
+
+    /// Above the minimum: silent too. Pairs with the test above so `>` (which
+    /// fires here) is caught by two tests, not one.
+    // rivet: verifies REQ-ANALYSIS-LATENCY-BEST-CASE-INCOMPLETE-001
+    #[test]
+    fn an_incomplete_best_case_above_the_minimum_is_silent() {
+        let d = incomplete_fixture("4 ms .. 100 ms");
+        assert!(
+            below_minimum(&d).is_empty(),
+            "best case 5 ms is above a 4 ms minimum: {d:#?}"
+        );
+    }
     #[test]
     fn latency_no_sampling_delay_for_first_component() {
         // Verify the first component in a flow does NOT get sampling delay added.
