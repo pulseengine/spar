@@ -89,6 +89,20 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
             cross: true
+          # Statically linked Linux builds beside the glibc ones (#447,
+          # REQ-RELEASE-MUSL-001). The gnu x86_64 asset carries a GLIBC_2.39
+          # floor and does not run on Ubuntu 22.04, Debian 12, RHEL 9 or
+          # Alpine. Each musl entry builds on a runner of its own arch so the
+          # #422 step below runs the binary instead of skipping it. The build
+          # itself is .github/actions/musl-build, shared with musl-smoke.yml.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            zigbuild: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+            zigbuild: true
           - target: x86_64-apple-darwin
             os: macos-14
             archive: tar.gz
@@ -114,12 +128,18 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build (native)
-        if: ${{ !matrix.cross }}
+        if: ${{ !matrix.cross && !matrix.zigbuild }}
         run: cargo build --release --target ${{ matrix.target }} -p spar
 
       - name: Build (cross)
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p spar
+
+      - name: Build (musl, static)
+        if: matrix.zigbuild
+        uses: ./.github/actions/musl-build
+        with:
+          target: ${{ matrix.target }}
 
       # #422: run the FRESHLY BUILT binary and assert it reports the tag.
       #
@@ -577,11 +597,11 @@ jobs:
           #
           # Count what was gathered and fail on a shortfall, which is the shape
           # the SBOM block immediately below already uses. The floor is derived,
-          # not guessed: build-binaries has 5 matrix targets and build-vsix has
-          # 5, so a complete release carries at least 10 of these three
+          # not guessed: build-binaries has 7 matrix targets and build-vsix has
+          # 5, so a complete release carries at least 12 of these three
           # extensions before the wasm/compliance/evidence bundles are counted.
           # If a target is added to either matrix, raise this with it.
-          MIN_RELEASE_ASSETS=10
+          MIN_RELEASE_ASSETS=12
           find artifacts -type f \
             \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.vsix" \) \
             -exec cp {} release-assets/ \;
@@ -592,6 +612,15 @@ jobs:
             find artifacts -type f | head -40
             exit 1
           fi
+          # A count cannot tell WHICH asset is missing, so the musl archives
+          # are named (#447): a release without them is a failed release.
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            a="release-assets/spar-${GH_REF#refs/tags/}-${t}.tar.gz"
+            if [ ! -f "$a" ]; then
+              echo "::error::missing ${a}; refusing to publish without the musl builds (#447)."
+              exit 1
+            fi
+          done
           # Version-stamp the SBOM per the release-asset naming
           # standard: <tool>-X.Y.Z.cdx.json (bare version, no `v`).
           VERSION="${GH_REF#refs/tags/}"

@@ -1,0 +1,79 @@
+name: Build spar for a musl target
+description: >
+  Builds a statically linked `spar` for an `*-unknown-linux-musl` target with
+  cargo-zigbuild, asserts that it is statically linked, and runs it inside an
+  Alpine container. The ONE definition of the musl build, used by the release
+  matrix (release.yml) and by the pull-request smoke run (musl-smoke.yml), so
+  the build a PR proves is the build a tag ships (REQ-RELEASE-MUSL-001, #447).
+  The caller checks out the tree and installs a Rust toolchain with the target.
+  The runner must be the target's architecture: x86_64 on ubuntu-latest,
+  aarch64 on ubuntu-24.04-arm. Then the Alpine run executes the binary natively.
+
+inputs:
+  target:
+    description: "The musl target triple, e.g. x86_64-unknown-linux-musl."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # zig is spar's C/C++ cross toolchain here: highs-sys builds HiGHS with
+    # cmake, and zig supplies a musl libc++ to link it statically. Both tools
+    # are pinned to the versions this build was first proven with locally
+    # (cargo-zigbuild 0.24.0, zig 0.16.0). A venv sidesteps Ubuntu 24.04's
+    # externally-managed system Python. cargo-zigbuild finds zig through the
+    # venv's `python3 -m ziglang`.
+    - name: Install cargo-zigbuild and zig
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -m venv "$RUNNER_TEMP/zigbuild"
+        "$RUNNER_TEMP/zigbuild/bin/pip" install --quiet \
+          cargo-zigbuild==0.24.0 ziglang==0.16.0
+        echo "$RUNNER_TEMP/zigbuild/bin" >> "$GITHUB_PATH"
+
+    - name: Build (cargo-zigbuild)
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: cargo zigbuild --release --target "$TARGET" -p spar
+
+    # The point of a musl asset is that it carries no glibc floor, so a
+    # dynamically linked result is a failure, not a variant. `file` names an
+    # interpreter for a dynamic ELF, and says "statically linked" (or
+    # "static-pie linked") for a static one.
+    - name: Assert the binary is statically linked
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        BIN="target/${TARGET}/release/spar"
+        info="$(file -b "$BIN")"
+        echo "  file: $info"
+        case "$info" in
+          *interpreter*)
+            echo "::error::${BIN} names an ELF interpreter, so it is dynamically linked: ${info}"
+            exit 1 ;;
+          *"statically linked"*|*"static-pie linked"*) ;;
+          *)
+            echo "::error::${BIN} is not reported as statically linked: ${info}"
+            exit 1 ;;
+        esac
+
+    # Alpine ships musl and no glibc, so a binary that runs here does not
+    # depend on the host's libc. The version check against the tag stays in
+    # release.yml's #422 step; this one asserts the binary starts at all.
+    - name: Run the binary in an Alpine container
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        out="$(docker run --rm -v "$PWD/target/${TARGET}/release:/b:ro" \
+          alpine:3.20 /b/spar --version)"
+        echo "  alpine says: $out"
+        case "$out" in
+          "spar "[0-9]*) ;;
+          *) echo "::error::spar --version in Alpine printed '${out}'"; exit 1 ;;
+        esac
