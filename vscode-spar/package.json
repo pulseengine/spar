@@ -90,7 +90,7 @@
     "@types/node": "^22",
     "@types/mocha": "^10",
     "@vscode/test-electron": "^2.4.0",
-    "mocha": "^10",
+    "mocha": "^12",
     "glob": "^11",
     "typescript": "^5.9.0",
     "esbuild": "^0.25.0"
