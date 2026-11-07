@@ -7980,8 +7980,10 @@ artifacts:
   - id: REQ-CI-MUTANTS-WEEKLY-KILLRATE-001
     type: requirement
     title: Mutants Weekly shall run the tests that cover each mutant, or the 1.7% kill rate shall be explained by measurement
-    status: approved
-    description: "Refs #391. Still reproducing: run 40171999628 (2026-10-25, shard 0/8) reports '1448 mutants tested in 2h: 1327 missed, 23 caught, 98 unviable', against roughly 71% for the gating Mutation Testing job with the same -- --lib flag; every MISSED line in the issue reports 0s test time. Requirement: establish which of the issue's three hypotheses holds (no test binary run, starved test processes, or genuine coverage gap) by measurement, and fix the workflow so a MISSED verdict means a test ran. Oracle: a known-killable mutant in a shard is reported caught."
+    status: implemented
+    description: |-
+      Refs #391. Still reproducing: run 40171999628 (2026-10-25, shard 0/8) reports '1448 mutants tested in 2h: 1327 missed, 23 caught, 98 unviable', against roughly 71% for the gating Mutation Testing job with the same -- --lib flag; every MISSED line in the issue reports 0s test time. Requirement: establish which of the issue's three hypotheses holds (no test binary run, starved test processes, or genuine coverage gap) by measurement, and fix the workflow so a MISSED verdict means a test ran. Oracle: a known-killable mutant in a shard is reported caught.
+      MEASURED 2026-11-07 (run 42075962045, shard 0/8): all 1512 mutants are in spar-cli; the test phase DID run for each (median 0.65 s), so 'no test binary run' is false as stated, but '-- --lib' limited every mutant to spar-cli's 11 in-source unit tests out of 504 (0 s vs 50 s for the full suite), and a mutant in src/main.rs (the [[bin]] target, 471 of the 1376 missed) was compiled (the build phase takes no test args; 9 were unviable) but never run by any test, because 'cargo test --lib' runs none of the tests/*.rs that drive the binary via CARGO_BIN_EXE_spar. One mutant, main.rs:100:12 'delete !', is MISSED under '-- --lib' and CAUGHT by tests/subcommand_help_exit.rs. Second defect: '--no-shuffle' with a fixed default shard of 0/8 re-tested the same spar-cli slice every Sunday. Fix: drop '-- --lib', --timeout 300, rotate the scheduled shard by ISO week. Verified when this workflow's own shard 0/8 run reports main.rs:100:12 caught.
     tags: [ci, mutation-testing, guardrail]
     links:
       - type: traces-to
