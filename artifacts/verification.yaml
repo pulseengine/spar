@@ -5153,8 +5153,10 @@ artifacts:
   - id: TEST-PROOF-LAKE-REACHABLE-001
     type: feature
     title: Every first-party Lean file is compiled by a Lake target CI builds
-    status: implemented
-    description: "tools/check_lean_reachable.py computes the import closure of the roots CI compiles (defaultTargets in proofs/lakefile.toml, plus every lean_exe a workflow runs with lake exe) and fails on any first-party .lean file outside it. A lean_lib that is not a default target is not a root, so deleting import Proofs from Main turns it red. Unmodelled lakefile keys (globs, srcDir), a lakefile.lean, an unrecognised import line and an empty population exit 2. MEASURED on the tree before this change: exit 1 naming proofs/Proofs/Network/MinPlusPwa.lean (13 of 14 reachable); with the import, 14 of 14. Importing it exposed that the file no longer elaborated (List.minimum?/List.maximum?, absent from the pinned Lean); renamed to List.min?/List.max?, after which the full lake build passes and lake exe codegen is byte-identical. Sorry count unchanged at 12: the text ratchet counted these 8 all along. Self-test 18 cases; 5 potency mutants, each SURVIVED with its catching case removed and CAUGHT by the full suite. NOT claimed: that MinPlusPwa is proven. All 8 of its theorems are still sorry."
+    status: verified
+    description: |-
+      tools/check_lean_reachable.py computes the import closure of the roots CI compiles (defaultTargets in proofs/lakefile.toml, plus every lean_exe a workflow runs with lake exe) and fails on any first-party .lean file outside it. A lean_lib that is not a default target is not a root, so deleting import Proofs from Main turns it red. Unmodelled lakefile keys (globs, srcDir), a lakefile.lean, an unrecognised import line and an empty population exit 2. MEASURED on the tree before this change: exit 1 naming proofs/Proofs/Network/MinPlusPwa.lean (13 of 14 reachable); with the import, 14 of 14. Importing it exposed that the file no longer elaborated (List.minimum?/List.maximum?, absent from the pinned Lean); renamed to List.min?/List.max?, after which the full lake build passes and lake exe codegen is byte-identical. Sorry count unchanged at 12: the text ratchet counted these 8 all along. Self-test 18 cases; 5 potency mutants, each SURVIVED with its catching case removed and CAUGHT by the full suite. NOT claimed: that MinPlusPwa is proven. All 8 of its theorems are still sorry.
+      VERIFIED 2026-11-07 on CI: PR #582 (squash 64608f5): merge_group CI 42137311757, Verification Gate 42137311747, Lean Proofs 42137311780 all success.
     release: v0.49.0
     tags: [proofs, lean, guardrail, ci]
     fields:
@@ -5171,8 +5173,10 @@ artifacts:
   - id: TEST-TSN-YANG-DEPLOYABLE-001
     type: feature
     title: The 802.1Qcw export is schema-valid edit content and carries its activation
-    status: implemented
-    description: "Two layers. (1) Structural, in spar-network's qcw_yang tests: the table is under bridge-port in the ieee802-dot1q-sched-bridge namespace, the identity is prefixed, the interface type is present, admin-base-time and config-change are emitted (the schema does NOT require them, measured), the cycle rational fits uint32 and recovers the cycle, and every unrepresentable input is refused. (2) Schema: the advisory CI job '802.1Qcw YANG export schema validation (advisory)' runs tools/check_qcw_yang.py, which fetches the modules at the YangModels commit pinned in tools/yang/modules.txt, checks their sha256, validates the emit_qcw_yang example's documents (hand-built and synthesize_gcl) with yanglint -t edit, and requires a bare-identityref control to be REJECTED. MEASURED locally with yanglint 6.4.13: both documents accepted, control rejected, and the pre-fix document rejected (exit 1). NOT CLAIMED: that a switch accepts it; the CI job's yanglint (Ubuntu libyang2-tools) is a different version from the local one until its first run shows otherwise."
+    status: verified
+    description: |-
+      Two layers. (1) Structural, in spar-network's qcw_yang tests: the table is under bridge-port in the ieee802-dot1q-sched-bridge namespace, the identity is prefixed, the interface type is present, admin-base-time and config-change are emitted (the schema does NOT require them, measured), the cycle rational fits uint32 and recovers the cycle, and every unrepresentable input is refused. (2) Schema: the advisory CI job '802.1Qcw YANG export schema validation (advisory)' runs tools/check_qcw_yang.py, which fetches the modules at the YangModels commit pinned in tools/yang/modules.txt, checks their sha256, validates the emit_qcw_yang example's documents (hand-built and synthesize_gcl) with yanglint -t edit, and requires a bare-identityref control to be REJECTED. MEASURED locally with yanglint 6.4.13: both documents accepted, control rejected, and the pre-fix document rejected (exit 1). NOT CLAIMED: that a switch accepts it; the CI job's yanglint (Ubuntu libyang2-tools) is a different version from the local one until its first run shows otherwise.
+      VERIFIED 2026-11-07 on CI: PR #586 (squash 31a442d): merge_group CI 42169274198, Verification Gate 42169274199, Lean Proofs 42169274163 all success.
     release: v0.49.0
     tags: [tsn, yang, interop, ci]
     fields:
@@ -5188,8 +5192,10 @@ artifacts:
   - id: TEST-CI-FIXTURE-PODMAN-PREFLIGHT-001
     type: feature
     title: A podman start failure is reported under a step that names podman
-    status: implemented
-    description: "tools/check_podman_preflight.py runs in trace-fixtures.yml as its own step BEFORE 'Require /dev/kvm openable by a Nix BUILD process'. It creates a file in XDG_RUNTIME_DIR (default /run/user/<uid>), not an os.access test, and runs podman info. Self-test (in PR CI): a chmod 0500 XDG_RUNTIME_DIR fails with 'not a /dev/kvm problem'; a missing one, a failing podman info (its output printed) and no podman each fail; a writable dir plus a working podman passes. Mutant replacing the write test with pass SURVIVED with the read-only case removed and is CAUGHT with it. NOT CLAIMED until a nightly run: that the step runs green on the podman runner; the read-only case is skipped when the self-test runs as root."
+    status: verified
+    description: |-
+      tools/check_podman_preflight.py runs in trace-fixtures.yml as its own step BEFORE 'Require /dev/kvm openable by a Nix BUILD process'. It creates a file in XDG_RUNTIME_DIR (default /run/user/<uid>), not an os.access test, and runs podman info. Self-test (in PR CI): a chmod 0500 XDG_RUNTIME_DIR fails with 'not a /dev/kvm problem'; a missing one, a failing podman info (its output printed) and no podman each fail; a writable dir plus a working podman passes. Mutant replacing the write test with pass SURVIVED with the read-only case removed and is CAUGHT with it. NOT CLAIMED until a nightly run: that the step runs green on the podman runner; the read-only case is skipped when the self-test runs as root.
+      VERIFIED 2026-11-07 on CI: PR #587 (squash c6a3c40): merge_group CI 42177812091, Verification Gate 42177812122, Lean Proofs 42177812089 all success.
     release: v0.49.0
     tags: [ci, fixtures, guardrail]
     fields:
@@ -5204,8 +5210,10 @@ artifacts:
   - id: TEST-SYSML2-STATE-MODES-001
     type: feature
     title: A SysML v2 state machine lowers to AADL modes and reaches mode reachability
-    status: implemented
-    description: "The MODES half of REQ-SYSML2-FLOWS-MODES-001; the flows half is open, so this satisfies but does not verify the requirement. Grammar: transition, accept-then, first start then, entry; then, state actions, exhibit state (official corpus 27 -> 35 parsing). Lowering: the substates of the one state usage that declares substates become the part def's modes; entry; then S / first start then S names the initial mode; transition and accept-then become mode transitions; a trigger becomes a port trigger only through via <port of this part def>. Every construct AADL cannot hold (other triggers, guards, effects, state actions, nested states, dotted references, a second machine or initial state) is reported, and no initial mode is invented. End to end: spar sysml2 lower then spar modes reports the initial mode, an unreachable mode and the transitions. Mutation: 29 of the new lowering's mutants survived without these tests, 0 with them (34 caught, 6 unviable)."
+    status: verified
+    description: |-
+      The MODES half of REQ-SYSML2-FLOWS-MODES-001; the flows half is open, so this satisfies but does not verify the requirement. Grammar: transition, accept-then, first start then, entry; then, state actions, exhibit state (official corpus 27 -> 35 parsing). Lowering: the substates of the one state usage that declares substates become the part def's modes; entry; then S / first start then S names the initial mode; transition and accept-then become mode transitions; a trigger becomes a port trigger only through via <port of this part def>. Every construct AADL cannot hold (other triggers, guards, effects, state actions, nested states, dotted references, a second machine or initial state) is reported, and no initial mode is invented. End to end: spar sysml2 lower then spar modes reports the initial mode, an unreachable mode and the transitions. Mutation: 29 of the new lowering's mutants survived without these tests, 0 with them (34 caught, 6 unviable).
+      VERIFIED 2026-11-07 on CI: PR #588 (squash b81ed2a): merge_group CI 42204449919, Verification Gate 42204449994, Lean Proofs 42204449961 all success and PR #589 (squash d201c1d): merge_group CI 42226966427, Verification Gate 42226966426, Lean Proofs 42226966391 all success.
     release: v0.49.0
     tags: [sysml2, modes, northstar]
     fields:
@@ -5220,8 +5228,10 @@ artifacts:
   - id: TEST-SYSML2-FLOW-CONNECTIONS-001
     type: feature
     title: A SysML v2 flow usage lowers to an AADL port connection and reaches the instance model
-    status: implemented
-    description: "The CONNECTIONS part of the flows half of REQ-SYSML2-FLOWS-MODES-001; the end-to-end flow and its latency verdict are open, so this satisfies but does not verify the requirement. Grammar: flow [name] [of T] [from] S to D, succession flow, a body-only redefining flow, flow def (official corpus 35 -> 39 parsing); before it, every flow was an ERROR node that swallowed the members after it. Lowering: a flow directly in a part def body becomes a port connection under its declared name, else the name a connect between the same parts would get, made unique. An end resolves to a feature of the part or a port of one of its parts; a.p.x is the port p of part a when a's type declares p (the item x is what the port carries). An end that does not resolve, a flow without ends, a flow in a part usage or action body, and a flow def are reported and not lowered. End to end: spar sysml2 lower then spar instance --format json shows the connection between the two ports. Mutation: the grammar's in-diff mutants 4 survivors -> 0, the lowering's 28 -> 0."
+    status: verified
+    description: |-
+      The CONNECTIONS part of the flows half of REQ-SYSML2-FLOWS-MODES-001; the end-to-end flow and its latency verdict are open, so this satisfies but does not verify the requirement. Grammar: flow [name] [of T] [from] S to D, succession flow, a body-only redefining flow, flow def (official corpus 35 -> 39 parsing); before it, every flow was an ERROR node that swallowed the members after it. Lowering: a flow directly in a part def body becomes a port connection under its declared name, else the name a connect between the same parts would get, made unique. An end resolves to a feature of the part or a port of one of its parts; a.p.x is the port p of part a when a's type declares p (the item x is what the port carries). An end that does not resolve, a flow without ends, a flow in a part usage or action body, and a flow def are reported and not lowered. End to end: spar sysml2 lower then spar instance --format json shows the connection between the two ports. Mutation: the grammar's in-diff mutants 4 survivors -> 0, the lowering's 28 -> 0.
+      VERIFIED 2026-11-07 on CI: PR #590 (squash 30ccedb): merge_group CI 42256370755, Verification Gate 42256370719, Lean Proofs 42256370798 all success.
     release: v0.49.0
     tags: [sysml2, flows, northstar]
     fields:
