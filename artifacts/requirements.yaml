@@ -5938,7 +5938,7 @@ artifacts:
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
     status: approved
-    release: v0.49.0
+    release: v0.50.0
     tags: [process, guardrail, claims, documentation]
 
   - id: REQ-SYSML2-VISIBILITY-001
@@ -6043,7 +6043,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: approved
-    release: v0.49.0
+    release: v0.50.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6131,39 +6131,15 @@ artifacts:
   - id: REQ-SYSML2-FLOWS-MODES-001
     type: requirement
     title: Flows and modes shall be analysable from a SysML v2 model
-    description: >
-      The North Star's first executable mile, and the reason DEC-NORTHSTAR-001
-      picks the position it does. In March 2026 Galois, with Ellidiss, CMU/SEI
-      and Collins Aerospace, released `Systems-Modeling/SysML-v2-AADL-Release`:
-      a domain extension library translating most of AADLv2 core into SysML v2
-      parts, ports and attributes, developed inside the OMG RTESC working
-      group. Its stated exclusions are AADL FLOWS and MODES, with typing rules
-      deferred.
-
-      Those exclusions are exactly the constructs spar's strongest analyses
-      consume — `latency`, `flow_rules`, `mode_reachability`, `modal`, and the
-      whole network-calculus arm, which reads flows to compute end-to-end
-      bounds. The standards track is carrying AADL STRUCTURE into SysML v2 and
-      explicitly not carrying the BEHAVIOUR that makes it analysable, which is
-      a narrow and defensible opening that nobody else is contesting.
-
-      THE REQUIREMENT. A SysML v2 model expressing flows and modes shall reach
-      the existing latency, mode-reachability and modal-scheduling passes and
-      produce a timing verdict with its derivation. Acceptance is end-to-end: a
-      SysML v2 file goes in, a bound with evidence comes out.
-
-      LICENCE CONSTRAINT, load-bearing for how this is built: the official
-      library is CC-BY-ND 4.0. It may be vendored VERBATIM with attribution and
-      used as a conformance corpus; it may not be forked or modified. Any
-      spar-side extension for flows and modes must therefore live beside it as
-      a separate artefact, not as a patched copy.
-
-      NOT CLAIMED: that spar defines how flows and modes SHOULD be expressed in
-      SysML v2. That is the RTESC working group's to settle. If they publish a
-      form, spar adopts it; until then spar's expression is a proposal and must
-      be labelled as one wherever it is emitted.
+    description: |-
+      The North Star's first executable mile, and the reason DEC-NORTHSTAR-001 picks the position it does. In March 2026 Galois, with Ellidiss, CMU/SEI and Collins Aerospace, released `Systems-Modeling/SysML-v2-AADL-Release`: a domain extension library translating most of AADLv2 core into SysML v2 parts, ports and attributes, developed inside the OMG RTESC working group. Its stated exclusions are AADL FLOWS and MODES, with typing rules deferred.
+      Those exclusions are exactly the constructs spar's strongest analyses consume — `latency`, `flow_rules`, `mode_reachability`, `modal`, and the whole network-calculus arm, which reads flows to compute end-to-end bounds. The standards track is carrying AADL STRUCTURE into SysML v2 and explicitly not carrying the BEHAVIOUR that makes it analysable, which is a narrow and defensible opening that nobody else is contesting.
+      THE REQUIREMENT. A SysML v2 model expressing flows and modes shall reach the existing latency, mode-reachability and modal-scheduling passes and produce a timing verdict with its derivation. Acceptance is end-to-end: a SysML v2 file goes in, a bound with evidence comes out.
+      LICENCE CONSTRAINT, load-bearing for how this is built: the official library is CC-BY-ND 4.0. It may be vendored VERBATIM with attribution and used as a conformance corpus; it may not be forked or modified. Any spar-side extension for flows and modes must therefore live beside it as a separate artefact, not as a patched copy.
+      NOT CLAIMED: that spar defines how flows and modes SHOULD be expressed in SysML v2. That is the RTESC working group's to settle. If they publish a form, spar adopts it; until then spar's expression is a proposal and must be labelled as one wherever it is emitted.
+      DECIDED 2026-11-07 by the maintainer (notice 20261106T173443-f9d276, option proposal-lib): spar reads end-to-end flows and their latency budget from a separate, labelled SparFlowsProposal SysML v2 package (beside, never patching, the CC-BY-ND AADL library), e.g. a metadata def EndToEndFlow { flows; latency_budget; }; every emitted result names it as spar's proposal. Moved to v0.50.0 by DEC-RELEASE-V049-SCOPE-001.
     status: approved
-    release: v0.49.0
+    release: v0.50.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
       - type: traces-to
@@ -7204,7 +7180,7 @@ artifacts:
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
     status: approved
-    release: v0.49.0
+    release: v0.50.0
     tags: [tsn, cli, synthesis, interop]
 
   - id: REQ-DBC-CYCLE-TIME-001
@@ -8015,7 +7991,9 @@ artifacts:
     type: requirement
     title: The Verification Gate shall check every feature artifact that carries a verification step, and a PR body shall not be able to narrow it
     status: approved
-    description: "Refs #358, #513. On main .github/workflows/verification-gate.yml:75 still sets DEFAULT='(and (= type \"feature\") (or (has-tag \"v093\") (has-tag \"v0100\")))', a frozen v0.9.3/v0.10.0 slice (20 of 245 features per #513), and line 76 lets a 'Verify-Filter:' line in the PR body replace it. Requirement: derive the default from every feature artifact with fields.steps (or the release being cut), add a MIN_MATCHED floor like the other guards, and allow an override only to widen the set. Oracle: the matched count equals the independently counted population of stepped features; a narrowing override is rejected."
+    description: |-
+      Refs #358, #513. On main .github/workflows/verification-gate.yml:75 still sets DEFAULT='(and (= type "feature") (or (has-tag "v093") (has-tag "v0100")))', a frozen v0.9.3/v0.10.0 slice (20 of 245 features per #513), and line 76 lets a 'Verify-Filter:' line in the PR body replace it. Requirement: derive the default from every feature artifact with fields.steps (or the release being cut), add a MIN_MATCHED floor like the other guards, and allow an override only to widen the set. Oracle: the matched count equals the independently counted population of stepped features; a narrowing override is rejected.
+      DECIDED 2026-11-07 by the maintainer (notice 20261106T003526-f517d2, option split): the required per-PR default is the stepped features whose requirement is in the release being cut (the version in Cargo.toml); a scheduled workflow runs all stepped features weekly and files a red run as an issue. Moved to v0.50.0 by DEC-RELEASE-V049-SCOPE-001.
     tags: [ci, verification, guardrail]
     links:
       - type: traces-to
@@ -8024,7 +8002,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:50Z
-    release: v0.49.0
+    release: v0.50.0
 
   - id: REQ-CI-ORACLE-WASI-BUMP-001
     type: requirement
