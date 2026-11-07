@@ -385,16 +385,61 @@ def _is_mutable_source(path: str) -> bool:
     return parts[-1] not in ("tests.rs", "build.rs")
 
 
-def diff_mutable_lines(diff_text: str) -> dict[str, int]:
+_CFG_TEST = re.compile(r"^\s*#\[cfg\(test\)\]\s*$")
+_MOD_OPEN = re.compile(r"^(\s*)(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{\s*$")
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+
+
+def test_module_lines(source: str) -> set[int]:
+    """1-based line numbers of every `#[cfg(test)] mod NAME { ... }` block in
+    `source`, attribute through closing brace. cargo-mutants never mutates
+    code under `#[cfg(test)]`, so an added line here selects nothing. The
+    block ends at the first line that is the opening line's indentation
+    followed by `}` (rustfmt's layout); a block with no such line is not
+    recognised, which keeps its lines counted as code (the strict side)."""
+    lines = source.splitlines()
+    inside: set[int] = set()
+    i = 0
+    while i < len(lines):
+        if not _CFG_TEST.match(lines[i]):
+            i += 1
+            continue
+        j = i + 1
+        while j < len(lines) and (lines[j].strip().startswith("#[") or not lines[j].strip()
+                                  or lines[j].strip().startswith("//")):
+            j += 1
+        m = _MOD_OPEN.match(lines[j]) if j < len(lines) else None
+        if not m:
+            i += 1
+            continue
+        close = m.group(1) + "}"
+        k = j + 1
+        while k < len(lines) and lines[k].rstrip() != close:
+            k += 1
+        if k == len(lines):
+            i += 1
+            continue
+        inside.update(range(i + 1, k + 2))
+        i = k + 1
+    return inside
+
+
+def diff_mutable_lines(diff_text: str, root: str = ".") -> dict[str, int]:
     """{path: added-or-changed line count} for mutable source files in a
     unified diff. Only ADDED lines count. MEASURED (cargo-mutants 27.1.0): a
     deletion inside a function that still exists DOES select that function's
     mutants — the hunk maps onto it — and then writes a report, so the normal
     path judges it. A pure removal with no surrounding function (a whole fn
     deleted) legitimately selects nothing, which is why removal-only changes
-    are not counted here as source that must select something."""
+    are not counted here as source that must select something.
+
+    An added line inside a `#[cfg(test)]` module is not counted either: the
+    post-change file is read from `root` (the checked-out PR tree) to find
+    those modules. A file that cannot be read keeps every line counted."""
     out: dict[str, int] = {}
     current = None
+    tests_in: set[int] = set()
+    new_line = 0
     for line in diff_text.splitlines():
         if line.startswith("+++ "):
             target = line[4:].strip()
@@ -404,18 +449,37 @@ def diff_mutable_lines(diff_text: str) -> dict[str, int]:
             current = target[2:] if target.startswith("b/") else target
             if not _is_mutable_source(current):
                 current = None
+                continue
+            try:
+                with open(os.path.join(root, current), "r", encoding="utf-8",
+                          errors="replace") as fh:
+                    tests_in = test_module_lines(fh.read())
+            except OSError:
+                tests_in = set()
             continue
+        hunk = _HUNK.match(line)
+        if hunk:
+            new_line = int(hunk.group(1))
+            continue
+        if line.startswith("-") and not line.startswith("---"):
+            continue  # a removed line has no number in the new file
+        if line.startswith("\\"):
+            continue  # "\ No newline at end of file"
+        lineno = new_line
+        new_line += 1
         if current and line.startswith("+") and not line.startswith("+++"):
             # A blank or `//` comment line (doc comments, `rivet:` markers)
             # holds nothing cargo-mutants can mutate, so it selects nothing.
             body = line[1:].strip()
             if not body or body.startswith("//"):
                 continue
+            if lineno in tests_in:
+                continue
             out[current] = out.get(current, 0) + 1
     return out
 
 
-def check_in_diff(output_dir: str, diff_path: str, out=None) -> int:
+def check_in_diff(output_dir: str, diff_path: str, out=None, root: str = ".") -> int:
     """The per-PR gate. 0 = every selected mutant was killed (or the diff has
     no mutable source, said so); 1 = otherwise."""
     out = out or sys.stdout
@@ -434,14 +498,14 @@ def check_in_diff(output_dir: str, diff_path: str, out=None) -> int:
         )
         return 1
 
-    mutable = diff_mutable_lines(diff_text)
+    mutable = diff_mutable_lines(diff_text, root)
     n_lines = sum(mutable.values())
     rdir = report_dir(output_dir)
 
     if not os.path.isdir(rdir) and n_lines == 0:
         print(
             "No mutable source line in the diff (no non-test Rust under a crate's "
-            "src/ was added or changed) — nothing to mutate. This is NOT a mutation "
+            "src/, outside a #[cfg(test)] module, was added or changed) — nothing to mutate. This is NOT a mutation "
             "verdict on the change; the full-crate run on main still covers it (#400).",
             file=out,
         )
@@ -1097,15 +1161,24 @@ def self_test() -> int:
                    "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
                    "@@ -1,3 +1,2 @@\n fn f() {\n-    let y = 1;\n }\n")
 
-    def dcase(desc: str, want: int, diff_text: str, build, want_msg: str):
+    def dcase(desc: str, want: int, diff_text: str, build, want_msg: str,
+              files: dict[str, str] | None = None):
         nonlocal passed, failed
         with tempfile.TemporaryDirectory() as tmp:
             dpath = os.path.join(tmp, "pr.diff")
             with open(dpath, "w", encoding="utf-8") as fh:
                 fh.write(diff_text)
+            # `files` is the post-change tree the diff applies to, written
+            # under `tmp` and passed as the root the gate reads source from.
+            src_root = os.path.join(tmp, "tree")
+            for rel, body in (files or {}).items():
+                fpath = os.path.join(src_root, rel)
+                os.makedirs(os.path.dirname(fpath), exist_ok=True)
+                with open(fpath, "w", encoding="utf-8") as fh:
+                    fh.write(body)
             out_dir = build(tmp)
             buf = io.StringIO()
-            got = check_in_diff(out_dir, dpath, out=buf)
+            got = check_in_diff(out_dir, dpath, out=buf, root=src_root)
             text = buf.getvalue()
             if got != want or want_msg not in text:
                 failed += 1
@@ -1129,6 +1202,32 @@ def self_test() -> int:
           COMMENT_ONLY, no_report, "nothing to mutate")
     dcase("in-diff: code with a trailing comment, ZERO selected, still fails", 1,
           CODE_AND_COMMENT, no_report, "selected ZERO mutants")
+    # cargo-mutants never mutates a `#[cfg(test)]` module, so a change whose
+    # added lines all sit inside one selects nothing and writes no report
+    # (#598: 167 added test lines in two src/ files, zero selected, red).
+    # The gate reads the post-change file to tell such lines from code.
+    X_RS = ("fn f() {\n"
+            "    let y = 1;\n"
+            "}\n"
+            "\n"
+            "#[cfg(test)]\n"
+            "mod tests {\n"
+            "    use super::*;\n"
+            "\n"
+            "    #[test]\n"
+            "    fn t() {\n"
+            "        assert_eq!(f(), ());\n"
+            "    }\n"
+            "}\n")
+    X_TREE = {"crates/spar-analysis/src/x.rs": X_RS}
+    IN_TEST_MOD = ("diff --git a/crates/spar-analysis/src/x.rs b/crates/spar-analysis/src/x.rs\n"
+                   "--- a/crates/spar-analysis/src/x.rs\n+++ b/crates/spar-analysis/src/x.rs\n"
+                   "@@ -6,3 +6,8 @@\n mod tests {\n     use super::*;\n+\n+    #[test]\n"
+                   "+    fn t() {\n+        assert_eq!(f(), ());\n+    }\n }\n")
+    dcase("in-diff: lines added only inside a #[cfg(test)] module, no report, are labelled, not scored", 0,
+          IN_TEST_MOD, no_report, "nothing to mutate", files=X_TREE)
+    dcase("in-diff: code added outside the #[cfg(test)] module of the same file, ZERO selected, still fails", 1,
+          SRC_DIFF, no_report, "selected ZERO mutants", files=X_TREE)
     dcase("in-diff: every selected mutant killed passes", 0,
           SRC_DIFF, lambda t: _fixture(t, missed=0, caught=4, unviable=1), "Every in-diff mutant was killed")
     dcase("in-diff: ONE survivor in the diff fails (zero tolerance)", 1,

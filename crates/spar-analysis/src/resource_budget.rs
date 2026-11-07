@@ -335,6 +335,7 @@ mod tests {
         features: Arena<FeatureInstance>,
         connections: Arena<ConnectionInstance>,
         property_maps: FxHashMap<ComponentInstanceIdx, PropertyMap>,
+        connection_property_maps: FxHashMap<ConnectionInstanceIdx, PropertyMap>,
     }
 
     impl TestBuilder {
@@ -344,7 +345,50 @@ mod tests {
                 features: Arena::default(),
                 connections: Arena::default(),
                 property_maps: FxHashMap::default(),
+                connection_property_maps: FxHashMap::default(),
             }
+        }
+
+        fn add_connection(
+            &mut self,
+            name: &str,
+            owner: ComponentInstanceIdx,
+        ) -> ConnectionInstanceIdx {
+            let idx = self.connections.alloc(ConnectionInstance {
+                name: Name::new(name),
+                kind: spar_hir_def::item_tree::ConnectionKind::Port,
+                is_bidirectional: false,
+                owner,
+                src: None,
+                dst: None,
+                in_modes: Vec::new(),
+            });
+            self.components[owner].connections.push(idx);
+            idx
+        }
+
+        /// A property declared on the connection itself (inline `{ ... }`).
+        fn set_connection_property(
+            &mut self,
+            conn: ConnectionInstanceIdx,
+            set: &str,
+            name: &str,
+            value: &str,
+        ) {
+            let map = self.connection_property_maps.entry(conn).or_default();
+            map.add(PropertyValue {
+                name: PropertyRef {
+                    property_set: if set.is_empty() {
+                        None
+                    } else {
+                        Some(Name::new(set))
+                    },
+                    property_name: Name::new(name),
+                },
+                value: value.to_string(),
+                typed_expr: None,
+                is_append: false,
+            });
         }
 
         fn add_component(
@@ -409,7 +453,7 @@ mod tests {
                 diagnostics: Vec::new(),
                 property_maps: self.property_maps,
                 feature_property_maps: Default::default(),
-                connection_property_maps: Default::default(),
+                connection_property_maps: self.connection_property_maps,
                 emv2_models: Default::default(),
                 semantic_connections: Vec::new(),
                 system_operation_modes: Vec::new(),
@@ -1245,9 +1289,90 @@ mod tests {
         );
         // Also verify connection count = 2
         assert!(
-            warnings[0].message.contains("2 connections"),
+            warnings[0].message.contains("(2 connections)"),
             "should report 2 connections: {}",
             warnings[0].message
+        );
+    }
+
+    // ── REQ-AADL-BINDING-CONSUMERS-002 item 3 (#515) ────────────────────
+    //
+    // A connection's OWN `Actual_Connection_Binding` + `Data_Rate` count
+    // against the bus it names. The oracles lived only in spar-cli
+    // integration tests, invisible to the `--lib` Mutation Testing run.
+
+    /// `root` holds bus `eth0` (1000 bps) and bus `can0` (1 Gbps, never
+    /// near capacity). Each `(name, bus, rate)` is a connection owned by
+    /// `root` carrying its own binding and data rate.
+    fn connection_binding_fixture(conns: &[(&str, &str, &str)]) -> Vec<AnalysisDiagnostic> {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let eth0 = b.add_component("eth0", ComponentCategory::Bus, Some(root));
+        let can0 = b.add_component("can0", ComponentCategory::Bus, Some(root));
+        b.set_children(root, vec![eth0, can0]);
+        b.set_property(eth0, "Communication_Properties", "Data_Rate", "1000 bitsps");
+        b.set_property(can0, "Communication_Properties", "Data_Rate", "1 Gbitsps");
+        for &(name, bus, rate) in conns {
+            let c = b.add_connection(name, root);
+            b.set_connection_property(
+                c,
+                "Deployment_Properties",
+                "Actual_Connection_Binding",
+                &format!("reference ({bus})"),
+            );
+            b.set_connection_property(c, "Communication_Properties", "Data_Rate", rate);
+        }
+        let inst = b.build(root);
+        ResourceBudgetAnalysis.analyze(&inst)
+    }
+
+    fn bandwidth_warnings(d: &[AnalysisDiagnostic]) -> Vec<&AnalysisDiagnostic> {
+        d.iter()
+            .filter(|x| x.message.contains("bandwidth may be exceeded"))
+            .collect()
+    }
+
+    /// 600 + 700 = 1300 bps over eth0's 1000 only when SUMMED (each alone
+    /// fits). Kills `total_rate += rate` -> `-=` / `*=` (both stay at or
+    /// below 0) and `connection_count += 1` -> `*=` (0, skipped) / `-=`
+    /// ("(-2 connections)"). The 5000 bps connection on `can0` must not
+    /// count on eth0: a binding compared with `!=`, or a filter inverted to
+    /// `== Some(true)`, reports 5000 bps over 1 connection instead.
+    // rivet: verifies REQ-AADL-BINDING-CONSUMERS-002
+    #[test]
+    fn connection_own_bindings_sum_against_their_bus() {
+        let d = connection_binding_fixture(&[
+            ("c1", "eth0", "600 bitsps"),
+            ("c2", "eth0", "700 bitsps"),
+            ("c3", "can0", "5000 bitsps"),
+        ]);
+        let w = bandwidth_warnings(&d);
+        assert_eq!(w.len(), 1, "only eth0 is over capacity: {d:#?}");
+        assert_eq!(w[0].severity, Severity::Warning);
+        assert!(w[0].message.contains("bus 'eth0'"), "{}", w[0].message);
+        assert!(
+            w[0].message
+                .contains("1300.0 bps demanded vs 1000.0 bps capacity (2 connections)"),
+            "{}",
+            w[0].message
+        );
+    }
+
+    /// A connection bound to a DIFFERENT bus adds nothing here: eth0 carries
+    /// only c1's 100 bps, so it is silent, and can0 is far under its 1 Gbps.
+    /// Kills `idx == bus` -> `!=` in `connection_own_binding_is` and
+    /// `!= Some(true)` -> `==` in `check_bandwidth_budgets`: either one puts
+    /// c2's 1500 bps on eth0.
+    // rivet: verifies REQ-AADL-BINDING-CONSUMERS-002
+    #[test]
+    fn a_connection_bound_to_another_bus_does_not_count() {
+        let d = connection_binding_fixture(&[
+            ("c1", "eth0", "100 bitsps"),
+            ("c2", "can0", "1500 bitsps"),
+        ]);
+        assert!(
+            bandwidth_warnings(&d).is_empty(),
+            "c2 is bound to can0, not eth0: {d:#?}"
         );
     }
 
