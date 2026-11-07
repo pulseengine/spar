@@ -89,7 +89,7 @@
     "@types/vscode": "^1.85.0",
     "@types/node": "^22",
     "@types/mocha": "^10",
-    "@vscode/test-electron": "^2.4.0",
+    "@vscode/test-electron": "^3.1.0",
     "mocha": "^10",
     "glob": "^11",
     "typescript": "^5.9.0",
