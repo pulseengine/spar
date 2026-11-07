@@ -26,8 +26,8 @@ jobs:
     name: Verify version consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
       - name: Check tag matches Cargo.toml and package.json
@@ -67,7 +67,7 @@ jobs:
       # default depth of 1 has no history to walk. fetch-tags makes the tag
       # OBJECT (not just the commit) present, which is what carries the tagger
       # date and the message the gate reads.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -113,7 +113,7 @@ jobs:
             os: windows-latest
             archive: zip
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -238,7 +238,7 @@ jobs:
           cd staging && 7z a "../$ARCHIVE" . && cd ..
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -251,7 +251,7 @@ jobs:
     name: Build compliance report
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Generate compliance report
         id: report
@@ -266,7 +266,7 @@ jobs:
         # step captured `rivet validate`'s exit code and never used it, reading
         # the verdict by grepping stdout for "Result: PASS". We want the gate;
         # the bug was the input below.
-        uses: pulseengine/rivet/.github/actions/compliance@6cd75d3d3b05b4e882da9a05144f6e5da964019a
+        uses: pulseengine/rivet/.github/actions/compliance@a1829c7194054bbe752875abc459be65a469437f
         with:
           theme: dark
           # v0.40.0, NOT v0.1.0 (#464). Measured on this tree, running what
@@ -291,7 +291,7 @@ jobs:
           # fetch-reports can auto-generate data/spar/{stats,artifacts}.json.
           include-data-formats: true
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -304,7 +304,7 @@ jobs:
     name: Build test evidence
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -314,7 +314,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install tools
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
         with:
           tool: cargo-nextest,cargo-llvm-cov
 
@@ -357,7 +357,7 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/}"
           tar czf "spar-${VERSION}-test-evidence.tar.gz" test-evidence/
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -376,7 +376,7 @@ jobs:
     needs: [check-versions]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -386,7 +386,7 @@ jobs:
         with:
           key: release-wasm32-wasip2
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
 
@@ -414,7 +414,7 @@ jobs:
           tar -C dist/wasm -czf "spar-wasm-browser-${VERSION}.tar.gz" .
           ls -la "spar-wasm-browser-${VERSION}.tar.gz"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -446,12 +446,12 @@ jobs:
             rust-target: x86_64-pc-windows-msvc
             binary: spar.exe
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
       - name: Download binary for ${{ matrix.rust-target }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary-${{ matrix.rust-target }}
           path: binary-artifact
@@ -472,7 +472,7 @@ jobs:
       - name: Package platform VSIX
         working-directory: vscode-spar
         run: npx @vscode/vsce package --target ${{ matrix.target }} --no-dependencies
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -486,12 +486,12 @@ jobs:
     needs: [build-vsix, create-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: vsix-*
           path: vsix
           merge-multiple: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
       - name: Publish to VS Code Marketplace
@@ -509,10 +509,10 @@ jobs:
     name: Generate SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
         with:
           tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
@@ -536,7 +536,7 @@ jobs:
           # release-assets flatten time in the create-release job.
           cp "$SBOM_SRC" sbom-out/spar.cdx.json
           ls -la sbom-out/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # An empty upload must not be silent: the release job gathers
           # these with `find`, which exits 0 on no match (#402).
@@ -573,10 +573,10 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
@@ -655,7 +655,7 @@ jobs:
       # keeps the workflow self-contained. spar ships both .tar.gz
       # (Unix) and .zip (Windows), so both globs are attested.
       - name: Generate SLSA build provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             release-assets/*.tar.gz
@@ -677,7 +677,7 @@ jobs:
       #     --bundle SHA256SUMS.txt.cosign.bundle \
       #     SHA256SUMS.txt
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: 'v2.4.1'
 
