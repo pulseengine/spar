@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   mutants:
-    name: cargo-mutants ${{ github.event.inputs.shard || 'shard 0/8' }}
+    name: cargo-mutants ${{ github.event.inputs.shard || github.event_name }}
     runs-on: [self-hosted, linux, x64, lean-mem]
     timeout-minutes: 720
 
@@ -70,7 +70,21 @@ jobs:
       - name: Resolve inputs
         id: cfg
         run: |
-          SHARD="${{ github.event.inputs.shard || '0/8' }}"
+          # A dispatch names its shard. A scheduled run ROTATES through the
+          # eight shards by ISO week, so eight Sundays cover the workspace:
+          # with --no-shuffle the shard list is deterministic, and the old
+          # fixed default of 0/8 re-tested the same slice (all of it
+          # spar-cli) every week while the other seven eighths were never
+          # mutated. A push run (the workflow-file test hook) keeps 0/8 so
+          # it compares like for like with earlier push runs. Refs #391.
+          SHARD="${{ github.event.inputs.shard }}"
+          if [ -z "$SHARD" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              SHARD="$(( 10#$(date -u +%V) % 8 ))/8"
+            else
+              SHARD="0/8"
+            fi
+          fi
           PACKAGES="${{ github.event.inputs.packages }}"
           PKGS_FLAG=""
           if [ -n "$PACKAGES" ]; then
@@ -85,10 +99,21 @@ jobs:
           echo "shard=$SHARD" >> $GITHUB_OUTPUT
           echo "shard_flag=$SHARD_FLAG" >> $GITHUB_OUTPUT
           echo "pkgs_flag=$PKGS_FLAG" >> $GITHUB_OUTPUT
-          echo "Effective: cargo mutants ${PKGS_FLAG:-(workspace)} $SHARD_FLAG --timeout 180 --jobs 8 --output mutants-out -- --lib"
+          echo "Effective: cargo mutants ${PKGS_FLAG:-(workspace)} $SHARD_FLAG --timeout 300 --jobs 8 --output mutants-out"
 
       - name: Run cargo-mutants
         id: run
+        # Every test target of the mutated package runs, not only `--lib`.
+        # With `-- --lib` (until #391) a mutant saw the package's in-source
+        # unit tests and nothing else: for spar-cli that was 11 of its 504
+        # tests (0 s, against 50 s for the full suite). A mutant in
+        # src/main.rs, the `[[bin]]` target, was compiled by the build phase
+        # (which takes no test args) but no test ever RAN it: `cargo test
+        # --lib` runs none of the `tests/*.rs` that drive the binary through
+        # CARGO_BIN_EXE_spar. That is how shard 0/8 reported
+        # 1376 missed against 36 caught. Measured on one mutant
+        # (main.rs:100:12, `delete !`): MISSED under `--lib`, CAUGHT by
+        # tests/subcommand_help_exit.rs.
         # `|| true` so the report still uploads even when survivors exist;
         # the next step decides exit status from the missed.txt content.
         run: |
@@ -96,11 +121,10 @@ jobs:
           cargo mutants \
             ${{ steps.cfg.outputs.pkgs_flag }} \
             ${{ steps.cfg.outputs.shard_flag }} \
-            --timeout 180 \
+            --timeout 300 \
             --jobs 8 \
             --output mutants-out \
             --no-shuffle \
-            -- --lib \
             || echo "cargo-mutants exited non-zero (survivors expected; see report)"
 
       - name: Summarise to job summary
