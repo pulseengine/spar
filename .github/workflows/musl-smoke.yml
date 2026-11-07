@@ -1,0 +1,52 @@
+name: musl smoke
+
+# release.yml runs only on a tag, so without this a broken musl build would
+# first surface while a release is being cut. This runs the SAME composite
+# action the release matrix uses (.github/actions/musl-build) on pull
+# requests that could break it: a dependency change (a new -sys crate), the
+# action itself, or the release workflow. Advisory, not a required check.
+# REQ-RELEASE-MUSL-001, #447.
+
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - .github/actions/musl-build/**
+      - .github/workflows/musl-smoke.yml
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+concurrency:
+  group: musl-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  musl:
+    name: musl ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: musl-smoke-${{ matrix.target }}
+
+      - uses: ./.github/actions/musl-build
+        with:
+          target: ${{ matrix.target }}

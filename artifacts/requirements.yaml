@@ -7890,8 +7890,10 @@ artifacts:
   - id: REQ-RELEASE-MUSL-001
     type: requirement
     title: Linux release assets shall include musl builds beside the glibc ones
-    status: approved
-    description: "Refs #447. The v0.40.0 x86_64 Linux asset is dynamically linked with a GLIBC_2.39 floor, so it does not run on Ubuntu 22.04, Debian 12, RHEL 9, Ubuntu 20.04 or Alpine; on main release.yml has no musl target (0 matches). Maintainer decision on the issue (2026-09-24): ship musl beside gnu, named <tool>-<tag>-x86_64-unknown-linux-musl.tar.gz and the aarch64 equivalent, entering the signed SHA256SUMS.txt. Oracle: the release lists both musl archives, the binaries are statically linked (file reports no interpreter), and they run in an Alpine container."
+    status: implemented
+    description: |-
+      Refs #447. The v0.40.0 x86_64 Linux asset is dynamically linked with a GLIBC_2.39 floor, so it does not run on Ubuntu 22.04, Debian 12, RHEL 9, Ubuntu 20.04 or Alpine; on main release.yml has no musl target (0 matches). Maintainer decision on the issue (2026-09-24): ship musl beside gnu, named <tool>-<tag>-x86_64-unknown-linux-musl.tar.gz and the aarch64 equivalent, entering the signed SHA256SUMS.txt. Oracle: the release lists both musl archives, the binaries are statically linked (file reports no interpreter), and they run in an Alpine container.
+      IMPLEMENTED 2026-11-07: .github/actions/musl-build is the single definition of the musl build (cargo-zigbuild 0.24.0 + zig 0.16.0 from PyPI in a venv; zig links highs-sys's C++ statically), used by release.yml's matrix (x86_64 on ubuntu-latest, aarch64 on ubuntu-24.04-arm so the #422 version check runs both natively) and by musl-smoke.yml on PRs touching dependencies or the release workflow. The action asserts 'file' reports static linking with no interpreter and runs 'spar --version' in alpine:3.20. The flatten step requires both musl archives by name and the asset floor rises 10 -> 12, so a complete release carries 21 assets. Local evidence: both targets build in ~105 s with cargo-zigbuild and 'file' reports 'statically linked'. VERIFIED only by a published release that lists both archives; the PR's musl-smoke run is the pre-tag evidence.
     tags: [release, distribution, linux]
     links:
       - type: traces-to
