@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "detectors": [
+    {
+      "command": ["tools/classify_changed_paths.py"],
+      "outputs": ["code"],
+      "controls": [
+        "crates/gate-probe-control/src/lib.rs",
+        ".github/workflows/gate-probe-control.yml",
+        "artifacts/gate-probe-control.rs",
+        "safety/gate-probe-control.sh",
+        "Cargo.toml"
+      ],
+      "negative_controls": ["docs/gate-probe-negative.md"]
+    }
+  ]
+}
