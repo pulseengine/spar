@@ -104,7 +104,7 @@ jobs:
             archive: tar.gz
             zigbuild: true
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15
             archive: tar.gz
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -150,7 +150,7 @@ jobs:
       # produced it, so the version has to come from the artifact we ship.
       #
       # The guard keys on ARCHITECTURE MATCH, not on the `cross` flag. Those
-      # are different questions: x86_64-apple-darwin is built on macos-14,
+      # are different questions: x86_64-apple-darwin is built on macos-15,
       # which is arm64, and is NOT marked cross -- so a `cross`-based condition
       # would execute a foreign-arch binary and quietly depend on Rosetta being
       # present on the image. Runs on Windows too (`shell: bash`), because
