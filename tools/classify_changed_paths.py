@@ -103,6 +103,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import re
 import subprocess
 import sys
@@ -215,6 +216,33 @@ def run(
 
     n_code = sum(1 for _, label in rows if label is None)
     print(f"\n{len(rows)} changed, {n_code} classified CODE.", file=out)
+    print(f"-> code={'true' if is_code else 'false'}", file=out)
+    emit(is_code, github_output)
+    return 0
+
+
+def run_probe(files_path: str, github_output: str, out=sys.stdout) -> int:
+    """temper gate-probe mode: the changed paths come from a file, one per line.
+
+    temper's behavioural probe (pulseengine/temper docs/gate-probe.md) runs this
+    detector with only GATE_PROBE_FILES and GITHUB_OUTPUT in the environment and
+    no arguments, and checks that each control path comes back `code=true`. The
+    same classify() and emit() decide here as in CI, so the probe measures the
+    classifier CI actually runs, not a copy of it. An empty list is the
+    fail-safe direction, as in run().
+    """
+    if not github_output:
+        raise RuntimeError("GATE_PROBE_FILES is set but GITHUB_OUTPUT is not")
+    with open(files_path, encoding="utf-8") as fh:
+        paths = [line.strip() for line in fh if line.strip()]
+    print("== changed-path classifier (gate-probe) ==", file=out)
+    if not paths:
+        print("empty list -> full suite (fail-safe).", file=out)
+        emit(True, github_output)
+        return 0
+    is_code, rows = classify(paths)
+    for path, label in rows:
+        print(f"  {'CODE' if label is None else 'skip'}  {path}", file=out)
     print(f"-> code={'true' if is_code else 'false'}", file=out)
     emit(is_code, github_output)
     return 0
@@ -432,6 +460,45 @@ def self_test() -> int:
     e2e("E2E merge_group: a .rs queue entry emits code=true",
         ["crates/x/src/lib.rs"], "code=true", event="merge_group")
 
+    # -- gate-probe mode (temper docs/gate-probe.md) --------------------------
+    # temper's three default controls must all come back code=true, and a docs
+    # .md must come back code=false: a detector that answered "run everything"
+    # to every probe would pass the first three while exercising nothing.
+    def probe_case(desc, lines, want, gh_output=True):
+        nonlocal passed, failed
+        with tempfile.TemporaryDirectory() as td:
+            lst = Path(td, "changed.txt")
+            lst.write_text("".join(f"{l}\n" for l in lines))
+            gh = Path(td, "gh_output")
+            gh.write_text("")
+            try:
+                rc = run_probe(str(lst), str(gh) if gh_output else "",
+                               out=io.StringIO())
+            except Exception:  # noqa: BLE001
+                rc = 1
+            written = gh.read_text().strip()
+        good = (rc == 0 and written == want) if want else (
+            rc != 0 and "code=false" not in written)
+        if good:
+            passed += 1
+            print(f"  ok   {desc}")
+        else:
+            failed += 1
+            print(f"  FAIL {desc}: rc={rc}, wrote {written!r}, want {want!r}")
+
+    probe_case("probe: docs/gate-probe-control.rs is CODE",
+               ["docs/gate-probe-control.rs"], "code=true")
+    probe_case("probe: supply-chain/gate-probe-control.toml is CODE",
+               ["supply-chain/gate-probe-control.toml"], "code=true")
+    probe_case("probe: a new top-level directory is CODE",
+               ["gate-probe-new-dir/control.bin"], "code=true")
+    probe_case("probe NEGATIVE CONTROL: docs/gate-probe-negative.md is NOT code",
+               ["docs/gate-probe-negative.md"], "code=false")
+    probe_case("probe: an empty list runs the full suite",
+               [], "code=true")
+    probe_case("probe: no GITHUB_OUTPUT -> non-zero, no code=false",
+               ["docs/gate-probe-negative.md"], None, gh_output=False)
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
@@ -440,6 +507,20 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--self-test" in argv:
         return self_test()
+
+    probe_files = os.environ.get("GATE_PROBE_FILES")
+    if probe_files:
+        if argv:
+            print("::error::GATE_PROBE_FILES is set together with arguments; "
+                  "refusing to guess which input decides. No verdict emitted.",
+                  file=sys.stderr)
+            return 2
+        try:
+            return run_probe(probe_files, os.environ.get("GITHUB_OUTPUT", ""))
+        except Exception as exc:  # noqa: BLE001 — no error path emits code=false
+            print(f"::error::changed-path classifier (gate-probe) failed: {exc}",
+                  file=sys.stderr)
+            return 1
 
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--event-name", required=True, help="github.event_name")
