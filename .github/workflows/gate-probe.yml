@@ -1,0 +1,23 @@
+# Report-only: temper's behavioural probe runs tools/classify_changed_paths.py
+# on the control paths declared in .github/gate-probe.json and fails if any
+# comes back code=false, or if the negative control comes back code=true.
+# Contract: pulseengine/temper docs/gate-probe.md. Per that contract this
+# workflow has no path filter, no `if:`, no continue-on-error and no
+# pull_request_target, and the control paths live only in gate-probe.json.
+# Making `gate-probe` a required check is a later step that needs the owner's
+# approval. Keep the job name stable: renaming a required check silently
+# drops the requirement.
+name: gate-probe
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gate-probe:
+    runs-on: [self-hosted, linux, x64, light]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pulseengine/temper/.github/actions/gate-probe@a57e81353acfad05bf1e4cf635281a7562253d36 # temper#87
