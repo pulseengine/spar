@@ -14,7 +14,11 @@ permissions:
   contents: read
 jobs:
   gate-probe:
-    runs-on: [self-hosted, linux, x64, light]
+    # The probe executes the PR's own classifier. A fork PR therefore runs on
+    # a GitHub-hosted runner, never on the self-hosted pool; the job still
+    # runs on every PR, so it cannot be skipped. Same pattern as
+    # aadl-interop.yml, gale and varve.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
