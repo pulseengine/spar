@@ -163,6 +163,37 @@ MUTANTS: list[Mutant] = [
              "count as zero. Caught by `REGRESSION #385(b): axiom COUNTS` (want_msg "
              "'axiom=1').",
     ),
+    # ── check_trust_ledger.py ──────────────────────────────────────────────
+    # REQ-PROOF-AXIOM-LEDGER-001. Each was confirmed SURVIVED with its catching
+    # cases removed, then CAUGHT by the full suite, before it was added.
+    Mutant(
+        tool="check_trust_ledger.py",
+        id="tl-sorry-standard",
+        old='STANDARD_AXIOMS = frozenset({"propext", "Quot.sound", "Classical.choice"})',
+        new='STANDARD_AXIOMS = frozenset({"propext", "Quot.sound", "Classical.choice", "sorryAx"})',
+        note="treating sorryAx as a standard axiom: every sorried theorem leaves the "
+             "ledger and the kernel check passes on an unproven library. Caught by "
+             "`sorryAx is not standard`, `a def that uses sorry counts` and the "
+             "canary case.",
+    ),
+    Mutant(
+        tool="check_trust_ledger.py",
+        id="tl-ignore-additions",
+        old="    added = current - ledger\n",
+        new="    added = Counter()\n",
+        note="a comparison that never reports an addition: the check prints its "
+             "notices and passes whatever appears. Caught by `an unlisted escape "
+             "FAILS` and `moving a sorry to another theorem FAILS`.",
+    ),
+    Mutant(
+        tool="check_trust_ledger.py",
+        id="tl-count-kani-assume",
+        old='("assume", re.compile(r"(?<![\\w:])(?<!fn )assume\\s*\\(")),',
+        new='("assume", re.compile(r"(?<![\\w])(?<!fn )assume\\s*\\(")),',
+        note="dropping the `:` guard makes every kani::assume harness precondition a "
+             "Verus trust escape, so the ledger fills with noise and a real assume "
+             "hides in it. Caught by `kani::assume is not a trust escape`.",
+    ),
     # ── check_lean_reachable.py ────────────────────────────────────────────
     # REQ-PROOF-LAKE-REACHABLE-001 (#397). Each was confirmed SURVIVED with its
     # catching case removed, then CAUGHT by the full suite, before it was added.
@@ -593,7 +624,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 10
+MIN_COVERED = 11
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`

@@ -5170,6 +5170,25 @@ artifacts:
       - type: verifies
         target: REQ-PROOF-LAKE-REACHABLE-001
 
+  - id: TEST-PROOF-AXIOM-LEDGER-001
+    type: feature
+    title: Every non-standard axiom dependency of a hand-written proof is in the trust ledger, and canaries prove the check can fail
+    status: implemented
+    description: |-
+      tools/check_trust_ledger.py imports every module under proofs/Proofs into a throwaway Lean file, walks the elaborated environment and prints Lean.collectAxioms for every constant (theorems, defs, private declarations), then compares the non-standard dependencies, plus Verus escapes in tracked .rs files, against .github/trust-ledger.txt. An unlisted entry exits 1; a stale ledger line is a notice; an empty report, a failed Lean run or a malformed ledger exit 2. --negative-control adds four canaries (by sorry, native_decide, an axiom, a theorem using it) and fails unless all four are reported. MEASURED 2026-11-11 on main 90806e7: 12 modules imported, 11 declaring 426 constants, 180 theorems; 13 ledger entries (11 theorems, 1 def and its _proof_1, all sorryAx), 0 Verus escapes. Negative controls on a local lake build: an inline `by sorry` in EDF.demand_le_interval -> exit 1 naming it and the downstream totalDemand_le_nL (the text ratchet also exit 1); a native_decide theorem in EDF -> exit 1 (text ratchet exit 0); a MinPlus theorem that only references delay_bound_classical -> exit 1 (text ratchet exit 0). Self-test 24 cases, also under Python 3.9; 3 potency mutants, each SURVIVED with its catching cases removed and CAUGHT by the full suite. NOT claimed: that any sorried theorem is proven.
+    release: v0.50.0
+    tags: [proofs, lean, guardrail, ci]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_trust_ledger.py --self-test
+        - run: tools/check_trust_ledger.py --negative-control
+    links:
+      - type: satisfies
+        target: REQ-PROOF-AXIOM-LEDGER-001
+      - type: verifies
+        target: REQ-PROOF-AXIOM-LEDGER-001
+
   - id: TEST-TSN-YANG-DEPLOYABLE-001
     type: feature
     title: The 802.1Qcw export is schema-valid edit content and carries its activation

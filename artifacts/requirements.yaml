@@ -7957,6 +7957,22 @@ artifacts:
       timestamp: 2026-10-29T05:39:50Z
     release: v0.49.0
 
+  - id: REQ-PROOF-AXIOM-LEDGER-001
+    type: requirement
+    title: Every axiom a hand-written proof depends on beyond propext, Quot.sound and Classical.choice shall be listed by name in a committed ledger
+    status: implemented
+    description: |-
+      The sorry ratchet (tools/check_lean_sorries.py, REQ-GUARD-GATE-EVIDENCE-002) counts sorry, sorryAx, admit and axiom in the TEXT of proofs/Proofs and holds the total to 12. A count cannot say which declarations are unproven, and text cannot see what the kernel sees: a theorem that only uses a sorried lemma, native_decide (on the pinned Lean 4.29 an auxiliary axiom <decl>._native.native_decide.ax_N_M), or a sorry moved from one theorem to another at the same count. The generated proofs already get a `#print axioms` check (check_generated_proofs.py); the hand-written library did not. Requirement: run Lean.collectAxioms on every constant of every proofs/Proofs module and fail on any non-standard axiom dependency .github/trust-ledger.txt does not list by declaration name; hold Verus external_body / assume_specification / assume / admit in tracked .rs files to the same ledger (kani::assume is a harness precondition and is excluded). Removing an escape is always allowed. Oracle: an inline `by sorry`, a native_decide proof and a theorem that only uses a sorried lemma each turn the check red; the last two leave the text ratchet green.
+    tags: [proofs, lean, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-GUARD-GATE-EVIDENCE-002
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-11T13:29:20Z
+    release: v0.50.0
+
   - id: REQ-CI-MUTANTS-WEEKLY-KILLRATE-001
     type: requirement
     title: Mutants Weekly shall run the tests that cover each mutant, or the 1.7% kill rate shall be explained by measurement
