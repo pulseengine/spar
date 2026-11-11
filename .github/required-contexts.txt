@@ -43,3 +43,4 @@ Security Audit (RustSec)
 Supply Chain (cargo-vet)
 Test
 Verification Gate (rivet-driven)
+gate-probe

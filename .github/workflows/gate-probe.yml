@@ -4,9 +4,11 @@
 # Contract: pulseengine/temper docs/gate-probe.md. Per that contract this
 # workflow has no path filter, no `if:`, no continue-on-error and no
 # pull_request_target, and the control paths live only in gate-probe.json.
-# Making `gate-probe` a required check is a later step that needs the owner's
-# approval. Keep the job name stable: renaming a required check silently
-# drops the requirement.
+# `gate-probe` is listed in .github/required-contexts.txt (owner-approved
+# 2026-11-11), as tools/check_required_contexts.py demands for a job that runs
+# on every PR and cannot fail open. Adding it to branch protection is a
+# separate admin step. Keep the job name stable: renaming a required check
+# silently drops the requirement.
 name: gate-probe
 on:
   pull_request:
