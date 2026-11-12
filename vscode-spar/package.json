@@ -92,7 +92,7 @@
     "@vscode/test-electron": "^3.1.0",
     "mocha": "^12",
     "glob": "^14",
-    "typescript": "^5.9.0",
+    "typescript": "^7.0.2",
     "esbuild": "^0.25.0"
   },
   "scripts": {
