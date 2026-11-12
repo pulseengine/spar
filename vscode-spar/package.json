@@ -93,7 +93,7 @@
     "mocha": "^12",
     "glob": "^14",
     "typescript": "^7.0.2",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.2"
   },
   "scripts": {
     "vscode:prepublish": "npm run esbuild -- --production",
