@@ -115,7 +115,7 @@ jobs:
       # the actual fail-on-sorry enforcement (see #wave3-tier-a-1 audit).
       - name: Build proofs (lake build)
         id: lake_build
-        uses: leanprover/lean-action@fe408643ea7367d8c0404a8be3975bb145f5fb64 # v1
+        uses: leanprover/lean-action@ba3fdfe5c4476c925da13bf11a005ddb47e47aee # v1
         with:
           lake-package-directory: proofs
           # Pull Mathlib's precompiled .olean files instead of rebuilding
