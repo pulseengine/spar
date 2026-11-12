@@ -1,0 +1,24 @@
+# Trust escapes in spar's proofs: every declaration that depends on an axiom
+# beyond propext, Quot.sound and Classical.choice, and every Verus
+# external_body / assume_specification / assume / admit.
+#
+# Checked by tools/check_trust_ledger.py in the required
+# `Lean proof typecheck (lake build)` job. A new escape fails the build until
+# it is proven or listed here in the same PR, where review sees it. Removing a
+# line is always allowed. Regenerate with `tools/check_trust_ledger.py --write`.
+#
+# lean   <module> <kind> <declaration> <axiom>
+# verus  <path> <fn> <kind>        (one line per occurrence)
+lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.backlog_bound_classical	sorryAx
+lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.compose_delays_dominates	sorryAx
+lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.delay_bound_classical	sorryAx
+lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.output_dominates_input	sorryAx
+lean	Proofs.Network.MinPlusPwa	def	Spar.Network.MinPlusPwa.pwaOutputClosedForm	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwaOutputClosedForm._proof_1	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_arrival_at_mono	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_at_le_per_bucket	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_backlog_bound_classical	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_delay_bound_classical	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_of_affine_at_eq	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_output_dominates_input	sorryAx
+lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_residual_service_classical	sorryAx
