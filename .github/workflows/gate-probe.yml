@@ -1,0 +1,29 @@
+# Report-only: temper's behavioural probe runs tools/classify_changed_paths.py
+# on the control paths declared in .github/gate-probe.json and fails if any
+# comes back code=false, or if the negative control comes back code=true.
+# Contract: pulseengine/temper docs/gate-probe.md. Per that contract this
+# workflow has no path filter, no `if:`, no continue-on-error and no
+# pull_request_target, and the control paths live only in gate-probe.json.
+# `gate-probe` is listed in .github/required-contexts.txt (owner-approved
+# 2026-11-11), as tools/check_required_contexts.py demands for a job that runs
+# on every PR and cannot fail open. Adding it to branch protection is a
+# separate admin step. Keep the job name stable: renaming a required check
+# silently drops the requirement.
+name: gate-probe
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gate-probe:
+    # The probe executes the PR's own classifier. A fork PR therefore runs on
+    # a GitHub-hosted runner, never on the self-hosted pool; the job still
+    # runs on every PR, so it cannot be skipped. Same pattern as
+    # aadl-interop.yml, gale and varve.
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pulseengine/temper/.github/actions/gate-probe@308848d151a0fdd0fc5eb8af0531addbf6f36ef4 # temper main, run 42897869007
