@@ -216,7 +216,26 @@ theorem delay_bound_classical (α : ArrivalCurve) (β : ServiceCurve)
   -- TODO(v1.0.0): discharge via Le Boudec & Thiran horizontal-distance
   -- argument.  In integer arithmetic this reduces to chasing div_ceil
   -- bounds across the affine ↔ rate-latency intersection point.
-  sorry -- TODO(v1.0.0)
+  have hR : β.rate_bps ≠ 0 := by omega
+  by_cases ht : _t = 0
+  · subst ht
+    simp [ArrivalCurve.at]
+  · obtain ⟨c, hc⟩ : ∃ c, c = (α.burst_bytes * scale + β.rate_bps - 1) / β.rate_bps := ⟨_, rfl⟩
+    have hcR : α.burst_bytes * scale ≤ β.rate_bps * c := by
+      have hdm := Nat.div_add_mod (α.burst_bytes * scale + β.rate_bps - 1) β.rate_bps
+      have hml := Nat.mod_lt (α.burst_bytes * scale + β.rate_bps - 1) h_rate_pos
+      rw [← hc] at hdm
+      omega
+    have hlat : ¬ (_t + (β.latency_ps + c) ≤ β.latency_ps) := by omega
+    have hsub : _t + (β.latency_ps + c) - β.latency_ps = _t + c := by omega
+    simp only [ArrivalCurve.at, ServiceCurve.at, delayClosedForm, hR, ht, h_no_peak, ← hc, hlat, hsub, if_false, ↓reduceIte]
+    rw [Nat.le_div_iff_mul_le scale_pos]
+    have h1 : α.sustained_rate_bps * _t / scale * scale ≤ α.sustained_rate_bps * _t := Nat.div_mul_le_self _ _
+    have h2 : α.sustained_rate_bps * _t ≤ β.rate_bps * _t := Nat.mul_le_mul_right _ h_stable
+    rw [Nat.add_mul, Nat.mul_add]
+    first
+    | omega
+    | nlinarith [h1, h2, hcR]
 
 /-! ## Theorem 6 — Output bound (burst inflation, rate preserved)
 
@@ -257,7 +276,11 @@ theorem output_dominates_input (α : ArrivalCurve) (β : ServiceCurve)
   intro _t
   -- TODO(v1.0.0): discharge.  The output curve has burst = σ + ρ·T
   -- (≥ σ) and the same sustained rate, so α'(t) ≥ α(t) at every t.
-  sorry -- TODO(v1.0.0)
+  unfold ArrivalCurve.at outputClosedForm
+  by_cases h : _t = 0
+  · simp [h]
+  · simp [h, h_no_peak]
+    all_goals omega
 
 /-! ## Theorem 7 — Composition (serial chain delay aggregates)
 

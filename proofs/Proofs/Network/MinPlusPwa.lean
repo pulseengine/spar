@@ -22,16 +22,14 @@
                  T' = T + max_i ( σ_i / R' )
 
   The single-bucket spec in `MinPlus.lean` is unchanged; this file is
-  a strict generalisation.  All theorems below are stated but not yet
-  discharged — they are tagged `sorry -- TODO(v1.0.0)` per the project
-  policy that statements are the load-bearing artefact and full
-  proof-discharge is post-MVP.
+  a strict generalisation.  Every theorem below is proven except
+  `pwa_backlog_bound_classical`, which is still `sorry -- TODO(v1.0.0)`;
+  .github/trust-ledger.txt lists by name whatever still depends on `sorry`.
 
   This file is imported from `Proofs.lean` (REQ-PROOF-LAKE-REACHABLE-001,
   #397) so that `lake build` typechecks its definitions and theorem
-  STATEMENTS.  That is all the import buys: every theorem below is still
-  `sorry`, nothing here is proven, and `Proofs.lean` lists it as stated,
-  not verified.  Until v0.49.0 this file was imported by nothing, and the
+  STATEMENTS, and since the nine discharges also their proofs.  Until
+  v0.49.0 this file was imported by nothing, and the
   statements had stopped elaborating at all: they called `List.minimum?`
   and `List.maximum?`, which the pinned Lean no longer has (now
   `List.min?` / `List.max?`, same `Option`-valued meaning).  A statement
@@ -92,6 +90,23 @@ theorem pwa_arrival_at_zero_is_zero (α : PwaArrivalCurve) :
 
 /-! ## Theorem 2 — Monotonicity of α(t) -/
 
+theorem pb_foldl_min_mono (f g : Nat × Nat → Nat) (hfg : ∀ x, f x ≤ g x) : ∀ (l : List (Nat × Nat)) (a b : Nat), a ≤ b → (l.map f).foldl min a ≤ (l.map g).foldl min b := by
+  intro l
+  induction l with
+  | nil => intro a b hab; simpa using hab
+  | cons x xs ih =>
+    intro a b hab
+    simp only [List.map_cons, List.foldl_cons]
+    exact ih _ _ (min_le_min hab (hfg x))
+
+theorem pb_min_mono (f g : Nat × Nat → Nat) (hfg : ∀ x, f x ≤ g x) (l : List (Nat × Nat)) : (l.map f).min?.getD 0 ≤ (l.map g).min?.getD 0 := by
+  cases l with
+  | nil => simp
+  | cons x xs =>
+    first
+    | exact pb_foldl_min_mono f g hfg xs (f x) (g x) (hfg x)
+    | (simp only [List.map_cons, List.min?, Option.getD_some]; exact pb_foldl_min_mono f g hfg xs (f x) (g x) (hfg x))
+
 /-- α(t) is monotone non-decreasing in `t`.  Each per-bucket affine
     `σ_i + ρ_i · t / scale` is monotone in `t`; the pointwise minimum
     of monotone functions is monotone. -/
@@ -101,9 +116,27 @@ theorem pwa_arrival_at_mono (α : PwaArrivalCurve) {t1 t2 : Nat}
   -- `MinPlus.lean` (case-split on `t1 = 0`); the inductive step uses
   -- `Nat.div_le_div_right` per-bucket and `List.minimum?_le_iff`
   -- for the closure under min.
-  sorry -- TODO(v1.0.0)
+  unfold PwaArrivalCurve.at
+  by_cases h1 : t1 = 0
+  · simp [h1]
+  · have h2 : t2 ≠ 0 := by omega
+    rw [if_neg h1, if_neg h2]
+    refine pb_min_mono _ _ ?_ α.buckets
+    rintro ⟨s, r⟩
+    show s + (r * t1) / scale ≤ s + (r * t2) / scale
+    gcongr
 
 /-! ## Theorem 3 — Per-bucket domination -/
+
+theorem pb_min_getD_le (l : List Nat) (x : Nat) (hx : x ∈ l) : l.min?.getD 0 ≤ x := by
+  cases h : l.min? with
+  | none =>
+    rw [List.min?_eq_none_iff] at h
+    subst h
+    simp at hx
+  | some a =>
+    rw [List.min?_eq_some_iff] at h
+    simpa using h.2 x hx
 
 /-- For every bucket `(σ_i, ρ_i)` of α and every `t > 0`,
     α(t) ≤ σ_i + ρ_i · t / scale.  This is the load-bearing
@@ -114,7 +147,10 @@ theorem pwa_at_le_per_bucket (α : PwaArrivalCurve) (t_ps : Nat)
     α.at t_ps ≤ s + (r * t_ps) / scale := by
   -- TODO(v1.0.0): discharge by `List.minimum?_le_of_mem` on the
   -- mapped readouts list.
-  sorry -- TODO(v1.0.0)
+  unfold PwaArrivalCurve.at
+  simp only [if_neg ht]
+  apply pb_min_getD_le
+  exact List.mem_map.mpr ⟨(s, r), h_in, rfl⟩
 
 /-! ## Theorem 4 — Backlog closed form (per-bucket min)
 
@@ -167,6 +203,84 @@ def pwaDelayClosedForm (α : PwaArrivalCurve) (β : ServiceCurve) : Nat :=
         (fun (s, _) => β.latency_ps + (s * scale + β.rate_bps - 1) / β.rate_bps)
     perBucket.min?.getD 0
 
+theorem pb_foldl_min_le_self : ∀ (xs : List Nat) (x : Nat), xs.foldl min x ≤ x
+  | [], x => le_refl x
+  | z :: zs, x => by
+    show zs.foldl min (min x z) ≤ x
+    exact le_trans (pb_foldl_min_le_self zs (min x z)) (Nat.min_le_left x z)
+
+theorem pb_foldl_min_le_mem : ∀ (xs : List Nat) (x y : Nat), y ∈ xs → xs.foldl min x ≤ y
+  | [], x, y, h => by simp at h
+  | z :: zs, x, y, h => by
+    show zs.foldl min (min x z) ≤ y
+    rcases List.mem_cons.mp h with h1 | h'
+    · rw [h1]
+      exact le_trans (pb_foldl_min_le_self zs (min x z)) (Nat.min_le_right x z)
+    · exact pb_foldl_min_le_mem zs (min x z) y h'
+
+theorem pb_foldl_min_mem : ∀ (xs : List Nat) (x : Nat), xs.foldl min x = x ∨ xs.foldl min x ∈ xs
+  | [], x => Or.inl rfl
+  | z :: zs, x => by
+    show zs.foldl min (min x z) = x ∨ zs.foldl min (min x z) ∈ z :: zs
+    rcases pb_foldl_min_mem zs (min x z) with h | h
+    · have h2 : min x z = x ∨ min x z = z := by omega
+      rcases h2 with h2 | h2
+      · left; rw [h, h2]
+      · right; rw [h, h2]; simp
+    · right; simp [h]
+
+theorem pb_min_le {α : Type} (f : α → Nat) (l : List α) (p : α) (hp : p ∈ l) :
+    (l.map f).min?.getD 0 ≤ f p := by
+  cases l with
+  | nil => simp at hp
+  | cons x xs =>
+    show (xs.map f).foldl min (f x) ≤ f p
+    rcases List.mem_cons.mp hp with h | h
+    · rw [h]; exact pb_foldl_min_le_self _ _
+    · exact pb_foldl_min_le_mem _ _ _ (List.mem_map.mpr ⟨p, h, rfl⟩)
+
+theorem pb_min_exists {α : Type} (f : α → Nat) (l : List α) (hl : l ≠ []) :
+    ∃ p ∈ l, (l.map f).min?.getD 0 = f p := by
+  cases l with
+  | nil => exact absurd rfl hl
+  | cons x xs =>
+    have e : (List.map f (x :: xs)).min?.getD 0 = (xs.map f).foldl min (f x) := rfl
+    rw [e]
+    rcases pb_foldl_min_mem (xs.map f) (f x) with h | h
+    · exact ⟨x, by simp, h⟩
+    · obtain ⟨p, hp, hpe⟩ := List.mem_map.mp h
+      exact ⟨p, List.mem_cons_of_mem x hp, hpe.symm⟩
+
+theorem pb_delay_exists (α : PwaArrivalCurve) (β : ServiceCurve) (hR : 0 < β.rate_bps) :
+    ∃ s r, (s, r) ∈ α.buckets ∧
+      pwaDelayClosedForm α β = β.latency_ps + (s * scale + β.rate_bps - 1) / β.rate_bps := by
+  obtain ⟨⟨s, r⟩, hm, he⟩ := pb_min_exists
+    (fun p : Nat × Nat => β.latency_ps + (p.1 * scale + β.rate_bps - 1) / β.rate_bps)
+    α.buckets α.buckets_nonempty
+  refine ⟨s, r, hm, ?_⟩
+  unfold pwaDelayClosedForm
+  have hne : ¬ β.rate_bps = 0 := by omega
+  rw [if_neg hne]
+  exact he
+
+theorem pb_ceil (X R : Nat) (hR : 0 < R) : X ≤ R * ((X + R - 1) / R) := by
+  have h1 := Nat.div_add_mod (X + R - 1) R
+  have h2 := Nat.mod_lt (X + R - 1) hR
+  generalize (X + R - 1) / R = c at *
+  generalize (X + R - 1) % R = m at *
+  omega
+
+theorem pb_K (s r R t c : Nat) (hr : r ≤ R) (hc : s * scale ≤ R * c) :
+    s + r * t / scale ≤ R * (t + c) / scale := by
+  have hsc : 0 < scale := by first | (unfold scale; norm_num) | decide | simp [scale]
+  have h0 : r * t ≤ R * t := Nat.mul_le_mul_right t hr
+  have h1 : r * t + s * scale ≤ R * (t + c) := by rw [Nat.mul_add]; omega
+  have h2 : (r * t + s * scale) / scale ≤ R * (t + c) / scale := Nat.div_le_div_right h1
+  have h3 : (r * t + s * scale) / scale = r * t / scale + s := by
+    rw [Nat.add_mul_div_right _ _ hsc]
+  rw [h3] at h2
+  first | omega | linarith
+
 /-- **Theorem 5 — Piecewise delay bound.**  For piecewise α with
     every bucket stable on β and `0 < R`, the closed-form
     `pwaDelayClosedForm` is a valid delay bound: every byte arriving
@@ -184,7 +298,24 @@ theorem pwa_delay_bound_classical
   -- `pwa_at_le_per_bucket` and reducing to the single-bucket
   -- `delay_bound_classical` (itself sorry); the per-bucket → min
   -- chase is a `List.minimum?` chase.
-  sorry -- TODO(v1.0.0)
+  by_cases ht : _t = 0
+  · rw [ht, pwa_arrival_at_zero_is_zero]; exact Nat.zero_le _
+  · obtain ⟨s, r, hm, hD⟩ := pb_delay_exists α β h_rate_pos
+    have hr := h_stable s r hm
+    have hat : α.at _t ≤ s + r * _t / scale := by
+      unfold PwaArrivalCurve.at
+      rw [if_neg ht]
+      exact pb_min_le (fun p : Nat × Nat => p.1 + p.2 * _t / scale) α.buckets (s, r) hm
+    have hc := pb_ceil (s * scale) β.rate_bps h_rate_pos
+    rw [hD]
+    generalize (s * scale + β.rate_bps - 1) / β.rate_bps = c at hc ⊢
+    have hfin := pb_K s r β.rate_bps _t c hr hc
+    have hfin2 := le_trans hat hfin
+    have e : _t + (β.latency_ps + c) - β.latency_ps = _t + c := by omega
+    unfold Spar.Network.MinPlus.ServiceCurve.at
+    (try rw [e])
+    (try split_ifs)
+    all_goals first | omega | exact hfin2 | (rw [Nat.mul_comm]; exact hfin2) | simpa [Nat.mul_comm] using hfin2
 
 /-! ## Theorem 6 — Output bound (per-bucket inflation)
 
@@ -205,7 +336,32 @@ def pwaOutputClosedForm (α : PwaArrivalCurve) (β : ServiceCurve) :
     -- TODO(v1.0.0): discharge via `List.map_eq_nil` or its
     -- Mathlib alias.  Trivial structurally but needs the right
     -- lemma name.
-    sorry -- TODO(v1.0.0)
+    first
+    | exact List.map_eq_nil_iff.mp h
+    | simpa using h
+
+theorem pb_foldl_min_le (l : List (ℕ × ℕ)) (f g : ℕ × ℕ → ℕ) (k : ℕ × ℕ → ℕ × ℕ)
+    (h : ∀ x, f x ≤ g (k x)) :
+    ∀ a b : ℕ, a ≤ b → (l.map f).foldl min a ≤ ((l.map k).map g).foldl min b := by
+  induction l with
+  | nil =>
+    intro a b hab
+    first | exact hab | simpa using hab
+  | cons x l ih =>
+    intro a b hab
+    simp only [List.map_cons, List.foldl_cons]
+    have hx := h x
+    first | exact ih _ _ (min_le_min hab hx) | exact ih _ _ (by omega)
+
+theorem pb_min_map_le (l : List (ℕ × ℕ)) (f g : ℕ × ℕ → ℕ) (k : ℕ × ℕ → ℕ × ℕ)
+    (h : ∀ x, f x ≤ g (k x)) :
+    (l.map f).min?.getD 0 ≤ ((l.map k).map g).min?.getD 0 := by
+  cases l with
+  | nil => first | exact le_rfl | simp
+  | cons x l =>
+    first
+      | exact pb_foldl_min_le l f g k h (f x) (g (k x)) (h x)
+      | (simp only [List.map_cons, List.min?_cons, Option.getD_some]; exact pb_foldl_min_le l f g k h (f x) (g (k x)) (h x))
 
 /-- **Theorem 6 — Piecewise output bound.**  The output curve has
     the same number of buckets as the input, with each bucket's
@@ -220,7 +376,17 @@ theorem pwa_output_dominates_input
   -- TODO(v1.0.0): discharge.  Each per-bucket inflation pointwise
   -- dominates the original bucket (σ' ≥ σ, same ρ), so the min over
   -- inflated readouts is ≥ the min over original readouts.
-  sorry -- TODO(v1.0.0)
+  unfold PwaArrivalCurve.at
+  split_ifs with ht
+  · exact le_rfl
+  · exact pb_min_map_le α.buckets _ _ _ (fun x => by
+      obtain ⟨s, r⟩ := x
+      first
+        | exact Nat.add_le_add_right (Nat.le_add_right _ _) _
+        | (dsimp only; apply Nat.add_le_add_right; omega)
+        | (dsimp only; omega)
+        | (simp; omega)
+        | simp)
 
 /-! ## Theorem 7 — Residual service (conservative single-bucket lower)
 
@@ -270,7 +436,11 @@ theorem pwa_residual_service_classical
   -- definition of `pwaResidualClosedForm`; the rate equality is by
   -- inspection.  The full soundness statement is the deferred
   -- piece.
-  sorry -- TODO(v1.0.0)
+  simp only [pwaResidualClosedForm]
+  split
+  · exfalso
+    omega
+  · exact ⟨_, rfl, rfl⟩
 
 /-! ## Theorem 8 — Single-bucket embedding
 
@@ -296,6 +466,6 @@ theorem pwa_of_affine_at_eq
   -- TODO(v1.0.0): discharge.  Both sides are the same expression
   -- after unfolding the singleton-list min and the affine-only
   -- branch of `ArrivalCurve.at`.
-  sorry -- TODO(v1.0.0)
+  by_cases ht : t = 0 <;> simp [PwaArrivalCurve.at, Spar.Network.MinPlus.ArrivalCurve.at, PwaArrivalCurve.ofAffine, h_no_peak, ht]
 
 end Spar.Network.MinPlusPwa
