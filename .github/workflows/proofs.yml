@@ -157,9 +157,9 @@ jobs:
       # Replaced by a declared ratchet. --max-sorries is the floor, and it is
       # here (in the workflow) rather than in the proofs, so lowering it is a
       # deliberate edit by someone other than the proof being exempted.
-      # 12 was the measured count on ae27ff1; 3 after the nine MinPlus and
-      # MinPlusPwa discharges. LOWER IT as proofs land; the gate says so on
-      # every run where the real count is below the floor.
+      # 12 was the measured count on ae27ff1; 0 since every MinPlus and
+      # MinPlusPwa theorem is proven. A new `sorry` now fails this step and
+      # must also be listed in .github/trust-ledger.txt.
       # Discharging these is REQ-PROOF-NC-MINPLUS-001 (v0.38.0).
       - name: Lean-sorry guardrail self-test
         if: always()
@@ -168,7 +168,7 @@ jobs:
       - name: Fail on sorry (post-build gate)
         if: always()
         working-directory: ${{ github.workspace }}
-        run: tools/check_lean_sorries.py --max-sorries 3
+        run: tools/check_lean_sorries.py --max-sorries 0
 
       # Reachability gate (REQ-PROOF-LAKE-REACHABLE-001, #397).
       #

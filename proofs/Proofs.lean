@@ -15,11 +15,10 @@
 --   6. Flow latency monotonicity in component WCETs (Feiertag et al. 2009)
 --   7. ARINC 653 partition isolation (ARINC 653P1-5 §3)
 --
--- Partly proven: piecewise-affine (T-SPEC) min-plus closed forms,
--- Network/MinPlusPwa.lean. Every theorem there is proven except
--- pwa_backlog_bound_classical, which is still `sorry`. The theorems and
--- defs that still depend on `sorry`, here and in MinPlus.lean, are listed
--- by name in .github/trust-ledger.txt (REQ-PROOF-AXIOM-LEDGER-001).
+-- Also proven: piecewise-affine (T-SPEC) min-plus closed forms,
+-- Network/MinPlusPwa.lean. Anything that depends on `sorry` must be listed
+-- by name in .github/trust-ledger.txt (REQ-PROOF-AXIOM-LEDGER-001); the
+-- ledger is empty.
 
 import Proofs.Scheduling.RTACore
 import Proofs.Scheduling.RTA

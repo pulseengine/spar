@@ -9,6 +9,3 @@
 #
 # lean   <module> <kind> <declaration> <axiom>
 # verus  <path> <fn> <kind>        (one line per occurrence)
-lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.backlog_bound_classical	sorryAx
-lean	Proofs.Network.MinPlus	theorem	Spar.Network.MinPlus.compose_delays_dominates	sorryAx
-lean	Proofs.Network.MinPlusPwa	theorem	Spar.Network.MinPlusPwa.pwa_backlog_bound_classical	sorryAx
