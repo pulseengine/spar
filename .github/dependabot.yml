@@ -46,6 +46,15 @@ updates:
       interval: weekly
     labels:
       - dependencies
+    # @types/vscode is the API surface the extension compiles against, and
+    # vsce refuses to package when it is newer than engines.vscode (^1.85.0
+    # in vscode-spar/package.json): #601 raised it and #614 reverted it.
+    # Patch releases of 1.85 stay allowed. Raise both together, by hand.
+    ignore:
+      - dependency-name: "@types/vscode"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
   - package-ecosystem: npm
     directory: /tests/playwright
     schedule:
