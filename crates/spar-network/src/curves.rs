@@ -103,12 +103,7 @@ fn bits_to_bytes_in_window(rate_bps: u64, t_ps: u64) -> u64 {
 fn bits_to_bytes_in_window_ceil(rate_bps: u64, t_ps: u64) -> u64 {
     let product = (rate_bps as u128) * (t_ps as u128);
     let denom = (BITS_PER_BYTE as u128) * (PS_PER_SECOND as u128);
-    let bytes = product.div_ceil(denom);
-    if bytes > u64::MAX as u128 {
-        u64::MAX
-    } else {
-        bytes as u64
-    }
+    u64::try_from(product.div_ceil(denom)).unwrap_or(u64::MAX)
 }
 
 /// Compute the time in picoseconds needed to transmit `bytes` at
@@ -509,6 +504,19 @@ mod tests {
         let alpha = ArrivalCurve::affine(1500, HUNDRED_MBPS);
         let beta = ServiceCurve::rate_latency(GBPS, TEN_US_PS);
         assert_eq!(backlog_bound(&alpha, &beta).unwrap(), 1625);
+    }
+
+    #[test]
+    fn bits_to_bytes_in_window_ceil_rounds_up_and_saturates() {
+        // 1 bps for 4·10^12 ps is half a byte: floor 0, ceil 1.
+        assert_eq!(bits_to_bytes_in_window(1, 4_000_000_000_000), 0);
+        assert_eq!(bits_to_bytes_in_window_ceil(1, 4_000_000_000_000), 1);
+        // An exact whole byte is not rounded further.
+        assert_eq!(bits_to_bytes_in_window_ceil(1, 8_000_000_000_000), 1);
+        assert_eq!(bits_to_bytes_in_window_ceil(0, u64::MAX), 0);
+        // u64::MAX bps for u64::MAX ps is ~4.25·10^25 bytes, past u64::MAX:
+        // the result saturates rather than wrapping.
+        assert_eq!(bits_to_bytes_in_window_ceil(u64::MAX, u64::MAX), u64::MAX);
     }
 
     #[test]
