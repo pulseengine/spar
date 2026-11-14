@@ -5193,9 +5193,9 @@ artifacts:
   - id: TEST-RELEASE-VERSION-CROSSARCH-001
     type: feature
     title: The cross-arch release binaries are run and report the tag before the release is created
-    status: implemented
+    status: proposed
     description: |-
-      release.yml job verify-cross-arch-binaries (needed by create-release) unpacks the shipped archives of aarch64-unknown-linux-gnu (on ubuntu-24.04-arm) and x86_64-apple-darwin (under Rosetta 2 on macos-15) and asserts `spar --version` equals the tag and an unknown command exits 2. The build job's #422 step fails any cross-arch target not listed in CHECKED_DOWNSTREAM. Evidence for verified: the next tag's release run, where both targets print the tag in this job and the build job prints the deferral notice for exactly those two. Local checks of both scripts are recorded on REQ-RELEASE-VERSION-CROSSARCH-001. There are no steps here: the job runs only on a tag push.
+      release.yml job verify-cross-arch-binaries (needed by create-release) unpacks the shipped archives of aarch64-unknown-linux-gnu (on ubuntu-24.04-arm) and x86_64-apple-darwin (under Rosetta 2 on macos-15) and asserts `spar --version` equals the tag and an unknown command exits 2. The build job's #422 step fails any cross-arch target not listed in CHECKED_DOWNSTREAM. Evidence for verified: the next tag's release run, where both targets print the tag in this job and the build job prints the deferral notice for exactly those two. Local checks of both scripts are recorded on REQ-RELEASE-VERSION-CROSSARCH-001. There are no steps here: the job runs only on a tag push, so this stays proposed (tools/check_evidence_steps.py) until that run exists.
     release: v0.50.0
     tags: [release, guardrail, ci]
     fields:
