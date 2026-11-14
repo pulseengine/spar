@@ -7876,6 +7876,23 @@ artifacts:
       timestamp: 2026-10-29T05:39:49Z
     release: v0.49.0
 
+  - id: REQ-RELEASE-VERSION-CROSSARCH-001
+    type: requirement
+    title: Every published binary shall be executed and shown to report the tag, including those built on a runner of another architecture
+    status: implemented
+    description: |-
+      The #422 step in release.yml's build job runs each freshly built binary and asserts `spar --version` equals the tag and an unknown command exits 2. It skipped any target whose architecture differs from its runner with a notice, so in v0.49.0 (release run 42948305706) aarch64-unknown-linux-gnu (cross-built on x86_64) and x86_64-apple-darwin (built on arm64 macos-15) shipped with no version check; the other 5 printed 'spar 0.49.0'. Requirement: a new job, verify-cross-arch-binaries, downloads the SHIPPED archive of each such target and runs the same two assertions where it can execute (aarch64 Linux natively on ubuntu-24.04-arm; x86_64 macOS under Rosetta 2 on macos-15, installed if absent), and create-release needs it. The build step now defers only a target listed in CHECKED_DOWNSTREAM and fails any other cross-arch target, so a target added later cannot ship unchecked.
+      IMPLEMENTED 2026-11-13: the verify step, extracted from release.yml, run locally on the v0.49.0 aarch64-apple-darwin archive: right tag exit 0 ('spar 0.49.0', unknown command exits 2); wrong tag v0.48.0 exit 1; missing archive exit 1; x86_64-apple-darwin with no Rosetta installed exit 1 ('Bad CPU type'), never a pass. The build step's skip rule: a listed cross target exit 0 with a notice, an unlisted one exit 1, a near-miss name exit 1. actionlint: no findings beyond main's 4 pre-existing SC2035 infos. NOT exercised: the job on GitHub's runners, which only a tag run does; verified when the next release run shows both targets asserting the tag.
+    tags: [release, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-RELEASE-ASSETS-STANDARD
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-13T00:00:00Z
+    release: v0.50.0
+
   - id: REQ-DEPS-ROWAN-SYNC-001
     type: requirement
     title: spar and rivet shall build against one rowan, and spar's own rowan use shall be measured under Miri
