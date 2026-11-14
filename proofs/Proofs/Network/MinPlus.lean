@@ -26,9 +26,7 @@
   artifact for the integer-arithmetic side; the theorems here capture
   monotonicity, the "below latency" zero, and the closed-form shapes.
 
-  Some proofs use `sorry` and a `TODO(v1.0.0): discharge` comment.
-  Project policy: statements are the load-bearing artifact; full
-  proof-discharge is post-MVP.
+  Every theorem here is proven (no `sorry`).
 -/
 
 import Mathlib.Tactic
@@ -162,31 +160,55 @@ theorem service_at_zero_strictly_below_latency (β : ServiceCurve) (t : Nat)
 /-! ## Theorem 4 — Backlog closed form
 
     For affine α (`σ + ρ·t`, no peak cap) and rate-latency β with
-    `ρ ≤ R`, the maximum backlog is `B = σ + ρ·T / scale`. -/
+    `ρ ≤ R`, the maximum backlog is `B = σ + ⌈ρ·T / scale⌉`.  Rounding
+    ρ·T down instead is off by one in the integer model, because
+    ⌊(a+b)/s⌋ can exceed ⌊a/s⌋ + ⌊b/s⌋. -/
 
 /-- Closed-form backlog bound for stable affine flow / rate-latency
     server.  Mirrors `backlog_bound` in `curves.rs`. -/
 def backlogClosedForm (α : ArrivalCurve) (β : ServiceCurve) : Nat :=
-  α.burst_bytes + (α.sustained_rate_bps * β.latency_ps) / scale
+  α.burst_bytes + (α.sustained_rate_bps * β.latency_ps + scale - 1) / scale
 
 /-- **Theorem 4 — Backlog bound.**  For affine α with no peak cap and a
     rate-latency β with `ρ ≤ R`, there is a backlog bound of the
-    form `σ + ρ·T/scale` such that for every `t`, `α(t) ≤ β(t) + B`.
+    form `σ + ⌈ρ·T/scale⌉` such that for every `t`, `α(t) ≤ β(t) + B`.
     The bound is the closed form `backlogClosedForm α β`. -/
 theorem backlog_bound_classical (α : ArrivalCurve) (β : ServiceCurve)
     (h_no_peak : α.peak_rate_bps = none)
     (h_stable : α.sustained_rate_bps ≤ β.rate_bps) :
     ∃ B : Nat, B = backlogClosedForm α β
             ∧ ∀ t : Nat, α.at t ≤ β.at t + B := by
-  -- Take B := σ + ρ·T/scale.  The witness is straightforward; the
-  -- ∀-t statement requires the Le Boudec & Thiran sup-at-T argument
-  -- which uses real-number reasoning we defer to v1.0.0.
+  -- B := σ + ⌈ρ·T/scale⌉.  For t > T, ρ·t ≤ R·(t−T) + ρ·T, and
+  -- ⌊(a+b)/s⌋ ≤ ⌊a/s⌋ + ⌈b/s⌉; for 0 < t ≤ T the burst term alone
+  -- bounds α(t).  The ceiling is needed: with ⌊ρ·T/scale⌋ the bound is
+  -- off by one in the integer model.
   refine ⟨backlogClosedForm α β, rfl, ?_⟩
-  intro _t
-  -- TODO(v1.0.0): discharge via case split on (t ≤ T) vs (t > T) and
-  -- apply Nat.div arithmetic with `h_stable`.  The classical real-line
-  -- proof shows sup_t (α(t) - β(t)) is reached at t = T.
-  sorry -- TODO(v1.0.0)
+  intro t
+  unfold ArrivalCurve.at ServiceCurve.at backlogClosedForm
+  by_cases ht : t = 0
+  · simp [ht]
+  · simp only [ht, h_no_peak, if_false]
+    by_cases hT : t ≤ β.latency_ps
+    · simp only [hT, if_true, Nat.zero_add]
+      have hm : α.sustained_rate_bps * t ≤ α.sustained_rate_bps * β.latency_ps :=
+        Nat.mul_le_mul_left _ hT
+      generalize α.sustained_rate_bps * t = X at *
+      generalize α.sustained_rate_bps * β.latency_ps = Bv at *
+      simp only [scale] at *
+      omega
+    · simp only [hT, if_false]
+      have hX : α.sustained_rate_bps * t
+          ≤ β.rate_bps * (t - β.latency_ps) + α.sustained_rate_bps * β.latency_ps := by
+        have e : α.sustained_rate_bps * t
+            = α.sustained_rate_bps * (t - β.latency_ps) + α.sustained_rate_bps * β.latency_ps := by
+          rw [← Nat.mul_add]; congr 1; omega
+        rw [e]
+        exact Nat.add_le_add_right (Nat.mul_le_mul_right _ h_stable) _
+      generalize α.sustained_rate_bps * t = X at *
+      generalize β.rate_bps * (t - β.latency_ps) = A at *
+      generalize α.sustained_rate_bps * β.latency_ps = Bv at *
+      simp only [scale] at *
+      omega
 
 /-! ## Theorem 5 — Delay closed form
 
@@ -316,7 +338,10 @@ theorem compose_delays
 /-- **Theorem 7' — Concatenation domination (PBOO weakening).**
     The naive sum overestimates the optimal pay-burst-only-once
     bound, but is itself a valid (looser) end-to-end bound: for
-    every `t`, `α(t) ≤ β2(β1(t + D))` where `D` is the naive sum.
+    every `t`, `α(t) ≤ β(t + D)` where `D` is the naive sum and
+    `β = ⟨min R₁ R₂, T₁ + T₂⟩` is the rate-latency service the two
+    servers offer in series.  (Feeding `β1(t)`, a byte count, into
+    `β2` as a time was a unit mismatch.)
 
     PBOO concatenation is deferred to v0.8.x; here we just record
     the naive bound as our anchoring statement. -/
@@ -327,13 +352,66 @@ theorem compose_delays_dominates
     (h_stable2 : α.sustained_rate_bps ≤ β2.rate_bps)
     (h_rate1_pos : 0 < β1.rate_bps)
     (h_rate2_pos : 0 < β2.rate_bps) :
-    ∀ t : Nat, α.at t ≤ β2.at (β1.at (t + composeDelayNaive α β1 β2)) := by
-  intro _t
-  -- TODO(v1.0.0): discharge.  Apply delay_bound_classical at each
-  -- hop, then chain through output_dominates_input to thread α →
-  -- output(α,β1) → β2.  The arithmetic is straightforward once the
-  -- per-hop sorries above are discharged.
-  sorry -- TODO(v1.0.0)
+    ∀ t : Nat, α.at t ≤
+      ServiceCurve.at ⟨min β1.rate_bps β2.rate_bps, β1.latency_ps + β2.latency_ps⟩
+        (t + composeDelayNaive α β1 β2) := by
+  -- Two rate-latency servers in series offer the rate-latency service
+  -- ⟨min R₁ R₂, T₁ + T₂⟩.  The naive sum D = T₁ + ⌈σ/R₁⌉ + T₂ + ⌈σ'/R₂⌉
+  -- (σ' ≥ σ the hop-1 output burst) covers that server's own delay
+  -- T₁ + T₂ + ⌈σ/min R⌉, whichever rate is the minimum.
+  intro t
+  by_cases ht : t = 0
+  · subst ht; simp [ArrivalCurve.at]
+  · have hR1 : β1.rate_bps ≠ 0 := by omega
+    have hR2 : β2.rate_bps ≠ 0 := by omega
+    obtain ⟨c1, hc1⟩ : ∃ c, c = (α.burst_bytes * scale + β1.rate_bps - 1) / β1.rate_bps :=
+      ⟨_, rfl⟩
+    obtain ⟨c2, hc2⟩ : ∃ c, c = ((α.burst_bytes + α.sustained_rate_bps * β1.latency_ps / scale)
+        * scale + β2.rate_bps - 1) / β2.rate_bps := ⟨_, rfl⟩
+    have hk1 : α.burst_bytes * scale ≤ β1.rate_bps * c1 := by
+      have hdm := Nat.div_add_mod (α.burst_bytes * scale + β1.rate_bps - 1) β1.rate_bps
+      have hml := Nat.mod_lt (α.burst_bytes * scale + β1.rate_bps - 1) h_rate1_pos
+      rw [← hc1] at hdm
+      omega
+    have hk2 : α.burst_bytes * scale ≤ β2.rate_bps * c2 := by
+      have hdm := Nat.div_add_mod ((α.burst_bytes + α.sustained_rate_bps * β1.latency_ps / scale)
+        * scale + β2.rate_bps - 1) β2.rate_bps
+      have hml := Nat.mod_lt ((α.burst_bytes + α.sustained_rate_bps * β1.latency_ps / scale)
+        * scale + β2.rate_bps - 1) h_rate2_pos
+      rw [← hc2] at hdm
+      have hge : α.burst_bytes * scale
+          ≤ (α.burst_bytes + α.sustained_rate_bps * β1.latency_ps / scale) * scale :=
+        Nat.mul_le_mul_right _ (Nat.le_add_right _ _)
+      omega
+    have hD : composeDelayNaive α β1 β2 = β1.latency_ps + c1 + (β2.latency_ps + c2) := by
+      simp only [composeDelayNaive, delayClosedForm, outputClosedForm, hR1, hR2, if_false,
+        ← hc1, ← hc2]
+    rw [hD]
+    have hlat : ¬ (t + (β1.latency_ps + c1 + (β2.latency_ps + c2))
+        ≤ β1.latency_ps + β2.latency_ps) := by omega
+    have hsub : t + (β1.latency_ps + c1 + (β2.latency_ps + c2)) - (β1.latency_ps + β2.latency_ps)
+        = t + c1 + c2 := by omega
+    simp only [ArrivalCurve.at, ServiceCurve.at, ht, h_no_peak, hlat, hsub, if_false]
+    rw [Nat.le_div_iff_mul_le scale_pos]
+    have hfl : α.sustained_rate_bps * t / scale * scale ≤ α.sustained_rate_bps * t :=
+      Nat.div_mul_le_self _ _
+    -- whichever rate is the minimum, it carries the flow's rate and
+    -- one of the two ceilings covers σ.
+    have key : α.sustained_rate_bps * t + α.burst_bytes * scale
+        ≤ min β1.rate_bps β2.rate_bps * (t + c1 + c2) := by
+      rcases Nat.le_total β1.rate_bps β2.rate_bps with h | h
+      · rw [Nat.min_eq_left h]
+        have := Nat.mul_le_mul_right t h_stable1
+        have : β1.rate_bps * (t + c1 + c2) = β1.rate_bps * t + β1.rate_bps * c1 + β1.rate_bps * c2 := by
+          ring
+        omega
+      · rw [Nat.min_eq_right h]
+        have := Nat.mul_le_mul_right t h_stable2
+        have : β2.rate_bps * (t + c1 + c2) = β2.rate_bps * t + β2.rate_bps * c1 + β2.rate_bps * c2 := by
+          ring
+        omega
+    rw [Nat.add_mul]
+    omega
 
 /-! ## Sanity check — causality at t = 0
 
@@ -393,8 +471,8 @@ theorem arrival_peak_capped_mono (α : ArrivalCurve) (p : Nat)
     is therefore `σ + ρ·T₁ + ρ·T₂`. -/
 def backlogChained (α : ArrivalCurve) (β1 β2 : ServiceCurve) : Nat :=
   α.burst_bytes
-  + (α.sustained_rate_bps * β1.latency_ps) / scale
-  + (α.sustained_rate_bps * β2.latency_ps) / scale
+  + (α.sustained_rate_bps * β1.latency_ps + scale - 1) / scale
+  + (α.sustained_rate_bps * β2.latency_ps + scale - 1) / scale
 
 /-- The chained-backlog formula matches the per-hop sum of the
     closed-form backlog bounds along the serial chain.  Pure
@@ -403,7 +481,7 @@ theorem backlogChained_eq_sum
     (α : ArrivalCurve) (β1 β2 : ServiceCurve) :
     backlogChained α β1 β2
       = backlogClosedForm α β1
-      + (α.sustained_rate_bps * β2.latency_ps) / scale := by
+      + (α.sustained_rate_bps * β2.latency_ps + scale - 1) / scale := by
   unfold backlogChained backlogClosedForm
   ring
 

@@ -22,9 +22,9 @@
                  T' = T + max_i ( σ_i / R' )
 
   The single-bucket spec in `MinPlus.lean` is unchanged; this file is
-  a strict generalisation.  Every theorem below is proven except
-  `pwa_backlog_bound_classical`, which is still `sorry -- TODO(v1.0.0)`;
-  .github/trust-ledger.txt lists by name whatever still depends on `sorry`.
+  a strict generalisation.  Every theorem below is proven.  The backlog
+  closed form rounds the ρ·T term UP (⌈ρ·T/scale⌉): rounded down it is
+  off by one in the integer model.
 
   This file is imported from `Proofs.lean` (REQ-PROOF-LAKE-REACHABLE-001,
   #397) so that `lake build` typechecks its definitions and theorem
@@ -164,7 +164,7 @@ theorem pwa_at_le_per_bucket (α : PwaArrivalCurve) (t_ps : Nat)
     the Rust `piecewise::backlog_bound`. -/
 def pwaBacklogClosedForm (α : PwaArrivalCurve) (β : ServiceCurve) : Nat :=
   let perBucket :=
-    α.buckets.map (fun (s, r) => s + (r * β.latency_ps) / scale)
+    α.buckets.map (fun (s, r) => s + (r * β.latency_ps + scale - 1) / scale)
   perBucket.min?.getD 0
 
 /-- **Theorem 4 — Piecewise backlog bound.**  For piecewise α with
@@ -177,13 +177,45 @@ theorem pwa_backlog_bound_classical
     ∃ B : Nat,
         B = pwaBacklogClosedForm α β
       ∧ ∀ t : Nat, α.at t ≤ β.at t + B := by
+  -- The min over buckets is attained by some bucket (σ, ρ); α(t) is at
+  -- most that bucket's readout, and the single-bucket argument
+  -- (ρ ≤ R, ceiling on ρ·T) bounds it.
   refine ⟨pwaBacklogClosedForm α β, rfl, ?_⟩
-  intro _t
-  -- TODO(v1.0.0): discharge.  Per-bucket version of the
-  -- single-bucket `backlog_bound_classical` (which itself is a
-  -- v1.0.0 sorry); apply `pwa_at_le_per_bucket` for each bucket and
-  -- close the min.
-  sorry -- TODO(v1.0.0)
+  intro t
+  by_cases ht : t = 0
+  · simp [PwaArrivalCurve.at, ht]
+  · have hne : α.buckets.map (fun (s, r) => s + (r * β.latency_ps + scale - 1) / scale)
+        ≠ [] := by simpa using α.buckets_nonempty
+    obtain ⟨m, hm⟩ := Option.ne_none_iff_exists'.mp (mt List.min?_eq_none_iff.mp hne)
+    have hmem := List.min?_mem hm
+    obtain ⟨⟨σ, ρ⟩, hin, hval⟩ := List.mem_map.mp hmem
+    have hB : pwaBacklogClosedForm α β = σ + (ρ * β.latency_ps + scale - 1) / scale := by
+      unfold pwaBacklogClosedForm
+      dsimp only
+      rw [hm, Option.getD_some, ← hval]
+    rw [hB]
+    have hle := pwa_at_le_per_bucket α t ht σ ρ hin
+    have hr := h_stable σ ρ hin
+    suffices h : ρ * t / scale ≤ β.at t + (ρ * β.latency_ps + scale - 1) / scale by omega
+    unfold ServiceCurve.at
+    by_cases hT : t ≤ β.latency_ps
+    · simp only [hT, if_true, Nat.zero_add]
+      have hmul : ρ * t ≤ ρ * β.latency_ps := Nat.mul_le_mul_left _ hT
+      generalize ρ * t = X at *
+      generalize ρ * β.latency_ps = Bv at *
+      simp only [scale] at *
+      omega
+    · simp only [hT, if_false]
+      have hX : ρ * t ≤ β.rate_bps * (t - β.latency_ps) + ρ * β.latency_ps := by
+        have e : ρ * t = ρ * (t - β.latency_ps) + ρ * β.latency_ps := by
+          rw [← Nat.mul_add]; congr 1; omega
+        rw [e]
+        exact Nat.add_le_add_right (Nat.mul_le_mul_right _ hr) _
+      generalize ρ * t = X at *
+      generalize β.rate_bps * (t - β.latency_ps) = A at *
+      generalize ρ * β.latency_ps = Bv at *
+      simp only [scale] at *
+      omega
 
 /-! ## Theorem 5 — Delay closed form (per-bucket min)
 

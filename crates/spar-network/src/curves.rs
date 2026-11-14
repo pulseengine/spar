@@ -95,6 +95,17 @@ fn bits_to_bytes_in_window(rate_bps: u64, t_ps: u64) -> u64 {
     }
 }
 
+/// [`bits_to_bytes_in_window`] rounded *up*: the smallest whole number
+/// of bytes not below `rate_bps * t_ps / (8 * 10^12)`, saturating like
+/// it. A backlog bound uses this for its `ρ · T` term: rounded down, the
+/// bound is off by one in the integer model, because `⌊(a+b)/s⌋` can
+/// exceed `⌊a/s⌋ + ⌊b/s⌋` when the readouts on both sides round down.
+fn bits_to_bytes_in_window_ceil(rate_bps: u64, t_ps: u64) -> u64 {
+    let product = (rate_bps as u128) * (t_ps as u128);
+    let denom = (BITS_PER_BYTE as u128) * (PS_PER_SECOND as u128);
+    u64::try_from(product.div_ceil(denom)).unwrap_or(u64::MAX)
+}
+
 /// Compute the time in picoseconds needed to transmit `bytes` at
 /// `rate_bps` (`bytes * 8 * 10^12 / rate_bps`), rounding *up* so that
 /// the returned duration is never an under-estimate.
@@ -292,16 +303,18 @@ impl core::error::Error for NcError {}
 /// `t = latency` (the moment the server starts draining), giving
 ///
 /// ```text
-/// B = σ + ρ · latency
+/// B = σ + ⌈ρ · latency⌉
 /// ```
 ///
-/// when `ρ ≤ R`. When `ρ > R` the queue grows without bound and we
-/// return [`NcError::UnstableServer`].
+/// when `ρ ≤ R`, with the `ρ · latency` term in bytes rounded up (see
+/// [`bits_to_bytes_in_window_ceil`]). Lean: `backlogClosedForm`, proven
+/// in `backlog_bound_classical`. When `ρ > R` the queue grows without
+/// bound and we return [`NcError::UnstableServer`].
 pub fn backlog_bound(alpha: &ArrivalCurve, beta: &ServiceCurve) -> Result<u64, NcError> {
     if alpha.sustained_rate_bps > beta.rate_bps {
         return Err(NcError::UnstableServer);
     }
-    let inflation = bits_to_bytes_in_window(alpha.sustained_rate_bps, beta.latency_ps);
+    let inflation = bits_to_bytes_in_window_ceil(alpha.sustained_rate_bps, beta.latency_ps);
     Ok(alpha.burst_bytes.saturating_add(inflation))
 }
 
@@ -494,6 +507,35 @@ mod tests {
     }
 
     #[test]
+    fn bits_to_bytes_in_window_ceil_rounds_up_and_saturates() {
+        // 1 bps for 4·10^12 ps is half a byte: floor 0, ceil 1.
+        assert_eq!(bits_to_bytes_in_window(1, 4_000_000_000_000), 0);
+        assert_eq!(bits_to_bytes_in_window_ceil(1, 4_000_000_000_000), 1);
+        // An exact whole byte is not rounded further.
+        assert_eq!(bits_to_bytes_in_window_ceil(1, 8_000_000_000_000), 1);
+        assert_eq!(bits_to_bytes_in_window_ceil(0, u64::MAX), 0);
+        // u64::MAX bps for u64::MAX ps is ~4.25·10^25 bytes, past u64::MAX:
+        // the result saturates rather than wrapping.
+        assert_eq!(bits_to_bytes_in_window_ceil(u64::MAX, u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn backlog_bound_rounds_the_latency_term_up() {
+        // σ = 0, ρ = R = 1 bps, T = 4·10^12 ps: ρ·T is half a byte.
+        // At t = 8·10^12 ps, α(t) = 1 byte and β(t) = 0 (half a byte,
+        // rounded down), so a bound of σ + ⌊ρ·T⌋ = 0 would be off by one
+        // in the integer model. The bound must be 1 and must cover α(t).
+        let alpha = ArrivalCurve::affine(0, 1);
+        let beta = ServiceCurve::rate_latency(1, 4_000_000_000_000);
+        let b = backlog_bound(&alpha, &beta).unwrap();
+        assert_eq!(b, 1);
+        let t = 8_000_000_000_000;
+        assert_eq!(alpha.at(t), 1);
+        assert_eq!(beta.at(t), 0);
+        assert!(alpha.at(t) <= beta.at(t) + b);
+    }
+
+    #[test]
     fn backlog_bound_unstable_when_rate_exceeds_service() {
         let alpha = ArrivalCurve::affine(1500, GBPS); // 1 Gbps
         let beta = ServiceCurve::rate_latency(HUNDRED_MBPS, TEN_US_PS); // 100 Mbps
@@ -638,7 +680,10 @@ mod tests {
 /// strategy that respects the AADL property surface for declaring
 /// per-stream T-SPEC inputs).
 pub mod piecewise {
-    use super::{ArrivalCurve, NcError, ServiceCurve, bits_to_bytes_in_window, time_to_send_ps};
+    use super::{
+        ArrivalCurve, NcError, ServiceCurve, bits_to_bytes_in_window, bits_to_bytes_in_window_ceil,
+        time_to_send_ps,
+    };
 
     /// Piecewise-affine arrival curve: `α(t) = min_i (σ_i + ρ_i · t)`.
     ///
@@ -832,7 +877,9 @@ pub mod piecewise {
         }
         let mut best: Option<u64> = None;
         for &(sigma, rho) in &alpha.buckets {
-            let inflation = bits_to_bytes_in_window(rho, beta.latency_ps);
+            // Rounded up, as in the single-bucket `backlog_bound`
+            // (Lean: `pwaBacklogClosedForm`).
+            let inflation = bits_to_bytes_in_window_ceil(rho, beta.latency_ps);
             let candidate = sigma.saturating_add(inflation);
             best = Some(match best {
                 Some(b) => b.min(candidate),
@@ -1202,6 +1249,18 @@ pub mod piecewise {
             let beta = ServiceCurve::rate_latency(GBPS, TEN_US_PS);
             let b = backlog_bound(&pwa, &beta).unwrap();
             assert_eq!(b, 1350);
+        }
+
+        #[test]
+        fn backlog_bound_rounds_each_buckets_latency_term_up() {
+            // The single-bucket case of `backlog_bound_rounds_the_latency_term_up`
+            // through the piecewise path: ρ·T is half a byte, so the bound is 1.
+            let pwa = PiecewiseAffineArrivalCurve::new(vec![(0, 1)]).unwrap();
+            let beta = ServiceCurve::rate_latency(1, 4_000_000_000_000);
+            let b = backlog_bound(&pwa, &beta).unwrap();
+            assert_eq!(b, 1);
+            let t = 8_000_000_000_000;
+            assert!(pwa.at(t) <= beta.at(t) + b);
         }
     }
 }
