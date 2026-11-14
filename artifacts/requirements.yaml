@@ -4829,7 +4829,8 @@ artifacts:
       compose_delays_dominates; all TODO(v1.0.0)). Internal correctness
       ratchet for the NC substrate; never gates a near-term feature.
       Lean has nothing in NC today [SOLID, absence].
-      IMPLEMENTED 2026-11-13: all four are proven, and so are the nine
+      DISCHARGED 2026-11-13 (the status change is left to a human, since
+      this artifact is human-scoped): all four are proven, and so are the nine
       MinPlusPwa theorems; .github/trust-ledger.txt is empty and the
       sorry ratchet in proofs.yml is 0. Two statements were corrected
       first: the backlog closed form (single-bucket and piecewise)
@@ -4840,8 +4841,8 @@ artifacts:
       compose_delays_dominates now states the bound against the series
       service <min R1 R2, T1+T2>, fixing a unit mismatch (a byte count
       was fed to a service curve as a time).
-    status: implemented
-    release: v0.50.0
+    status: proposed
+    release: v0.38.0
     tags: [proof, lean, network-calculus, soundness, tier3, human-scoped]
 
   - id: REQ-PROOF-NC-CERT-001
