@@ -5298,3 +5298,52 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-VERIFY-GATE-SCOPE-001
+
+  - id: TEST-CLAIM-LEDGER-001
+    type: feature
+    title: README.md and COMPLIANCE.md claims are bound to evidence by claims.yaml and gated
+    description: >
+      Verifies REQ-CLAIM-LEDGER-001. `tools/check_claims.py` reads
+      `claims.yaml` in the required Format job and fails on four things: a
+      line matching a watch pattern (maturity word, competitive claim, stated
+      count, capability badge) that no ledger entry covers; a ledger entry
+      whose text is gone from its document; a claim whose evidence no longer
+      holds; and a contested count that differs from CONTESTED (exact,
+      two-sided). A glob matching nothing or a region marker that is gone
+      exits 2, never a pass.
+
+      MEASURED on the first run: 8 claims held by evidence, 6 contested, 3
+      narrative lines, 8 watch patterns over the 2 documents. The ledger found
+      a stale count at once: README.md said "16 subcommands" while the
+      COMMANDS table in spar-cli holds 19; corrected and bound with eq 19. The
+      contested six are the SysML v2 badge, "replaces the Eclipse/Java OSATE2
+      toolchain", "reaches well past what OSATE ... covers", and three v0.9.1
+      snapshots in COMPLIANCE.md ("production-grade", "18 crates", "10
+      analysis passes", three of whose named checks are no longer registered
+      passes). Their rewording is left to the maintainer.
+
+      SELF-TEST: 18 cases. Five mutants are enrolled in
+      check_self_test_potency.py (MIN_COVERED 11 -> 12), each confirmed CAUGHT,
+      and three of them confirmed SURVIVED with their named case removed.
+      PLANTED: ci-controls.toml carries `claims-unledgered-overclaim` (a
+      "production-grade" line appended to README.md) and `claims-count-drift`
+      (a 24th crate); both pass under plant, green baseline and red plant.
+
+      NOT CLAIMED: that a gated claim is true, only that its stated evidence
+      still holds; that the watch list finds every claim (a claim worded
+      outside its patterns passes unseen); or anything about documents other
+      than README.md and COMPLIANCE.md. docs/designs/track-f-sysml-kerml-engagement.md
+      still says "production-grade" and "most mature" and is not watched.
+    status: implemented
+    release: v0.50.0
+    tags: [process, guardrail, claims, documentation, ci]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/check_claims.py --self-test
+        - run: tools/check_claims.py
+    links:
+      - type: satisfies
+        target: REQ-CLAIM-LEDGER-001
+      - type: verifies
+        target: REQ-CLAIM-LEDGER-001

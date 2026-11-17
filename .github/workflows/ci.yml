@@ -177,6 +177,15 @@ jobs:
         # count at 4. A hard-coded list would fix today's bug and re-open it
         # the day someone adds a fifth workspace.
         run: tools/check_fmt_workspaces.py
+      # ── claims ledger (REQ-CLAIM-LEDGER-001) ──────────────────────────────
+      # README.md and COMPLIANCE.md are the repo's largest claim surface and
+      # were ungated: the README said "16 subcommands" over a 19-entry COMMANDS
+      # table. claims.yaml binds each watched assertion to evidence; a new
+      # maturity word, count or badge with no ledger entry fails here.
+      - name: Claims ledger self-test
+        run: tools/check_claims.py --self-test
+      - name: README and COMPLIANCE claims are bound to evidence
+        run: tools/check_claims.py
 
   clippy:
     name: Clippy

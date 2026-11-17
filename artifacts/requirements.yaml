@@ -5945,11 +5945,16 @@ artifacts:
       distinction that keeps this writable: mark the ASSERTIONS, never the
       narrative. Motivation, rationale and examples stay free.
 
+      IMPLEMENTED 2026-11-17 (TEST-CLAIM-LEDGER-001): claims.yaml and
+      tools/check_claims.py in the Format job. The contradicted claims above
+      are ledgered as CONTESTED, an exact two-sided count, rather than
+      reworded: rewording them is the maintainer's call (see NOT CLAIMED).
+
       NOT CLAIMED: that a gated claim is a true claim. The gate proves the
       stated evidence still holds, not that the evidence supports the wording.
       A badge whose predicate passes can still overclaim, and choosing honest
       wording stays a human judgement.
-    status: approved
+    status: implemented
     release: v0.50.0
     tags: [process, guardrail, claims, documentation]
 

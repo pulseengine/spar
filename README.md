@@ -93,7 +93,7 @@ flowchart TB
     end
 
     subgraph IF["Interfaces"]
-        CLI["spar-cli<br/>16 subcommands incl. LSP + MCP"]
+        CLI["spar-cli<br/>19 subcommands incl. LSP + MCP"]
         MCP["spar-mcp<br/>read-only oracles for AI agents"]
         WASM["spar-wasm<br/>WASI P2 / browser component"]
     end
@@ -213,7 +213,7 @@ Back-ends (generate & visualize)
   spar-mermaid        Mermaid diagram emission
 
 Interfaces
-  spar-cli            Command-line interface (16 subcommands incl. LSP + MCP)
+  spar-cli            Command-line interface (19 subcommands incl. LSP + MCP)
   spar-mcp            Model Context Protocol server (read-only oracles)
   spar-wasm           WebAssembly component (WASI P2 / browser)
 ```
