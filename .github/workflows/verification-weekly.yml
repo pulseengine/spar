@@ -1,0 +1,105 @@
+name: Verification Weekly
+
+# REQ-VERIFY-GATE-SCOPE-001 (#358, #513), the weekly half of the maintainer's
+# 2026-11-07 split: the per-PR Verification Gate checks a slice of the stepped
+# feature artifacts; this runs every one of them, and a red run is filed as
+# (or commented on) one tracking issue by tools/file_verification_issue.py,
+# since a scheduled run has no PR to turn red.
+#
+# The matched set is held to an INDEPENDENT count: tools/check_evidence_steps.py
+# parses the artifact YAML itself and prints how many `type: feature` artifacts
+# exist. rivet matching fewer than that means the filter or rivet's loader lost
+# some, and the run fails rather than checking a smaller set quietly.
+#
+# Not on pull_request or merge_group, so it is not a required context and never
+# runs on a PR's code.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"     # 03:17 UTC every Monday
+  workflow_dispatch:
+
+concurrency:
+  group: verification-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  all-stepped:
+    name: Verification (every stepped feature, weekly)
+    runs-on: [self-hosted, linux, x64, rust-cpu]
+    # The per-PR gate's 60 minutes covers 20 features, TEST-PROOF-* `lake build`
+    # included. This runs all of them; the first runs measure the real figure.
+    timeout-minutes: 300
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pinned by SHA (master), with the toolchain named, unlike the moving
+      # @stable tag the other workflows use: this job holds issues: write.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10-16
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+
+      - name: Install rivet
+        # Same pin as verification-gate.yml, so the two runs read artifacts alike.
+        run: |
+          cargo install --locked --git https://github.com/pulseengine/rivet \
+            --rev b7a17bef \
+            --bin rivet \
+            rivet-cli
+
+      - name: Self-test the issue filer
+        run: tools/file_verification_issue.py --self-test
+
+      - name: Count feature artifacts independently of rivet
+        id: population
+        run: |
+          set -euo pipefail
+          n=$(tools/check_evidence_steps.py --max-stepless 9999 \
+                | sed -n 's/^feature artifacts scanned: *//p')
+          case "$n" in
+            ''|*[!0-9]*|0) echo "::error::could not count feature artifacts (got '$n')"; exit 1 ;;
+          esac
+          echo "feature artifacts in the YAML: $n"
+          echo "count=$n" >>"$GITHUB_OUTPUT"
+
+      - name: Run every stepped feature artifact
+        id: verify
+        continue-on-error: true
+        env:
+          MIN_MATCHED: ${{ steps.population.outputs.count }}
+        run: |
+          tools/run_verification.py \
+            --filter '(= type "feature")' \
+            --min-matched "$MIN_MATCHED" \
+            --results-json verification-results.json
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-weekly-results
+          path: verification-results.json
+          if-no-files-found: warn
+
+      - name: File or update the tracking issue
+        if: steps.verify.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: tools/file_verification_issue.py --run-url "$RUN_URL"
+
+      - name: Fail the run if any artifact failed
+        if: steps.verify.outcome != 'success'
+        run: |
+          echo "::error::The weekly verification run failed; see the tracking issue."
+          exit 1

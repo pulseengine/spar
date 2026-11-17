@@ -1,0 +1,12 @@
+# PLANTED BAD INPUT for the `weekly-red-step` control in ci-controls.toml.
+# Never part of the real artifact set: plant overlays this file onto a scratch
+# copy of the repository and expects tools/run_verification.py to go red.
+artifacts:
+  - id: PLANT-WEEKLY-RED-STEP
+    type: feature
+    title: Planted feature whose only step fails
+    status: implemented
+    fields:
+      method: automated-test
+      steps:
+        - run: exit 1
