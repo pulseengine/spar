@@ -4299,7 +4299,7 @@ artifacts:
       method: automated-test
       steps:
         - run: tools/check_lean_sorries.py --self-test
-        - run: tools/check_lean_sorries.py --root proofs/Proofs --max-sorries 12
+        - run: tools/check_lean_sorries.py --root proofs/Proofs --max-sorries 0
     links:
       - type: satisfies
         target: REQ-GUARD-GATE-EVIDENCE-002
@@ -5280,3 +5280,21 @@ artifacts:
     links:
       - type: satisfies
         target: REQ-SYSML2-FLOWS-MODES-001
+
+  - id: TEST-VERIFY-WEEKLY-001
+    type: feature
+    title: Every stepped feature artifact is run weekly, against an independent count, and a red run is filed as one tracking issue
+    status: implemented
+    description: |-
+      The weekly half of REQ-VERIFY-GATE-SCOPE-001 (the maintainer's 2026-11-07 split). .github/workflows/verification-weekly.yml runs tools/run_verification.py over every `type: feature` artifact with --min-matched set to the count tools/check_evidence_steps.py takes from the YAML itself (253 on d526dc8), so rivet matching fewer fails the run. A red run goes to tools/file_verification_issue.py, which comments on the open issue carrying its marker or creates one, and exits 2 on any API error or a missing results file instead of reporting nothing.
+      The step below is the filer's self-test: 14 cases, and three hand mutants (a marked PR picked, any issue picked, a missing results file rendered as a pass) each turn it red, checked before commit. The planted acceptance control is `weekly-red-step` in ci-controls.toml: a feature whose step exits 1 must make the runner exit 1.
+      NOT CLAIMED: the per-PR default half of the requirement (open decision 20261117T184412-effaa3: the release-scoped default selects 5 features against today's 20), and the workflow's runtime, which its first run measures. Verified needs a scheduled or dispatched run on main.
+    release: v0.50.0
+    tags: [ci, verification, guardrail]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/file_verification_issue.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-VERIFY-GATE-SCOPE-001

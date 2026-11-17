@@ -1,0 +1,14 @@
+# Planted-bad-input controls for spar's CI checks, run by `plant`
+# (pulseengine/plant). Each control overlays its `plant` directory onto a
+# scratch copy of HEAD, runs `run`, and must see it fail; plant also runs the
+# same command on the unplanted copy first and requires that to pass.
+
+[[control]]
+id = "weekly-red-step"
+check = "Verification (every stepped feature, weekly)"
+# The baseline selects one real, cheap stepped feature so it is green without
+# the plant; the plant adds a feature whose step exits 1.
+run = """tools/run_verification.py --results-json /dev/null --filter '(or (= id "PLANT-WEEKLY-RED-STEP") (= id "TEST-GUARD-CHANGED-PATHS"))'"""
+plant = "ci-controls/weekly-red-step"
+expect = "fail"
+stderr_or_stdout_matches = 'PLANT-WEEKLY-RED-STEP'
