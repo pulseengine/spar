@@ -27,7 +27,7 @@ env:
 jobs:
   solver-benchmarks:
     name: Solver criterion nightly
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Belt-and-braces ceiling. milp/worst_64 is gated at the source level
     # (SPAR_BENCH_SLOW_MILP). Keep a hard cap so a future slow-bench
     # addition can't silently consume hours of runner budget.

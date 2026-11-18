@@ -41,7 +41,7 @@ jobs:
   # or the reflected codegen, so this job lets those PRs skip the lake build.
   changes:
     name: Detect changed paths (proofs)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Trivial classifier (observed <10s); gates the required Lean typecheck.
     # Enforced by tools/check_job_timeouts.py (#398).
     timeout-minutes: 5
@@ -80,7 +80,7 @@ jobs:
     name: Lean proof typecheck (lake build)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # 90 min covers cold-cache Mathlib fetches via `lake exe cache get`
     # plus our in-tree proof compile. Warm runs land in well under 10 min.
     timeout-minutes: 90

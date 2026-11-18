@@ -302,14 +302,14 @@ jobs:
   # ── Security audits ──────────────────────────────────────────────────
   audit:
     name: Security Audit (RustSec)
-    # Stays on ubuntu-latest temporarily: smithy ships cargo-audit
+    # Stays on ubuntu-24.04 temporarily: smithy ships cargo-audit
     # v0.21.2 whose bundled rustsec parser still rejects RUSTSEC-2026-0037
     # ("unsupported CVSS version: 4.0"). v0.22.1 fixes it but the
     # `cargo install --locked cargo-audit` build trips over our
     # sccache-on-cc setup (aws-lc-sys C compile fails through sccache).
     # Follow-up: drop sccache from ralf's profile before bumping the
     # toolchains-role version, then move this back to [self-hosted, light].
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # rustsec/audit-check hits the network advisory DB (observed ~3m). 15m for
     # network variance.
     timeout-minutes: 15
@@ -349,7 +349,7 @@ jobs:
     # exits 2: a validator that accepts that accepts anything.
     # Hosted runner because it needs apt for libyang's yanglint. Advisory
     # (not a required context) until it has a track record.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     # Cold cargo build of spar-network's example plus an apt install; observed
     # ~3m locally for the build. 20m for hosted-runner variance.
@@ -359,7 +359,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install yanglint
         # The package that ships yanglint is renamed across Ubuntu releases
-        # (`libyang2-tools` has no candidate on the current ubuntu-latest:
+        # (`libyang2-tools` has no candidate on the current ubuntu-24.04:
         # the first run of this job). Take the first candidate that exists,
         # say which, and fail loudly with what apt does offer if none does.
         run: |
@@ -406,7 +406,7 @@ jobs:
       # rejects RUSTSEC-2026-0037 ("unsupported CVSS version: 4.0").
       # bans / licenses / sources still gate. Re-add `advisories`
       # once smithy ships an upgraded rustsec; the audit job (still
-      # on ubuntu-latest) covers vulnerability matching meanwhile.
+      # on ubuntu-24.04) covers vulnerability matching meanwhile.
       - run: cargo deny check bans licenses sources
 
   # ── Code coverage ────────────────────────────────────────────────────
@@ -1008,10 +1008,10 @@ jobs:
     name: Bazel test (//...) (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    # Stays on ubuntu-latest until Bazel is installed on the smithy host.
+    # Stays on ubuntu-24.04 until Bazel is installed on the smithy host.
     # Tracked as a follow-up: smithy/group_vars/all.yml could add a
     # bazel apt-installable. Until then, hosted handles this.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     timeout-minutes: 35
     steps:
@@ -1064,11 +1064,11 @@ jobs:
     name: Kani Bounded Model Checking (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    # Stays on ubuntu-latest because kani-verifier bundles CBMC (~100 MB)
+    # Stays on ubuntu-24.04 because kani-verifier bundles CBMC (~100 MB)
     # which we don't pre-install on smithy. Once smithy ships Kani as a
     # toolchain, switch to rust-cpu (the verification is RAM-modest but
     # CPU-bound; CBMC is single-threaded per harness).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
