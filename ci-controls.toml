@@ -12,3 +12,23 @@ run = """tools/run_verification.py --results-json /dev/null --filter '(or (= id 
 plant = "ci-controls/weekly-red-step"
 expect = "fail"
 stderr_or_stdout_matches = 'PLANT-WEEKLY-RED-STEP'
+
+[[control]]
+id = "claims-unledgered-overclaim"
+check = "Format"
+# plant only overlays files, so the planted line is appended by `run` when the
+# plant put it there; on the baseline copy the file is absent and README.md is
+# checked as committed.
+run = """if [ -f ci-controls-planted-readme.md ]; then cat ci-controls-planted-readme.md >> README.md; fi; tools/check_claims.py"""
+plant = "ci-controls/claims-unledgered-overclaim"
+expect = "fail"
+stderr_or_stdout_matches = 'UNLEDGERED README\.md:\d+: .spar is production-grade'
+
+[[control]]
+id = "claims-count-drift"
+check = "Format"
+# A 24th crate under crates/ makes README.md's "23 crates" claim unbacked.
+run = "tools/check_claims.py"
+plant = "ci-controls/claims-count-drift"
+expect = "fail"
+stderr_or_stdout_matches = 'UNBACKED   README-CRATES: 24 files'

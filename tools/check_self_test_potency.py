@@ -526,6 +526,54 @@ MUTANTS: list[Mutant] = [
              "PRs, is defined-but-not-enforced. Caught by `an in-diff gate that "
              "is not PR-only FAILS`.",
     ),
+    # ── check_claims.py ────────────────────────────────────────────────────
+    # REQ-CLAIM-LEDGER-001. Each mutant below was also run with its named case
+    # dropped: the first, third and fifth then SURVIVED, so those cases are the
+    # only ones reading the behaviour; the second and fourth are also caught by
+    # a neighbouring case.
+    Mutant(
+        tool="check_claims.py",
+        id="cl-empty-glob-passes",
+        old='raise Inconclusive(f"{where}: glob {ev[\'glob\']!r} matched no file")',
+        new="return None",
+        note="a count over a glob that matches nothing satisfies any bound, so a "
+             "renamed directory would read as a backed claim. Caught by `a glob "
+             "matching nothing is inconclusive`.",
+    ),
+    Mutant(
+        tool="check_claims.py",
+        id="cl-coverage-doc-wide",
+        old="not any(t in line for t in covering[d])",
+        new='not any(t in "\\n".join(lines) for t in covering[d])',
+        note="an entry covers the LINE its text is on, not the document; read "
+             "document-wide, one ledgered sentence excuses every new overclaim in "
+             "the file. Caught by `a narrative entry does not cover another line`.",
+    ),
+    Mutant(
+        tool="check_claims.py",
+        id="cl-contested-one-sided",
+        old="if len(contested) != contested_declared:",
+        new="if len(contested) > contested_declared:",
+        note="the contested count is EXACT: a reworded claim must lower CONTESTED "
+             "or the slack is re-spent on the next overclaim. Caught by `one fewer "
+             "contested claim than declared fails`.",
+    ),
+    Mutant(
+        tool="check_claims.py",
+        id="cl-region-ignored",
+        old="return lines[i + 1:j]",
+        new="return lines",
+        note="a count bounded to a region (the COMMANDS table) must not count the "
+             "rest of the file. Caught by `lines outside the region are not counted`.",
+    ),
+    Mutant(
+        tool="check_claims.py",
+        id="cl-stale-skipped",
+        old="                if t not in body:\n",
+        new="                if False:\n",
+        note="a claim reworded without its ledger entry leaves evidence bound to a "
+             "sentence nobody reads. Caught by `a reworded claim is STALE`.",
+    ),
 ]
 
 
@@ -624,7 +672,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 11
+MIN_COVERED = 12
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`
