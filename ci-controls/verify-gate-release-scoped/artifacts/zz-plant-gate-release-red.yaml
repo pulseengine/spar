@@ -1,0 +1,14 @@
+# PLANTED BAD INPUT for the `verify-gate-release-scoped` control in
+# ci-controls.toml. Never part of the real artifact set: plant overlays this
+# file onto a scratch copy of the repository and expects the release half of
+# the per-PR Verification Gate default to select it and go red.
+artifacts:
+  - id: PLANT-GATE-RELEASE-RED
+    type: feature
+    title: Planted release-scoped feature whose only step fails
+    status: implemented
+    release: v9.9.9
+    fields:
+      method: automated-test
+      steps:
+        - run: exit 1

@@ -326,6 +326,58 @@ MUTANTS: list[Mutant] = [
              "failures with no reason (run 44206636144). Caught only by `a failing "
              "step keeps the tail of its output`.",
     ),
+    # ── verification_default_filter.py ───────────────────────────────────────
+    # REQ-VERIFY-GATE-SCOPE-001, decision 20261117T184412-effaa3 (`union`).
+    # vd-release-ignored and vd-release-ids-dropped were confirmed SURVIVED
+    # with their case removed, then CAUGHT; the other three are caught by more
+    # than one case.
+    Mutant(
+        tool="verification_default_filter.py",
+        id="vd-release-ignored",
+        old='    return art.get("release") == release\n',
+        new="    return False\n",
+        note="the independent count drops the release half, so --min-matched "
+             "reads 20 and a pinned rivet that ignores `= release` passes the "
+             "gate on the frozen slice alone. Caught only by `the count is the "
+             "union`.",
+    ),
+    Mutant(
+        tool="verification_default_filter.py",
+        id="vd-cargo-version-unanchored",
+        old="""re.search(r'^version\\s*=\\s*"([^"]+)"', text, re.M)""",
+        new="""re.search(r'version\\s*=\\s*"([^"]+)"', text)""",
+        note="the release is read from the first dependency's version, so the "
+             "release half selects some other release. Caught by `the release is "
+             "the workspace version, not a dependency's` and the union count.",
+    ),
+    Mutant(
+        tool="verification_default_filter.py",
+        id="vd-unparsable-skipped",
+        old='                raise Unreadable(f"{os.path.relpath(path, root)}: {e}")\n',
+        new="                continue\n",
+        note="an artifact file PyYAML cannot read lowers the count instead of "
+             "failing, and a lower floor lets rivet match less. Caught by `an "
+             "unparsable artifact file is an error`.",
+    ),
+    Mutant(
+        tool="verification_default_filter.py",
+        id="vd-release-ids-dropped",
+        old='    extra = f" {_ids(ids)}" if ids else ""\n',
+        new='    extra = ""\n',
+        note="the default filter loses its release half while the count keeps "
+             "it, so every PR fails the floor; or, with the count mutated too, "
+             "the gate checks the frozen slice alone. Caught only by `the "
+             "filter carries both frozen tags and the release ids`.",
+    ),
+    Mutant(
+        tool="verification_default_filter.py",
+        id="vd-frozen-tag-dropped",
+        old='FROZEN_TAGS = ("v093", "v0100")',
+        new='FROZEN_TAGS = ("v093",)',
+        note="the v0100 half of the frozen slice leaves the default, so a PR is "
+             "checked against fewer than the 20 the union promised. Caught by the "
+             "filter-string case and both counts.",
+    ),
     # ── check_stale_scope.py ───────────────────────────────────────────────
     Mutant(
         tool="check_stale_scope.py",
@@ -700,7 +752,7 @@ def evaluate(mut: Mutant, tool_path: Path) -> tuple[str, str]:
 # measured 2026-10-09 — #474 then added check_closing_keywords.py together with
 # its mutants, moving both figures. That drift is the reason this is a derived
 # count with a locked constant rather than a number in a sentence.
-MIN_COVERED = 12
+MIN_COVERED = 13
 
 # Fixtures for THIS tool's own self-test, written into a temp dir. They are
 # named in the table but are not guard tools, and they ship no `--self-test`

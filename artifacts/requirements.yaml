@@ -8044,10 +8044,12 @@ artifacts:
   - id: REQ-VERIFY-GATE-SCOPE-001
     type: requirement
     title: The Verification Gate shall check every feature artifact that carries a verification step, and a PR body shall not be able to narrow it
-    status: approved
+    status: implemented
     description: |-
       Refs #358, #513. On main .github/workflows/verification-gate.yml:75 still sets DEFAULT='(and (= type "feature") (or (has-tag "v093") (has-tag "v0100")))', a frozen v0.9.3/v0.10.0 slice (20 of 245 features per #513), and line 76 lets a 'Verify-Filter:' line in the PR body replace it. Requirement: derive the default from every feature artifact with fields.steps (or the release being cut), add a MIN_MATCHED floor like the other guards, and allow an override only to widen the set. Oracle: the matched count equals the independently counted population of stepped features; a narrowing override is rejected.
       DECIDED 2026-11-07 by the maintainer (notice 20261106T003526-f517d2, option split): the required per-PR default is the stepped features whose requirement is in the release being cut (the version in Cargo.toml); a scheduled workflow runs all stepped features weekly and files a red run as an issue. Moved to v0.50.0 by DEC-RELEASE-V049-SCOPE-001.
+      DECIDED 2026-11-18 by the maintainer (notice 20261117T184412-effaa3, option union): measured on 0.49.0, the release-scoped default alone selects 5 features against the frozen slice's 20, so the per-PR default is the union of the two (25), and no PR is checked against less than before. The weekly workflow runs all of them.
+      IMPLEMENTED 2026-11-18: tools/verification_default_filter.py prints the union filter for Cargo.toml's version (the release half as explicit ids, since the gate's pinned rivet v0.7.0 has no `release` field in its filter language) and counts its matches from the YAML with PyYAML; the gate passes that count as --min-matched, so a rivet that drops part of the filter fails the gate. --must-cover keeps an override from narrowing it (#513).
     tags: [ci, verification, guardrail]
     links:
       - type: traces-to
