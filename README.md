@@ -9,7 +9,7 @@
 ![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat-square&logo=rust&logoColor=white&labelColor=1a1b27)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat-square&logo=webassembly&logoColor=white&labelColor=1a1b27)
 ![AADL](https://img.shields.io/badge/AADL_v2.3-AS5506D-654FF0?style=flat-square&labelColor=1a1b27)
-![SysML](https://img.shields.io/badge/SysML_v2-KerML-654FF0?style=flat-square&labelColor=1a1b27)
+![SysML](https://img.shields.io/badge/SysML_v2-partial-654FF0?style=flat-square&labelColor=1a1b27)
 ![TSN](https://img.shields.io/badge/TSN-Network_Calculus-654FF0?style=flat-square&labelColor=1a1b27)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square&labelColor=1a1b27)
 
@@ -57,8 +57,7 @@ except the "programs" it compiles are **system architectures**.
 
 This is why it has outgrown the "AADL toolchain" label: AADL is one of several front-ends, and
 the timing/verification middle-end is a substrate any architecture formalism can feed. Spar
-replaces the Eclipse/Java OSATE2 toolchain with a fast, embeddable, WASM-compilable alternative —
-and reaches well past what OSATE, or a single-formalism SysML v2 tool, covers.
+is a fast, embeddable, WASM-compilable alternative to the Eclipse/Java OSATE2 toolchain.
 
 ## Components
 

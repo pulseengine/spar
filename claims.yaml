@@ -94,11 +94,10 @@ claims:
 
   - id: README-BADGE-SYSML
     doc: README.md
-    text: "![SysML](https://img.shields.io/badge/SysML_v2-KerML-"
-    contested: >-
-      REQ-CLAIM-LEDGER-001 / REQ-SYSML2-CONFORMANCE-001: the parser rejects
-      KerML constructs the specification's Annex A model uses, and the official
-      corpus ratchet counts a minority of 310 files parsing.
+    text: "![SysML](https://img.shields.io/badge/SysML_v2-partial-"
+    evidence:
+      # "partial" is the claim: REQ-SYSML2-CONFORMANCE-001 measures the rest.
+      - {kind: file-exists, path: crates/spar-sysml2/Cargo.toml}
 
   - id: README-BADGE-TSN
     doc: README.md
@@ -114,43 +113,7 @@ claims:
       - {kind: count, glob: LICENSE, pattern: '^MIT License', eq: 1}
 
   # ── README.md: competitive claims ───────────────────────────────────────
-  - id: README-REPLACES-OSATE
-    doc: README.md
-    text: "replaces the Eclipse/Java OSATE2 toolchain"
-    contested: >-
-      REQ-CLAIM-LEDGER-001 / REQ-RENDER-COMPOUND-001: refuted by one render
-      while the renderer drops components of compound models.
-
-  - id: README-PAST-OSATE
-    doc: README.md
-    text: "reaches well past what OSATE, or a single-formalism SysML v2 tool, covers"
-    contested: >-
-      REQ-CLAIM-LEDGER-001: not true of the SysML v2 half
-      (REQ-SYSML2-CONFORMANCE-001).
-
   # ── COMPLIANCE.md ───────────────────────────────────────────────────────
-  - id: COMPLIANCE-HEADER-COUNT
-    doc: COMPLIANCE.md
-    text: "2759+ tests passing across 18 crates"
-    contested: >-
-      A v0.9.1 snapshot (the document's own date) in the header, read as
-      current: the workspace has 23 crates today.
-
-  - id: COMPLIANCE-SYSML2-PRODUCTION
-    doc: COMPLIANCE.md
-    text: "production-grade with full requirements roundtrip"
-    contested: >-
-      REQ-CLAIM-LEDGER-001 / REQ-SYSML2-CONFORMANCE-001: contradicted by the
-      conformance measurements.
-
-  - id: COMPLIANCE-ANALYSIS-PASSES
-    doc: COMPLIANCE.md
-    text: "**10 analysis passes** cover connectivity"
-    contested: >-
-      A v0.9.1 snapshot: of the ten checks it names, category, naming and
-      legality have no registered pass in AnalysisRunner::register_all today
-      (legality is a separate engine), so the sentence cannot be re-derived.
-
 narrative:
   - doc: COMPLIANCE.md
     text: "**Test count delta**: v0.8.0 closed at"
@@ -161,3 +124,9 @@ narrative:
   - doc: COMPLIANCE.md
     text: "replaces the simple slack metric"
     why: describes what one change replaced inside spar
+  - doc: COMPLIANCE.md
+    text: "**Toolchain**: spar at v0.9.1 (2759+ tests passing across 18 crates at that release)"
+    why: dated to the release it measured, matching the document's own date
+  - doc: COMPLIANCE.md
+    text: "At v0.9.1, **10 analysis passes** covered"
+    why: dated to the release it measured; today's passes are counted by README-PASSES

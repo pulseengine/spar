@@ -5322,6 +5322,15 @@ artifacts:
       analysis passes", three of whose named checks are no longer registered
       passes). Their rewording is left to the maintainer.
 
+      REWORDED 2026-11-18 (owner decision 20261117T215723-6982d0, option
+      measured): the badge reads "SysML v2 partial" and is bound to the
+      spar-sysml2 crate; the OSATE sentence reads "an alternative to the
+      Eclipse/Java OSATE2 toolchain" and "reaches well past" is gone; the
+      two COMPLIANCE.md counts are dated to v0.9.1 and recorded as
+      narrative; the "production-grade" parenthetical points at the SysML v2
+      conformance requirement instead. CONTESTED is now 0: 9 claims held
+      by evidence, 5 narrative lines.
+
       SELF-TEST: 18 cases. Five mutants are enrolled in
       check_self_test_potency.py (MIN_COVERED 11 -> 12), each confirmed CAUGHT,
       and three of them confirmed SURVIVED with their named case removed.

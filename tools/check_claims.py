@@ -56,12 +56,10 @@ except ModuleNotFoundError:  # pragma: no cover - reported, never silently skipp
     sys.exit(2)
 
 # Claims the repo's own measurements contradict, kept visible until the
-# maintainer rewords them. Re-derived from claims.yaml on 2026-11-17: the SysML
-# v2 badge, "replaces the Eclipse/Java OSATE2 toolchain", "reaches well past
-# what OSATE ... covers", and three v0.9.1 snapshots in COMPLIANCE.md: its
-# "production-grade", its header count of 18 crates (23 today) and its "10
-# analysis passes", three of which no longer exist as registered passes.
-CONTESTED = 6
+# maintainer rewords them. The six found on 2026-11-17 were reworded to measured
+# statements or dated (owner decision 20261117T215723-6982d0, option measured).
+# A new contested entry has to raise this, so it cannot appear unnoticed.
+CONTESTED = 0
 
 
 class Inconclusive(Exception):
