@@ -298,6 +298,34 @@ MUTANTS: list[Mutant] = [
              "ran)` case and the `verified nothing` message pin; survives if either "
              "is dropped.",
     ),
+    Mutant(
+        tool="run_verification.py",
+        id="rv-step-timeout-ignored",
+        old="        out, _ = proc.communicate(timeout=timeout)\n",
+        new="        out, _ = proc.communicate()\n",
+        note="--step-timeout is accepted and never applied, so one hung step runs "
+             "the weekly job into its 300-minute limit with no results file, as "
+             "run 44206636144 did. Caught by `a step past the limit fails` and the "
+             "under-10-s case.",
+    ),
+    Mutant(
+        tool="run_verification.py",
+        id="rv-timeout-kills-shell-only",
+        old="            os.killpg(proc.pid, signal.SIGKILL)\n",
+        new="            proc.kill()\n",
+        note="the timeout kills the shell and leaves its child (cargo, lake) holding "
+             "the output pipe, so reading it waits for the child anyway. Caught "
+             "only by `the timeout kills the step's children too`.",
+    ),
+    Mutant(
+        tool="run_verification.py",
+        id="rv-fail-tail-dropped",
+        old='    return False, why, "\\n".join(lines[-TAIL_LINES:])\n',
+        new='    return False, why, ""\n',
+        note="a failed step prints no output again, so the weekly issue lists six "
+             "failures with no reason (run 44206636144). Caught only by `a failing "
+             "step keeps the tail of its output`.",
+    ),
     # ── check_stale_scope.py ───────────────────────────────────────────────
     Mutant(
         tool="check_stale_scope.py",

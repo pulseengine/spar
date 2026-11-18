@@ -75,12 +75,21 @@ jobs:
       - name: Run every stepped feature artifact
         id: verify
         continue-on-error: true
+        # The first run on main (44206636144) hit the 300-minute job limit with
+        # 140 of 254 artifacts in the log: Python block-buffered its stdout into
+        # a pipe, so the log stopped at 02:18 and the cancel discarded the rest
+        # and the results file. Unbuffered output shows progress as it happens;
+        # the 45-minute step limit (a cold Mathlib `lake build` takes 25-35)
+        # turns one hung step into a failed artifact, so the run still ends,
+        # writes its results and files the issue.
         env:
           MIN_MATCHED: ${{ steps.population.outputs.count }}
+          PYTHONUNBUFFERED: "1"
         run: |
           tools/run_verification.py \
             --filter '(= type "feature")' \
             --min-matched "$MIN_MATCHED" \
+            --step-timeout 2700 \
             --results-json verification-results.json
 
       - name: Upload results artifact

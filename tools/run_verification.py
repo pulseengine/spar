@@ -7,6 +7,7 @@ writes a structured JSON summary alongside human-readable stdout progress.
 
 Usage:
     tools/run_verification.py [--filter '<sexp>'] [--results-json PATH] [--shell SHELL]
+                              [--step-timeout SECONDS]
 
 Defaults:
     --filter '(= type "feature")'
@@ -20,6 +21,14 @@ Exit code:
        must not report success (#403)
     2  if `rivet list` itself failed
 
+--step-timeout bounds each step. A step still running at the limit has its
+whole process group killed and counts as a failure ("timed out after Ns"), so
+one hung step fails its artifact instead of the job timing out with nothing
+written. The first weekly run on main (run 44206636144) hit the job's 300-minute
+limit that way, with block-buffered output and no results file. A failing
+step's last TAIL_LINES lines of output are printed, and every artifact line
+carries its elapsed seconds.
+
 The `if not ids: return 1` below closed "the filter matched nothing". This
 closes the sibling one line down — "the filter matched, and nothing ran":
 `tools/run_verification.py --filter '(and (= type "feature") (has-field
@@ -32,8 +41,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
@@ -73,14 +84,37 @@ def rivet_get_steps(artifact_id: str) -> list[str]:
     return [s["run"] for s in data.get("fields", {}).get("steps", []) if "run" in s]
 
 
-def run_one_step(cmd: str, shell: str) -> bool:
-    """Return True iff exit code is 0."""
-    proc = subprocess.run(
+TAIL_LINES = 20
+
+
+def run_one_step(cmd: str, shell: str, timeout: Optional[float] = None) -> tuple[bool, str, str]:
+    """(ok, why, tail). ok is True iff the step exited 0 within `timeout` seconds.
+
+    The step runs in its own session so a timeout kills the whole process group:
+    `bash -c 'cargo test'` leaves cargo holding the output pipe when only bash is
+    killed, and reading the pipe would then wait for cargo after all.
+    """
+    proc = subprocess.Popen(
         [shell, "-c", cmd],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
     )
-    return proc.returncode == 0
+    try:
+        out, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        out, _ = proc.communicate()
+        why = f"timed out after {timeout:g}s"
+    else:
+        if proc.returncode == 0:
+            return True, "", ""
+        why = f"exit {proc.returncode}"
+    lines = out.decode("utf-8", "replace").splitlines()
+    return False, why, "\n".join(lines[-TAIL_LINES:])
 
 
 def decide_exit(total: int, passed: int, failed: int, skipped: int) -> tuple[int, str]:
@@ -217,6 +251,24 @@ def self_test() -> int:
     report("a narrowing verdict names the dropped artifacts",
            "B, C" in why and "only widen" in why, why, "...B, C ... only widen")
 
+    # ── run_one_step: a hung step is bounded, and a failure says why ──
+    ok, why, tail = run_one_step("echo first; echo last-line; exit 3", "sh")
+    report("a failing step is not ok", ok is False, ok, False)
+    report("a failing step names its exit code", why == "exit 3", why, "exit 3")
+    report("a failing step keeps the tail of its output", "last-line" in tail, tail, "...last-line")
+    ok, why, tail = run_one_step("echo fine", "sh")
+    report("a passing step is ok", ok is True, ok, True)
+    t0 = time.monotonic()
+    # The child holds the output pipe after sh is gone: killing only sh, or not
+    # killing at all, leaves communicate() waiting the full 30 s.
+    ok, why, _tail = run_one_step("sleep 30 & wait", "sh", timeout=1)
+    took = time.monotonic() - t0
+    report("a step past the limit fails", ok is False, ok, False)
+    report("a step past the limit names the timeout", why == "timed out after 1s", why,
+           "timed out after 1s")
+    report("the timeout kills the step's children too (returns in under 10 s)",
+           took < 10, round(took, 1), "< 10")
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
@@ -252,9 +304,16 @@ def main() -> int:
         help="fail when --filter matches fewer artifacts than this floor",
     )
     parser.add_argument(
+        "--step-timeout",
+        type=float,
+        default=None,
+        help="seconds each step may run before its process group is killed and "
+             "the artifact fails (default: no limit)",
+    )
+    parser.add_argument(
         "--self-test",
         action="store_true",
-        help="run the decision-table self-test and exit (no rivet, no shell)",
+        help="run the self-test and exit (no rivet; runs a few sh steps)",
     )
     args = parser.parse_args()
 
@@ -318,18 +377,23 @@ def main() -> int:
 
         print(f"[RUN ] {artifact_id}")
         ok = True
+        start = time.monotonic()
         for cmd in steps:
             print(f"       + {cmd}")
-            if not run_one_step(cmd, args.shell):
+            step_ok, why, tail = run_one_step(cmd, args.shell, args.step_timeout)
+            if not step_ok:
                 ok = False
-                print(f"       ✗ failed: {cmd}")
+                print(f"       ✗ failed ({why}): {cmd}")
+                for line in tail.splitlines():
+                    print(f"       | {line}")
                 break
+        elapsed = f"({time.monotonic() - start:.0f}s)"
 
         if ok:
-            print(f"[ OK ] {artifact_id}")
+            print(f"[ OK ] {artifact_id} {elapsed}")
             result.passed.append(artifact_id)
         else:
-            print(f"[FAIL] {artifact_id}")
+            print(f"[FAIL] {artifact_id} {elapsed}")
             result.failed.append(artifact_id)
 
     result.passed_count = len(result.passed)
