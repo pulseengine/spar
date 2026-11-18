@@ -5288,13 +5288,16 @@ artifacts:
     description: |-
       The weekly half of REQ-VERIFY-GATE-SCOPE-001 (the maintainer's 2026-11-07 split). .github/workflows/verification-weekly.yml runs tools/run_verification.py over every `type: feature` artifact with --min-matched set to the count tools/check_evidence_steps.py takes from the YAML itself (253 on d526dc8), so rivet matching fewer fails the run. A red run goes to tools/file_verification_issue.py, which comments on the open issue carrying its marker or creates one, and exits 2 on any API error or a missing results file instead of reporting nothing.
       The step below is the filer's self-test: 14 cases, and three hand mutants (a marked PR picked, any issue picked, a missing results file rendered as a pass) each turn it red, checked before commit. The planted acceptance control is `weekly-red-step` in ci-controls.toml: a feature whose step exits 1 must make the runner exit 1.
-      NOT CLAIMED: the per-PR default half of the requirement (open decision 20261117T184412-effaa3: the release-scoped default selects 5 features against today's 20), and the workflow's runtime, which its first run measures. Verified needs a scheduled or dispatched run on main.
+      FIRST RUN on main (run 44206636144, ad7b6b2, dispatched 2026-11-18): matched 254 of 254, then hit the job's 300-minute limit and was cancelled with no results file and no issue filed. The log held 140 artifacts (93 OK, 6 FAIL, 41 SKIP) because Python block-buffered its stdout; nothing reached it after 02:18. The six failures named no reason because run_one_step discarded step output: five `cargo kani` steps (three spar-solver harnesses, two spar-codegen harness sets; ci.yml runs Kani on a hosted runner because the self-hosted ones do not install it) and VERIFY-STPA-COVERAGE (`rivet coverage --from stpa-coverage --to requirement`).
+      Since then the workflow sets PYTHONUNBUFFERED and passes --step-timeout 2700, which kills a step's process group at the limit and fails its artifact, and a failed step prints its last 20 lines of output. The second step below covers that (`a step past the limit fails`, `the timeout kills the step's children too`); the planted control `weekly-step-timeout` makes a `sleep 300` step fail at a 30-second limit.
+      NOT CLAIMED: the per-PR default half of the requirement (open decision 20261117T184412-effaa3: the release-scoped default selects 5 features against today's 20), and the workflow's runtime, which no run has measured to completion. Verified needs a completed scheduled or dispatched run on main.
     release: v0.50.0
     tags: [ci, verification, guardrail]
     fields:
       method: automated-test
       steps:
         - run: tools/file_verification_issue.py --self-test
+        - run: tools/run_verification.py --self-test
     links:
       - type: satisfies
         target: REQ-VERIFY-GATE-SCOPE-001

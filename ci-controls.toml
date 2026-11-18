@@ -32,3 +32,15 @@ run = "tools/check_claims.py"
 plant = "ci-controls/claims-count-drift"
 expect = "fail"
 stderr_or_stdout_matches = 'UNBACKED   README-CRATES: 24 files'
+
+[[control]]
+id = "weekly-step-timeout"
+check = "Verification (every stepped feature, weekly)"
+# The plant adds a feature whose step sleeps past a 30-second --step-timeout;
+# the runner must kill it and fail the artifact. Without the plant only the
+# cheap real feature matches, which passes; it takes about 4 s under
+# `taskpolicy -b`, so a tighter limit makes the baseline itself flaky.
+run = """tools/run_verification.py --results-json /dev/null --step-timeout 30 --filter '(or (= id "PLANT-WEEKLY-STEP-TIMEOUT") (= id "TEST-GUARD-CHANGED-PATHS"))'"""
+plant = "ci-controls/weekly-step-timeout"
+expect = "fail"
+stderr_or_stdout_matches = 'failed \(timed out after 30s\): sleep 300'
