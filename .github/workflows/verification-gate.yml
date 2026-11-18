@@ -63,16 +63,24 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          # Default: every `type: feature` artifact whose status is currently
-          # `passing`. PRs may override by adding a single line to the body:
+          # Default (REQ-VERIFY-GATE-SCOPE-001, owner decision
+          # 20261117T184412-effaa3, option `union`): the frozen v093/v0100 slice
+          # (20 features) plus every feature whose `release:` is Cargo.toml's
+          # version, named by id (rivet v0.7.0 cannot filter on `release`).
+          # The weekly workflow runs every feature. A PR may widen the
+          # default with one body line:
           #     Verify-Filter: (and (= type "feature") (has-tag "v093"))
-          # Default scope: current-milestone artifacts only (v0.9.x bug
-          # closeout + v0.10.x work).  Running every `(= type "feature")`
-          # artifact would re-run ~124 cargo test invocations and blow the
-          # 30-minute job timeout.  Per-PR override via `Verify-Filter:` line.
-          # rivet v0.7.0 supports: and/or/not/implies/excludes/=/!=/>/</has-tag/
-          # has-field/in/matches/contains/linked-* (no `has-status`).
-          DEFAULT='(and (= type "feature") (or (has-tag "v093") (has-tag "v0100")))'
+          # tools/verification_default_filter.py prints the filter and an
+          # independent count of what it must match, taken from the YAML with
+          # PyYAML, which becomes --min-matched below.
+          tools/verification_default_filter.py >defaults.txt
+          cat defaults.txt
+          DEFAULT=$(sed -n 's/^filter=//p' defaults.txt)
+          EXPECTED=$(sed -n 's/^expected=//p' defaults.txt)
+          case "$EXPECTED" in
+            ''|*[!0-9]*|0) echo "::error::no default count (got '$EXPECTED')"; exit 1 ;;
+          esac
+          printf 'expected=%s\n' "$EXPECTED" >>"$GITHUB_OUTPUT"
           OVERRIDE=$(printf '%s' "$PR_BODY" | grep -m1 -E '^Verify-Filter:' | sed 's/^Verify-Filter:[[:space:]]*//' || true)
           # The override may only WIDEN the default (REQ-VERIFY-GATE-SCOPE-001,
           # #513): run_verification.py --must-cover fails a filter that drops
@@ -91,14 +99,16 @@ jobs:
         env:
           FILTER: ${{ steps.pick.outputs.filter }}
           DEFAULT_FILTER: ${{ steps.pick.outputs.default }}
+          EXPECTED: ${{ steps.pick.outputs.expected }}
         run: |
-          # --min-matched 20: the default matched 20 features when this floor
-          # was set (2026-11-06). Below it, the default has stopped matching
-          # what it used to (a tag renamed, a field dropped).
+          # --min-matched is the YAML's own count of the default (25 on
+          # 0.49.0). Matching fewer means rivet dropped part of the filter or
+          # failed to load an artifact (a tag renamed, an id rivet does not
+          # see), so the gate fails rather than checking a smaller set.
           tools/run_verification.py \
             --filter "$FILTER" \
             --must-cover "$DEFAULT_FILTER" \
-            --min-matched 20 \
+            --min-matched "$EXPECTED" \
             --results-json verification-results.json
 
       - name: Upload results artifact

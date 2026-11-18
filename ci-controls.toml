@@ -44,3 +44,15 @@ run = """tools/run_verification.py --results-json /dev/null --step-timeout 30 --
 plant = "ci-controls/weekly-step-timeout"
 expect = "fail"
 stderr_or_stdout_matches = 'failed \(timed out after 30s\): sleep 300'
+
+[[control]]
+id = "verify-gate-release-scoped"
+check = "Verification Gate (rivet-driven)"
+# The release half of the per-PR default, computed by the gate's own script for
+# a release nothing real carries (v9.9.9), plus one cheap real feature so the
+# baseline passes. The plant adds a v9.9.9 feature whose step exits 1, which
+# the release half must select and fail.
+run = '''tools/run_verification.py --results-json /dev/null --filter "(or $(tools/verification_default_filter.py --release v9.9.9 | sed -n 's/^release_filter=//p') (= id \"TEST-GUARD-CHANGED-PATHS\"))"'''
+plant = "ci-controls/verify-gate-release-scoped"
+expect = "fail"
+stderr_or_stdout_matches = '\[FAIL\] PLANT-GATE-RELEASE-RED'

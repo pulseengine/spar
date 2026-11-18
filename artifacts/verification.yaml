@@ -5350,3 +5350,25 @@ artifacts:
         target: REQ-CLAIM-LEDGER-001
       - type: verifies
         target: REQ-CLAIM-LEDGER-001
+
+  - id: TEST-VERIFY-GATE-DEFAULT-001
+    type: feature
+    title: The per-PR Verification Gate default is the frozen slice plus the Cargo.toml release, held to an independent count
+    status: implemented
+    description: |-
+      The per-PR half of REQ-VERIFY-GATE-SCOPE-001 as decided on 2026-11-18 (option union). tools/verification_default_filter.py builds the default from Cargo.toml's version: `(and (= type "feature") (or (has-tag "v093") (has-tag "v0100") (= id "...") ...))`, the release half spelled as the ids of the features whose `release:` is that version, read from the YAML. It counts the union by parsing artifacts/*.yaml and safety/**/*.yaml with PyYAML, and verification-gate.yml passes the count to run_verification.py as --min-matched.
+      MEASURED 2026-11-18 on 0.49.0: the script counts 25 (the frozen 20 plus 5 carrying v0.49.0, no overlap), and the generated filter matches 25 under both the gate's pinned rivet v0.7.0 (b7a17bef, built locally) and rivet 0.41.1. The first draft used `(= release "v0.49.0")`, which v0.7.0 does not know as a field: it matched 0 there and 5 under 0.41.1, so the gate would have read 20 against a floor of 25. All 5 release-scoped features pass locally.
+      The first step is the script's self-test, 10 cases, among them the workspace version rather than a dependency's, the union count over nested safety/ files, the release ids named in the filter, the frozen slice alone when nothing carries the release, and an unparsable file as an error rather than a lower count. Five mutants are enrolled in tools/check_self_test_potency.py; vd-release-ignored and vd-release-ids-dropped each survived with their one case removed. The planted control `verify-gate-release-scoped` makes a failing feature with release v9.9.9 turn the release half red.
+      NOT CLAIMED: right after a version bump the release half is empty and the default is the frozen 20 until artifacts carry the new release.
+    release: v0.50.0
+    tags: [ci, verification, guardrail]
+    fields:
+      method: automated-test
+      steps:
+        - run: tools/verification_default_filter.py --self-test
+        - run: tools/run_verification.py --self-test
+    links:
+      - type: satisfies
+        target: REQ-VERIFY-GATE-SCOPE-001
+      - type: verifies
+        target: REQ-VERIFY-GATE-SCOPE-001
