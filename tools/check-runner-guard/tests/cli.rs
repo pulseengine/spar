@@ -56,9 +56,11 @@ fn cli_reads_the_tree_it_is_pointed_at() {
         Some(2)
     );
 
-    // Anything else is a usage error.
-    for args in [&["--bogus", "x"][..], &["--root"][..], &["x"][..]] {
-        let o = bin().args(args).current_dir(&bad).output().unwrap();
+    // Anything else is a usage error. The unknown flag names the UNGUARDED tree,
+    // so a parser that took any flag for `--root` would exit 1, not 2.
+    let bad_s = bad.to_str().unwrap();
+    for args in [&["--bogus", bad_s][..], &["--root"][..], &["x"][..]] {
+        let o = bin().args(args).current_dir(&empty).output().unwrap();
         assert_eq!(o.status.code(), Some(2), "{args:?}");
     }
 }
