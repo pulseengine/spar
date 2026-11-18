@@ -6,7 +6,7 @@ description: >
   matrix (release.yml) and by the pull-request smoke run (musl-smoke.yml), so
   the build a PR proves is the build a tag ships (REQ-RELEASE-MUSL-001, #447).
   The caller checks out the tree and installs a Rust toolchain with the target.
-  The runner must be the target's architecture: x86_64 on ubuntu-latest,
+  The runner must be the target's architecture: x86_64 on ubuntu-24.04,
   aarch64 on ubuntu-24.04-arm. Then the Alpine run executes the binary natively.
 
 inputs:

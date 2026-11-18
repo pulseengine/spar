@@ -24,7 +24,7 @@ jobs:
   # ── Version consistency check ──────────────────────────────────────────
   check-versions:
     name: Verify version consistency
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -61,7 +61,7 @@ jobs:
   # script.
   tag-point:
     name: Verify tag point
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # fetch-depth: 0 is load-bearing: the gate walks C..origin/main, and the
       # default depth of 1 has no history to walk. fetch-tags makes the tag
@@ -83,10 +83,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           # Statically linked Linux builds beside the glibc ones (#447,
@@ -96,7 +96,7 @@ jobs:
           # #422 step below runs the binary instead of skipping it. The build
           # itself is .github/actions/musl-build, shared with musl-smoke.yml.
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             zigbuild: true
           - target: aarch64-unknown-linux-musl
@@ -261,7 +261,7 @@ jobs:
   # ── Compliance report (HTML export via rivet) ─────────────────────────
   build-compliance:
     name: Build compliance report
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -314,7 +314,7 @@ jobs:
   # ── Test evidence bundle ──────────────────────────────────────────────
   build-test-evidence:
     name: Build test evidence
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -386,7 +386,7 @@ jobs:
   build-wasm:
     name: Build spar-wasm browser bundle
     needs: [check-versions]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -438,7 +438,7 @@ jobs:
   build-vsix:
     name: Build VS Code Extension (${{ matrix.target }})
     needs: [build-binaries]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:
@@ -496,7 +496,7 @@ jobs:
   publish-vsix:
     name: Publish to Marketplace
     needs: [build-vsix, create-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -519,7 +519,7 @@ jobs:
   # ── SBOM (Software Bill of Materials) ─────────────────────────────────
   build-sbom:
     name: Generate SBOM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -653,7 +653,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [tag-point, build-binaries, verify-cross-arch-binaries, build-compliance, build-test-evidence, build-vsix, build-sbom, build-wasm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Restated at job-level: actions/attest-build-provenance + cosign
     # keyless OIDC need both `id-token: write` and `attestations: write`.
     # Workflow-level permissions grant the same trio — restated here to
