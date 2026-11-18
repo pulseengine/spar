@@ -2,7 +2,7 @@
 
 **Updated**: 2026-04-28 (v0.9.1 released; v0.9.2 in progress)
 **Source**: 102 HTML files from OSATE2 (`org.osate.help/html/std/`)
-**Toolchain**: spar (2759+ tests passing across 18 crates)
+**Toolchain**: spar at v0.9.1 (2759+ tests passing across 18 crates at that release)
 
 ---
 
@@ -367,7 +367,7 @@ Remaining v0.8.0 work:
 
 **Track F — SysML v2 / KerML community engagement (strategy doc on main)**
 
-- `docs/designs/track-f-sysml-kerml-engagement.md` (#160): research-backed engagement plan for the OMG SysML v2 ecosystem. Anchors on the `Systems-Modeling/SysML-v2-AADL-Release` repo + named contacts at Galois/CMU-SEI/Ellidiss. Includes verified spar-sysml2 audit (production-grade with full requirements roundtrip) + Rust ecosystem positioning (`syster`, `Sysand`, `tree-sitter-sysml`).
+- `docs/designs/track-f-sysml-kerml-engagement.md` (#160): research-backed engagement plan for the OMG SysML v2 ecosystem. Anchors on the `Systems-Modeling/SysML-v2-AADL-Release` repo + named contacts at Galois/CMU-SEI/Ellidiss. Includes an audit of spar-sysml2 as it stood then (today's conformance is measured by REQ-SYSML2-CONFORMANCE-001) + Rust ecosystem positioning (`syster`, `Sysand`, `tree-sitter-sysml`).
 
 **v0.8.0 release readiness criteria**
 
@@ -396,7 +396,7 @@ Remaining v0.8.0 work:
 - **Cross-file name resolution** works with case-insensitive lookup.
 - **Property system** has typed expressions, type checking, unit conversion, and inheritance.
 - **Instance model** expands hierarchy with features, connections, modes, and semantic connections.
-- **10 analysis passes** cover connectivity, hierarchy, completeness, direction, binding, flow, mode, category, naming, and legality.
+- At v0.9.1, **10 analysis passes** covered connectivity, hierarchy, completeness, direction, binding, flow, mode, category, naming, and legality.
 - **Category restriction tables** enforce feature/subcomponent rules for all 14 categories.
 - **Mode support** spans ItemTree through instance model with validation.
 - **Annex system** supports EMV2 + Behavior Annex sublanguage parsing.
