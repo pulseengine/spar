@@ -1,0 +1,11 @@
+# Planted by ci-controls.toml control `runner-guard-unguarded`: a pull_request
+# workflow whose self-hosted job has no fork guard. Never committed outside
+# ci-controls/.
+name: plant
+on: [pull_request]
+jobs:
+  plant:
+    runs-on: [self-hosted, linux, x64, light]
+    timeout-minutes: 1
+    steps:
+      - run: "true"

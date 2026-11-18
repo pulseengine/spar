@@ -25,7 +25,7 @@ permissions:
 jobs:
   rivet-verification:
     name: Verification Gate (rivet-driven)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # 60m budget: TEST-PROOF-* steps run `cd proofs && lake build`, which
     # against Mathlib on a cold elan cache takes 25–35 min. Once smithy
     # adds Lake build-artifact caching across runs, this can drop back

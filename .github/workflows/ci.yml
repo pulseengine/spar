@@ -43,7 +43,7 @@ jobs:
   # top-level path runs the full suite until it is deliberately allow-listed.
   changes:
     name: Detect changed paths
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # Trivial classifier (observed <=15s), but it gates 10 of the other jobs, so
     # a wedge here stalls the whole suite. 5m is a generous ceiling vs the 360m
     # default. Enforced by tools/check_job_timeouts.py (#398).
@@ -100,7 +100,7 @@ jobs:
   # artifacts-only PR needs to pass.
   fmt:
     name: Format
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # fmt across every workspace (observed <=40s). Cap far under the 360m default.
     timeout-minutes: 5
     steps:
@@ -186,12 +186,20 @@ jobs:
         run: tools/check_claims.py --self-test
       - name: README and COMPLIANCE claims are bound to evidence
         run: tools/check_claims.py
+      # A fork's pull request, once its run is approved, executes the fork's
+      # code on whatever runner the job names. Every self-hosted runs-on a
+      # pull request can reach must carry the fail-closed guard; the
+      # schedule/dispatch-only workflows are listed as exemptions in the tool
+      # and checked both ways. On origin/main before this step existed it
+      # reported 18 unguarded sites. Unit tests run under `cargo test`.
+      - name: Self-hosted runners carry the fork guard
+        run: cargo run -q --locked -p spar-check-runner-guard
 
   clippy:
     name: Clippy
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # Workspace clippy (observed ~21m on a cold cache). 45m is ~2x that.
     timeout-minutes: 45
     steps:
@@ -217,7 +225,7 @@ jobs:
     name: Test
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # nextest across the workspace (observed ~7.5m). 30m absorbs a cold cache.
     timeout-minutes: 30
     steps:
@@ -254,7 +262,7 @@ jobs:
     name: Codegen compile oracle
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # Generated-crate + wasmtime/kiln runtime oracles (observed ~27m cold). 60m ~2x.
     timeout-minutes: 60
     steps:
@@ -284,7 +292,7 @@ jobs:
     name: Bench compile smoke
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # Compile-only bench check (observed ~9m). 30m absorbs a cold cache.
     timeout-minutes: 30
     steps:
@@ -394,7 +402,7 @@ jobs:
     # a rootless container, which fails on our hardened systemd unit:
     # newuidmap is setuid but NoNewPrivileges=true blocks the escalation
     # (newuidmap: write to uid_map failed: Operation not permitted).
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # cargo-deny bans/licenses/sources (observed <=20s).
     timeout-minutes: 5
     steps:
@@ -414,7 +422,7 @@ jobs:
     name: Code Coverage
     needs: [changes, test]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # llvm-cov across the workspace (observed ~8.5m). 30m absorbs a cold cache.
     timeout-minutes: 30
     steps:
@@ -453,7 +461,7 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     # lean-mem class — Miri allocates aggressively and benefits from the 24G
     # MemoryHigh ceiling on smithy lean-mem runners over the 12G rust-cpu cap.
-    runs-on: [self-hosted, linux, x64, lean-mem]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-24.04' }}
     # Miri instance-model tests (observed ~2m; lean-mem contention can stretch it).
     timeout-minutes: 30
     steps:
@@ -481,7 +489,7 @@ jobs:
     name: Proptest (extended)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # proptest at 10x cases (observed ~8m). 30m absorbs a cold cache.
     timeout-minutes: 30
     steps:
@@ -518,7 +526,7 @@ jobs:
     #   diff selects nothing, so in-diff cannot see it. Its cost moves from
     #   once per PR rebase to once per merge, plus smithy's off-peak dispatches.
     #   The exhaustive full-workspace run stays in mutants-weekly.yml.
-    runs-on: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]')) || 'ubuntu-24.04' }}
     # Full crate: the only finished run took 182.3 min, and 2026-10-22 saw one
     # hit 240, so 240 stays the ceiling for the off-PR run. PR: see the
     # measured in-diff durations in REQ-CI-MUTANTS-IN-DIFF-001.
@@ -639,7 +647,7 @@ jobs:
   # ── Fuzz smoke (60s per target on PRs) ──────────────────────────────
   fuzz-smoke:
     name: Fuzz smoke (60s/target)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # 3 targets x 60s + cold ASan builds (observed ~5m on PRs). 30m ceiling.
     timeout-minutes: 30
     # PRs and merge-queue entries — pushes to main hit the nightly workflow
@@ -675,7 +683,7 @@ jobs:
     name: Supply Chain (cargo-vet)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     # cargo-vet supply-chain check (observed <=20s).
     timeout-minutes: 5
     steps:
@@ -694,7 +702,7 @@ jobs:
   # in artifacts/, safety/stpa/, and rivet.yaml.
   rivet-validate:
     name: Rivet validate (artifacts)
-    runs-on: [self-hosted, linux, x64, rust-cpu]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
     # rivet validate + all artifact guardrail self-tests (observed ~21m cold,
     # dominated by the verification-filter guardrail). 45m is ~2x.
     timeout-minutes: 45
@@ -1109,7 +1117,7 @@ jobs:
   # path. curl, not `gh`: self-hosted runners do not have the GitHub CLI.
   script-portability:
     name: Script portability (shellcheck + Python 3.9 floor)
-    runs-on: [self-hosted, linux, x64, light]
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

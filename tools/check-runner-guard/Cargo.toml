@@ -1,0 +1,17 @@
+[package]
+name = "spar-check-runner-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CI guard: every self-hosted runs-on a pull request can reach carries the fail-closed fork guard"
+publish = false
+
+# std only: a gate's own supply chain should be as small as the check, and the
+# workflow files are regular enough to read line by line, failing closed on
+# any shape the reader does not recognise.
+
+[[bin]]
+name = "check-runner-guard"
+path = "src/main.rs"

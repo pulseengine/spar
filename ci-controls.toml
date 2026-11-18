@@ -56,3 +56,13 @@ run = '''tools/run_verification.py --results-json /dev/null --filter "(or $(tool
 plant = "ci-controls/verify-gate-release-scoped"
 expect = "fail"
 stderr_or_stdout_matches = '\[FAIL\] PLANT-GATE-RELEASE-RED'
+
+[[control]]
+id = "runner-guard-unguarded"
+check = "Format"
+# The plant adds a pull_request workflow whose self-hosted job carries no fork
+# guard; the checker must name it.
+run = "cargo run -q --locked -p spar-check-runner-guard"
+plant = "ci-controls/runner-guard-unguarded"
+expect = "fail"
+stderr_or_stdout_matches = 'UNGUARDED zz-plant-unguarded\.yml:8 runs-on: \[self-hosted, linux, x64, light\]'
