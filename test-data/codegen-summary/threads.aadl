@@ -1,0 +1,11 @@
+-- TEST-CODEGEN-SUMMARY-HINT: a thread-only model (rooted at Threads::Worker.impl)
+-- has no `process`, so `spar codegen` with a format that includes WIT writes no
+-- .wit file and must print the hint; `--format rust` must not print it.
+package Threads
+public
+  thread Worker
+  end Worker;
+
+  thread implementation Worker.impl
+  end Worker.impl;
+end Threads;
