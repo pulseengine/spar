@@ -3753,9 +3753,9 @@ artifacts:
     fields:
       method: smoke-test
       steps:
-        - run: "out=$(cargo run -q -p spar -- codegen --root Threads::Worker.impl --output target/codegen-summary/threads test-data/codegen-summary/threads.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: both)' && printf '%s' \"$out\" | grep -q 'this model has 0 processes'"
-        - run: "out=$(cargo run -q -p spar -- codegen --root Proc::Sys.impl --format wit --output target/codegen-summary/proc test-data/codegen-summary/proc.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(1 .wit) (format: wit)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
-        - run: "out=$(cargo run -q -p spar -- codegen --root Threads::Worker.impl --format rust --output target/codegen-summary/threads-rust test-data/codegen-summary/threads.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: rust)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::ControlLoop.impl --output target/codegen-summary/thread-both test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: both)' && printf '%s' \"$out\" | grep -q 'this model has 0 processes'"
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::BuildingSystem.impl --format wit --output target/codegen-summary/system-wit test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(1 .wit) (format: wit)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::ControlLoop.impl --format rust --output target/codegen-summary/thread-rust test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: rust)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
     status: implemented
     tags: [codegen, wit, cli, diagnostics, v0110]
     links:
