@@ -2213,7 +2213,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        - run: cd proofs && lake build
+        - run: cd proofs && lake exe cache get && lake build
     status: implemented
     tags: [v0.8.0, network, wctt, network-calculus, lean, proofs]
     links:
@@ -2243,7 +2243,7 @@ artifacts:
     fields:
       method: formal-proof
       steps:
-        - run: cd proofs && lake build
+        - run: cd proofs && lake exe cache get && lake build
     status: implemented
     tags: [v0.15.0, scheduling, lean, proofs, rta, edf]
     links:
@@ -3753,9 +3753,9 @@ artifacts:
     fields:
       method: smoke-test
       steps:
-        - run: cargo run -q -p spar -- codegen --root Threads::Sys.impl --output /tmp/threads-out /tmp/threads.aadl
-        - run: cargo run -q -p spar -- codegen --root Proc::Sys.impl --format wit --output /tmp/proc-out /tmp/proc.aadl
-        - run: cargo run -q -p spar -- codegen --root Threads::Sys.impl --format rust --output /tmp/threads-rust-out /tmp/threads.aadl
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::ControlLoop.impl --output target/codegen-summary/thread-both test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: both)' && printf '%s' \"$out\" | grep -q 'this model has 0 processes'"
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::BuildingSystem.impl --format wit --output target/codegen-summary/system-wit test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(1 .wit) (format: wit)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
+        - run: "out=$(cargo run -q -p spar -- codegen --root BuildingControl::ControlLoop.impl --format rust --output target/codegen-summary/thread-rust test-data/codegen/building_control.aadl 2>&1) && printf '%s' \"$out\" | grep -q '(format: rust)' && ! printf '%s' \"$out\" | grep -q '^hint:'"
     status: implemented
     tags: [codegen, wit, cli, diagnostics, v0110]
     links:
@@ -3842,7 +3842,7 @@ artifacts:
       steps:
         - run: python3 -c "import yaml; yaml.safe_load(open('.github/workflows/release.yml'))"
         - run: grep -q 'actions/attest-build-provenance@v2' .github/workflows/release.yml
-        - run: grep -q 'sigstore/cosign-installer@v3' .github/workflows/release.yml
+        - run: "grep -Eq 'sigstore/cosign-installer@[0-9a-f]{40}' .github/workflows/release.yml"
         - run: "grep -q \"cosign-release: 'v2.4.1'\" .github/workflows/release.yml"
         - run: grep -q 'cosign sign-blob' .github/workflows/release.yml
         - run: grep -q 'build-env.txt' .github/workflows/release.yml
@@ -5183,6 +5183,7 @@ artifacts:
       method: automated-test
       steps:
         - run: tools/check_trust_ledger.py --self-test
+        - run: cd proofs && lake exe cache get && lake build
         - run: tools/check_trust_ledger.py --negative-control
     links:
       - type: satisfies
@@ -5284,13 +5285,14 @@ artifacts:
   - id: TEST-VERIFY-WEEKLY-001
     type: feature
     title: Every stepped feature artifact is run weekly, against an independent count, and a red run is filed as one tracking issue
-    status: implemented
+    status: verified
     description: |-
       The weekly half of REQ-VERIFY-GATE-SCOPE-001 (the maintainer's 2026-11-07 split). .github/workflows/verification-weekly.yml runs tools/run_verification.py over every `type: feature` artifact with --min-matched set to the count tools/check_evidence_steps.py takes from the YAML itself (253 on d526dc8), so rivet matching fewer fails the run. A red run goes to tools/file_verification_issue.py, which comments on the open issue carrying its marker or creates one, and exits 2 on any API error or a missing results file instead of reporting nothing.
       The step below is the filer's self-test: 14 cases, and three hand mutants (a marked PR picked, any issue picked, a missing results file rendered as a pass) each turn it red, checked before commit. The planted acceptance control is `weekly-red-step` in ci-controls.toml: a feature whose step exits 1 must make the runner exit 1.
       FIRST RUN on main (run 44206636144, ad7b6b2, dispatched 2026-11-18): matched 254 of 254, then hit the job's 300-minute limit and was cancelled with no results file and no issue filed. The log held 140 artifacts (93 OK, 6 FAIL, 41 SKIP) because Python block-buffered its stdout; nothing reached it after 02:18. The six failures named no reason because run_one_step discarded step output: five `cargo kani` steps (three spar-solver harnesses, two spar-codegen harness sets; ci.yml runs Kani on a hosted runner because the self-hosted ones do not install it) and VERIFY-STPA-COVERAGE (`rivet coverage --from stpa-coverage --to requirement`).
       Since then the workflow sets PYTHONUNBUFFERED and passes --step-timeout 2700, which kills a step's process group at the limit and fails its artifact, and a failed step prints its last 20 lines of output. The second step below covers that (`a step past the limit fails`, `the timeout kills the step's children too`); the planted control `weekly-step-timeout` makes a `sleep 300` step fail at a 30-second limit.
-      NOT CLAIMED: the per-PR default half of the requirement (open decision 20261117T184412-effaa3: the release-scoped default selects 5 features against today's 20), and the workflow's runtime, which no run has measured to completion. Verified needs a completed scheduled or dispatched run on main.
+      SECOND RUN on main (run 44575526792, a0e7959, dispatched 2026-11-19): completed in 2 h 41 min on rust-cpu, matched 256 of 256, 158 passed, 11 failed, 87 skipped, and filed tracking issue #638. Every failure named its reason: five `cargo kani` steps (no Kani on the self-hosted runner), TEST-LEAN-SCHEDULING (`lake build` compiled Mathlib from source and hit the 2700 s step limit) and the axiom-ledger feature after it (no built Proofs.olean), three stale step texts (VERIFY-STPA-COVERAGE, TEST-RELEASE-ASSETS-STANDARD, TEST-CODEGEN-SUMMARY-HINT), and the spar-analysis mutation feature (a full `cargo mutants -p spar-analysis` past 2700 s). That is the property this artifact claims: every stepped feature runs, against the independent count, and a red run reaches one issue with reasons. The eleven failures are the features' own findings, tracked in #638, not this workflow's.
+      NOT CLAIMED: that the weekly run is green, and the per-PR default half of the requirement, which the per-PR default feature carries (decision 20261117T184412-effaa3, union).
     release: v0.50.0
     tags: [ci, verification, guardrail]
     fields:
