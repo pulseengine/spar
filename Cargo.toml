@@ -24,6 +24,7 @@ members = [
     "crates/spar-insight",
     "crates/spar-trace-topology",
     "crates/spar-mermaid",
+    "tools/check-runner-guard",
 ]
 
 [workspace.package]
