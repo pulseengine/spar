@@ -194,6 +194,14 @@ jobs:
       # reported 18 unguarded sites. Unit tests run under `cargo test`.
       - name: Self-hosted runners carry the fork guard
         run: cargo run -q --locked -p spar-check-runner-guard
+      # North Star O3 counts every assumption that narrows a Kani harness's
+      # input range, and its guard says the count may only shrink. The ledger
+      # lists each occurrence (kani::assume, any_where, unwind bounds, stubs,
+      # and calls to helpers that narrow); an unlisted or stale line fails.
+      # --negative-control re-runs six planted mutations in memory and fails
+      # unless each is reported. REQ-PROOF-TRUST-ESCAPE-LEDGER-001.
+      - name: Kani input-narrowing ledger may only shrink
+        run: cargo run -q --locked -p spar-check-kani-ledger -- --negative-control
 
   clippy:
     name: Clippy
