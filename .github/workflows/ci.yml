@@ -671,10 +671,37 @@ jobs:
       # cargo-fuzz defaults to x86_64-unknown-linux-musl, whose statically-
       # linked libc is incompatible with ASan ("sanitizer is incompatible
       # with statically linked libc"). Pin to the GNU triple explicitly.
+      # The fuzz steps run `cargo +nightly`: the runner's floating nightly, not
+      # the nightly-2026-08-26 installed above. Print which compiler that is,
+      # so a pass and a failure can be compared. Pinning it is a separate
+      # change, so a fix does not also move the toolchain.
+      - name: Show the toolchain `cargo +nightly` resolves to
+        run: |
+          rustup toolchain list
+          rustc +nightly -vV
       - name: fuzz_aadl_parse (60s)
         run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_aadl_parse -- -max_total_time=60 -timeout=10
+      # Diagnostic for the intermittent exit 1 that follows ASan's "runtime
+      # does not come first in initial library list" partway through a run
+      # (runs 44734215360, 44736435168, 44772072858). verbosity=1 logs which
+      # process initialises ASan; symbolize=0 keeps the symbolizer out of it.
       - name: fuzz_scheduler_solver (60s)
+        env:
+          ASAN_OPTIONS: verbosity=1:symbolize=0
         run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_scheduler_solver -- -max_total_time=60 -timeout=5
+      # On failure keep the instrumented binary (for ldd and a replay) and the
+      # inputs: crash-*/oom-* files when libFuzzer wrote one, and the corpus.
+      - name: Upload fuzz_scheduler_solver binary and inputs on failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-scheduler-solver-failure
+          path: |
+            fuzz/target/x86_64-unknown-linux-gnu/release/fuzz_scheduler_solver
+            fuzz/artifacts/fuzz_scheduler_solver/
+            fuzz/corpus/fuzz_scheduler_solver/
+          if-no-files-found: warn
+          retention-days: 14
       - name: fuzz_codegen_roundtrip (60s)
         run: cargo +nightly fuzz run --target x86_64-unknown-linux-gnu fuzz_codegen_roundtrip -- -max_total_time=60 -timeout=10
 
