@@ -2480,7 +2480,7 @@ artifacts:
       shared interface with aligned types; a type mismatch fails codegen.
       Tracks GitHub #282 (jess DD-009).
     status: proposed
-    release: v0.39.0
+    release: v0.50.0
     tags: [codegen, wit, wrpc, capability]
 
   - id: REQ-RELEASE-PUBLISH-001
@@ -6060,7 +6060,7 @@ artifacts:
       editorial layer above it, and SARIF consumers may legitimately want the
       unmerged rows.
     status: approved
-    release: v0.50.0
+    release: v0.51.0
     tags: [analysis, ux, diagnostics]
 
   - id: REQ-RENDER-METRICS-001
@@ -6086,7 +6086,7 @@ artifacts:
       would produce legible labels on a diagram that is still missing most of
       the model.
     status: proposed
-    release: v0.50.0
+    release: v0.51.0
     tags: [render, etch, layout]
 
   - id: REQ-RENDER-COMPOUND-001
@@ -6117,7 +6117,7 @@ artifacts:
       NOT CLAIMED: that this is a small change. It is the largest single item
       in this plan and the only one whose shape is not yet decided.
     status: proposed
-    release: v0.50.0
+    release: v0.51.0
     tags: [render, etch, layout, architecture]
 
   - id: REQ-RENDER-GOLDEN-001
@@ -6142,7 +6142,7 @@ artifacts:
       breakage in, so the baseline must be blessed after
       REQ-RENDER-COMPOUND-001 and not before.
     status: proposed
-    release: v0.50.0
+    release: v0.51.0
     tags: [render, guardrail, testing]
 
   - id: REQ-SYSML2-FLOWS-MODES-001
@@ -6156,7 +6156,7 @@ artifacts:
       NOT CLAIMED: that spar defines how flows and modes SHOULD be expressed in SysML v2. That is the RTESC working group's to settle. If they publish a form, spar adopts it; until then spar's expression is a proposal and must be labelled as one wherever it is emitted.
       DECIDED 2026-11-07 by the maintainer (notice 20261106T173443-f9d276, option proposal-lib): spar reads end-to-end flows and their latency budget from a separate, labelled SparFlowsProposal SysML v2 package (beside, never patching, the CC-BY-ND AADL library), e.g. a metadata def EndToEndFlow { flows; latency_budget; }; every emitted result names it as spar's proposal. Moved to v0.50.0 by DEC-RELEASE-V049-SCOPE-001.
     status: approved
-    release: v0.50.0
+    release: v0.51.0
     tags: [sysml2, northstar, flows, modes, analysis, interop]
     links:
       - type: traces-to
@@ -7198,7 +7198,7 @@ artifacts:
       command would make that disagreement easier to reach, not smaller. That
       mismatch is its own requirement and is not yet reproduced here.
     status: approved
-    release: v0.50.0
+    release: v0.51.0
     tags: [tsn, cli, synthesis, interop]
 
   - id: REQ-DBC-CYCLE-TIME-001
@@ -7859,7 +7859,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:49Z
-    release: v0.50.0
+    release: v0.51.0
   - id: REQ-RELEASE-VEX-001
     type: requirement
     title: Each release shall publish a CycloneDX VEX document for the shipped lockfile, signed with the other assets, and re-issue it when an advisory lands
@@ -7873,7 +7873,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:49Z
-    release: v0.50.0
+    release: v0.51.0
 
   - id: REQ-RELEASE-MUSL-001
     type: requirement
@@ -7923,7 +7923,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:49Z
-    release: v0.50.0
+    release: v0.51.0
 
   - id: REQ-AADL-UNDECLARED-PROPERTY-SET-001
     type: requirement
@@ -7955,7 +7955,7 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-10-29T05:39:50Z
-    release: v0.50.0
+    release: v0.51.0
 
   - id: REQ-CI-FIXTURE-PODMAN-PREFLIGHT-001
     type: requirement
@@ -8028,7 +8028,7 @@ artifacts:
 
   - id: REQ-CI-MUTANTS-RATCHET-WALKDOWN-001
     type: requirement
-    title: The whole-crate mutation ratchet shall walk down to zero survivors, with the denominator stated at each step
+    title: The whole-crate mutation ratchet shall walk down in measured batches, with the denominator stated at each step
     status: proposed
     description: "Refs #382. On main ci.yml's push-to-main Check surviving mutants still runs tools/check_mutants_report.py --max-missed 292 (per-PR runs now mutate only the diff, REQ-CI-MUTANTS-IN-DIFF-001). The issue's checklist (210 -> 142 -> 100 -> 50 -> 0) was set before the baseline moved to 292. Requirement: lower --max-missed in batches as tests kill survivors, stating the mutant population beside each milestone (e.g. 292 of 1755) so a population shift is visible. Oracle: each lowering lands with the measured report that justifies it."
     tags: [ci, mutation-testing, testing]
@@ -8177,7 +8177,7 @@ artifacts:
     title: An analysis that needs a CAN frame's rate shall read the transmitting port's Output_Rate
     status: proposed
     description: "Follow-up to REQ-DBC-CYCLE-TIME-001 (#476). Ingest now writes a frame's GenMsgCycleTime as Communication_Properties::Output_Rate on the transmitter's out port, but no analysis reads a port's Output_Rate: bus_bandwidth takes the rate from Period on the source COMPONENT (get_period_for_component), and a CAN node sends frames at several rates, so a component Period cannot carry them. cqf_synth will never see CAN streams, because the CAN bus deliberately has no Switch_Type. So an ingested model now states its rates, while bus_bandwidth on it still computes no CAN load. Requirement: bus_bandwidth (and any other per-connection rate consumer) reads the source port's Output_Rate when present, ahead of the component Period. Oracle: a DBC with two frames on one node at 10 ms and 100 ms, 8 bytes each, yields the summed per-frame load on CAN_Bus; red on main."
-    release: v0.50.0
+    release: v0.51.0
     tags: [dbc, can, analysis, follow-up]
     links:
       - type: traces-to
@@ -8186,7 +8186,7 @@ artifacts:
   - id: REQ-TRACE-HANDOFF-001
     type: requirement
     title: spar codegen shall write a manifest per generated component binding instance path, model digest, WIT world, component digest, fused core-module digest, binding and per-thread budgets
-    status: draft
+    status: proposed
     description: "Serves O1 (runs on target) as the join key, not as an O1 number: synth's reach, execution match and WCET attach to a model element through it. Bet 1 of docs/plans/2026-11-19-v050-north-star-plan.md. Each record carries an ELF digest field left null until synth fills it."
     tags: [trace, codegen, north-star, plan]
     links:
@@ -8201,7 +8201,7 @@ artifacts:
   - id: REQ-TRACE-HANDOFF-CHECK-001
     type: requirement
     title: spar trace check shall re-derive every manifest field and fail when any recorded value differs
-    status: draft
+    status: proposed
     description: "Serves O1 as the join key. Bet 1 of docs/plans/2026-11-19-v050-north-star-plan.md. N is counted from the instance model, not from the manifest, so an empty manifest fails. One planted control per bound field, each must turn the check red."
     tags: [trace, gate, north-star, plan]
     links:
@@ -8216,7 +8216,7 @@ artifacts:
   - id: REQ-TRACE-BUDGET-WCET-001
     type: requirement
     title: spar shall compare an externally reported WCET with the model budget per thread, and a thread without a reported WCET shall count as failed
-    status: draft
+    status: proposed
     description: "Serves O1; follows its guard that a skipped hardware run counts as a failure. Bet 1 of docs/plans/2026-11-19-v050-north-star-plan.md. Depends on synth's report format. A WCET above the budget must turn the comparison red (negative control)."
     tags: [trace, timing, north-star, plan]
     links:
@@ -8233,7 +8233,7 @@ artifacts:
   - id: REQ-CODEGEN-WIT-CONN-MISMATCH-001
     type: requirement
     title: spar codegen shall reject a connection whose endpoint data types differ, before any component is emitted
-    status: draft
+    status: proposed
     description: "Prerequisite with no indicator of its own: bet 2 of docs/plans/2026-11-19-v050-north-star-plan.md. The negative fixture must be shown to pass codegen on main first, so the rejection is attributable to the new code."
     tags: [codegen, wit, north-star, plan]
     links:
@@ -8248,7 +8248,7 @@ artifacts:
   - id: REQ-PROOF-TRUST-ESCAPE-LEDGER-001
     type: requirement
     title: Every assumption that narrows a proof harness's input range shall be counted in a committed ledger whose counts may only shrink
-    status: draft
+    status: proposed
     description: "Serves O3 (every verified claim is backed). Bet 3 of docs/plans/2026-11-19-v050-north-star-plan.md. Counted: kani::assume, kani::any_where, unwind bounds, stubs, and Lean axiom, sorry and hypotheses in audited theorems. Planted controls: a direct assume, an assume wrapped in a helper, a new Lean axiom."
     tags: [proof, kani, lean, north-star, plan]
     links:
@@ -8263,7 +8263,7 @@ artifacts:
   - id: REQ-CI-KANI-EXECUTED-001
     type: requirement
     title: Every Kani harness in source shall execute in CI, and the executed count shall equal the count of harness attributes in source
-    status: draft
+    status: proposed
     description: "Serves O3. Bet 3 of docs/plans/2026-11-19-v050-north-star-plan.md. Today the self-hosted runners have no Kani, so five weekly steps fail (#638). A missing tool is a failure; a harness is never marked skipped."
     tags: [proof, kani, ci, north-star, plan]
     links:
@@ -8278,7 +8278,7 @@ artifacts:
   - id: REQ-PROOF-CHECK-REQUIRED-001
     type: requirement
     title: The proof check, comprising the Lean build, the kernel axiom audit, the Kani harnesses and the trust-escape ledger, shall be a required status check
-    status: draft
+    status: proposed
     description: "Serves O3: the indicator counts repositories whose proof check with an axiom audit and a trust-escape ledger is required. Bet 3 of docs/plans/2026-11-19-v050-north-star-plan.md. Acceptance: the context is listed in .github/required-contexts.txt and reconciled against branch protection."
     tags: [proof, ci, north-star, plan]
     links:
@@ -8295,7 +8295,7 @@ artifacts:
   - id: REQ-RELEASE-BUNDLE-001
     type: requirement
     title: The spar wasm component shall carry a rivet trace export, a witness MC/DC report and a sigil attestation, checked by the same verify command the O2 indicator runs
-    status: draft
+    status: proposed
     description: "Enabler for O2, not an O2 number: spar is not a consumer repository in the O2 script. Bet 4 of docs/plans/2026-11-19-v050-north-star-plan.md. Expected v0.50.0 result: verify fails because MC/DC is absent until witness reads component modules; nothing is called a bundle before verify passes."
     tags: [release, evidence, north-star, plan]
     links:
@@ -8310,7 +8310,7 @@ artifacts:
   - id: REQ-RELEASE-BUNDLE-NEG-001
     type: requirement
     title: The bundle verify step shall run per PR on a fixture build and fail when any one piece is removed or carries a stale digest
-    status: draft
+    status: proposed
     description: "Enabler for O2; follows its guard (negative control in CI). Bet 4 of docs/plans/2026-11-19-v050-north-star-plan.md. The MC/DC report must hold more than 0 decisions and the trace more than 0 links, both printed."
     tags: [release, evidence, gate, north-star, plan]
     links:
@@ -8325,7 +8325,7 @@ artifacts:
   - id: REQ-CI-GATE-INVENTORY-001
     type: requirement
     title: spar's tools and CI gates shall be listed in a committed inventory with their runtime, and a gate missing from it shall fail CI
-    status: draft
+    status: proposed
     description: "Serves O5 (we run on our own chain) by giving it a denominator. Bet 5 of docs/plans/2026-11-19-v050-north-star-plan.md. Independent count: Python files under tools/ (32 on 2026-11-19), Rust gate binaries, workflow gate steps."
     tags: [ci, inventory, north-star, plan]
     links:
@@ -8340,7 +8340,7 @@ artifacts:
   - id: REQ-CI-GATE-WASI-001
     type: requirement
     title: At least one spar gate shall run as a signed wasm32-wasip2 component under kiln, with wasmtime as the differential and an equivalence test against the native build
-    status: draft
+    status: proposed
     description: "Serves O5. Bet 5 of docs/plans/2026-11-19-v050-north-star-plan.md. Candidate: tools/check-runner-guard (std-only Rust). The equivalence test includes a planted divergence. A *_GAP switch means it counts as not running; if kiln lacks argv or a read-only directory the count stays 0."
     tags: [ci, wasi, kiln, north-star, plan]
     links:
