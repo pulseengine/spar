@@ -25,6 +25,7 @@ members = [
     "crates/spar-trace-topology",
     "crates/spar-mermaid",
     "tools/check-runner-guard",
+    "tools/check-kani-ledger",
 ]
 
 [workspace.package]

@@ -1,0 +1,16 @@
+[package]
+name = "spar-check-kani-ledger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CI guard: every Kani assumption that narrows a harness's input range is listed in a shrink-only ledger"
+publish = false
+
+# std only, like check-runner-guard: a gate's own supply chain should be as
+# small as the check.
+
+[[bin]]
+name = "check-kani-ledger"
+path = "src/main.rs"
