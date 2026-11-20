@@ -62,7 +62,9 @@ except ImportError:  # pragma: no cover - environment problem, not a verdict
 #
 # 90 -> 80 is REQ-GUARD-STALE-SCOPE-002: ten TEST-GUARD-* verification artifacts
 # were counted as debt and are not debt (see IS_SETTLED_AT_IMPLEMENTED).
-DEFAULT_MAX = 80
+# 80 -> 79 is DEC-RELEASE-V050-SCOPE-001: REQ-CODEGEN-WIT-CONN-001 moved from
+# v0.39.0 to v0.50.0.
+DEFAULT_MAX = 79
 
 # The two directories this guard governs. CI passes them explicitly; this is the
 # same list so an operator running the tool bare measures what the gate measures.
