@@ -100,3 +100,261 @@ fn multiplication_and_deref_are_code_not_comments() {
     let src = "let a = x * y; let b = *p; let c = 2 *3;";
     assert_eq!(strip(src), src);
 }
+
+#[test]
+fn direct_assume_is_attributed_to_its_fn() {
+    watchdog();
+    let (e, h) =
+        scan_source("#[kani::proof]\nfn h() { let x: u8 = kani::any(); kani::assume(x < 3); }\n");
+    assert_eq!(h, 1);
+    assert_eq!(e, vec!["h assume".to_owned()]);
+}
+
+#[test]
+fn unwind_and_stub_bind_to_the_next_fn() {
+    watchdog();
+    let (e, _) =
+        scan_source("#[kani::proof]\n#[kani::unwind( 8 )]\n#[kani::stub(a::b, c::d)]\nfn h() {}\n");
+    assert_eq!(
+        e,
+        vec!["h stub=a::b,c::d".to_owned(), "h unwind=8".to_owned()]
+    );
+}
+
+#[test]
+fn helper_call_sites_are_counted_through_two_levels() {
+    watchdog();
+    let src = "impl T { fn any() -> Self { kani::assume(true); T } }\n\
+               fn twice() -> T { T::any() }\n\
+               #[kani::proof]\nfn h() { let _ = twice(); let _ = T::any(); }\n";
+    let (e, _) = scan_source(src);
+    assert!(e.contains(&"T::any assume".to_owned()), "{e:?}");
+    assert!(e.contains(&"twice via=T::any".to_owned()), "{e:?}");
+    assert!(e.contains(&"h via=twice".to_owned()), "{e:?}");
+    assert!(e.contains(&"h via=T::any".to_owned()), "{e:?}");
+    assert_eq!(e.len(), 4, "{e:?}");
+}
+
+#[test]
+fn kani_any_is_not_a_call_to_a_free_helper_named_any() {
+    watchdog();
+    let src = "fn any() -> u8 { kani::assume(true); 0 }\n#[kani::proof]\nfn h() { let x: u8 = kani::any(); let y = it.any(); }\n";
+    let (e, _) = scan_source(src);
+    assert_eq!(e, vec!["any assume".to_owned()], "{e:?}");
+}
+
+#[test]
+fn macro_body_and_invocations_are_counted() {
+    watchdog();
+    let src = "fn band(lo: u64) { let p: u64 = kani::any(); kani::assume(p >= lo); }\n\
+               macro_rules! band_proof { ($n:ident, $lo:expr) => { #[kani::proof] #[kani::unwind(2)] fn $n() { band($lo); } }; }\n\
+               band_proof!(a, 1);\nband_proof!(b, 2);\n";
+    let (e, _) = scan_source(src);
+    assert!(e.contains(&"band assume".to_owned()), "{e:?}");
+    assert!(e.contains(&"band_proof!::$n unwind=2".to_owned()), "{e:?}");
+    assert!(e.contains(&"band_proof!::$n via=band".to_owned()), "{e:?}");
+    assert_eq!(
+        e.iter()
+            .filter(|x| x.as_str() == "? via=band_proof!")
+            .count(),
+        2,
+        "{e:?}"
+    );
+}
+
+#[test]
+fn a_body_is_found_past_brackets_where_clauses_and_bodiless_decls() {
+    watchdog();
+    let src = "trait T { fn g(); }\n\
+               fn f(x: [u8; 2], y: (u8, u8)) -> u8 where u8: Copy { kani::assume(x[0] < 2); 0 }\n\
+               fn h() { kani::assume(true); }\n";
+    let (e, _) = scan_source(src);
+    assert_eq!(
+        e,
+        vec!["f assume".to_owned(), "h assume".to_owned()],
+        "{e:?}"
+    );
+}
+
+#[test]
+fn impl_type_is_the_self_type_without_generics_or_path() {
+    watchdog();
+    let src = "impl<T: Clone> Wrap<T> { fn any() -> u8 { kani::assume(true); 0 } }\n\
+               impl kani::Arbitrary for m::Foo { fn any() -> Self { kani::assume(true); Foo } }\n\
+               impl<T> Tr for Bar<T> where T: Copy { fn any() -> u8 { kani::assume(true); 0 } }\n";
+    let (e, _) = scan_source(src);
+    assert_eq!(
+        e,
+        vec![
+            "Bar::any assume".to_owned(),
+            "Foo::any assume".to_owned(),
+            "Wrap::any assume".to_owned()
+        ],
+        "{e:?}"
+    );
+}
+
+#[test]
+fn the_innermost_fn_owns_an_occurrence() {
+    watchdog();
+    let src =
+        "fn outer() { fn inner() { kani::assume(true); } kani::any_where(|v: &u8| *v < 2); }\n";
+    let (e, _) = scan_source(src);
+    assert_eq!(
+        e,
+        vec!["inner assume".to_owned(), "outer any_where".to_owned()],
+        "{e:?}"
+    );
+}
+
+#[test]
+fn a_method_helper_is_matched_by_dot_call_and_an_assoc_fn_is_not() {
+    watchdog();
+    let src = "impl S { fn lim(&self) -> u8 { kani::assume(true); 0 } fn mk() -> S { kani::assume(true); S } }\n\
+               #[kani::proof]\nfn h() { let s = S::mk(); s.lim(); let _ = x.mk(); }\n";
+    let (e, _) = scan_source(src);
+    assert_eq!(
+        e,
+        vec![
+            "S::lim assume".to_owned(),
+            "S::mk assume".to_owned(),
+            "h via=S::lim".to_owned(),
+            "h via=S::mk".to_owned()
+        ],
+        "{e:?}"
+    );
+}
+
+#[test]
+fn an_innocent_macro_is_not_counted() {
+    watchdog();
+    let src = "fn band() { kani::assume(true); }\n\
+               macro_rules! noisy { () => { fn q() {} }; }\n\
+               macro_rules! narrow { () => { fn r() { band(); } }; }\n\
+               noisy!();\nnarrow!();\n";
+    let (e, _) = scan_source(src);
+    assert!(!e.iter().any(|x| x.contains("noisy")), "{e:?}");
+    assert_eq!(
+        e.iter().filter(|x| x.as_str() == "? via=narrow!").count(),
+        1,
+        "{e:?}"
+    );
+}
+
+#[test]
+fn edges_of_the_text_neither_panic_nor_miss() {
+    watchdog();
+    let (e, _) = scan_source("kani::assume(true)");
+    assert_eq!(e, vec!["? assume".to_owned()]);
+    for s in [
+        "fn",
+        "fn ",
+        "macro_rules!",
+        "impl",
+        "#",
+        "#[kani::unwind(",
+        "kani::assume",
+        "use kani::assume",
+    ] {
+        let _ = scan_source(s);
+    }
+    assert!(
+        scan_source("kani::assumed(x); kani::assume_x(y); my_kani::assume(z)")
+            .0
+            .is_empty()
+    );
+    let (e, _) = scan_source("x.kani::assume (1)");
+    assert_eq!(e.len(), 1, "{e:?}");
+}
+
+#[test]
+fn use_forms_that_import_narrowing_are_counted() {
+    watchdog();
+    for (src, n) in [
+        ("use kani::assume;", 1),
+        ("use kani::{any, any_where};", 1),
+        ("use kani::*;", 1),
+        ("use kani::any;", 0),
+        ("use std::assume;", 0),
+        ("fn user() {}", 0),
+    ] {
+        let (e, _) = scan_source(src);
+        assert_eq!(
+            e.iter().filter(|x| x.ends_with(" import")).count(),
+            n,
+            "{src}: {e:?}"
+        );
+    }
+}
+
+#[test]
+fn string_escapes_end_where_rust_ends_them() {
+    watchdog();
+    let src = "let a = \"x\\\\\"; kani::assume(true); let b = '\\''; kani::assume(false);";
+    let (e, _) = scan_source(src);
+    assert_eq!(
+        e.iter().filter(|x| x.ends_with(" assume")).count(),
+        2,
+        "{e:?}"
+    );
+    let src = "let c = r#\"a\"#; kani::assume(true); let d = \"\\u{1F600}\"; kani::assume(true);";
+    assert_eq!(scan_source(src).0.len(), 2);
+}
+
+#[test]
+fn harness_count_and_attribute_binding() {
+    watchdog();
+    let src =
+        "#[kani::proof]\nfn a() {}\n#[kani::proof]\n#[kani::unwind(3)]\nfn b() {}\nfn c() {}\n";
+    let (e, h) = scan_source(src);
+    assert_eq!(h, 2);
+    assert_eq!(e, vec!["b unwind=3".to_owned()]);
+}
+
+#[test]
+fn a_macro_ends_at_its_own_brace() {
+    watchdog();
+    let src = "macro_rules! m { () => {}; }\nfn h() { kani::assume(true); }\n";
+    assert_eq!(scan_source(src).0, vec!["h assume".to_owned()]);
+}
+
+#[test]
+fn a_bodiless_decl_owns_nothing_and_braces_in_brackets_are_not_the_body() {
+    watchdog();
+    let src = "trait T { fn g(); }\nconst _: () = { kani::assume(true); };\n";
+    assert_eq!(scan_source(src).0, vec!["? assume".to_owned()]);
+    let src = "fn f(x: [u8; { 2 }]) { kani::assume(true); }\n";
+    assert_eq!(scan_source(src).0, vec!["f assume".to_owned()]);
+}
+
+#[test]
+fn the_innermost_impl_names_the_type() {
+    watchdog();
+    let src = "impl A {\n fn x() {\n  impl B { fn any() -> u8 { kani::assume(true); 0 } }\n }\n fn y() {}\n fn z() {}\n fn w() {}\n}\n";
+    assert_eq!(scan_source(src).0, vec!["B::any assume".to_owned()]);
+}
+
+#[test]
+fn the_innermost_impl_wins_when_it_sits_at_the_end_of_the_outer_one() {
+    watchdog();
+    let src = "impl A {\n fn a() {}\n fn b() {}\n fn c() {}\n fn x() { impl B { fn any() -> u8 { kani::assume(true); 0 } } }\n}\n";
+    assert_eq!(scan_source(src).0, vec!["B::any assume".to_owned()]);
+}
+
+#[test]
+fn an_impl_whose_type_parses_empty_names_the_fn_alone() {
+    watchdog();
+    let (e, _) = scan_source(
+        "impl <X> {\n#[kani::proof]\nfn h() { let x: u8 = kani::any(); kani::assume(x < 3); }\n}\n",
+    );
+    assert_eq!(e, vec!["h assume".to_owned()]);
+}
+
+#[test]
+fn find_all_matches_a_text_of_exactly_the_pattern_length() {
+    watchdog();
+    assert_eq!(find_all(b"ab", "ab"), vec![0]);
+    assert_eq!(find_all(b"a", "ab"), Vec::<usize>::new());
+    assert_eq!(find_all(b"xab", "ab"), Vec::<usize>::new());
+    assert_eq!(find_all(b"x.ab", ".ab"), vec![1]);
+}
