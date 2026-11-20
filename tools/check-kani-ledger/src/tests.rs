@@ -358,3 +358,95 @@ fn find_all_matches_a_text_of_exactly_the_pattern_length() {
     assert_eq!(find_all(b"xab", "ab"), Vec::<usize>::new());
     assert_eq!(find_all(b"x.ab", ".ab"), vec![1]);
 }
+
+#[test]
+fn compare_reports_growth_and_shrink_as_multisets() {
+    watchdog();
+    let f = vec!["p u assume".to_owned(), "p u assume".to_owned()];
+    let l = vec!["p u assume".to_owned(), "p v assume".to_owned()];
+    let (u, s) = compare(&f, &l);
+    assert_eq!(u, vec!["p u assume".to_owned()]);
+    assert_eq!(s, vec!["p v assume".to_owned()]);
+}
+
+#[test]
+fn malformed_ledger_line_is_rejected() {
+    watchdog();
+    assert!(parse_ledger("a b c\n").is_err());
+    assert!(parse_ledger("kernel\tf\tk\tn\n").is_err());
+    assert_eq!(
+        parse_ledger("# c\n\nsource\tf\tkani-assume\th \n").unwrap(),
+        vec!["source\tf\tkani-assume\th".to_owned()]
+    );
+}
+
+#[test]
+fn every_canary_is_caught() {
+    watchdog();
+    let mut out = Vec::new();
+    assert_eq!(
+        negative_control(&mut out),
+        0,
+        "{}",
+        String::from_utf8_lossy(&out)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out).matches("control ok").count(),
+        canaries().len()
+    );
+}
+
+#[test]
+fn this_repository_matches_its_ledger() {
+    watchdog();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut out = Vec::new();
+    let code = run(&root, &root.join(LEDGER), &mut out);
+    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&out));
+}
+
+#[test]
+fn negative_control_fails_on_a_missed_or_absent_control() {
+    watchdog();
+    assert_eq!(canaries().len(), 6);
+    let mut out = Vec::new();
+    let undetectable = vec![("no change", CANARY_BASE.to_owned())];
+    assert_eq!(negative_control_with(&undetectable, &mut out), 1);
+    assert!(String::from_utf8_lossy(&out).contains("CONTROL-MISSED no change"));
+    let mut out = Vec::new();
+    assert_eq!(negative_control_with(&[], &mut out), 1);
+    let mut out = Vec::new();
+    let two = vec![("no change", CANARY_BASE.to_owned()), canaries().remove(0)];
+    assert_eq!(negative_control_with(&two, &mut out), 1);
+    assert!(String::from_utf8_lossy(&out).contains("controls: 2 run, 1 missed"));
+}
+
+#[test]
+fn walk_skips_hidden_target_node_modules_and_ci_controls() {
+    watchdog();
+    let d = std::env::temp_dir().join(format!("kani-ledger-walk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    for sub in [
+        "src",
+        "target/x",
+        ".hidden",
+        "node_modules/m",
+        "ci-controls/p",
+        "a/target",
+    ] {
+        std::fs::create_dir_all(d.join(sub)).unwrap();
+        std::fs::write(d.join(sub).join("f.rs"), "").unwrap();
+    }
+    std::fs::write(d.join("src/g.txt"), "").unwrap();
+    let got: Vec<String> = rs_files(&d)
+        .unwrap()
+        .iter()
+        .map(|p| {
+            p.strip_prefix(&d)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(got, vec!["src/f.rs".to_owned()]);
+}

@@ -1,24 +1,50 @@
 //! Shrink-only ledger of the Kani assumptions that narrow a harness's input
 //! range (REQ-PROOF-TRUST-ESCAPE-LEDGER-001).
 //!
-//! `strip` blanks comments, string literals and char literals, so a pattern
-//! search sees code only. `scan_source` then reports each narrowing,
-//! attributed to the enclosing fn (`Type::fn` inside an impl, `macro!` or
-//! `macro!::fn` inside a `macro_rules!` body, `?` outside any unit):
+//! A Kani proof says nothing about inputs its harness assumed away: a bug
+//! outside `kani::assume(x <= 8)` is invisible to it. The North Star's O3
+//! indicator therefore counts every such assumption, and its guard says the
+//! count may only shrink. `tools/check_trust_ledger.py` excludes
+//! `kani::assume` on purpose (it audits trust escapes in the Lean kernel
+//! sense); this gate covers the Kani half.
+//!
+//! What counts, per occurrence, attributed to the enclosing function (or
+//! `macro!` / `macro!::fn` inside a `macro_rules!` body):
 //!
 //! * `assume`      a `kani::assume(..)` call;
 //! * `any_where`   a `kani::any_where(..)` call;
-//! * `unwind=N`    a `#[kani::unwind(N)]` bound;
+//! * `unwind=N`    a `#[kani::unwind(N)]` bound (changing N changes the entry);
 //! * `stub=A`      a `#[kani::stub(A)]` replacement;
 //! * `import`      a `use kani::..` that brings `assume` or `any_where` into
-//!   scope;
+//!   scope, since a bare `assume(..)` after it would escape the other kinds;
 //! * `via=H`       a call to a same-file helper `H` that narrows (directly or
-//!   through another helper).
+//!   through another helper). This is what catches a new harness that reuses
+//!   an existing narrowing helper such as `BoundedTaskSet::any()`.
 //!
-//! The ledger gate follows in the next pull request (spar#641); the split
-//! keeps each one inside the 60 minute in-diff mutation budget.
+//! Comments and string literals are blanked first, so the harness templates
+//! `proof_gen.rs` writes inside strings are not spar's own harnesses.
+//!
+//! The ledger `.github/kani-narrowing-ledger.tsv` holds one row per
+//! occurrence in rivet's trust-ledger shape (`proofs/trust-ledger.tsv` there):
+//! `section<TAB>file<TAB>kind<TAB>name`, with section `source`, the kind
+//! prefixed `kani-` (rivet's `kani-assume` plus the other narrowing forms),
+//! and the name the attributed unit. The format is rivet's to own
+//! (pulseengine/rivet#1300); this tool is the detector that fills it.
+//! An occurrence the ledger does not hold is UNLISTED and an entry with no
+//! occurrence is STALE; both exit 1, so the ledger can only move down, and
+//! each step down is a reviewed edit.
+//!
+//! Skipped while walking: hidden directories, `target/`, `node_modules/` and
+//! `ci-controls/` (planted-bad inputs that plant overlays on a scratch copy).
+//!
+//! Exit codes: 0 ledger matches, 1 UNLISTED or STALE, 2 could not judge
+//! (unreadable or malformed ledger, or zero `#[kani::proof]` harnesses found).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+pub const LEDGER: &str = ".github/kani-narrowing-ledger.tsv";
 
 /// Blank comments, string literals and char literals (keeping newlines and
 /// byte offsets), so pattern search sees code only.
@@ -487,6 +513,243 @@ fn mark(us: &[Unit], set: &mut BTreeSet<usize>, k: usize) {
             set.insert(m);
         }
     }
+}
+
+pub fn rs_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d)? {
+            let e = e?;
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            let ft = e.file_type()?;
+            if ft.is_dir() {
+                // ci-controls/ holds planted-bad inputs for plant; they are judged only
+                // when plant overlays them onto a scratch copy.
+                if name.starts_with('.')
+                    || name == "target"
+                    || name == "node_modules"
+                    || name == "ci-controls"
+                {
+                    continue;
+                }
+                stack.push(p);
+            } else if ft.is_file() && name.ends_with(".rs") {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Every ledger line for the tree under `root`, plus the harness count.
+pub fn scan_tree(root: &Path) -> std::io::Result<(Vec<String>, usize)> {
+    let mut all = Vec::new();
+    let mut harnesses = 0;
+    for f in rs_files(root)? {
+        let src = std::fs::read_to_string(&f)?;
+        if !src.contains("kani") {
+            continue;
+        }
+        let rel = f
+            .strip_prefix(root)
+            .unwrap_or(&f)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let (es, h) = scan_source(&src);
+        harnesses += h;
+        all.extend(es.into_iter().map(|e| {
+            let (unit, kind) = e.split_once(' ').unwrap_or((e.as_str(), ""));
+            format!("source\t{rel}\tkani-{kind}\t{unit}")
+        }));
+    }
+    all.sort();
+    Ok((all, harnesses))
+}
+
+pub fn parse_ledger(text: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for (n, l) in text.lines().enumerate() {
+        let l = l.trim();
+        if l.is_empty() || l.starts_with('#') {
+            continue;
+        }
+        let f: Vec<&str> = l.split('\t').map(str::trim).collect();
+        if f.len() != 4 || f[0] != "source" || f.iter().any(|x| x.is_empty()) {
+            return Err(format!(
+                "line {}: expected `source<TAB>file<TAB>kind<TAB>name`, got `{l}`",
+                n + 1
+            ));
+        }
+        out.push(f.join("\t"));
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// (unlisted, stale) as multisets.
+pub fn compare(found: &[String], ledger: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut m: BTreeMap<&str, i64> = BTreeMap::new();
+    for f in found {
+        *m.entry(f).or_default() += 1;
+    }
+    for l in ledger {
+        *m.entry(l).or_default() -= 1;
+    }
+    let mut unlisted = Vec::new();
+    let mut stale = Vec::new();
+    for (k, v) in m {
+        for _ in 0..v.max(0) {
+            unlisted.push(k.to_owned());
+        }
+        for _ in 0..(-v).max(0) {
+            stale.push(k.to_owned());
+        }
+    }
+    (unlisted, stale)
+}
+
+pub fn render_ledger(found: &[String]) -> String {
+    let mut s = String::from(
+        "# Kani assumptions that narrow a harness's input range, one row per occurrence,\n\
+         # in rivet's trust-ledger shape. Written by\n\
+         # `cargo run -p spar-check-kani-ledger -- --write`. This list may only shrink\n\
+         # (REQ-PROOF-TRUST-ESCAPE-LEDGER-001): a new row is a reviewed widening of what\n\
+         # the proofs do not cover.\n\
+         #\n\
+         # section\tfile\tkind\tname\n",
+    );
+    for f in found {
+        s.push_str(f);
+        s.push('\n');
+    }
+    s
+}
+
+/// The check. Exit 0 match, 1 unlisted or stale, 2 could not judge.
+pub fn run(root: &Path, ledger_path: &Path, out: &mut dyn Write) -> i32 {
+    let (found, harnesses) = match scan_tree(root) {
+        Ok(x) => x,
+        Err(e) => {
+            let _ = writeln!(out, "UNREADABLE tree {}: {e}", root.display());
+            return 2;
+        }
+    };
+    if harnesses == 0 {
+        let _ = writeln!(
+            out,
+            "NO-HARNESS no #[kani::proof] under {}: nothing to judge",
+            root.display()
+        );
+        return 2;
+    }
+    let text = match std::fs::read_to_string(ledger_path) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = writeln!(out, "UNREADABLE ledger {}: {e}", ledger_path.display());
+            return 2;
+        }
+    };
+    let ledger = match parse_ledger(&text) {
+        Ok(l) => l,
+        Err(e) => {
+            let _ = writeln!(out, "MALFORMED ledger {}: {e}", ledger_path.display());
+            return 2;
+        }
+    };
+    let (unlisted, stale) = compare(&found, &ledger);
+    for u in &unlisted {
+        let _ = writeln!(out, "UNLISTED {}", u.replace('\t', " "));
+    }
+    for s in &stale {
+        let _ = writeln!(
+            out,
+            "STALE {}  (no longer occurs: delete this ledger row)",
+            s.replace('\t', " ")
+        );
+    }
+    let _ = writeln!(
+        out,
+        "harnesses: {harnesses}; narrowing occurrences: {}; ledger lines: {}; unlisted: {}; stale: {}",
+        found.len(),
+        ledger.len(),
+        unlisted.len(),
+        stale.len()
+    );
+    i32::from(!(unlisted.is_empty() && stale.is_empty()))
+}
+
+/// Planted controls, run in memory: each mutation of a clean harness file
+/// must produce at least one UNLISTED line against the clean file's ledger.
+pub const CANARY_BASE: &str = r#"
+struct Bounded { n: u8 }
+impl Bounded {
+    fn any() -> Self { let n: u8 = kani::any(); kani::assume(n < 4); Bounded { n } }
+}
+#[kani::proof]
+#[kani::unwind(4)]
+fn harness_a() { let b = Bounded::any(); assert!(b.n < 4); }
+"#;
+
+pub fn canaries() -> Vec<(&'static str, String)> {
+    let b = CANARY_BASE;
+    vec![
+        (
+            "direct assume",
+            format!(
+                "{b}\n#[kani::proof]\nfn harness_b() {{ let x: u8 = kani::any(); kani::assume(x > 1); }}\n"
+            ),
+        ),
+        (
+            "assume wrapped in a new helper",
+            format!(
+                "{b}\nfn small() -> u8 {{ let x: u8 = kani::any(); kani::assume(x < 2); x }}\n#[kani::proof]\nfn harness_c() {{ let _ = small(); }}\n"
+            ),
+        ),
+        (
+            "existing helper reused",
+            format!("{b}\n#[kani::proof]\nfn harness_d() {{ let _ = Bounded::any(); }}\n"),
+        ),
+        (
+            "any_where",
+            format!(
+                "{b}\n#[kani::proof]\nfn harness_e() {{ let _x: u8 = kani::any_where(|v| *v < 3); }}\n"
+            ),
+        ),
+        (
+            "unwind bound changed",
+            b.replace("#[kani::unwind(4)]", "#[kani::unwind(2)]"),
+        ),
+        ("assume imported", format!("{b}\nuse kani::assume;\n")),
+    ]
+}
+
+pub fn negative_control(out: &mut dyn Write) -> i32 {
+    negative_control_with(&canaries(), out)
+}
+
+/// Exit 1 if any control yields no UNLISTED row, or if there are no controls.
+pub fn negative_control_with(controls: &[(&str, String)], out: &mut dyn Write) -> i32 {
+    let (base, _) = scan_source(CANARY_BASE);
+    let mut missed = 0usize;
+    for (name, src) in controls {
+        let (found, _) = scan_source(src);
+        let (unlisted, _) = compare(&found, &base);
+        if unlisted.is_empty() {
+            missed += 1;
+            let _ = writeln!(out, "CONTROL-MISSED {name}: no UNLISTED line");
+        } else {
+            let _ = writeln!(out, "control ok: {name} -> UNLISTED {}", unlisted[0]);
+        }
+    }
+    if controls.is_empty() {
+        let _ = writeln!(out, "CONTROL-MISSED no controls to run");
+        return 1;
+    }
+    let _ = writeln!(out, "controls: {} run, {missed} missed", controls.len());
+    i32::from(missed != 0)
 }
 
 #[cfg(test)]
