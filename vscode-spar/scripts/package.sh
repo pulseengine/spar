@@ -11,7 +11,7 @@ SPAR_ROOT="$(cd "$EXT_DIR/.." && pwd)"
 
 TARGETS=("darwin-arm64")
 if [[ "${1:-}" == "--all" ]]; then
-  TARGETS=("darwin-arm64" "darwin-x64" "linux-x64" "linux-arm64" "win32-x64")
+  TARGETS=("darwin-arm64" "linux-x64" "linux-arm64" "win32-x64")
 fi
 
 # Map VS Code target to Rust target. A `case`, not `declare -A`: the default
@@ -19,7 +19,6 @@ fi
 rust_target_for() {
   case "$1" in
     darwin-arm64) echo "aarch64-apple-darwin" ;;
-    darwin-x64)   echo "x86_64-apple-darwin" ;;
     linux-x64)    echo "x86_64-unknown-linux-gnu" ;;
     linux-arm64)  echo "aarch64-unknown-linux-gnu" ;;
     win32-x64)    echo "x86_64-pc-windows-msvc" ;;
