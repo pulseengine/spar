@@ -1433,6 +1433,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "spar-check-kani-ledger"
+version = "0.49.0"
+
+[[package]]
 name = "spar-check-runner-guard"
 version = "0.49.0"
 
