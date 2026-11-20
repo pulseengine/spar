@@ -402,7 +402,7 @@ jobs:
           ls -lh "${QCOW2}"
 
       # ── 3. Build the fixture-vm Rust harness ─────────────────────────────
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-20
         with:
           toolchain: nightly-2026-08-26
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
