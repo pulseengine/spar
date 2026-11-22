@@ -18,7 +18,7 @@ on:
   # job-level `if:` that is false here still reports `skipped`, which satisfies
   # the context; only a workflow that does not trigger reports nothing.
   merge_group:
-  # smithy's downtime dispatcher (GitHub App pulseengine-smithy) runs the
+  # the CI hosts' downtime dispatcher (a GitHub App) runs the
   # full-crate mutation ratchet off-peak via workflow_dispatch (#400).
   workflow_dispatch:
 
@@ -310,7 +310,7 @@ jobs:
   # ── Security audits ──────────────────────────────────────────────────
   audit:
     name: Security Audit (RustSec)
-    # Stays on ubuntu-24.04 temporarily: smithy ships cargo-audit
+    # Stays on ubuntu-24.04 temporarily: the self-hosted image ships cargo-audit
     # v0.21.2 whose bundled rustsec parser still rejects RUSTSEC-2026-0037
     # ("unsupported CVSS version: 4.0"). v0.22.1 fixes it but the
     # `cargo install --locked cargo-audit` build trips over our
@@ -397,7 +397,7 @@ jobs:
 
   deny:
     name: Cargo Deny
-    # Smithy has cargo-deny installed (toolchains role, v0.16.4).
+    # The self-hosted image has cargo-deny installed (toolchains role, v0.16.4).
     # We avoid EmbarkStudios/cargo-deny-action@v2 because it launches
     # a rootless container, which fails on our hardened systemd unit:
     # newuidmap is setuid but NoNewPrivileges=true blocks the escalation
@@ -413,7 +413,7 @@ jobs:
       # cargo-audit share the same rustsec parser, which currently
       # rejects RUSTSEC-2026-0037 ("unsupported CVSS version: 4.0").
       # bans / licenses / sources still gate. Re-add `advisories`
-      # once smithy ships an upgraded rustsec; the audit job (still
+      # once the self-hosted image ships an upgraded rustsec; the audit job (still
       # on ubuntu-24.04) covers vulnerability matching meanwhile.
       - run: cargo deny check bans licenses sources
 
@@ -460,7 +460,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # lean-mem class — Miri allocates aggressively and benefits from the 24G
-    # MemoryHigh ceiling on smithy lean-mem runners over the 12G rust-cpu cap.
+    # MemoryHigh ceiling on the lean-mem runners over the 12G rust-cpu cap.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","lean-mem"]') || 'ubuntu-24.04' }}
     # Miri instance-model tests (observed ~2m; lean-mem contention can stretch it).
     timeout-minutes: 30
@@ -524,7 +524,7 @@ jobs:
     #   exact 292 ratchet, on lean-mem (RAM under -j 4). It is the only gate
     #   that sees a change which WEAKENS a test without touching source: that
     #   diff selects nothing, so in-diff cannot see it. Its cost moves from
-    #   once per PR rebase to once per merge, plus smithy's off-peak dispatches.
+    #   once per PR rebase to once per merge, plus the off-peak dispatches.
     #   The exhaustive full-workspace run stays in mutants-weekly.yml.
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]')) || 'ubuntu-24.04' }}
     # Full crate: the only finished run took 182.3 min, and 2026-10-22 saw one
@@ -1016,8 +1016,8 @@ jobs:
     name: Bazel test (//...) (advisory)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    # Stays on ubuntu-24.04 until Bazel is installed on the smithy host.
-    # Tracked as a follow-up: smithy/group_vars/all.yml could add a
+    # Stays on ubuntu-24.04 until Bazel is installed on the self-hosted runners.
+    # Tracked as a follow-up: the runner configuration could add a
     # bazel apt-installable. Until then, hosted handles this.
     runs-on: ubuntu-24.04
     continue-on-error: true
@@ -1073,7 +1073,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     # Stays on ubuntu-24.04 because kani-verifier bundles CBMC (~100 MB)
-    # which we don't pre-install on smithy. Once smithy ships Kani as a
+    # which we don't pre-install on the self-hosted runners. Once they ship Kani as a
     # toolchain, switch to rust-cpu (the verification is RAM-modest but
     # CPU-bound; CBMC is single-threaded per harness).
     runs-on: ubuntu-24.04

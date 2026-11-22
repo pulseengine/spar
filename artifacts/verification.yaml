@@ -4639,11 +4639,11 @@ artifacts:
       ARMING THIS WAS DELIBERATELY DEFERRED until the cause was fixed, because a
       detector for a live infrastructure fault turns a required context into a
       coin-flip — the issue said so before either half was built. The cause was
-      smithy's tmpfiles policy sweeping `cargo-mutants-*.tmp` older than 2h,
+      the runner hosts' tmpfiles policy sweeping `cargo-mutants-*.tmp` older than 2h,
       hourly, on the assumption that a running job keeps mtime fresh. False for
       cargo-mutants, which copies each worker's source tree once at start and
       never touches it again. Age raised to 8h, above GitHub's 6h job ceiling;
-      aggressive reclaim moved to the post-job hook (smithy PR #7, verified
+      aggressive reclaim moved to the post-job hook (runner configuration change, verified
       12/12 rules, 12/12 hooks).
 
       NOT claimed: that the surviving-mutant threshold is right. This ensures
