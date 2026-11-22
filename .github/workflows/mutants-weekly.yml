@@ -6,7 +6,7 @@ name: Mutants Weekly
 # weekly cadence (and on demand) — no gating, just a long-form
 # quality signal you read async.
 #
-# Resource posture (DD: see smithy/artifacts/design-decisions.yaml):
+# Resource posture (set by the runner configuration):
 #   - lean-mem runners (24 G MemoryHigh, 24 G usable per job)
 #   - 12 h timeout cap
 #   - never cancel an in-flight run; let it finish even when overlapping refs land
@@ -139,10 +139,11 @@ jobs:
         # of them gets fixed and the other does not.
         #
         # Advisory: --summary-file never fails the job, it only refuses to
-        # render absence as zeros. `echo` the runner separately since the
-        # script has no business knowing about smithy classes.
+        # render absence as zeros. The runner is named only as "self-hosted":
+        # this repository is public, so its step summaries are too, and a
+        # runner hostname or class is private infrastructure detail.
         run: |
-          echo "Runner: \`$(hostname)\` (${SMITHY_RUNNER_CLASS:-unknown class})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Runner: self-hosted" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
           tools/check_mutants_report.py \
             --output-dir mutants-out \

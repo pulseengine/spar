@@ -117,7 +117,7 @@ flowchart TB
     CLI --> HIR
     MCP --> HIR
     WASM --> HIR
-    GEN -->|WIT components| DOWN["PulseEngine chain →<br/>witness · sigil · smithy · loom"]
+    GEN -->|WIT components| DOWN["PulseEngine chain →<br/>witness · sigil · loom"]
 ```
 
 ## Installation

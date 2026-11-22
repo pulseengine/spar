@@ -91,8 +91,8 @@ This script now REJECTS a truncated run (REQ-GUARD-GATE-EVIDENCE-002 (d)).
 Arming it was deliberately blocked until the cause was fixed, because a
 detector for an infrastructure fault that still happens turns a required
 context into a coin-flip. The cause was found and fixed on 2026-08-07
-(smithy PR #7), and it is worth recording because the mechanism is not
-obvious: `/etc/tmpfiles.d/smithy-runner-tmp.conf` swept
+(in the runner configuration), and it is worth recording because the mechanism is not
+obvious: a `/etc/tmpfiles.d/` rule on the runner hosts swept
 `cargo-mutants-*.tmp` files older than **2h**, hourly, resting on the stated
 assumption that "a job that's still running keeps mtime fresh". That is false
 for cargo-mutants specifically — it copies the source tree into each worker's
