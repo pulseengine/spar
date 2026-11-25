@@ -275,7 +275,7 @@ jobs:
         # step captured `rivet validate`'s exit code and never used it, reading
         # the verdict by grepping stdout for "Result: PASS". We want the gate;
         # the bug was the input below.
-        uses: pulseengine/rivet/.github/actions/compliance@da0c965f8d5ce4b604779ba723c24c92e4181395
+        uses: pulseengine/rivet/.github/actions/compliance@687f8f5bbb7acf638441b146eca1f7cde3ca7359
         with:
           theme: dark
           # v0.40.0, NOT v0.1.0 (#464). Measured on this tree, running what
@@ -323,7 +323,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install tools
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-nextest,cargo-llvm-cov
 
@@ -521,7 +521,7 @@ jobs:
         with:
           toolchain: 1.100.0
       - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: cargo-cyclonedx
       - name: Generate CycloneDX SBOM
