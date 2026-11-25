@@ -529,8 +529,10 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && ((github.event_name == 'pull_request' || github.event_name == 'merge_group') && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || fromJSON('["self-hosted","linux","x64","lean-mem"]')) || 'ubuntu-24.04' }}
     # Full crate: the only finished run took 182.3 min, and 2026-10-22 saw one
     # hit 240, so 240 stays the ceiling for the off-PR run. PR: see the
-    # measured in-diff durations in REQ-CI-MUTANTS-IN-DIFF-001.
-    timeout-minutes: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 60 || 240 }}
+    # measured in-diff durations in REQ-CI-MUTANTS-IN-DIFF-001. 90, not 60:
+    # #646's diff selects 191 mutants, which passed in 52 min once and was
+    # then cancelled at 60 three times, the last on a runner at 84% disk.
+    timeout-minutes: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 90 || 240 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
