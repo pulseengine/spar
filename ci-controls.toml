@@ -66,3 +66,13 @@ run = "cargo run -q --locked -p spar-check-runner-guard"
 plant = "ci-controls/runner-guard-unguarded"
 expect = "fail"
 stderr_or_stdout_matches = 'UNGUARDED zz-plant-unguarded\.yml:8 runs-on: \[self-hosted, linux, x64, light\]'
+
+[[control]]
+id = "kani-ledger-unlisted"
+check = "Format"
+# The plant adds a Kani harness with one kani::assume the ledger does not list;
+# the checker must name it.
+run = "cargo run -q --locked -p spar-check-kani-ledger"
+plant = "ci-controls/kani-ledger-unlisted"
+expect = "fail"
+stderr_or_stdout_matches = 'UNLISTED source crates/spar-solver/tests/zz_plant_kani\.rs kani-assume zz_plant_harness'

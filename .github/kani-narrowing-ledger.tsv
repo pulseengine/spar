@@ -1,0 +1,41 @@
+# Kani assumptions that narrow a harness's input range, one row per occurrence,
+# in rivet's trust-ledger shape. Written by
+# `cargo run -p spar-check-kani-ledger -- --write`. This list may only shrink
+# (REQ-PROOF-TRUST-ESCAPE-LEDGER-001): a new row is a reviewed widening of what
+# the proofs do not cover.
+#
+# section	file	kind	name
+source	crates/spar-codegen/tests/kani_codegen.rs	kani-assume	kani_emit_preserves_schedule
+source	crates/spar-codegen/tests/kani_codegen.rs	kani-unwind=65	kani_emit_preserves_schedule
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-assume	check_period_roundtrip
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-assume	prove_access_right_preserved
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-assume	prove_port_direction_preserved
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-assume	prove_port_direction_preserved
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-unwind=$unwind	period_band_proof!::$name
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-unwind=65	prove_access_right_preserved
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-unwind=8	prove_port_direction_preserved
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=check_period_roundtrip	period_band_proof!::$name
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-codegen/tests/kani_contracts.rs	kani-via=period_band_proof!	?
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	BoundedTaskSet::any
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	BoundedTaskSet::any
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	BoundedTaskSet::any
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	BoundedTaskSet::any
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	BoundedTaskSet::any
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-assume	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-unwind=8	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-unwind=8	kani_schedule_implies_no_deadline_miss
+source	crates/spar-solver/tests/kani_solver.rs	kani-unwind=8	kani_zero_laxity_handled
+source	crates/spar-solver/tests/kani_solver.rs	kani-via=BoundedTaskSet::any	kani_priority_monotonicity
+source	crates/spar-solver/tests/kani_solver.rs	kani-via=BoundedTaskSet::any	kani_schedule_implies_no_deadline_miss

@@ -10,3 +10,7 @@ publish = false
 
 # std only, like check-runner-guard: a gate's own supply chain should be as
 # small as the check.
+
+[[bin]]
+name = "check-kani-ledger"
+path = "src/main.rs"
