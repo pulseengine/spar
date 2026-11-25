@@ -379,12 +379,20 @@ artifacts:
     description: >
       Analysis coverage is tracked via rivet artifact linking: coverage
       records in artifacts/requirements.yaml link AS5506 chapters to
-      implemented analysis rules, and rivet validate/coverage commands
-      check completeness.
+      implemented analysis rules, and COMPLIANCE.md documents the covered
+      sections. The step checks that COMPLIANCE.md is non-empty, that the
+      10 COVERAGE-* records load, and that none of them lacks an outbound
+      satisfies link. The previous step, `rivet coverage --from stpa-coverage
+      --to requirement`, used flags no pinned rivet has (v0.7.0 knows
+      --filter/--tests/--baseline/--fail-under), so it failed every weekly
+      run without measuring anything (#638).
     fields:
       method: inspection
       steps:
-        - run: rivet coverage --from stpa-coverage --to requirement
+        - run: >-
+            test -s COMPLIANCE.md
+            && rivet list --filter '(matches id "^COVERAGE-")' | grep -qx '10 artifacts'
+            && rivet list --filter '(and (matches id "^COVERAGE-") (not (linked-by "satisfies" _)))' | grep -qx '0 artifacts'
     links:
       - type: satisfies
         target: STPA-REQ-022
