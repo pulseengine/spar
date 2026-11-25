@@ -1,13 +1,27 @@
 version: 2
+# Grouped monthly updates (fleet template, owner decision 2026-11-21; same
+# shape as rivet's .github/dependabot.yml at 58d165af). One entry per
+# ecosystem, its directories in one `directories:` list, so a release opens
+# one PR and not one per directory. Every entry runs monthly (the 1st, 02:00
+# UTC), keeps at most 2 PRs open, and waits 7 days after a release
+# (cooldown). Lockstep groups come first because Dependabot puts a dependency
+# in the FIRST group it matches; then one minor-patch group. Majors stay
+# ungrouped, one PR each, so a breaking change is read on its own. Security
+# updates ignore the schedule and the limit.
+#
 # Groups live inside each updates entry: Dependabot rejects a top-level
 # `groups:` key and YAML aliases (&ref_0 / *ref_0), and with either one it
-# ignores the whole file. One cargo entry lists every directory, so a grouped
-# release opens one PR and not one per directory.
+# ignores the whole file.
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
     groups:
@@ -21,8 +35,18 @@ updates:
       - /crates/spar-analysis
       - /crates/spar-annex
       - /crates/spar-base-db
+      # Separate workspaces with their own Cargo.lock. A lock-only change is
+      # code to tools/classify_changed_paths.py, so the required
+      # `Codegen compile oracle` job builds and runs both on any bump here.
+      - /codegen-exec-oracle
+      - /codegen-kiln-oracle
     schedule:
-      interval: weekly
+      interval: monthly
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
     groups:
@@ -40,24 +64,35 @@ updates:
         patterns:
           - "wasmtime"
           - "wasmtime-*"
+      minor-patch:
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: npm
-    directory: /vscode-spar
+    directories:
+      - /vscode-spar
+      - /tests/playwright
     schedule:
-      interval: weekly
+      interval: monthly
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
-    # @types/vscode is the API surface the extension compiles against, and
-    # vsce refuses to package when it is newer than engines.vscode (^1.85.0
-    # in vscode-spar/package.json): #601 raised it and #614 reverted it.
-    # Patch releases of 1.85 stay allowed. Raise both together, by hand.
     ignore:
+      # /vscode-spar: @types/vscode is the API surface the extension compiles
+      # against, and vsce refuses to package when it is newer than
+      # engines.vscode (^1.85.0 in vscode-spar/package.json): #601 raised it
+      # and #614 reverted it. Patch releases of 1.85 stay allowed. Raise both
+      # together, by hand. /tests/playwright does not depend on it.
       - dependency-name: "@types/vscode"
         update-types:
           - version-update:semver-major
           - version-update:semver-minor
-  - package-ecosystem: npm
-    directory: /tests/playwright
-    schedule:
-      interval: weekly
-    labels:
-      - dependencies
+    groups:
+      minor-patch:
+        update-types:
+          - minor
+          - patch
