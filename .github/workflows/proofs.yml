@@ -213,6 +213,128 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: tools/check_trust_ledger.py --negative-control
 
+      # Independent re-check of the built .olean files (REQ-PROOF-OLEAN-RECHECK-001).
+      #
+      # Every gate above reads Lean's own verdict: the elaborator accepted the
+      # files, and the trust ledger asks the environment the elaborator built.
+      # Metaprogramming can add a declaration to that environment without the
+      # kernel (`addDeclCore (doCheck := false)`), and nothing above re-runs the
+      # kernel on what was written to disk. lean4checker loads each Proofs.*
+      # .olean, rebuilds the environment from its imports and replays every
+      # declaration through the kernel. It is the same kernel, not a second
+      # implementation (nanoda or lean4lean would be), so it catches environment
+      # hacking and corrupted build output, not a kernel bug.
+      #
+      # Pinned by tag AND commit; the tag must equal proofs/lean-toolchain
+      # because an .olean is only readable by the Lean that wrote it.
+      - name: Build lean4checker (v4.29.0-rc6, c789dcf4)
+        working-directory: ${{ runner.temp }}
+        env:
+          L4C_SHA: c789dcf4d5b27bf2ca2840aa34609960b1337e60
+        run: |
+          set -euo pipefail
+          rm -rf lean4checker
+          git init -q lean4checker
+          cd lean4checker
+          git fetch -q --depth 1 https://github.com/leanprover/lean4checker "$L4C_SHA"
+          git checkout -q FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$L4C_SHA"
+          # Contents, not bytes: proofs/lean-toolchain has no final newline and
+          # lean4checker's does, so `diff` failed on two identical versions.
+          want=$(cat "$GITHUB_WORKSPACE/proofs/lean-toolchain"); have=$(cat lean-toolchain)
+          if [ "$have" != "$want" ]; then
+            echo "::error::lean4checker is built for '$have', the proofs use '$want'"; exit 1
+          fi
+          lake build lean4checker
+          test -x .lake/build/bin/lean4checker
+      # Prints the declarations replayed per module, then requires: the module
+      # count equals the first-party Proofs modules (Proofs.lean plus every
+      # file under Proofs/), lean4checker found the same number, and the
+      # declaration total is above zero.
+      - name: Every Proofs declaration re-checked by lean4checker
+        env:
+          L4C: ${{ runner.temp }}/lean4checker/.lake/build/bin/lean4checker
+        run: |
+          set -euo pipefail
+          expected=$(( $(find Proofs -name '*.lean' | wc -l) + 1 ))
+          lake env lean --run ../tools/lean4checker/CountDecls.lean Proofs | tee "$RUNNER_TEMP/l4c-count.txt"
+          lake env "$L4C" Proofs | tee "$RUNNER_TEMP/l4c.txt"
+          mods=$(sed -n 's/^modules: \([0-9]*\) declarations: [0-9]*$/\1/p' "$RUNNER_TEMP/l4c-count.txt")
+          decls=$(sed -n 's/^modules: [0-9]* declarations: \([0-9]*\)$/\1/p' "$RUNNER_TEMP/l4c-count.txt")
+          found=$(sed -n 's/^Found \([0-9]*\) modules to check$/\1/p' "$RUNNER_TEMP/l4c.txt")
+          echo "first-party modules: $expected, counted: $mods, lean4checker found: $found, declarations re-checked: $decls"
+          test "$mods" = "$expected"
+          test "$found" = "$expected"
+          test "$decls" -gt 0
+      # Two controls; the step fails unless lean4checker rejects both.
+      #  1. A theorem `false : False` added with doCheck := false
+      #     (tools/lean4checker/AddFalseCanary.lean), compiled to a scratch dir.
+      #  2. A copy of one Proofs .olean with 64 bytes overwritten at a quarter,
+      #     half and three quarters of its length, shadowing the real file on
+      #     LEAN_PATH. An unmodified copy in the same position must pass first,
+      #     so a red corrupt run is about the bytes, not the path setup.
+      - name: lean4checker rejects an unchecked declaration and a corrupted .olean
+        env:
+          L4C: ${{ runner.temp }}/lean4checker/.lake/build/bin/lean4checker
+        run: |
+          # Actions runs this as `bash -e`, and both controls EXPECT a non-zero
+          # exit, so errexit is off here and every result is tested by hand.
+          # With it on, `out=$(...)` ended the step at control 1 with no
+          # output (run 45808476587).
+          set +e
+          set -uo pipefail
+          C="$RUNNER_TEMP/l4c-controls"
+          rm -rf "$C"; mkdir -p "$C/canary" "$C/clean" "$C/corrupt" || exit 1
+          LP=$(lake env printenv LEAN_PATH)
+          if [ -z "$LP" ]; then echo "::error::lake env gave no LEAN_PATH"; exit 1; fi
+          fail=0
+
+          cp ../tools/lean4checker/AddFalseCanary.lean "$C/canary/L4CCanary.lean"
+          if ! lake env lean --root="$C/canary" -o "$C/canary/L4CCanary.olean" "$C/canary/L4CCanary.lean"; then
+            echo "::error::the canary did not compile, so control 1 tested nothing"; exit 1
+          fi
+          out=$(lake env env LEAN_PATH="$C/canary:$LP" "$L4C" L4CCanary 2>&1); rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -q 'found a problem in L4CCanary'; then
+            echo "control 1 ok: unchecked declaration rejected (rc=$rc)"
+          else
+            echo "::error::lean4checker accepted a theorem added without the kernel (rc=$rc)"; fail=1
+          fi
+
+          m=$(cd .lake/build/lib/lean && find Proofs -name '*.olean' ! -name '*.*.olean' | sort | tail -1)
+          if [ -z "$m" ]; then echo "::error::no Proofs .olean found for control 2"; exit 1; fi
+          mod=$(printf '%s' "${m%.olean}" | tr / .)
+          # The whole Proofs tree, not one file: Lean resolves every Proofs.*
+          # import from the first search-path entry holding the Proofs root, so
+          # a lone shadowed .olean hid its siblings and even the clean copy
+          # failed (run 45810407038: "RTACore.olean ... does not exist").
+          for d in clean corrupt; do
+            cp -R .lake/build/lib/lean/Proofs "$C/$d/" || exit 1
+            cp .lake/build/lib/lean/Proofs.olean* "$C/$d/" 2>/dev/null || true
+          done
+          size=$(wc -c < "$C/corrupt/$m")
+          for off in $((size / 4)) $((size / 2)) $((size * 3 / 4)); do
+            head -c 64 /dev/zero | tr '\0' '\377' | dd of="$C/corrupt/$m" bs=1 seek="$off" conv=notrunc 2>/dev/null
+          done
+          if cmp -s "$C/clean/$m" "$C/corrupt/$m"; then
+            echo "::error::the corruption left $m unchanged"; fail=1
+          fi
+          if lake env env LEAN_PATH="$C/clean:$LP" "$L4C" "$mod" >/dev/null 2>&1; then
+            echo "control 2 setup ok: unmodified copy of $m passes from the shadowing path"
+          else
+            echo "::error::the unmodified copy of $m failed, so control 2 would prove nothing"; fail=1
+          fi
+          lake env env LEAN_PATH="$C/corrupt:$LP" "$L4C" "$mod" > "$C/corrupt.out" 2>&1; rc=$?
+          tail -3 "$C/corrupt.out"
+          if grep -q 'does not exist' "$C/corrupt.out"; then
+            echo "::error::control 2 failed on a missing file, not on the corruption"; fail=1
+          elif [ "$rc" -ne 0 ]; then
+            echo "control 2 ok: corrupted $m rejected (rc=$rc)"
+          else
+            echo "::error::lean4checker accepted a corrupted $m"; fail=1
+          fi
+          exit "$fail"
+
       # Codegen freshness gate (REQ-PROOF-SCHED-CODEGEN-001, #321).
       #
       # `crates/spar-analysis/src/scheduling_verified.rs` is GENERATED by

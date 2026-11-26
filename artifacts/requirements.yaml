@@ -8008,6 +8008,23 @@ artifacts:
       timestamp: 2026-11-11T13:29:20Z
     release: v0.50.0
 
+  - id: REQ-PROOF-OLEAN-RECHECK-001
+    type: requirement
+    title: The required Lean job shall replay every Proofs declaration from the built .olean files through the kernel with a pinned lean4checker
+    status: implemented
+    description: |-
+      Every Lean gate in proofs.yml reads Lean's own verdict: lake build, the sorry ratchet, the reachability gate and the trust ledger (REQ-PROOF-AXIOM-LEDGER-001), which asks the environment the elaborator built. Metaprogramming can add a declaration to that environment without the kernel (Environment.addDeclCore with doCheck := false), and no step re-ran the kernel on what was written to disk. Requirement: in the required `Lean proof typecheck (lake build)` job, build lean4checker pinned by tag (equal to proofs/lean-toolchain, v4.29.0-rc6) and full commit (c789dcf4d5b27bf2ca2840aa34609960b1337e60), replay every Proofs.* module, and print the declarations replayed per module; fail unless the module count equals the first-party Proofs modules, lean4checker found the same number, and the declaration total is above zero. lean4checker uses the same kernel, so this detects environment hacking and corrupted build output, not a kernel bug; an independent kernel (nanoda, lean4lean) is a separate step. Oracle: a theorem `false : False` added with doCheck := false (tools/lean4checker/AddFalseCanary.lean) and a Proofs .olean with 192 bytes overwritten are each rejected in the same job, after an unmodified copy at the same search-path position passes.
+      MEASURED locally 2026-11-26 on a two-module project with the pinned lean4checker built against Lean 4.29.1: re-check step 2 modules, 3 declarations, pass; control 1 rejected (rc=1, 'declaration type mismatch'); control 2 setup passed, corrupted .olean rejected (rc=138); with lean4checker replaced by /usr/bin/true both steps fail; with zero declarations the re-check step fails.
+    tags: [proofs, lean, guardrail]
+    links:
+      - type: traces-to
+        target: REQ-PROOF-AXIOM-LEDGER-001
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-26T00:40:00Z
+    release: v0.50.0
+
   - id: REQ-CI-MUTANTS-WEEKLY-KILLRATE-001
     type: requirement
     title: Mutants Weekly shall run the tests that cover each mutant, or the 1.7% kill rate shall be explained by measurement
