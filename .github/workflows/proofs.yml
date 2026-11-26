@@ -239,7 +239,12 @@ jobs:
           git fetch -q --depth 1 https://github.com/leanprover/lean4checker "$L4C_SHA"
           git checkout -q FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$L4C_SHA"
-          diff lean-toolchain "$GITHUB_WORKSPACE/proofs/lean-toolchain"
+          # Contents, not bytes: proofs/lean-toolchain has no final newline and
+          # lean4checker's does, so `diff` failed on two identical versions.
+          want=$(cat "$GITHUB_WORKSPACE/proofs/lean-toolchain"); have=$(cat lean-toolchain)
+          if [ "$have" != "$want" ]; then
+            echo "::error::lean4checker is built for '$have', the proofs use '$want'"; exit 1
+          fi
           lake build lean4checker
           test -x .lake/build/bin/lean4checker
       # Prints the declarations replayed per module, then requires: the module
