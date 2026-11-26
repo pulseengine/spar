@@ -16,6 +16,8 @@ crates/spar-analysis/tests/fixtures/rta/irq_brake_handler.aadl	ACCEPT	REJECT	REJ
 crates/spar-analysis/tests/fixtures/rta/jittered_chain.aadl	ACCEPT	REJECT	REJECT	8
 crates/spar-analysis/tests/fixtures/rta/multi_isr_same_cpu.aadl	ACCEPT	REJECT	REJECT	21
 crates/spar-analysis/tests/fixtures/wctt/classical_ethernet.aadl	ACCEPT	REJECT	REJECT	11
+crates/spar-cli/tests/fixtures/architecture_v1/example.aadl	ACCEPT	ACCEPT	REJECT	0
+crates/spar-cli/tests/fixtures/architecture_v1/pe_arch.aadl	ACCEPT	ACCEPT	ACCEPT	0
 docs/research/forge-replication/descriptor.aadl	ACCEPT	ACCEPT	ACCEPT	0
 test-data/aadl2rust/abstract_feature_declaration.aadl	ACCEPT	ACCEPT	REJECT	0
 test-data/aadl2rust/annex_library_package.aadl	ACCEPT	ACCEPT	ACCEPT	0

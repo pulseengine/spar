@@ -77,7 +77,7 @@ const MUST_REJECT: &str = "test-data/negative";
 /// How many `.aadl` files pulseengine itself writes. Asserted exactly by
 /// `every_first_party_aadl_has_the_verdict_it_claims`; see the note there
 /// for why this is a count and not a floor.
-const FIRST_PARTY_MODELS: usize = 120;
+const FIRST_PARTY_MODELS: usize = 122;
 
 /// Same opt-out marker `test_data_parse_roundtrip.rs` honours, so a fixture
 /// needs one convention rather than two.

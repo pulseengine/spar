@@ -2,7 +2,7 @@
 //!
 //! `osate_corpus.rs` asks whether spar can read OSATE's files. This asks the
 //! question that actually bites a user: **they open our model in OSATE and it
-//! errors.** Measured over the 120 first-party `.aadl` files (#420).
+//! errors.** Measured over the 122 first-party `.aadl` files (#420).
 //!
 //! ## Why the OSATE column is committed rather than computed
 //!
