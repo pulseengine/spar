@@ -339,6 +339,11 @@ pub fn now_utc() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    rfc3339_utc(secs)
+}
+
+/// `secs` since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ`.
+fn rfc3339_utc(secs: i64) -> String {
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Howard Hinnant's civil_from_days.
     let z = days + 719_468;
@@ -386,6 +391,33 @@ mod tests {
         );
         assert!(credential("no-kind", "t").is_err());
         assert!(credential("x|bearer|y", "t").is_err());
+    }
+
+    /// Reference values from `date -u -r <secs> +%Y-%m-%dT%H:%M:%SZ`:
+    /// the epoch, the last second of a year, January and February (the
+    /// `m <= 2` year shift), a 400-year leap day, the day after a
+    /// non-leap century's February, and a time of day in every field.
+    #[test]
+    fn rfc3339_matches_reference_dates() {
+        for (secs, want) in [
+            (0, "1970-01-01T00:00:00Z"),
+            (946_684_799, "1999-12-31T23:59:59Z"),
+            (946_684_800, "2000-01-01T00:00:00Z"),
+            (951_782_400, "2000-02-29T00:00:00Z"),
+            (951_868_800, "2000-03-01T00:00:00Z"),
+            (1_709_210_096, "2024-02-29T12:34:56Z"),
+            (1_767_225_600, "2026-01-01T00:00:00Z"),
+            (1_795_528_799, "2026-11-24T13:59:59Z"),
+            (4_107_542_400, "2100-03-01T00:00:00Z"),
+            (4_107_456_000, "2100-02-28T00:00:00Z"),
+        ] {
+            assert_eq!(rfc3339_utc(secs), want, "{secs}");
+        }
+    }
+
+    #[test]
+    fn id_length_limit_is_64() {
+        assert_eq!(to_id(&"a".repeat(64), "t").unwrap().len(), 64);
     }
 
     #[test]

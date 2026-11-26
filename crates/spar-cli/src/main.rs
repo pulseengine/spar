@@ -1884,21 +1884,21 @@ fn cmd_emit(args: &[String]) {
         let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
         let db = spar_hir_def::HirDefDatabase::default();
         let mut trees = Vec::new();
-        // `source.model` is the file that declares the root's package.
-        let mut model: Option<String> = None;
+        // `source.model` is the first file that declares the root's package.
+        let mut declaring: Vec<String> = Vec::new();
         for (file_path, source) in load_sources_or_exit("emit", &files) {
             let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
             let tree = spar_hir_def::file_item_tree(&db, sf);
-            if model.is_none()
-                && tree
-                    .packages
-                    .iter()
-                    .any(|(_, p)| p.name.as_str().eq_ignore_ascii_case(&pkg_name))
+            if tree
+                .packages
+                .iter()
+                .any(|(_, p)| p.name.as_str().eq_ignore_ascii_case(&pkg_name))
             {
-                model = Some(file_path);
+                declaring.push(file_path);
             }
             trees.push(tree);
         }
+        let model = declaring.into_iter().next();
         let scope = spar_hir_def::GlobalScope::from_trees(trees);
         let inst = spar_hir_def::instance::SystemInstance::instantiate(
             &scope,
