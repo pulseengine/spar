@@ -8386,7 +8386,7 @@ artifacts:
       compares the #664 fixture's output with its expected document byte for
       byte (generated_at fixed, version substituted), and the ci.yml job
       "Architecture export conformance" checks the output against the pinned
-      schema (boon-cli 0.6.2) and the pinned warte 1.6.49 `arch check` (exit 0),
+      schema (boon-cli 0.6.2) and the pinned warte 1.6.51 `arch check` (exit 0),
       plus the negative control from #664, which the schema accepts and warte
       rejects with exit 1. Not covered: nested subcomponents, zone_crossing
       (warte derives it), and secret detection, which is warte's rule 8.
