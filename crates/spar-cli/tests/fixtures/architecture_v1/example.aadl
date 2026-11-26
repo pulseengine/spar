@@ -1,0 +1,44 @@
+-- Synthetic example for the architecture.v1 exporter. All names are invented.
+package Example_Security
+public
+  with PE_Arch;
+
+  abstract Node
+    features
+      net : feature;
+  end Node;
+
+  abstract Security end Security;
+
+  abstract implementation Security.impl
+    subcomponents
+      z_office : abstract Node { PE_Arch::Kind => "zone"; PE_Arch::Label => "Office";
+        PE_Arch::Trust => "trusted"; PE_Arch::Description => "Operator laptops"; };
+      z_lab : abstract Node { PE_Arch::Kind => "zone"; PE_Arch::Label => "Lab network";
+        PE_Arch::Trust => "internal"; };
+      z_cloud : abstract Node { PE_Arch::Kind => "zone"; PE_Arch::Label => "Cloud services";
+        PE_Arch::Trust => "external"; };
+
+      laptop : abstract Node { PE_Arch::Kind => "host"; PE_Arch::Zone => "z-office"; PE_Arch::Label => "Operator laptop";
+        PE_Arch::Controller => ("CTRL-001");
+        PE_Arch::Credentials => ("ssh-key|private-key|SSH to lab hosts"); };
+      gateway : abstract Node { PE_Arch::Kind => "host"; PE_Arch::Zone => "z-lab"; PE_Arch::Label => "Lab gateway"; };
+      dashboard : abstract Node { PE_Arch::Kind => "service"; PE_Arch::Zone => "z-lab"; PE_Arch::Host => "gateway";
+        PE_Arch::Label => "Dashboard"; PE_Arch::Controller => ("CTRL-002", "CTRL-003");
+        PE_Arch::Credentials => ("api-token|token|reads the cloud API"); };
+      keystore : abstract Node { PE_Arch::Kind => "credential-store"; PE_Arch::Zone => "z-lab"; PE_Arch::Host => "gateway";
+        PE_Arch::Label => "Key store"; };
+      sensor : abstract Node { PE_Arch::Kind => "device"; PE_Arch::Zone => "z-lab"; PE_Arch::Label => "Sensor"; };
+      cloud_api : abstract Node { PE_Arch::Kind => "external"; PE_Arch::Zone => "z-cloud"; PE_Arch::Label => "Cloud API"; };
+
+    connections
+      c_admin : feature laptop.net -> gateway.net { PE_Arch::Protocol => "ssh"; PE_Arch::Port_Number => 22;
+        PE_Arch::Authenticated => true; PE_Arch::Encrypted => true; PE_Arch::Credential => "laptop/ssh-key"; };
+      c_view : feature laptop.net -> dashboard.net { PE_Arch::Protocol => "https"; PE_Arch::Port_Number => 443;
+        PE_Arch::Authenticated => true; PE_Arch::Encrypted => true; };
+      c_sensor : feature sensor.net -> dashboard.net { PE_Arch::Protocol => "udp"; PE_Arch::Port_Number => 5683;
+        PE_Arch::Authenticated => false; PE_Arch::Encrypted => false; PE_Arch::Controller => ("CTRL-003"); };
+      c_cloud : feature dashboard.net -> cloud_api.net { PE_Arch::Protocol => "https"; PE_Arch::Port_Number => 443;
+        PE_Arch::Authenticated => true; PE_Arch::Encrypted => true; PE_Arch::Credential => "dashboard/api-token"; };
+  end Security.impl;
+end Example_Security;

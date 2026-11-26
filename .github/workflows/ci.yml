@@ -295,6 +295,71 @@ jobs:
       - name: Run kiln runtime oracle — spar→meld→kiln (REQ-CODEGEN-WIT-DATAPLANE-KILN-001)
         run: cargo run --release --manifest-path codegen-kiln-oracle/Cargo.toml --bin kiln-oracle
 
+  # ── architecture.v1 export conformance (#664) ───────────────────────
+  # `spar emit --format architecture-v1` on the #664 fixture must pass warte's
+  # schema AND `warte arch check`, which enforces the cross-reference rules
+  # the schema cannot express. The negative control (a credential reference
+  # to a credential that does not exist) must pass the schema and fail warte,
+  # which is why both checks run. Schema and binary are pinned by sha256.
+  arch-export:
+    name: Architecture export conformance
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    env:
+      WARTE_SCHEMA_COMMIT: 1f15e8094f6a35a81a773608ee320320c59ce9f0
+      WARTE_SCHEMA_SHA256: 891cf274ef99267f29cfef66124dac67c0b8d5daff2b9ccd36a62297e30a744b
+      WARTE_VERSION: 1.6.49
+      WARTE_LINUX_AMD64_SHA256: e63dc4108258d58ee43774ea1a51018c3bf574eb4f502cba410723e0564f9bd2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-20
+        with:
+          toolchain: nightly-2026-08-26
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Fetch the pinned schema, warte and boon
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP/arch"; mkdir -p "$T/bin"
+          curl -fsSL -o "$T/architecture.v1.json" \
+            "https://raw.githubusercontent.com/pulseengine/warte/$WARTE_SCHEMA_COMMIT/schemas/architecture.v1.json"
+          echo "$WARTE_SCHEMA_SHA256  $T/architecture.v1.json" | sha256sum -c -
+          curl -fsSL -o "$T/bin/warte" \
+            "https://github.com/pulseengine/warte/releases/download/v$WARTE_VERSION/warte-$WARTE_VERSION-linux-amd64"
+          echo "$WARTE_LINUX_AMD64_SHA256  $T/bin/warte" | sha256sum -c -
+          chmod +x "$T/bin/warte"
+          cargo install --locked boon-cli --version 0.6.2 --root "$T"
+      - name: Emit the fixture's document
+        run: |
+          set -euo pipefail
+          F=crates/spar-cli/tests/fixtures/architecture_v1
+          cargo run -q -p spar -- emit --format architecture-v1 \
+            --root Example_Security::Security.impl --generated-at 2026-01-01T00:00:00Z \
+            -o "$RUNNER_TEMP/arch/out.json" "$F/pe_arch.aadl" "$F/example.aadl"
+          sed 's#"dashboard/api-token"#"dashboard/no-such-token"#' "$RUNNER_TEMP/arch/out.json" > "$RUNNER_TEMP/arch/neg.json"
+          if cmp -s "$RUNNER_TEMP/arch/out.json" "$RUNNER_TEMP/arch/neg.json"; then
+            echo "::error::the negative control changed nothing"; exit 1
+          fi
+      - name: Schema and warte arch check, with the negative control
+        run: |
+          set +e
+          T="$RUNNER_TEMP/arch"; fail=0
+          "$T/bin/boon" "$T/architecture.v1.json" "$T/out.json"; rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::the document fails the schema (boon rc=$rc)"; fail=1; }
+          "$T/bin/warte" arch check "$T/out.json"; rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::warte arch check rejected the document (rc=$rc)"; fail=1; }
+          "$T/bin/boon" "$T/architecture.v1.json" "$T/neg.json"; rc=$?
+          [ "$rc" -eq 0 ] || { echo "::error::the negative control should pass the schema (boon rc=$rc)"; fail=1; }
+          out=$("$T/bin/warte" arch check "$T/neg.json" 2>&1); rc=$?
+          echo "$out"
+          if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'c-cloud.credential'; then
+            echo "negative control ok: warte rejected the dangling credential (rc=1)"
+          else
+            echo "::error::warte did not reject the negative control on c-cloud.credential (rc=$rc)"; fail=1
+          fi
+          exit "$fail"
+
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
     name: Bench compile smoke

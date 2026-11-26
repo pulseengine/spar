@@ -1,3 +1,4 @@
+mod arch_v1;
 mod assertion;
 mod diff;
 mod explain;
@@ -220,7 +221,7 @@ const COMMANDS: &[(&str, &str, CmdFn)] = &[
     ),
     (
         "emit",
-        "Emit a Mermaid diagram, target constants module, or linker memory map",
+        "Emit a Mermaid diagram, target constants module, linker memory map, or architecture.v1 document",
         cmd_emit,
     ),
     (
@@ -326,15 +327,17 @@ fn print_usage() {
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!(
-        "  emit     [--format mermaid|mermaid-class|mermaid-req|constants|linker] \
+        "  emit     [--format mermaid|mermaid-class|mermaid-req|constants|linker|architecture-v1] \
          [--root Package::Type.Impl] [--category <cat,...>] \
-         [--max-depth N] [--no-connections] [-o output] [<file...>]\n\
+         [--max-depth N] [--no-connections] [--generated-at T] [--commit SHA] \
+         [-o output] [<file...>]\n\
          \n\
          \t\t  mermaid       flowchart TD (default)\n\
          \t\t  mermaid-class classDiagram of component types\n\
          \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml\n\
          \t\t  constants     Rust constants module (memory/peripheral base addresses + sizes)\n\
-         \t\t  linker        GNU-ld MEMORY block / rust-embedded memory.x from memory components"
+         \t\t  linker        GNU-ld MEMORY block / rust-embedded memory.x from memory components\n\
+         \t\t  architecture-v1 warte architecture.v1 JSON from PE_Arch properties"
     );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -1752,6 +1755,8 @@ fn cmd_emit(args: &[String]) {
     let mut include_connections = true;
     let mut output: Option<String> = None;
     let mut files: Vec<String> = Vec::new();
+    let mut generated_at: Option<String> = None;
+    let mut commit: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -1765,17 +1770,36 @@ fn cmd_emit(args: &[String]) {
                     process::exit(1);
                 }
             }
+            "--generated-at" => {
+                i += 1;
+                if i < args.len() {
+                    generated_at = Some(args[i].clone());
+                } else {
+                    eprintln!("--generated-at requires a value (e.g. 2026-01-01T00:00:00Z)");
+                    process::exit(1);
+                }
+            }
+            "--commit" => {
+                i += 1;
+                if i < args.len() {
+                    commit = Some(args[i].clone());
+                } else {
+                    eprintln!("--commit requires a value");
+                    process::exit(1);
+                }
+            }
             "--format" => {
                 i += 1;
                 if i < args.len() {
                     let f = args[i].as_str();
                     match f {
-                        "mermaid" | "mermaid-class" | "mermaid-req" | "constants" | "linker" => {
+                        "mermaid" | "mermaid-class" | "mermaid-req" | "constants" | "linker"
+                        | "architecture-v1" => {
                             format = f.to_string();
                         }
                         other => {
                             eprintln!(
-                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' | 'constants' | 'linker' (got '{other}')"
+                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' | 'constants' | 'linker' | 'architecture-v1' (got '{other}')"
                             );
                             process::exit(1);
                         }
@@ -1845,6 +1869,72 @@ fn cmd_emit(args: &[String]) {
             process::exit(1);
         });
         return emit_output(diagram, output);
+    }
+
+    // ── architecture-v1: warte's Architecture view document (#664) ─────────
+    if format == "architecture-v1" {
+        let root = root.unwrap_or_else(|| {
+            eprintln!("--root Package::Type.Impl is required");
+            process::exit(1);
+        });
+        if files.is_empty() {
+            eprintln!("Missing file argument(s)");
+            process::exit(1);
+        }
+        let (pkg_name, type_name, impl_name) = parse_root_ref(&root);
+        let db = spar_hir_def::HirDefDatabase::default();
+        let mut trees = Vec::new();
+        // `source.model` is the file that declares the root's package.
+        let mut model: Option<String> = None;
+        for (file_path, source) in load_sources_or_exit("emit", &files) {
+            let sf = spar_base_db::SourceFile::new(&db, file_path.clone(), source);
+            let tree = spar_hir_def::file_item_tree(&db, sf);
+            if model.is_none()
+                && tree
+                    .packages
+                    .iter()
+                    .any(|(_, p)| p.name.as_str().eq_ignore_ascii_case(&pkg_name))
+            {
+                model = Some(file_path);
+            }
+            trees.push(tree);
+        }
+        let scope = spar_hir_def::GlobalScope::from_trees(trees);
+        let inst = spar_hir_def::instance::SystemInstance::instantiate(
+            &scope,
+            &spar_hir_def::Name::new(&pkg_name),
+            &spar_hir_def::Name::new(&type_name),
+            &spar_hir_def::Name::new(&impl_name),
+        );
+        for diag in &inst.diagnostics {
+            eprintln!("warning: {diag:?}");
+        }
+        if inst.component_count() == 0 {
+            eprintln!(
+                "error: root '{}::{}' could not be resolved — check --root spelling and file paths",
+                pkg_name, type_name
+            );
+            process::exit(1);
+        }
+        let model = model.unwrap_or_else(|| files[0].clone());
+        let model = std::path::Path::new(&model)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or(model);
+        let generated_at = generated_at.unwrap_or_else(arch_v1::now_utc);
+        let src = arch_v1::SourceInfo {
+            version: env!("CARGO_PKG_VERSION"),
+            model: &model,
+            commit: commit.as_deref(),
+            generated_at: &generated_at,
+        };
+        match arch_v1::emit(&inst, &src) {
+            Ok(content) => return emit_output(content, output),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
     }
 
     // ── constants / linker: hardware-target artifacts from the instance model ─

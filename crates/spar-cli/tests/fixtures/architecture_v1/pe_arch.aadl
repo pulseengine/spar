@@ -1,0 +1,20 @@
+-- Properties for the architecture.v1 export (warte `docs architecture-view`).
+-- values are names and kinds, never secrets.
+property set PE_Arch is
+  -- every component: what it is, and the zone it sits in
+  Kind : aadlstring applies to (all);          -- zone | host | service | credential-store | device | external
+  Zone : aadlstring applies to (all);          -- id of a component with Kind "zone"
+  Label : aadlstring applies to (all);         -- display name (defaults to the id)
+  Host : aadlstring applies to (all);          -- the host component a service runs on
+  Controller : list of aadlstring applies to (all);   -- STPA-Sec controller ids (opaque strings)
+  Credentials : list of aadlstring applies to (all);  -- "name|kind|purpose"
+  -- zones
+  Trust : aadlstring applies to (all);         -- trusted | internal | dmz | external
+  Description : aadlstring applies to (all);
+  -- connections
+  Protocol : aadlstring applies to (all);      -- quic | https | ssh | udp | wireguard | unix | other
+  Port_Number : aadlinteger applies to (all);
+  Authenticated : aadlboolean applies to (all);
+  Encrypted : aadlboolean applies to (all);
+  Credential : aadlstring applies to (all);    -- "<component id>/<credential name>"
+end PE_Arch;

@@ -8368,3 +8368,31 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-11-19T22:38:26Z
     release: v0.50.0
+
+  - id: REQ-EMIT-ARCHITECTURE-V1-001
+    type: requirement
+    title: "spar emit --format architecture-v1 shall write warte's architecture.v1 document from an AADL instance"
+    status: implemented
+    description: >
+      Requested in #664. The document is warte's Architecture view, contract
+      schemas/architecture.v1.json in pulseengine/warte at
+      1f15e8094f6a35a81a773608ee320320c59ce9f0 (sha256 891cf274...a744b). It is
+      read from the root implementation's direct subcomponents and its own
+      connections through the PE_Arch property set: Kind "zone" makes a zone,
+      every other subcomponent a component, every connection a connection.
+      Ids are the AADL names lowercased with _ as -. A missing required
+      property, a value outside the schema's enums or a repeated id exits 1
+      naming the element. Evidence: crates/spar-cli/tests/emit_architecture_v1.rs
+      compares the #664 fixture's output with its expected document byte for
+      byte (generated_at fixed, version substituted), and the ci.yml job
+      "Architecture export conformance" checks the output against the pinned
+      schema (boon-cli 0.6.2) and the pinned warte 1.6.49 `arch check` (exit 0),
+      plus the negative control from #664, which the schema accepts and warte
+      rejects with exit 1. Not covered: nested subcomponents, zone_crossing
+      (warte derives it), and secret detection, which is warte's rule 8.
+    tags: [emit, warte, architecture, export]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-26T18:00:00Z
+    release: v0.50.0
