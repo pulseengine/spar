@@ -981,8 +981,11 @@ artifacts:
     fields:
       method: formal-bounded
       steps:
+        # --solver kissat as in ci.yml's Kani job: with the default CaDiCaL the
+        # d9 band never finished (#252), and this step timed out at 2700 s in
+        # Verification Weekly run 45794934601.
         - run: >-
-            cargo kani --tests -p spar-codegen
+            cargo kani --tests -p spar-codegen --solver kissat
             --harness prove_thread_period_preserved_d1
             --harness prove_thread_period_preserved_d2
             --harness prove_thread_period_preserved_d3
@@ -993,8 +996,8 @@ artifacts:
             --harness prove_thread_period_preserved_d8
             --harness prove_thread_period_preserved_d9
             --harness prove_thread_period_preserved_d10
-        - run: cargo kani --tests -p spar-codegen --harness prove_port_direction_preserved
-        - run: cargo kani --tests -p spar-codegen --harness prove_access_right_preserved
+        - run: cargo kani --tests -p spar-codegen --solver kissat --harness prove_port_direction_preserved
+        - run: cargo kani --tests -p spar-codegen --solver kissat --harness prove_access_right_preserved
     links:
       - type: satisfies
         target: REQ-KANI-CODEGEN-001
