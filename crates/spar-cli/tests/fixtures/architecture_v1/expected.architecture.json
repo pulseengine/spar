@@ -1,0 +1,138 @@
+{
+  "schema": "architecture.v1",
+  "generated_at": "2026-01-01T00:00:00Z",
+  "source": {
+    "tool": "spar",
+    "version": "0.49.0",
+    "model": "example.aadl",
+    "commit": null
+  },
+  "zones": [
+    {
+      "id": "z-office",
+      "name": "Office",
+      "trust": "trusted",
+      "description": "Operator laptops"
+    },
+    {
+      "id": "z-lab",
+      "name": "Lab network",
+      "trust": "internal"
+    },
+    {
+      "id": "z-cloud",
+      "name": "Cloud services",
+      "trust": "external"
+    }
+  ],
+  "components": [
+    {
+      "id": "laptop",
+      "name": "Operator laptop",
+      "kind": "host",
+      "zone": "z-office",
+      "controller": [
+        "CTRL-001"
+      ],
+      "credentials": [
+        {
+          "name": "ssh-key",
+          "kind": "private-key",
+          "purpose": "SSH to lab hosts"
+        }
+      ],
+      "aadl": "Example_Security::Node (laptop)"
+    },
+    {
+      "id": "gateway",
+      "name": "Lab gateway",
+      "kind": "host",
+      "zone": "z-lab",
+      "aadl": "Example_Security::Node (gateway)"
+    },
+    {
+      "id": "dashboard",
+      "name": "Dashboard",
+      "kind": "service",
+      "zone": "z-lab",
+      "host": "gateway",
+      "controller": [
+        "CTRL-002",
+        "CTRL-003"
+      ],
+      "credentials": [
+        {
+          "name": "api-token",
+          "kind": "token",
+          "purpose": "reads the cloud API"
+        }
+      ],
+      "aadl": "Example_Security::Node (dashboard)"
+    },
+    {
+      "id": "keystore",
+      "name": "Key store",
+      "kind": "credential-store",
+      "zone": "z-lab",
+      "host": "gateway",
+      "aadl": "Example_Security::Node (keystore)"
+    },
+    {
+      "id": "sensor",
+      "name": "Sensor",
+      "kind": "device",
+      "zone": "z-lab",
+      "aadl": "Example_Security::Node (sensor)"
+    },
+    {
+      "id": "cloud-api",
+      "name": "Cloud API",
+      "kind": "external",
+      "zone": "z-cloud",
+      "aadl": "Example_Security::Node (cloud_api)"
+    }
+  ],
+  "connections": [
+    {
+      "id": "c-admin",
+      "from": "laptop",
+      "to": "gateway",
+      "protocol": "ssh",
+      "authenticated": true,
+      "encrypted": true,
+      "port": 22,
+      "credential": "laptop/ssh-key"
+    },
+    {
+      "id": "c-view",
+      "from": "laptop",
+      "to": "dashboard",
+      "protocol": "https",
+      "authenticated": true,
+      "encrypted": true,
+      "port": 443
+    },
+    {
+      "id": "c-sensor",
+      "from": "sensor",
+      "to": "dashboard",
+      "protocol": "udp",
+      "authenticated": false,
+      "encrypted": false,
+      "port": 5683,
+      "controller": [
+        "CTRL-003"
+      ]
+    },
+    {
+      "id": "c-cloud",
+      "from": "dashboard",
+      "to": "cloud-api",
+      "protocol": "https",
+      "authenticated": true,
+      "encrypted": true,
+      "port": 443,
+      "credential": "dashboard/api-token"
+    }
+  ]
+}

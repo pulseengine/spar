@@ -51,17 +51,20 @@ const BASELINE: &str = concat!(
 /// Models spar accepts that BOTH implementations reject. MEASURED 48.
 ///
 /// EXACT, not a one-sided bound: going below fails too, demanding this be
-/// lowered. So any movement in spar's verdict on these 120 files fails the
+/// lowered. So any movement in spar's verdict on these 122 files fails the
 /// test in EITHER direction, and a fix must be accompanied by updating this
 /// number. Calling it a "floor" undersells it.
 const MAX_TOO_PERMISSIVE: usize = 48;
 
-/// Files where OSATE and Ocarina disagree. MEASURED 14.
+/// Files where OSATE and Ocarina disagree. MEASURED 15: the 15th is the
+/// #664 architecture.v1 fixture example.aadl, whose abstract feature
+/// (`net : feature;`) Ocarina 9873d8b rejects, as it does
+/// test-data/aadl2rust/abstract_feature_declaration.aadl.
 ///
 /// EXACT, like MAX_TOO_PERMISSIVE: below fails as well as above. These are exempt from grading, so an unnoticed
 /// increase would quietly shrink the set of files this gate actually judges —
 /// the same vacuity as a corpus that silently stops being scanned.
-const MAX_CONTESTED: usize = 14;
+const MAX_CONTESTED: usize = 15;
 
 /// Files spar rejects that BOTH accept, deliberately.
 ///
@@ -82,7 +85,7 @@ enum Consensus {
 /// What the two independent implementations jointly say.
 ///
 /// Split out and unit-tested because the corpus cannot exercise every branch:
-/// `Contested` occurs 14 times today but could fall to zero, and a guard that
+/// `Contested` occurs 15 times today but could fall to zero, and a guard that
 /// only real data reaches is a guard that stops being tested the moment the
 /// data changes. Same lesson as the too-strict arm in `osate_agreement.rs`,
 /// which was deletable with no test failing.

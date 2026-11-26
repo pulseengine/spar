@@ -24,6 +24,7 @@
 #     job-level `if:` first; an if:-skipped job reports "skipped", which
 #     satisfies a required context.
 #
+Architecture export conformance
 Bench compile smoke
 Cargo Deny
 Clippy
