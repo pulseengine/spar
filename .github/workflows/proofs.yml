@@ -304,9 +304,13 @@ jobs:
           m=$(cd .lake/build/lib/lean && find Proofs -name '*.olean' ! -name '*.*.olean' | sort | tail -1)
           if [ -z "$m" ]; then echo "::error::no Proofs .olean found for control 2"; exit 1; fi
           mod=$(printf '%s' "${m%.olean}" | tr / .)
+          # The whole Proofs tree, not one file: Lean resolves every Proofs.*
+          # import from the first search-path entry holding the Proofs root, so
+          # a lone shadowed .olean hid its siblings and even the clean copy
+          # failed (run 45810407038: "RTACore.olean ... does not exist").
           for d in clean corrupt; do
-            mkdir -p "$C/$d/$(dirname "$m")"
-            cp ".lake/build/lib/lean/$m" "$C/$d/$m"
+            cp -R .lake/build/lib/lean/Proofs "$C/$d/" || exit 1
+            cp .lake/build/lib/lean/Proofs.olean* "$C/$d/" 2>/dev/null || true
           done
           size=$(wc -c < "$C/corrupt/$m")
           for off in $((size / 4)) $((size / 2)) $((size * 3 / 4)); do
@@ -322,7 +326,9 @@ jobs:
           fi
           lake env env LEAN_PATH="$C/corrupt:$LP" "$L4C" "$mod" > "$C/corrupt.out" 2>&1; rc=$?
           tail -3 "$C/corrupt.out"
-          if [ "$rc" -ne 0 ]; then
+          if grep -q 'does not exist' "$C/corrupt.out"; then
+            echo "::error::control 2 failed on a missing file, not on the corruption"; fail=1
+          elif [ "$rc" -ne 0 ]; then
             echo "control 2 ok: corrupted $m rejected (rc=$rc)"
           else
             echo "::error::lean4checker accepted a corrupted $m"; fail=1
