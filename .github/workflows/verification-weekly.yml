@@ -13,6 +13,19 @@ name: Verification Weekly
 #
 # Not on pull_request or merge_group, so it is not a required context and never
 # runs on a PR's code.
+#
+# Three jobs split the population by what each artifact needs (spar#638):
+#   all-stepped  every feature except the two groups below, on rust-cpu;
+#   kani         the five `matches id "KANI"` artifacts, whose steps call
+#                `cargo kani`, on ubuntu-24.04 with Kani installed as ci.yml's
+#                Kani job installs it (the rust-cpu runners have no Kani:
+#                `error: no such command: kani` in runs 44575526792 and
+#                45179028085);
+#   mutation     VAL-MUTATION-001, the full spar-analysis crate, on lean-mem
+#                with a step limit that holds the 182-240 min ci.yml records.
+# The report job merges the three results files, holds their union to the
+# independent count, and files the issue. A new `cargo kani` artifact without
+# KANI in its id lands in all-stepped and fails there, visibly.
 
 on:
   schedule:
@@ -25,7 +38,6 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   all-stepped:
@@ -34,6 +46,9 @@ jobs:
     # The per-PR gate's 60 minutes covers 20 features, TEST-PROOF-* `lake build`
     # included. This runs all of them; the first runs measure the real figure.
     timeout-minutes: 300
+    outputs:
+      population: ${{ steps.population.outputs.count }}
+      verify: ${{ steps.verify.outcome }}
     env:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -D warnings
@@ -82,13 +97,14 @@ jobs:
         # the 45-minute step limit (a cold Mathlib `lake build` takes 25-35)
         # turns one hung step into a failed artifact, so the run still ends,
         # writes its results and files the issue.
+        # The population floor moved to the report job, which holds the union
+        # of all three jobs to it; this job runs everything but theirs.
         env:
-          MIN_MATCHED: ${{ steps.population.outputs.count }}
           PYTHONUNBUFFERED: "1"
         run: |
           tools/run_verification.py \
-            --filter '(= type "feature")' \
-            --min-matched "$MIN_MATCHED" \
+            --filter '(and (= type "feature") (not (matches id "KANI")) (not (= id "VAL-MUTATION-001")))' \
+            --min-matched 1 \
             --step-timeout 2700 \
             --results-json verification-results.json
 
@@ -96,19 +112,188 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: verification-weekly-results
+          name: verification-weekly-results-main
           path: verification-results.json
           if-no-files-found: warn
 
+  kani:
+    name: Verification (Kani artifacts, weekly)
+    # Hosted, like ci.yml's Kani job: kani-verifier bundles CBMC, which the
+    # self-hosted runners do not carry. That job takes about 20 minutes.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    outputs:
+      verify: ${{ steps.verify.outcome }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-20
+        with:
+          toolchain: 1.100.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install rivet
+        run: |
+          cargo install --locked --git https://github.com/pulseengine/rivet \
+            --rev b7a17bef \
+            --bin rivet \
+            rivet-cli
+      - name: Install Kani
+        # Same version as ci.yml's Kani job (0.67.0, #252).
+        run: |
+          cargo install --locked kani-verifier --version 0.67.0
+          cargo kani setup
+      - name: Run the Kani artifacts
+        id: verify
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          tools/run_verification.py \
+            --filter '(and (= type "feature") (matches id "KANI"))' \
+            --min-matched 1 \
+            --step-timeout 2700 \
+            --results-json verification-results.json
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-weekly-results-kani
+          path: verification-results.json
+          if-no-files-found: warn
+
+  mutation:
+    name: Verification (full-crate mutation, weekly)
+    # lean-mem, like ci.yml's push-to-main Mutation Testing job, which runs
+    # the same command: RAM under --jobs 4. Its full-crate runs took 182.3 min
+    # and once 240, so the step limit is 270 min and the job's 330.
+    runs-on: [self-hosted, linux, x64, lean-mem]
+    timeout-minutes: 330
+    outputs:
+      verify: ${{ steps.verify.outcome }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-20
+        with:
+          toolchain: nightly-2026-08-26
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install rivet
+        run: |
+          cargo install --locked --git https://github.com/pulseengine/rivet \
+            --rev b7a17bef \
+            --bin rivet \
+            rivet-cli
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          # The version ci.yml pins: the report checker reads its layout.
+          tool: cargo-mutants@27.1.0
+      - name: Run VAL-MUTATION-001
+        id: verify
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          tools/run_verification.py \
+            --filter '(and (= type "feature") (= id "VAL-MUTATION-001"))' \
+            --min-matched 1 \
+            --step-timeout 16200 \
+            --results-json verification-results.json
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-weekly-results-mutation
+          path: verification-results.json
+          if-no-files-found: warn
+
+  report:
+    name: Verification Weekly report
+    needs: [all-stepped, kani, mutation]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Self-test the issue filer
+        run: tools/file_verification_issue.py --self-test
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: verification-weekly-results-*
+          path: parts
+      - name: Merge the three results files
+        id: merge
+        # Writes verification-results.json only when all three parts exist,
+        # are disjoint, and together cover at least the independent count;
+        # otherwise the filer reports "No results file" and the run fails.
+        env:
+          POPULATION: ${{ needs.all-stepped.outputs.population }}
+          OUTCOMES: ${{ needs.all-stepped.outputs.verify }} ${{ needs.kani.outputs.verify }} ${{ needs.mutation.outputs.verify }}
+        run: |
+          set -euo pipefail
+          case "$POPULATION" in
+            ''|*[!0-9]*|0) echo "::error::no population count from all-stepped (got '$POPULATION')"; exit 0 ;;
+          esac
+          for j in main kani mutation; do
+            f="parts/verification-weekly-results-$j/verification-results.json"
+            if ! jq -e 'type=="object" and (.passed|type=="array") and (.failed|type=="array") and (.skipped|type=="array")' "$f" >/dev/null 2>&1; then
+              echo "::error::job '$j' left no usable results file ($f)"; exit 0
+            fi
+          done
+          jq -s '{filter: (map(.filter) | join(" + ")),
+                  total: (map(.total) | add),
+                  passed_count: (map(.passed | length) | add),
+                  failed_count: (map(.failed | length) | add),
+                  skipped_count: (map(.skipped | length) | add),
+                  passed: (map(.passed) | add),
+                  failed: (map(.failed) | add),
+                  skipped: (map(.skipped) | add)}' \
+            parts/verification-weekly-results-main/verification-results.json \
+            parts/verification-weekly-results-kani/verification-results.json \
+            parts/verification-weekly-results-mutation/verification-results.json \
+            >merged.json
+          ids=$(jq '(.passed + .failed + .skipped) | length' merged.json)
+          uniq=$(jq '(.passed + .failed + .skipped) | unique | length' merged.json)
+          if [ "$ids" != "$uniq" ]; then
+            echo "::error::the three jobs overlap: $ids artifact results, $uniq distinct"; exit 0
+          fi
+          if [ "$uniq" -lt "$POPULATION" ]; then
+            echo "::error::the three jobs covered $uniq artifacts; the YAML holds $POPULATION features"; exit 0
+          fi
+          mv merged.json verification-results.json
+          jq -r '"\(.passed_count) passed, \(.failed_count) failed, \(.skipped_count) skipped of \(.total)"' verification-results.json
+          # A results file with no failures still needs every run step to
+          # have exited 0: run_verification.py also fails a run that matched
+          # too few or executed nothing.
+          echo "run_verification outcomes: $OUTCOMES"
+          if [ "$(jq .failed_count verification-results.json)" = 0 ] \
+             && [ "$OUTCOMES" = "success success success" ]; then
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          fi
+      - name: Upload merged results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-weekly-results
+          path: verification-results.json
+          if-no-files-found: warn
       - name: File or update the tracking issue
-        if: steps.verify.outcome != 'success'
+        if: steps.merge.outputs.ok != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: tools/file_verification_issue.py --run-url "$RUN_URL"
-
       - name: Fail the run if any artifact failed
-        if: steps.verify.outcome != 'success'
+        if: steps.merge.outputs.ok != 'true'
         run: |
           echo "::error::The weekly verification run failed; see the tracking issue."
           exit 1

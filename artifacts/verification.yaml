@@ -1008,14 +1008,24 @@ artifacts:
     status: implemented
     title: Mutation testing for analysis passes
     description: >
-      Mutation testing campaign covering 674 analysis tests. Validates that
-      the test suite detects injected faults in analysis logic. Survivor
-      count reduced to 142, confirming high fault-detection capability
-      of the analysis test suite.
+      Mutation testing campaign over the full spar-analysis crate. Validates
+      that the test suite detects injected faults in analysis logic. The
+      steps run the same command as ci.yml's push-to-main Mutation Testing
+      job and hold the survivors to that job's ratchet, read from ci.yml by
+      check_mutants_report.py --assert-workflow-threshold rather than copied
+      here. The bare `cargo mutants -p spar-analysis` this replaced could not
+      pass: it ran serially past the weekly job's 2700 s step limit (runs
+      44575526792 and 45179028085), and cargo-mutants exits non-zero on any
+      survivor while the crate has a few hundred. The weekly workflow runs
+      this artifact in its own lean-mem job with a longer step limit.
     fields:
       method: automated-test
       steps:
-        - run: cargo mutants -p spar-analysis
+        - run: cargo mutants -p spar-analysis --timeout 120 --jobs 4 --output mutants-out -- --lib || true
+        - run: >-
+            tools/check_mutants_report.py --output-dir mutants-out --max-missed
+            "$(tools/check_mutants_report.py --assert-workflow-threshold .github/workflows/ci.yml
+            | sed -n 's/.*--max-missed \([0-9][0-9]*\).*/\1/p')"
     links:
       - type: satisfies
         target: ARCH-ANALYSIS
