@@ -5411,7 +5411,7 @@ artifacts:
     status: implemented
     description: |-
       crates/spar-cli/tests/emit_architecture_v1.rs, 4 cases: the #664 fixture (pe_arch.aadl + example.aadl, root Example_Security::Security.impl, generated_at 2026-01-01T00:00:00Z) equals expected.architecture.json byte for byte with this crate's version in place of 0.49.0; --commit is written to source.commit and source.model is the file declaring the root package; a component without PE_Arch::Zone exits 1 naming the subcomponent; a protocol outside the schema enum exits 1 naming the connection. Three unit tests in crates/spar-cli/src/arch_v1.rs cover ids, the "name|kind|purpose" parser and the timestamp shape.
-      The schema and warte checks are not steps here because they need the pinned warte binary: ci.yml job "Architecture export conformance" runs them. MEASURED 2026-11-26 with warte 1.6.49 macos-arm64 (sha256 58210abf...0c74) and boon-cli 0.6.2: output valid, "3 zone(s), 6 component(s), 4 connection(s), 3 crossing a zone", rc 0; negative control passes the schema and fails warte with "c-cloud.credential: no such credential on that component", rc 1.
+      The schema and warte checks are not steps here because they need the pinned warte binary: ci.yml job "Architecture export conformance" runs them. MEASURED 2026-11-26 with warte 1.6.51 macos-arm64 (sha256 d10c69c7...925b) and boon-cli 0.6.2: output valid, "3 zone(s), 6 component(s), 4 connection(s), 3 crossing a zone", rc 0; negative control passes the schema and fails warte with "c-cloud.credential: no such credential on that component", rc 1.
     release: v0.50.0
     tags: [emit, warte, architecture]
     fields:
