@@ -277,10 +277,16 @@ jobs:
         env:
           L4C: ${{ runner.temp }}/lean4checker/.lake/build/bin/lean4checker
         run: |
+          # Actions runs this as `bash -e`, and both controls EXPECT a non-zero
+          # exit, so errexit is off here and every result is tested by hand.
+          # With it on, `out=$(...)` ended the step at control 1 with no
+          # output (run 45808476587).
+          set +e
           set -uo pipefail
           C="$RUNNER_TEMP/l4c-controls"
-          rm -rf "$C"; mkdir -p "$C/canary" "$C/clean" "$C/corrupt"
+          rm -rf "$C"; mkdir -p "$C/canary" "$C/clean" "$C/corrupt" || exit 1
           LP=$(lake env printenv LEAN_PATH)
+          if [ -z "$LP" ]; then echo "::error::lake env gave no LEAN_PATH"; exit 1; fi
           fail=0
 
           cp ../tools/lean4checker/AddFalseCanary.lean "$C/canary/L4CCanary.lean"
@@ -296,6 +302,7 @@ jobs:
           fi
 
           m=$(cd .lake/build/lib/lean && find Proofs -name '*.olean' ! -name '*.*.olean' | sort | tail -1)
+          if [ -z "$m" ]; then echo "::error::no Proofs .olean found for control 2"; exit 1; fi
           mod=$(printf '%s' "${m%.olean}" | tr / .)
           for d in clean corrupt; do
             mkdir -p "$C/$d/$(dirname "$m")"
