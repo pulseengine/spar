@@ -11,7 +11,9 @@ mod graph;
 mod render;
 
 pub use graph::{ArchEdge, ArchNode, build_graph};
-pub use render::{RenderError, analyze_aadl_from_fs, render_aadl, render_aadl_from_fs};
+pub use render::{
+    RenderError, analyze_aadl_from_fs, component_runner, render_aadl, render_aadl_from_fs,
+};
 
 // ---------------------------------------------------------------------------
 // WIT guest bindings (WASM component only)

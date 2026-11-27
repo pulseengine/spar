@@ -285,6 +285,11 @@ impl AnalysisRunner {
         self.analyses.len()
     }
 
+    /// The [`Analysis::name`] of each registered analysis, in order.
+    pub fn names(&self) -> Vec<&str> {
+        self.analyses.iter().map(|a| a.name()).collect()
+    }
+
     /// Run all registered analyses and collect their diagnostics.
     pub fn run_all(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         let mut all_diagnostics = Vec::new();

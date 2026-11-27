@@ -360,6 +360,47 @@ jobs:
           fi
           exit "$fail"
 
+  # ── Wasm component oracle (REQ-WASM-COMPONENT-HEADLESS-001) ─────────
+  # spar-wasm ships as a wasm32-wasip2 component every release. This job
+  # builds it as release.yml does and runs its `analyze` export headless
+  # under wasmtime on every root of the accepted first-party models,
+  # comparing the diagnostics with native `spar analyze` restricted to the
+  # component's analyses. A planted model must produce a direction_rules
+  # error through the component. wasmtime is pinned by sha256.
+  wasm-component:
+    name: Wasm component oracle
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    env:
+      WASMTIME_VERSION: 41.0.0
+      WASMTIME_LINUX_X64_SHA256: 07b82a195dc3bda0be010f73d48778b43a209829e9912a4bcd46a8e3760d74e9
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-20
+        with:
+          toolchain: nightly-2026-08-26
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Fetch the pinned wasmtime
+        run: |
+          set -euo pipefail
+          T="$RUNNER_TEMP/wasmtime"; mkdir -p "$T"
+          curl -fsSL -o "$T/w.tar.xz" \
+            "https://github.com/bytecodealliance/wasmtime/releases/download/v$WASMTIME_VERSION/wasmtime-v$WASMTIME_VERSION-x86_64-linux.tar.xz"
+          echo "$WASMTIME_LINUX_X64_SHA256  $T/w.tar.xz" | sha256sum -c -
+          tar -xJf "$T/w.tar.xz" -C "$T" --strip-components=1
+          echo "$T" >> "$GITHUB_PATH"
+      - name: Build spar-wasm (wasm32-wasip2)
+        run: cargo build --release --target wasm32-wasip2 -p spar-wasm
+      - name: Run the component against native spar analyze
+        run: |
+          set -euo pipefail
+          wasmtime --version
+          SPAR_WASM_COMPONENT="$PWD/target/wasm32-wasip2/release/spar_wasm.wasm" \
+            cargo test -p spar --test wasm_component_agreement -- --include-ignored --nocapture
+
   # ── Bench compile smoke (fast regression gate) ──────────────────────
   bench-smoke:
     name: Bench compile smoke

@@ -141,6 +141,15 @@ pub fn analyze_aadl_from_fs(
         )));
     }
 
+    Ok(component_runner().run_all(instance.inner()))
+}
+
+/// The analyses the component's `analyze` export runs. It is a subset of
+/// `AnalysisRunner::register_all`: the solver-backed passes do not build for
+/// wasm32. The headless component oracle (crates/spar-cli/tests/
+/// wasm_component_agreement.rs) reads this list to restrict native
+/// `spar analyze` output to the same passes.
+pub fn component_runner() -> spar_analysis::AnalysisRunner {
     let mut runner = spar_analysis::AnalysisRunner::new();
     runner.register(Box::new(spar_analysis::connectivity::ConnectivityAnalysis));
     runner.register(Box::new(spar_analysis::hierarchy::HierarchyAnalysis));
@@ -174,7 +183,7 @@ pub fn analyze_aadl_from_fs(
     ));
     runner.register(Box::new(spar_analysis::emv2_analysis::Emv2Analysis));
 
-    Ok(runner.run_all(instance.inner()))
+    runner
 }
 
 /// Parse AADL source, instantiate the given root, and render to SVG.

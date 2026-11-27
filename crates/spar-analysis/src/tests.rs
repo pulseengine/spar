@@ -1648,6 +1648,16 @@ fn test_register_all_count() {
     );
 }
 
+/// `names()` lists each registered analysis's `name()`, in registration order.
+#[test]
+fn runner_names_follow_registration() {
+    let mut runner = AnalysisRunner::new();
+    assert!(runner.names().is_empty());
+    runner.register(Box::new(crate::hierarchy::HierarchyAnalysis));
+    runner.register(Box::new(crate::connectivity::ConnectivityAnalysis));
+    assert_eq!(runner.names(), ["hierarchy", "connectivity"]);
+}
+
 // ── Pass name verification (kills ~50 name() mutants) ───────────────
 
 /// Verify that every analysis pass tags its diagnostics with the correct

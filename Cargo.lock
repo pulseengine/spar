@@ -1427,6 +1427,7 @@ dependencies = [
  "spar-syntax",
  "spar-sysml2",
  "spar-variants",
+ "spar-wasm",
  "toml",
 ]
 
