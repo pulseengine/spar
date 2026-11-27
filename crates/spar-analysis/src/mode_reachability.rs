@@ -251,7 +251,14 @@ fn find_dead_transitions(
     for mt in transitions {
         for trigger in &mt.triggers {
             let trigger_lower = trigger.as_str().to_ascii_lowercase();
-            if !connected_features.contains(&trigger_lower) {
+            // `sub.port`: the subcomponent raises the event itself, so the
+            // trigger is live whenever it resolves to an outgoing port.
+            let live = if trigger_lower.contains('.') {
+                crate::mode_check::resolve_trigger(instance, comp, trigger.as_str()).is_some()
+            } else {
+                connected_features.contains(&trigger_lower)
+            };
+            if !live {
                 let mt_label = mt
                     .name
                     .as_ref()

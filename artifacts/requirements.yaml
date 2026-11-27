@@ -8396,3 +8396,29 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-11-26T18:00:00Z
     release: v0.50.0
+
+  - id: REQ-MODE-TRIGGER-PATH-001
+    type: requirement
+    title: "A mode transition trigger written as subcomponent.port shall resolve to that subcomponent's outgoing port"
+    status: implemented
+    description: >
+      Reported in #670 from pulseengine/zwinger#16. AS5506 §12 allows an out
+      event port of a subcomponent as a mode transition trigger. The lowering
+      kept each identifier of `launcher.profile_loaded` as its own trigger, so
+      `spar modes` listed the transition as dead and mode_check reported both
+      halves as unmatched features. A trigger is now one dotted name. mode_check,
+      mode_rules and mode_reachability resolve it through one function: `port`
+      is a feature of the modal component, and `sub.port` is an out or in out
+      port of its subcomponent `sub`, compared case-insensitively. A resolved
+      `sub.port` trigger is live, because the subcomponent raises the event
+      itself. An unresolved one gives one warning naming the whole path.
+      Evidence: crates/spar-cli/tests/mode_trigger_path.rs (7 cases) and
+      spar-hir-def's mode_trigger_paths_stay_whole. Not covered: `self.event`
+      and `processor.port` triggers. The "N/N modes reachable" line still counts
+      dead transitions as edges (noted in #670).
+    tags: [modes, lowering, as5506]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-27T10:00:00Z
+    release: v0.50.0

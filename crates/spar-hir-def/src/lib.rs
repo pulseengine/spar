@@ -1607,6 +1607,31 @@ end TransPkg;
         );
     }
 
+    /// #670: a `subcomponent.port` trigger lowers to one dotted name, and a
+    /// comma list to one name per trigger.
+    #[test]
+    fn mode_trigger_paths_stay_whole() {
+        let db = HirDefDatabase::default();
+        let src = r#"
+package TrigPkg
+public
+  process P
+  end P;
+  process implementation P.impl
+    modes
+      a : initial mode;
+      b : mode;
+      a -[ launcher.profile_loaded, go ]-> b;
+  end P.impl;
+end TrigPkg;
+"#;
+        let file = spar_base_db::SourceFile::new(&db, "trig.aadl".to_string(), src.to_string());
+        let tree = file_item_tree(&db, file);
+        let mt = tree.mode_transitions.iter().next().unwrap().1;
+        let names: Vec<&str> = mt.triggers.iter().map(|n| n.as_str()).collect();
+        assert_eq!(names, ["launcher.profile_loaded", "go"]);
+    }
+
     #[test]
     fn mode_instances_from_impl() {
         let db = make_db();

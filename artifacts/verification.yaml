@@ -5424,3 +5424,28 @@ artifacts:
         target: REQ-EMIT-ARCHITECTURE-V1-001
       - type: verifies
         target: REQ-EMIT-ARCHITECTURE-V1-001
+
+  - id: TEST-MODE-TRIGGER-PATH-001
+    type: feature
+    title: A subcomponent.port trigger is live and matched; a wrong path, an in port or a data port is reported once
+    status: implemented
+    description: |-
+      crates/spar-cli/tests/mode_trigger_path.rs, 7 cases on a process with a thread subcomponent `launcher`:
+      - `launcher.profile_loaded` (an out event port) gives no mode_* warning and no dead transition, and so does the same name in other letter case;
+      - `launcher.nope` gives one mode_check warning naming the dotted path, and `spar modes` reports it not connected;
+      - `nobody.profile_loaded` and `launcher.ack` (an in port) do not resolve;
+      - `launcher.level` (an out data port) gets mode_rules' event-port warning and no mode_check warning;
+      - in the list `launcher.profile_loaded, go`, only `go` is dead.
+      spar-hir-def's mode_trigger_paths_stay_whole checks that the lowering yields ["launcher.profile_loaded", "go"].
+    release: v0.50.0
+    tags: [modes, lowering]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test mode_trigger_path
+        - run: cargo test -p spar-hir-def --lib mode_trigger_paths_stay_whole
+    links:
+      - type: satisfies
+        target: REQ-MODE-TRIGGER-PATH-001
+      - type: verifies
+        target: REQ-MODE-TRIGGER-PATH-001

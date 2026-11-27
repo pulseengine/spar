@@ -137,23 +137,19 @@ impl Analysis for ModeCheckAnalysis {
                     });
                 }
 
-                // Trigger validation: each trigger should name a feature on this component
-                let feature_names: Vec<String> = comp
-                    .features
-                    .iter()
-                    .map(|&fi| instance.features[fi].name.as_str().to_string())
-                    .collect();
-
+                // Trigger validation: each trigger names a feature on this
+                // component, or an outgoing port of one of its subcomponents.
                 for trigger in &mt.triggers {
-                    if !feature_names
-                        .iter()
-                        .any(|f| f.eq_ignore_ascii_case(trigger.as_str()))
-                    {
+                    if resolve_trigger(instance, comp, trigger.as_str()).is_none() {
+                        let what = if trigger.as_str().contains('.') {
+                            "does not match an outgoing port of a subcomponent of this component"
+                        } else {
+                            "does not match any feature on this component"
+                        };
                         diags.push(AnalysisDiagnostic {
                             severity: Severity::Warning,
                             message: format!(
-                                "mode transition '{}' in '{}': trigger '{}' \
-                                 does not match any feature on this component",
+                                "mode transition '{}' in '{}': trigger '{}' {what}",
                                 mt_label, comp.name, trigger
                             ),
                             path: path.clone(),
@@ -165,6 +161,45 @@ impl Analysis for ModeCheckAnalysis {
         }
 
         diags
+    }
+}
+
+/// The feature a mode transition trigger names, if it resolves.
+///
+/// `port` names a feature of `comp`. `sub.port` (AS5506 §12) names an
+/// outgoing port (`out` or `in out`) of the subcomponent `sub` of `comp`.
+/// Names compare case-insensitively, as AADL identifiers do.
+pub(crate) fn resolve_trigger(
+    instance: &SystemInstance,
+    comp: &spar_hir_def::instance::ComponentInstance,
+    trigger: &str,
+) -> Option<spar_hir_def::instance::FeatureInstanceIdx> {
+    let find = |owner: &spar_hir_def::instance::ComponentInstance, name: &str| {
+        owner.features.iter().copied().find(|&fi| {
+            instance.features[fi]
+                .name
+                .as_str()
+                .eq_ignore_ascii_case(name)
+        })
+    };
+    match trigger.split_once('.') {
+        None => find(comp, trigger),
+        Some((sub, port)) => {
+            let child = comp
+                .children
+                .iter()
+                .map(|&ci| instance.component(ci))
+                .find(|c| c.name.as_str().eq_ignore_ascii_case(sub))?;
+            let fi = find(child, port)?;
+            matches!(
+                instance.features[fi].direction,
+                Some(
+                    spar_hir_def::item_tree::Direction::Out
+                        | spar_hir_def::item_tree::Direction::InOut
+                )
+            )
+            .then_some(fi)
+        }
     }
 }
 
