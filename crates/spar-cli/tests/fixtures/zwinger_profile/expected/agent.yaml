@@ -1,0 +1,9 @@
+# What `spar emit --format zwinger-profile --session agent.session` must produce from
+# architecture/reference_mesh.aadl (zwinger#17). Until spar ships the emitter, this file is the
+# target: tests/architecture.rs parses it as a profile, and CI will diff spar's output against it.
+name: agent
+network:
+  mode: none
+  allow: [api.anthropic.com, github.com]
+  allow_local_binding: false
+  unix_sockets: confined

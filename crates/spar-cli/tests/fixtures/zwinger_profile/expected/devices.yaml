@@ -1,0 +1,8 @@
+# What `spar emit --format zwinger-profile --session devices.session` must produce from
+# architecture/reference_mesh.aadl (zwinger#17). The device session has no egress, so no hosts.
+name: devices
+network:
+  mode: none
+  allow: []
+  allow_local_binding: false
+  unix_sockets: confined

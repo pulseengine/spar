@@ -48,23 +48,31 @@ const BASELINE: &str = concat!(
     "/../../test-data/interop/baseline/three-way.tsv"
 );
 
-/// Models spar accepts that BOTH implementations reject. MEASURED 48.
+/// Models spar accepts that BOTH implementations reject. MEASURED 49. The
+/// 49th is zwinger's reference_mesh.aadl (the zwinger-profile fixture,
+/// pulseengine/zwinger#17). OSATE's 11 errors are all unresolved references
+/// to spar's built-in `Spar_Network` property set and its units, the same
+/// cause as classical_ethernet.aadl. Ocarina, run on the file alone as for
+/// every row, does not see the `Zwinger` package it imports.
 ///
 /// EXACT, not a one-sided bound: going below fails too, demanding this be
-/// lowered. So any movement in spar's verdict on these 122 files fails the
+/// lowered. So any movement in spar's verdict on these 125 files fails the
 /// test in EITHER direction, and a fix must be accompanied by updating this
 /// number. Calling it a "floor" undersells it.
-const MAX_TOO_PERMISSIVE: usize = 48;
+const MAX_TOO_PERMISSIVE: usize = 49;
 
-/// Files where OSATE and Ocarina disagree. MEASURED 15: the 15th is the
+/// Files where OSATE and Ocarina disagree. MEASURED 16: the 15th is the
 /// #664 architecture.v1 fixture example.aadl, whose abstract feature
 /// (`net : feature;`) Ocarina 9873d8b rejects, as it does
-/// test-data/aadl2rust/abstract_feature_declaration.aadl.
+/// test-data/aadl2rust/abstract_feature_declaration.aadl. The 16th is
+/// zwinger's zwinger.aadl, which OSATE accepts and Ocarina rejects in its
+/// EMV2 pass ("Cannot use types or extend the package itself in
+/// error_type_library").
 ///
 /// EXACT, like MAX_TOO_PERMISSIVE: below fails as well as above. These are exempt from grading, so an unnoticed
 /// increase would quietly shrink the set of files this gate actually judges —
 /// the same vacuity as a corpus that silently stops being scanned.
-const MAX_CONTESTED: usize = 15;
+const MAX_CONTESTED: usize = 16;
 
 /// Files spar rejects that BOTH accept, deliberately.
 ///

@@ -1145,6 +1145,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
+name = "rivet-yaml"
+version = "0.43.3"
+source = "git+https://github.com/pulseengine/rivet?tag=v0.43.3#3422f42e8461b17ec08dcfb6be215535cc9ede38"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "rowan 0.16.2",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "rowan"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1153,6 +1165,17 @@ dependencies = [
  "countme",
  "hashbrown 0.14.5",
  "rustc-hash 1.1.0",
+ "text-size",
+]
+
+[[package]]
+name = "rowan"
+version = "0.16.2"
+source = "git+https://github.com/pulseengine/rowan.git?branch=fix%2Fmiri-soundness-v3#9e7abd1161634377d278cde0c504c101ac003941"
+dependencies = [
+ "countme",
+ "hashbrown 0.15.5",
+ "rustc-hash 2.1.2",
  "text-size",
 ]
 
@@ -1207,6 +1230,12 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "salsa"
@@ -1377,7 +1406,8 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "proptest",
- "rowan",
+ "rivet-yaml",
+ "rowan 0.16.1",
  "rustc-hash 2.1.2",
  "salsa",
  "serde",
@@ -1418,7 +1448,7 @@ dependencies = [
 name = "spar-annex"
 version = "0.49.0"
 dependencies = [
- "rowan",
+ "rowan 0.16.1",
  "spar-syntax",
 ]
 
@@ -1426,7 +1456,7 @@ dependencies = [
 name = "spar-base-db"
 version = "0.49.0"
 dependencies = [
- "rowan",
+ "rowan 0.16.1",
  "salsa",
  "spar-annex",
  "spar-syntax",
@@ -1484,7 +1514,7 @@ name = "spar-hir-def"
 version = "0.49.0"
 dependencies = [
  "la-arena",
- "rowan",
+ "rowan 0.16.1",
  "rustc-hash 2.1.2",
  "salsa",
  "serde",
@@ -1545,7 +1575,7 @@ version = "0.49.0"
 dependencies = [
  "expect-test",
  "proptest",
- "rowan",
+ "rowan 0.16.1",
  "spar-syntax",
 ]
 
@@ -1579,7 +1609,7 @@ name = "spar-syntax"
 version = "0.49.0"
 dependencies = [
  "expect-test",
- "rowan",
+ "rowan 0.16.1",
  "spar-parser",
 ]
 
@@ -1589,7 +1619,7 @@ version = "0.49.0"
 dependencies = [
  "expect-test",
  "la-arena",
- "rowan",
+ "rowan 0.16.1",
  "smol_str",
  "spar-hir-def",
 ]

@@ -2,7 +2,7 @@
 //!
 //! `osate_corpus.rs` asks whether spar can read OSATE's files. This asks the
 //! question that actually bites a user: **they open our model in OSATE and it
-//! errors.** Measured over the 122 first-party `.aadl` files (#420).
+//! errors.** Measured over the 125 first-party `.aadl` files (#420).
 //!
 //! ## Why the OSATE column is committed rather than computed
 //!
@@ -73,10 +73,15 @@ const BASELINE: &str = concat!(
 );
 
 /// Models spar accepts that OSATE refuses. 54 when first measured on OSATE
-/// 2.18.0; **53** after the bus-access feature rule (#420) let
+/// 2.18.0; 53 after the bus-access feature rule (#420) let
 /// `connections_all.aadl` be corrected -- OSATE now accepts it with 0
-/// diagnostics. Lower this as more of #420 is fixed; it may never rise.
-const MAX_TOO_PERMISSIVE: usize = 53;
+/// diagnostics. **54** again with zwinger's reference_mesh.aadl (the
+/// zwinger-profile fixture, pulseengine/zwinger#17), a new file rather than
+/// a regression: OSATE's 11 errors are all unresolved references to spar's
+/// built-in `Spar_Network` property set and its units, as for
+/// classical_ethernet.aadl. Lower this as more of #420 is fixed. It rises
+/// only for a newly enrolled file whose every OSATE error is named here.
+const MAX_TOO_PERMISSIVE: usize = 54;
 
 /// Files where spar is stricter than OSATE **on purpose**.
 ///

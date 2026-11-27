@@ -1,0 +1,123 @@
+-- The public reference deployment: two zwinger nodes on one LAN (DD-ZW-012).
+--
+-- A template, not a fleet. It shows how a deployment instantiates Zwinger::Node: an agent node
+-- on a Mac and a device node on a Pi, each with its own warte probe, and a warte instance on the
+-- agent's host that collects both nodes' events. smithy's real fleet imports package Zwinger
+-- the same way and keeps its host names private; anyone else can copy this file.
+--
+-- The network view is for spar's WCTT pass (DD-ZW-014): the hosts' network interfaces are
+-- end stations on one switched LAN. The rates, the switch latency and the queue depth are
+-- assumptions for a home or lab LAN, written down so the bound can be recomputed when a real
+-- deployment states its own. WireGuard and SSH add headers to each frame; the default
+-- 1500-byte burst already covers a full MTU frame.
+--
+-- The control channel between sessions (zwinger#10, design C) is not modelled: it is design
+-- only, and modelling it would claim an interface that does not exist.
+
+package Zwinger_Reference_Mesh
+public
+  with Zwinger;
+  with Zwinger_Profile;
+
+  -- A host's network interface: the end station the WCTT pass sees.
+  device Nic
+    features
+      lan       : requires bus access;
+      from_host : in data port Zwinger::RunEvent;
+      to_lan    : out data port Zwinger::RunEvent;
+      from_lan  : in data port Zwinger::RunEvent;
+      to_host   : out data port Zwinger::RunEvent;
+    properties
+      Spar_Network::Output_Rate => 100000000 bitsps;  -- assumption: 100 Mbit/s uplink (the Pi's)
+      Spar_Network::Queue_Depth => 1;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        from_host : in propagation {ServiceOmission};
+        to_lan    : out propagation {ServiceOmission};
+        from_lan  : in propagation {ServiceOmission};
+        to_host   : out propagation {ServiceOmission};
+      flows
+        send : error path from_host {ServiceOmission} -> to_lan {ServiceOmission};
+        recv : error path from_lan {ServiceOmission} -> to_host {ServiceOmission};
+      end propagations;
+    **};
+  end Nic;
+
+  device implementation Nic.Ethernet
+  end Nic.Ethernet;
+
+  bus Lan
+    properties
+      Spar_Network::Switch_Type        => FIFO;
+      Spar_Network::Output_Rate        => 1000000000 bitsps;  -- assumption: unmanaged 1 Gbit/s switch
+      Spar_Network::Forwarding_Latency => 2 us .. 10 us;      -- assumption: store-and-forward
+      Spar_Network::Queue_Depth        => 8;
+  end Lan;
+
+  bus implementation Lan.Switched
+  end Lan.Switched;
+
+  -- warte's collecting instance on the agent's host.
+  process WarteInstance
+    features
+      events_in : in data port Zwinger::RunEvent;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        -- Where a lost event ends: warte sees a node that reported nothing, the same as a node
+        -- that ran nothing. This chain is the telemetry top event of DD-ZW-013.
+        events_in : in propagation {ServiceOmission};
+      end propagations;
+    **};
+  end WarteInstance;
+
+  process implementation WarteInstance.Local
+  end WarteInstance.Local;
+
+  -- A service outside the mesh that a session may connect to. Its Host is what the emitter
+  -- writes into network.allow.
+  system RemoteService
+    features
+      requests : in data port Zwinger::Traffic;
+  end RemoteService;
+
+  system implementation RemoteService.Internet
+  end RemoteService.Internet;
+
+  system Mesh
+  end Mesh;
+
+  system implementation Mesh.TwoNodes
+    subcomponents
+      agent    : system Zwinger::Node.Confined;   -- coding-agent sessions on the Mac
+      devices  : system Zwinger::Node.Confined;   -- device sessions on the Pi
+      warte    : process WarteInstance.Local;
+      mac_nic  : device Nic.Ethernet;
+      pi_nic   : device Nic.Ethernet;
+      lan      : bus Lan.Switched;
+      model_api : system RemoteService.Internet;  -- the coding agent's model API
+      forge     : system RemoteService.Internet;  -- the git host
+    connections
+      b_mac    : bus access lan -> mac_nic.lan;
+      b_pi     : bus access lan -> pi_nic.lan;
+      -- The agent node's probe reports locally.
+      e_agent  : port agent.sync_out -> warte.events_in;
+      -- The device node's probe reports across the LAN.
+      e_pi_out : port devices.sync_out -> pi_nic.from_host;
+      e_lan    : port pi_nic.to_lan -> mac_nic.from_lan;
+      e_mac_in : port mac_nic.to_host -> warte.events_in;
+      -- The agent session's egress. The device session has none, so its allow list is empty.
+      g_api    : port agent.egress -> model_api.requests;
+      g_forge  : port agent.egress -> forge.requests;
+    properties
+      Deployment_Properties::Actual_Connection_Binding => (reference (lan)) applies to e_lan;
+      Zwinger_Profile::Host => "api.anthropic.com" applies to model_api;
+      Zwinger_Profile::Host => "github.com" applies to forge;
+      Zwinger_Profile::Profile_Name => "agent" applies to agent.session;
+      Zwinger_Profile::Network_Mode => confined applies to agent.session;
+      Zwinger_Profile::Profile_Name => "devices" applies to devices.session;
+      Zwinger_Profile::Network_Mode => confined applies to devices.session;
+  end Mesh.TwoNodes;
+
+end Zwinger_Reference_Mesh;
