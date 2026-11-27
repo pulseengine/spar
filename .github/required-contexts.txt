@@ -44,4 +44,5 @@ Security Audit (RustSec)
 Supply Chain (cargo-vet)
 Test
 Verification Gate (rivet-driven)
+Wasm component oracle
 gate-probe
