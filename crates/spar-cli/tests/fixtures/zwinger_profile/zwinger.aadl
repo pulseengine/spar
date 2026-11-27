@@ -1,0 +1,227 @@
+-- zwinger: the component type any deployment instantiates (AADL v2.3, analysed by spar).
+--
+-- This package is the reusable half of DD-ZW-012. It describes one confined session: zwinger
+-- reads a profile, asks the kernel for its sandbox, and either confines and execs the command
+-- or refuses with exit 78. A deployment (smithy's fleet, or anyone's) imports this package and
+-- binds sessions to its own hosts; architecture/reference_mesh.aadl is the public example.
+--
+-- The EMV2 annexes state the two top events of DD-ZW-013 as error flows:
+--   fail-closed: every fault reaching a session (a bad profile, a kernel without the needed
+--     sandbox) ends in a sink, a refusal, and no session declares a commission error on what
+--     the command does to its host. The model states the claim; the evidence for it is the
+--     Kani and Verus proofs and the e2e tests linked from REQ-ZW-008 and REQ-ZW-013.
+--   telemetry: a run can end without an event (a write grant covers the events directory, or
+--     the directory cannot be written). That is an error source on events_out, and the model
+--     shows where it goes. Nothing downstream turns it into a detected loss yet.
+
+package Zwinger
+public
+  with Data_Model;
+
+  data Profile
+    -- A rivet-yaml profile (REQ-ZW-002). Untrusted input to the trusted parser.
+    properties
+      Data_Model::Data_Representation => Struct;
+  end Profile;
+
+  data KernelAbi
+    -- What the host kernel offers: the Landlock ABI on Linux, Seatbelt on macOS.
+    properties
+      Data_Model::Data_Representation => Struct;
+  end KernelAbi;
+
+  data RunEvent
+    -- One zwinger.event.v1 record per run (REQ-ZW-014): no paths, no arguments.
+    properties
+      Data_Model::Data_Representation => Struct;
+      Data_Size => 1 KByte;
+  end RunEvent;
+
+  data Command
+    -- A control message between sessions. Reserved: the channel (zwinger#10) is design only.
+    properties
+      Data_Model::Data_Representation => Struct;
+  end Command;
+
+  -- A connection the session initiates to a remote service. Data ports are one-way: the port
+  -- means "may connect to"; replies are not modelled.
+  data Traffic
+    properties
+      Data_Model::Data_Representation => Struct;
+  end Traffic;
+
+  -- The host's resources as seen by the confined command: files, sockets, devices.
+  data HostAccess
+    properties
+      Data_Model::Data_Representation => Struct;
+  end HostAccess;
+
+  process Session
+    features
+      profile_in : in data port Profile;
+      kernel_in  : in data port KernelAbi;
+      events_out : out data port RunEvent;
+      access_out : out data port HostAccess;  -- what the confined command does to its host
+      egress     : out data port Traffic;     -- network.allow is derived from these (zwinger#17)
+      -- Lifecycle triggers, raised by the launcher (REQ-ZW-018).
+      profile_loaded : in event port;
+      profile_bad    : in event port;
+      preflight_ok   : in event port;
+      preflight_fail : in event port;
+      exec_failed    : in event port;
+      child_exit     : in event port;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        profile_in : in propagation {ValueError};
+        kernel_in  : in propagation {ServiceOmission, ValueError};
+        events_out : out propagation {ServiceOmission};
+        -- access_out declares no out propagation: no fault becomes access the profile did
+        -- not grant. Adding one here would be the fail-closed claim breaking.
+      flows
+        bad_profile  : error sink profile_in {ValueError};             -- refused, exit 78
+        no_sandbox   : error sink kernel_in {ServiceOmission};         -- refused, exit 78
+        wrong_abi    : error sink kernel_in {ValueError};              -- refused, exit 78
+        event_lost   : error source events_out {ServiceOmission};      -- no event written
+      end propagations;
+    **};
+  end Session;
+
+  -- The zwinger process before exec: it loads the profile, runs preflight, confines itself and
+  -- execs the command, which becomes the session. It raises the lifecycle events.
+  process Launcher
+    features
+      profile_loaded : out event port;
+      profile_bad    : out event port;
+      preflight_ok   : out event port;
+      preflight_fail : out event port;
+      exec_failed    : out event port;  -- 126/127; the session is already confined
+      child_exit     : out event port;
+  end Launcher;
+
+  process implementation Launcher.Exec
+  end Launcher.Exec;
+
+  -- The session lifecycle (REQ-ZW-018). refused and exited are terminal: no transition leaves
+  -- them, so a refused session never becomes confined, and confined is entered only from
+  -- preflight, so nothing runs before the plan and the kernel check pass. Exit 78 belongs to
+  -- refused.
+  process implementation Session.Confined
+    modes
+      loading    : initial mode;
+      preflight  : mode;
+      confined   : mode;
+      refused    : mode;
+      exited     : mode;
+      load_ok    : loading -[profile_loaded]-> preflight;
+      load_fail  : loading -[profile_bad]-> refused;
+      plan_ok    : preflight -[preflight_ok]-> confined;
+      plan_fail  : preflight -[preflight_fail]-> refused;
+      run_exit   : confined -[child_exit]-> exited;
+      run_noexec : confined -[exec_failed]-> exited;
+  end Session.Confined;
+
+  -- The kernel the session runs on, as the source of sandbox faults.
+  device Kernel
+    features
+      abi_out : out data port KernelAbi;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        abi_out : out propagation {ServiceOmission, ValueError};
+      flows
+        too_old  : error source abi_out {ServiceOmission};  -- no Landlock, or no Seatbelt
+        mismatch : error source abi_out {ValueError};       -- an ABI below what the profile needs
+      end propagations;
+    **};
+  end Kernel;
+
+  device implementation Kernel.Host
+  end Kernel.Host;
+
+  -- Where profiles come from. A profile is untrusted until the parser accepts it.
+  device ProfileStore
+    features
+      profile_out : out data port Profile;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        profile_out : out propagation {ValueError};
+      flows
+        malformed : error source profile_out {ValueError};  -- hostile or broken YAML
+      end propagations;
+    **};
+  end ProfileStore;
+
+  device implementation ProfileStore.Files
+  end ProfileStore.Files;
+
+  -- The host resources the confined command touches. Its in propagation is where a broken
+  -- fail-closed claim would arrive.
+  device HostResources
+    features
+      access_in : in data port HostAccess;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        access_in : in propagation {ItemCommission};
+      end propagations;
+    **};
+  end HostResources;
+
+  device implementation HostResources.Host
+  end HostResources.Host;
+
+  -- warte's probe on the same host: reads the event drop directory (warte#223, option A) and
+  -- forwards the events to the warte instance.
+  process Probe
+    features
+      events_in : in data port RunEvent;
+      sync_out  : out data port RunEvent;
+    annex EMV2 {**
+      use types ErrorLibrary;
+      error propagations
+        events_in : in propagation {ServiceOmission};
+        sync_out  : out propagation {ServiceOmission};
+      flows
+        -- The probe cannot tell a run that wrote no event from no run, so a lost event passes
+        -- through as a silent omission. Closing this needs a run counter or a start record.
+        silent_loss : error path events_in {ServiceOmission} -> sync_out {ServiceOmission};
+      end propagations;
+    **};
+  end Probe;
+
+  process implementation Probe.StateDir
+  end Probe.StateDir;
+
+  -- One host's confinement: the session with its kernel, profiles, resources and probe.
+  system Node
+    features
+      sync_out : out data port RunEvent;
+      egress   : out data port Traffic;
+  end Node;
+
+  system implementation Node.Confined
+    subcomponents
+      session   : process Session.Confined;
+      kernel    : device Kernel.Host;
+      profiles  : device ProfileStore.Files;
+      resources : device HostResources.Host;
+      probe     : process Probe.StateDir;
+      launcher  : process Launcher.Exec;
+    connections
+      c_profile : port profiles.profile_out -> session.profile_in;
+      c_kernel  : port kernel.abi_out -> session.kernel_in;
+      c_access  : port session.access_out -> resources.access_in;
+      c_events  : port session.events_out -> probe.events_in;
+      c_sync    : port probe.sync_out -> sync_out;
+      c_egress  : port session.egress -> egress;
+      t_loaded  : port launcher.profile_loaded -> session.profile_loaded;
+      t_bad     : port launcher.profile_bad -> session.profile_bad;
+      t_ok      : port launcher.preflight_ok -> session.preflight_ok;
+      t_fail    : port launcher.preflight_fail -> session.preflight_fail;
+      t_noexec  : port launcher.exec_failed -> session.exec_failed;
+      t_exit    : port launcher.child_exit -> session.child_exit;
+  end Node.Confined;
+
+end Zwinger;

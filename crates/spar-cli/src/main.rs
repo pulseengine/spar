@@ -7,6 +7,7 @@ mod lsp;
 mod refactor;
 mod sarif;
 mod verify;
+mod zwinger_profile;
 
 // Re-export shared modules from the library so the binary keeps using
 // the `crate::moves::…` / `crate::variants_bridge::…` paths in its
@@ -327,9 +328,9 @@ fn print_usage() {
     );
     eprintln!("  modes    --root Package::Type.Impl [--format text|smv|dot] <file...>");
     eprintln!(
-        "  emit     [--format mermaid|mermaid-class|mermaid-req|constants|linker|architecture-v1] \
+        "  emit     [--format mermaid|mermaid-class|mermaid-req|constants|linker|architecture-v1|zwinger-profile] \
          [--root Package::Type.Impl] [--category <cat,...>] \
-         [--max-depth N] [--no-connections] [--generated-at T] [--commit SHA] \
+         [--max-depth N] [--no-connections] [--generated-at T] [--commit SHA] [--session PATH] \
          [-o output] [<file...>]\n\
          \n\
          \t\t  mermaid       flowchart TD (default)\n\
@@ -337,7 +338,8 @@ fn print_usage() {
          \t\t  mermaid-req   requirementDiagram from artifacts/requirements.yaml\n\
          \t\t  constants     Rust constants module (memory/peripheral base addresses + sizes)\n\
          \t\t  linker        GNU-ld MEMORY block / rust-embedded memory.x from memory components\n\
-         \t\t  architecture-v1 warte architecture.v1 JSON from PE_Arch properties"
+         \t\t  architecture-v1 warte architecture.v1 JSON from PE_Arch properties\n\
+         \t\t  zwinger-profile zwinger profile name + network YAML for --session, from Zwinger_Profile"
     );
     eprintln!("  render   --root Package::Type.Impl [-o output.svg] <file...>");
     eprintln!(
@@ -1757,6 +1759,7 @@ fn cmd_emit(args: &[String]) {
     let mut files: Vec<String> = Vec::new();
     let mut generated_at: Option<String> = None;
     let mut commit: Option<String> = None;
+    let mut session: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -1788,18 +1791,27 @@ fn cmd_emit(args: &[String]) {
                     process::exit(1);
                 }
             }
+            "--session" => {
+                i += 1;
+                if i < args.len() {
+                    session = Some(args[i].clone());
+                } else {
+                    eprintln!("--session requires a value (an instance path, e.g. agent.session)");
+                    process::exit(1);
+                }
+            }
             "--format" => {
                 i += 1;
                 if i < args.len() {
                     let f = args[i].as_str();
                     match f {
                         "mermaid" | "mermaid-class" | "mermaid-req" | "constants" | "linker"
-                        | "architecture-v1" => {
+                        | "architecture-v1" | "zwinger-profile" => {
                             format = f.to_string();
                         }
                         other => {
                             eprintln!(
-                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' | 'constants' | 'linker' | 'architecture-v1' (got '{other}')"
+                                "--format only supports 'mermaid' | 'mermaid-class' | 'mermaid-req' | 'constants' | 'linker' | 'architecture-v1' | 'zwinger-profile' (got '{other}')"
                             );
                             process::exit(1);
                         }
@@ -1869,6 +1881,46 @@ fn cmd_emit(args: &[String]) {
             process::exit(1);
         });
         return emit_output(diagram, output);
+    }
+
+    // ── zwinger-profile: a zwinger profile's name + network section ────────
+    if format == "zwinger-profile" {
+        let (Some(root), Some(session)) = (root.as_ref(), session.as_ref()) else {
+            eprintln!(
+                "zwinger-profile needs --root Package::Type.Impl and --session <instance path>"
+            );
+            process::exit(1);
+        };
+        if files.is_empty() {
+            eprintln!("Missing file argument(s)");
+            process::exit(1);
+        }
+        let (pkg_name, type_name, impl_name) = parse_root_ref(root);
+        let db = spar_hir_def::HirDefDatabase::default();
+        let trees = load_sources_or_exit("emit", &files)
+            .into_iter()
+            .map(|(file_path, source)| {
+                let sf = spar_base_db::SourceFile::new(&db, file_path, source);
+                spar_hir_def::file_item_tree(&db, sf)
+            })
+            .collect();
+        let scope = spar_hir_def::GlobalScope::from_trees(trees);
+        let inst = spar_hir_def::instance::SystemInstance::instantiate(
+            &scope,
+            &spar_hir_def::Name::new(&pkg_name),
+            &spar_hir_def::Name::new(&type_name),
+            &spar_hir_def::Name::new(&impl_name),
+        );
+        for diag in &inst.diagnostics {
+            eprintln!("warning: {diag:?}");
+        }
+        match zwinger_profile::emit(&inst, session) {
+            Ok(content) => return emit_output(content, output),
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
     }
 
     // ── architecture-v1: warte's Architecture view document (#664) ─────────

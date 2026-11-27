@@ -12,6 +12,9 @@ crates/spar-analysis/tests/fixtures/rta/multi_isr_same_cpu.aadl	ACCEPT	REJECT	21
 crates/spar-analysis/tests/fixtures/wctt/classical_ethernet.aadl	ACCEPT	REJECT	11
 crates/spar-cli/tests/fixtures/architecture_v1/example.aadl	ACCEPT	ACCEPT	0
 crates/spar-cli/tests/fixtures/architecture_v1/pe_arch.aadl	ACCEPT	ACCEPT	0
+crates/spar-cli/tests/fixtures/zwinger_profile/reference_mesh.aadl	ACCEPT	REJECT	11
+crates/spar-cli/tests/fixtures/zwinger_profile/zwinger.aadl	ACCEPT	ACCEPT	0
+crates/spar-cli/tests/fixtures/zwinger_profile/zwinger_profile.aadl	ACCEPT	ACCEPT	0
 docs/research/forge-replication/descriptor.aadl	ACCEPT	ACCEPT	0
 test-data/aadl2rust/abstract_feature_declaration.aadl	ACCEPT	ACCEPT	0
 test-data/aadl2rust/annex_library_package.aadl	ACCEPT	ACCEPT	0

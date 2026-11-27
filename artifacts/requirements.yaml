@@ -8421,4 +8421,35 @@ artifacts:
       created-by: ai-assisted
       model: claude-opus-5-5
       timestamp: 2026-11-27T10:00:00Z
+
+  - id: REQ-EMIT-ZWINGER-PROFILE-001
+    type: requirement
+    title: "spar emit --format zwinger-profile shall write a zwinger profile's name and network section from the architecture model"
+    status: implemented
+    description: >
+      Seam pulseengine/zwinger#17: zwinger owns the Zwinger_Profile property
+      set and the profile schema, and spar generates the part of a profile the
+      model decides. For the session process named by --session, spar writes
+      `name` from Profile_Name (required) and the whole `network` section.
+      mode comes from Network_Mode, where `confined` is written `none`, and an
+      absent value also gives `none`. allow is the sorted, deduplicated Host of
+      every end-to-end connection leaving the session's `egress` feature, taken
+      from the destination or its nearest ancestor. allow_local_binding and
+      unix_sockets come from their properties, defaulting to false and
+      `confined`. The YAML is written with rivet-yaml (git, pulseengine/rivet
+      v0.43.3), the parser zwinger reads profiles with. Generation refuses,
+      with exit 1 naming the element, everything zwinger's Profile::validate
+      refuses about the network section: unfiltered with hosts, unfiltered
+      with local binding, and a Host that is empty or holds *, /, : or
+      whitespace. It also refuses an egress destination with no Host on it or
+      any ancestor, and a missing Profile_Name. Paths and mach_lookup stay
+      hand-written. Evidence: crates/spar-cli/tests/emit_zwinger_profile.rs
+      parses spar's output and zwinger's expected agent.yaml and devices.yaml
+      into a deny_unknown_fields copy of zwinger's Profile shape and asserts
+      that they are equal.
+    tags: [emit, zwinger, yaml, export]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-27T12:00:00Z
     release: v0.50.0

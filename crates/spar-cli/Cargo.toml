@@ -32,6 +32,7 @@ spar-variants.workspace = true
 spar-insight.workspace = true
 spar-mermaid.workspace = true
 etch.workspace = true
+rivet-yaml.workspace = true
 la-arena.workspace = true
 rowan.workspace = true
 salsa.workspace = true

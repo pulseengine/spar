@@ -74,6 +74,7 @@ toml = "0.8"
 smol_str = "0.3"
 petgraph = "0.7"
 etch = { git = "https://github.com/pulseengine/rivet.git", rev = "4c067093ac34fc9e32227bc5bc853d47e9220540", package = "etch" }
+rivet-yaml = { git = "https://github.com/pulseengine/rivet", tag = "v0.43.3" }
 spar-verify-macros = { path = "crates/spar-verify-macros" }
 spar-verify = { path = "crates/spar-verify" }
 quote = "1"

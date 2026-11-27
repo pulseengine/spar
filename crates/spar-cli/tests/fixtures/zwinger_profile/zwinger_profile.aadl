@@ -1,0 +1,21 @@
+-- Zwinger_Profile: the properties spar's zwinger-profile emitter reads (zwinger#17).
+--
+-- zwinger owns this property set; spar copies it verbatim into its fixtures. The emitter writes
+-- a profile's `name` and its whole `network` section from these properties and from the
+-- session's egress connections. Paths and mach_lookup stay hand-written in the profile.
+
+property set Zwinger_Profile is
+  -- The profile's `name`.
+  Profile_Name : aadlstring applies to (process);
+  -- network.mode. `none` is an AADL keyword, so the literal is `confined`, which the emitter
+  -- writes as mode: none. Absent means none, zwinger's fail-closed default.
+  Network_Mode : enumeration (confined, unfiltered) applies to (process);
+  -- network.allow_local_binding: bind and listen on loopback ports.
+  Allow_Local_Binding : aadlboolean applies to (process);
+  -- network.unix_sockets.
+  Unix_Sockets : enumeration (confined, unfiltered) applies to (process);
+  -- The exact host name a peer is reached at. network.allow is the sorted set of Hosts reached
+  -- through the session's egress feature, each taken from the destination or its nearest
+  -- ancestor that carries one.
+  Host : aadlstring applies to (system, process, device, abstract);
+end Zwinger_Profile;

@@ -24,7 +24,7 @@ Cross-checks spar against OSATE 2.18.0 in **both directions**.
 | direction | question | corpus | gate |
 |---|---|---|---|
 | **A** | can spar read what OSATE wrote? | 548 vendored `osate/examples` | `crates/spar-cli/tests/osate_corpus.rs` |
-| **B** | does OSATE accept what *we* wrote? | 122 first-party `.aadl` | `crates/spar-cli/tests/osate_agreement.rs` |
+| **B** | does OSATE accept what *we* wrote? | 125 first-party `.aadl` | `crates/spar-cli/tests/osate_agreement.rs` |
 
 Direction B is the one that bites a user — they open our model in OSATE and it
 errors. See #420 for the current findings and #246 for the plug-fest design.

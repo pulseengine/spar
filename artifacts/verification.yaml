@@ -5449,3 +5449,31 @@ artifacts:
         target: REQ-MODE-TRIGGER-PATH-001
       - type: verifies
         target: REQ-MODE-TRIGGER-PATH-001
+
+  - id: TEST-EMIT-ZWINGER-PROFILE-001
+    type: feature
+    title: zwinger's reference mesh emits zwinger's expected profiles, and every network refusal exits 1 naming the element
+    status: implemented
+    description: |-
+      crates/spar-cli/tests/emit_zwinger_profile.rs, 14 cases. Fixtures are copied verbatim from pulseengine/zwinger architecture/ at b16bccf:
+      - agent.session and devices.session parse equal to expected/agent.yaml and expected/devices.yaml under a deny_unknown_fields copy of zwinger's Profile shape;
+      - agent's allow is [api.anthropic.com, github.com];
+      - unfiltered, Unix_Sockets and Allow_Local_Binding map through, and a missing Network_Mode gives none;
+      - an egress destination with no Host names its connection;
+      - a wildcard or scheme Host is refused;
+      - unfiltered with hosts, and unfiltered with local binding, are refused;
+      - a missing or empty Profile_Name, an unknown --session, a missing --session and a trailing --session with no value exit 1;
+      - an inline model shows that the nearest ancestor's Host applies and that a non-egress connection is ignored.
+      One unit test in crates/spar-cli/src/zwinger_profile.rs mirrors zwinger's exact-host rule.
+    release: v0.50.0
+    tags: [emit, zwinger, yaml]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test emit_zwinger_profile
+        - run: cargo test -p spar --bin spar zwinger_profile
+    links:
+      - type: satisfies
+        target: REQ-EMIT-ZWINGER-PROFILE-001
+      - type: verifies
+        target: REQ-EMIT-ZWINGER-PROFILE-001
