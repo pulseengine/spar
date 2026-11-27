@@ -96,14 +96,8 @@ fn check_transition_trigger_kinds(
 
         for trigger in &mt.triggers {
             // Find the feature matching this trigger name
-            let feat_kind = comp.features.iter().find_map(|&fi| {
-                let feat = &instance.features[fi];
-                if feat.name.as_str().eq_ignore_ascii_case(trigger.as_str()) {
-                    Some(feat.kind)
-                } else {
-                    None
-                }
-            });
+            let feat_kind = crate::mode_check::resolve_trigger(instance, comp, trigger.as_str())
+                .map(|fi| instance.features[fi].kind);
 
             if let Some(kind) = feat_kind {
                 // Trigger must be an event port or event data port

@@ -1401,18 +1401,25 @@ fn lower_mode_transition(node: &SyntaxNode, tree: &mut ItemTree) -> Option<ModeT
     let mut idents: Vec<String> = Vec::new();
     let mut triggers = Vec::new();
 
-    // Check for MODE_TRIGGER children
+    // Check for MODE_TRIGGER children. One MODE_TRIGGER holds the whole
+    // comma-separated trigger list; a trigger is one or more IDENTs joined
+    // by DOT (`port` or `subcomponent.port`, AS5506 §12), kept as one
+    // dotted name.
     for child in node.children() {
         if child.kind() == SyntaxKind::MODE_TRIGGER {
-            // Collect trigger port names
-            for tok in child
+            // IDENT, DOT and COMMA only: whitespace and comments drop out.
+            let text: String = child
                 .children_with_tokens()
                 .filter_map(|it| it.into_token())
-            {
-                if tok.kind() == SyntaxKind::IDENT {
-                    triggers.push(Name::new(tok.text()));
-                }
-            }
+                .filter(|t| {
+                    matches!(
+                        t.kind(),
+                        SyntaxKind::IDENT | SyntaxKind::DOT | SyntaxKind::COMMA
+                    )
+                })
+                .map(|t| t.text().to_string())
+                .collect();
+            triggers.extend(text.split(',').map(Name::new));
         }
     }
 
