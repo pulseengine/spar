@@ -44,4 +44,7 @@ toml.workspace = true
 
 [dev-dependencies]
 rustc-hash = "2"
+# The headless component oracle reads the component's analysis set
+# (wasm_component_agreement.rs).
+spar-wasm = { path = "../spar-wasm" }
 proptest.workspace = true

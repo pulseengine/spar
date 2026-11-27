@@ -8453,3 +8453,31 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-11-27T12:00:00Z
     release: v0.50.0
+
+  - id: REQ-WASM-COMPONENT-HEADLESS-001
+    type: requirement
+    title: "The spar-wasm component shall run headless under wasmtime and report the same diagnostics as native spar analyze for the analyses it runs"
+    status: implemented
+    description: >
+      spar-wasm ships every release as a wasm32-wasip2 component, and rivet's
+      dashboard runs it transpiled in a browser, but nothing ran the component
+      itself, so a build that analysed differently on wasm32 would have
+      shipped. CI now builds the component as release.yml does and calls its
+      `analyze` export under wasmtime 41.0.0 (pinned by sha256) for every
+      system implementation in the accepted first-party models. Each file is
+      analysed alone. The diagnostics, as (severity, analysis, path, message)
+      multisets, must equal native `spar analyze --format json` restricted to
+      the analyses the component registers. That set is read from
+      spar_wasm::component_runner(), the runner the export uses, not copied
+      into the test. A root both sides refuse to instantiate counts as
+      agreement and is listed. A planted model with an `in` to `in` sibling
+      connection must produce a direction_rules error through the component.
+      Not covered: the solver-backed analyses, which the component does not
+      build, and kiln (a meld-fused kiln run is the planned advisory
+      follow-up).
+    tags: [wasm, component, wasmtime, oracle]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-27T12:00:00Z
+    release: v0.50.0
