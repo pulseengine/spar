@@ -20,4 +20,12 @@ wildcards = "allow"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/pulseengine/rivet"]
+# pulseengine/rowan is rivet's Miri-soundness fork of rowan (branch
+# fix/miri-soundness-v3). rivet-yaml, spar's YAML emitter for zwinger
+# profiles (pulseengine/zwinger#17), depends on it through rivet's
+# workspace. The fork beside registry rowan 0.16.1 is the duplication #446
+# tracks.
+allow-git = [
+  "https://github.com/pulseengine/rivet",
+  "https://github.com/pulseengine/rowan",
+]
