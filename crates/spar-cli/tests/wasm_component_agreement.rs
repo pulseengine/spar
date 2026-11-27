@@ -400,15 +400,40 @@ fn component_agrees_with_native_analyze() {
     assert!(disagreements.is_empty(), "{}", disagreements.join("\n"));
 }
 
+/// Connection `c` joins two `in` ports across siblings, so its source has
+/// the wrong direction; direction_rules must report it on Top.impl. It is
+/// written to a temp dir, not kept as a fixture, so the first-party corpus
+/// (first_party_legality, osate_agreement) does not count it.
+const PLANTED: &str = "package Planted
+public
+  process Node
+    features
+      p : in data port;
+  end Node;
+  process implementation Node.impl
+  end Node.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      a : process Node.impl;
+      b : process Node.impl;
+    connections
+      c : port a.p -> b.p;
+  end Top.impl;
+end Planted;
+";
+
 /// A model with a known defect must produce that error through the
 /// component, so agreement cannot come from two empty outputs.
 #[test]
 #[ignore = "needs SPAR_WASM_COMPONENT and wasmtime; the CI job \"Wasm component oracle\" runs it"]
 fn planted_defect_is_reported_by_the_component() {
     let wasm = component();
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/wasm_component/planted.aadl");
-    let dir = alone(&fixture, usize::MAX);
+    let dir = std::env::temp_dir().join(format!("spar_wasm_planted_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("planted.aadl"), PLANTED).unwrap();
     let diags = run_component(&wasm, &dir, "Planted::Top.impl").unwrap_or_else(|e| panic!("{e}"));
     let _ = std::fs::remove_dir_all(&dir);
     assert!(

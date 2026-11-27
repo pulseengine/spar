@@ -5485,7 +5485,7 @@ artifacts:
     description: |-
       crates/spar-cli/tests/wasm_component_agreement.rs. Two ignored cases need SPAR_WASM_COMPONENT and wasmtime and run in ci.yml job "Wasm component oracle (advisory)", which is not a required check until the owner approves one:
       - component_agrees_with_native_analyze: every `system implementation` in the ACCEPT rows of test-data/interop/baseline/osate-first-party.tsv is a root. MEASURED 2026-11-27 with wasmtime 41.0.0 on macOS: 76 roots, 74 compared with 0 disagreements, 2 refused by both (car_integration.aadl and producer_consumer.aadl `with` packages from files beside them). MIN_ROOTS is 70.
-      - planted_defect_is_reported_by_the_component: tests/fixtures/wasm_component/planted.aadl gives a direction_rules error on Top.impl.
+      - planted_defect_is_reported_by_the_component: an inline model (const PLANTED, written to a temp dir so the first-party corpus does not count it) gives a direction_rules error on Top.impl.
       Potency, MEASURED the same day: a component built with the first diagnostic dropped gave 74 disagreements of 74.
       Two unignored cases cover the WAVE parser and root enumeration, and are the steps here.
     release: v0.50.0
