@@ -39,7 +39,7 @@ rather than left to be discovered.
 | `download-osate.sh` | **works** — 353 MB from CMU, slow but resumes |
 | `headless/` | **works** — the headless oracle, see below |
 | `generate-references.sh` | GUI-only **by design**: launches OSATE and prints manual steps |
-| `ease-scripts/generate_references.py` | **bit-rotted, do not use** — needs a manually installed EASE plugin, hardcodes `/Volumes/Home/...`, and its model table (`Top.Impl`, `Sys.Impl`) does not match the actual fixtures (`sys.impl`, `s.i`), so it would fail on at least 2 of its 4 models even in the GUI |
+| `ease-scripts/generate_references.py` | **bit-rotted, do not use** — needs a manually installed EASE plugin, hardcodes a local checkout path, and its model table (`Top.Impl`, `Sys.Impl`) does not match the actual fixtures (`sys.impl`, `s.i`), so it would fail on at least 2 of its 4 models even in the GUI |
 | `compare.py` | half-live: the spar side is real, the OSATE side consumes JSON only the broken EASE flow produced |
 
 The `headless/` bundle exists because **stock OSATE ships no headless

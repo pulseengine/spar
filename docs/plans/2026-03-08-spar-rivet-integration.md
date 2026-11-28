@@ -12,8 +12,8 @@
 
 ## Repo Map
 
-- **spar** = `/Volumes/Home/git/pulseengine/spar`
-- **rivet** = `/Volumes/Home/git/sdlc`
+- **spar** = this repository
+- **rivet** = `../rivet`
 
 ---
 
@@ -831,7 +831,7 @@ traceability-rules:
 Run from rivet directory:
 
 ```bash
-cd /Volumes/Home/git/sdlc && cargo test -- schema
+cd ../rivet && cargo test -- schema
 ```
 
 Expected: existing schema tests pass. The new schema file doesn't break anything since it's only loaded on demand.
@@ -854,13 +854,13 @@ fn aadl_schema_loads() {
 }
 ```
 
-Run: `cd /Volumes/Home/git/sdlc && cargo test aadl_schema_loads`
+Run: `cd ../rivet && cargo test aadl_schema_loads`
 Expected: PASS
 
 **Step 4: Commit**
 
 ```bash
-cd /Volumes/Home/git/sdlc
+cd ../rivet
 git add schemas/aadl.yaml rivet-core/tests/integration.rs
 git commit -m "feat(schema): add AADL artifact type schema
 
@@ -952,7 +952,7 @@ fn aadl_adapter_parses_spar_json() {
 }
 ```
 
-Run: `cd /Volumes/Home/git/sdlc && cargo test aadl_adapter_parses`
+Run: `cd ../rivet && cargo test aadl_adapter_parses`
 Expected: FAIL — module doesn't exist.
 
 **Step 2: Create the adapter**
@@ -1239,18 +1239,18 @@ Update `rivet/rivet-core/src/lib.rs` — add the `"aadl"` match arm in `load_art
 
 **Step 4: Run test**
 
-Run: `cd /Volumes/Home/git/sdlc && cargo test aadl_adapter_parses`
+Run: `cd ../rivet && cargo test aadl_adapter_parses`
 Expected: PASS
 
 **Step 5: Run full test suite**
 
-Run: `cd /Volumes/Home/git/sdlc && cargo test`
+Run: `cd ../rivet && cargo test`
 Expected: all PASS.
 
 **Step 6: Commit**
 
 ```bash
-cd /Volumes/Home/git/sdlc
+cd ../rivet
 git add rivet-core/src/formats/aadl.rs rivet-core/src/formats/mod.rs rivet-core/src/lib.rs rivet-core/tests/integration.rs
 git commit -m "feat(adapter): add AADL adapter for spar integration (Layer 1)
 
@@ -1350,20 +1350,20 @@ end FlightControl;
 
 **Step 2: Validate with rivet**
 
-Run: `cd /Volumes/Home/git/sdlc && cargo run -- validate --project examples/aadl/rivet.yaml`
+Run: `cd ../rivet && cargo run -- validate --project examples/aadl/rivet.yaml`
 
 Expected: validation passes (or produces only warnings for missing traceability links, not errors).
 
 **Step 3: Test coverage report**
 
-Run: `cd /Volumes/Home/git/sdlc && cargo run -- coverage --project examples/aadl/rivet.yaml`
+Run: `cd ../rivet && cargo run -- coverage --project examples/aadl/rivet.yaml`
 
 Expected: shows coverage of AADL components with requirement traceability.
 
 **Step 4: Commit**
 
 ```bash
-cd /Volumes/Home/git/sdlc
+cd ../rivet
 git add examples/aadl/
 git commit -m "feat(examples): add AADL integration example project
 

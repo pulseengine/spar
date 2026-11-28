@@ -11,8 +11,8 @@
 **Spec:** `docs/plans/2026-03-17-rendering-quality-design.md`
 
 **Repos:**
-- etch: `/Volumes/Home/git/sdlc/etch/` (branch off `feat/compound-layout`)
-- spar: `/Volumes/Home/git/pulseengine/spar/` (branch off `main`)
+- etch: `../rivet/etch/` (branch off `feat/compound-layout`)
+- spar: this repository (branch off `main`)
 
 **Cross-project workflow:** Tasks 1-8 modify etch in the sdlc/rivet repo. After Task 8, push the etch branch, create a PR, merge it. Then update spar's etch git rev in Task 9. Tasks 10-13 are spar-only.
 
@@ -25,7 +25,7 @@
 ### Task 1: Audit and fix HashMap non-determinism in etch layout
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/layout.rs`
+- Modify: `../rivet/etch/src/layout.rs`
 
 This task addresses RENDER-REQ-004.
 
@@ -123,10 +123,10 @@ git commit -m "feat(etch): add layout determinism tests (RENDER-REQ-004)"
 ### Task 2: Add port data model to etch
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/layout.rs` -- add PortInfo, PortSide, PortDirection, PortType; extend NodeInfo, EdgeInfo, LayoutNode, LayoutEdge
-- Modify: `/Volumes/Home/git/sdlc/etch/src/lib.rs` -- update doctest, re-export new types
-- Modify: `/Volumes/Home/git/sdlc/etch/src/svg.rs` -- update test helpers (add `ports: vec![]`, `source_port: None, target_port: None`)
-- Modify: `/Volumes/Home/git/sdlc/rivet-cli/src/serve.rs` -- add `ports: vec![]` to NodeInfo constructors (3 call sites around lines 3204, 3405, 6502), add `source_port: None, target_port: None` to EdgeInfo constructors
+- Modify: `../rivet/etch/src/layout.rs` -- add PortInfo, PortSide, PortDirection, PortType; extend NodeInfo, EdgeInfo, LayoutNode, LayoutEdge
+- Modify: `../rivet/etch/src/lib.rs` -- update doctest, re-export new types
+- Modify: `../rivet/etch/src/svg.rs` -- update test helpers (add `ports: vec![]`, `source_port: None, target_port: None`)
+- Modify: `../rivet/rivet-cli/src/serve.rs` -- add `ports: vec![]` to NodeInfo constructors (3 call sites around lines 3204, 3405, 6502), add `source_port: None, target_port: None` to EdgeInfo constructors
 
 - [ ] **Step 1: Write test for port-aware NodeInfo construction** (in layout.rs tests)
 - [ ] **Step 2: Run test to verify it fails**
@@ -157,7 +157,7 @@ git commit -m "feat(etch): add port data model (PortInfo, PortSide, PortType) �
 ### Task 3: Port positioning and edge-to-port snapping
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/layout.rs`
+- Modify: `../rivet/etch/src/layout.rs`
 
 - [ ] **Step 1: Write test for port position computation** (`ports_positioned_on_node_sides`)
 - [ ] **Step 2: Run test, verify it fails**
@@ -202,7 +202,7 @@ git commit -m "feat(etch): port positioning and edge-to-port snapping — RENDER
 ### Task 4: Port rendering in SVG
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/svg.rs`
+- Modify: `../rivet/etch/src/svg.rs`
 
 - [ ] **Step 1: Write test for port SVG output** (`svg_renders_ports`)
 - [ ] **Step 2: Run test, verify it fails**
@@ -220,7 +220,7 @@ git commit -m "feat(etch): SVG port rendering with type colors — RENDER-REQ-00
 ### Task 5: Add EdgeRouting enum and config
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/layout.rs`
+- Modify: `../rivet/etch/src/layout.rs`
 
 - [ ] **Step 1: Add `EdgeRouting` enum (`Orthogonal`, `CubicBezier`) and new `LayoutOptions` fields**
 - [ ] **Step 2: Update Default impl; `Orthogonal` falls back to `CubicBezier` temporarily**
@@ -235,9 +235,9 @@ git commit -m "feat(etch): add EdgeRouting enum and config — RENDER-REQ-001"
 ### Task 6: Implement orthogonal edge router
 
 **Files:**
-- Create: `/Volumes/Home/git/sdlc/etch/src/ortho.rs`
-- Modify: `/Volumes/Home/git/sdlc/etch/src/layout.rs`
-- Modify: `/Volumes/Home/git/sdlc/etch/src/lib.rs`
+- Create: `../rivet/etch/src/ortho.rs`
+- Modify: `../rivet/etch/src/layout.rs`
+- Modify: `../rivet/etch/src/lib.rs`
 
 - [ ] **Step 1: Write test for basic orthogonal routing** (`orthogonal_route_simple_chain`) -- assert all segments are axis-aligned
 - [ ] **Step 2: Run test, verify it fails**
@@ -261,7 +261,7 @@ git commit -m "feat(etch): orthogonal edge routing — RENDER-REQ-001"
 ### Task 7: Update SVG renderer for orthogonal edges
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/svg.rs`
+- Modify: `../rivet/etch/src/svg.rs`
 
 - [ ] **Step 1: Write test for orthogonal SVG path** (`svg_orthogonal_edges_use_line_commands`) -- verify path uses `L` not `C` commands
 - [ ] **Step 2: Run test, verify it fails**
@@ -279,9 +279,9 @@ git commit -m "feat(etch): SVG polyline rendering for orthogonal edges"
 ### Task 8: Create etch::html module (Phase 3a: pan/zoom/selection)
 
 **Files:**
-- Create: `/Volumes/Home/git/sdlc/etch/src/html.rs`
-- Create: `/Volumes/Home/git/sdlc/etch/src/html_interactivity.js`
-- Modify: `/Volumes/Home/git/sdlc/etch/src/lib.rs`
+- Create: `../rivet/etch/src/html.rs`
+- Create: `../rivet/etch/src/html_interactivity.js`
+- Modify: `../rivet/etch/src/lib.rs`
 
 - [ ] **Step 1: Write test for HTML output structure** (`html_contains_svg_and_script`)
 - [ ] **Step 2: Run test, verify it fails**
@@ -302,8 +302,8 @@ git commit -m "feat(etch): interactive HTML wrapper with pan/zoom/selection — 
 ### Task 8b: Enhanced navigation (Phase 3b: minimap/search/semantic zoom/legend)
 
 **Files:**
-- Modify: `/Volumes/Home/git/sdlc/etch/src/html.rs`
-- Modify: `/Volumes/Home/git/sdlc/etch/src/html_interactivity.js`
+- Modify: `../rivet/etch/src/html.rs`
+- Modify: `../rivet/etch/src/html_interactivity.js`
 
 - [ ] **Step 1: Write test for minimap presence** (`html_has_minimap`)
 - [ ] **Step 2: Write test for search** (`html_has_search`)
@@ -334,9 +334,9 @@ git commit -m "feat(etch): minimap, search, semantic zoom, legend — RENDER-REQ
 ### Task 9: Wire spar-render and spar-cli to ports + HTML
 
 **Files:**
-- Modify: `/Volumes/Home/git/pulseengine/spar/Cargo.toml` -- update etch rev
-- Modify: `/Volumes/Home/git/pulseengine/spar/crates/spar-render/src/lib.rs`
-- Modify: `/Volumes/Home/git/pulseengine/spar/crates/spar-cli/src/main.rs`
+- Modify: `Cargo.toml` -- update etch rev
+- Modify: `crates/spar-render/src/lib.rs`
+- Modify: `crates/spar-cli/src/main.rs`
 
 - [ ] **Step 1: Update etch git rev in workspace Cargo.toml**
 - [ ] **Step 2: Add `feature_to_port()` mapping in spar-render**
@@ -358,7 +358,7 @@ git commit -m "feat(spar-render): port-aware rendering with HTML output — REND
 ### Task 10: Upgrade spar CI workflow
 
 **Files:**
-- Modify: `/Volumes/Home/git/pulseengine/spar/.github/workflows/ci.yml`
+- Modify: `.github/workflows/ci.yml`
 
 - [ ] **Step 1: Add Miri job** (`cargo miri test -p spar-hir-def --lib`)
 - [ ] **Step 2: Add proptest job** (`PROPTEST_CASES=1000 cargo test`)
@@ -376,9 +376,9 @@ git commit -m "feat(ci): add Miri, proptest, mutation testing, MSRV, cargo-vet"
 ### Task 11: Create rendering STPA artifacts
 
 **Files:**
-- Create: `/Volumes/Home/git/pulseengine/spar/safety/stpa/rendering-analysis.yaml`
-- Modify: `/Volumes/Home/git/pulseengine/spar/artifacts/architecture.yaml`
-- Modify: `/Volumes/Home/git/pulseengine/spar/artifacts/verification.yaml`
+- Create: `safety/stpa/rendering-analysis.yaml`
+- Modify: `artifacts/architecture.yaml`
+- Modify: `artifacts/verification.yaml`
 
 - [ ] **Step 1: Create rendering-analysis.yaml** -- losses L-R1..4, hazards H-R1..5, requirements RENDER-REQ-001..006
 - [ ] **Step 2: Add ARCH decisions** -- ARCH-R1 (port layout), ARCH-R2 (orthogonal routing), ARCH-R3 (interactive HTML), ARCH-R4 (GLSP separation)
@@ -394,7 +394,7 @@ git commit -m "docs(stpa): rendering quality STPA analysis and architecture deci
 ### Task 12: Playwright visual regression tests
 
 **Files:**
-- Create: `/Volumes/Home/git/pulseengine/spar/tests/playwright/rendering.spec.ts`
+- Create: `tests/playwright/rendering.spec.ts`
 
 - [ ] **Step 1: Set up Playwright config**
 - [ ] **Step 2: Write tests:**

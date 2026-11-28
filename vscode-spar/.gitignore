@@ -1,3 +1,7 @@
 out/
 node_modules/
 *.vsix
+# Placed by release.yml build-vsix: the platform binary and the jco bundle.
+bin/spar
+bin/spar.exe
+assets/wasm/
