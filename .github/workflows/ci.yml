@@ -368,11 +368,7 @@ jobs:
   # component's analyses. A planted model must produce a direction_rules
   # error through the component. wasmtime is pinned by sha256.
   wasm-component:
-    name: Wasm component oracle (advisory)
-    # Advisory until the owner approves it as a required check; then drop
-    # continue-on-error and "(advisory)", and add it to protection and
-    # .github/required-contexts.txt together.
-    continue-on-error: true
+    name: Wasm component oracle
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","rust-cpu"]') || 'ubuntu-24.04' }}
