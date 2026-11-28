@@ -324,7 +324,9 @@ impl Analysis for LatencyAnalysis {
                             hop.max_ps as f64 / 1_000_000_000.0,
                         ),
                         path: owner_path.clone(),
-                        analysis: self.name().to_string(), data: None, });
+                        analysis: self.name().to_string(),
+                        data: None,
+                    });
                 }
                 for hop in &compute_hops {
                     diags.push(AnalysisDiagnostic {
@@ -544,7 +546,9 @@ impl Analysis for LatencyAnalysis {
                     instance.system_operation_modes.len()
                 ),
                 path: vec!["root".to_string()],
-                analysis: self.name().to_string(), data: None, });
+                analysis: self.name().to_string(),
+                data: None,
+            });
         }
 
         diags

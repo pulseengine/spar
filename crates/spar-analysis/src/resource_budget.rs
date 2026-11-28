@@ -56,7 +56,9 @@ impl Analysis for ResourceBudgetAnalysis {
                     instance.system_operation_modes.len()
                 ),
                 path: vec!["root".to_string()],
-                analysis: self.name().to_string(), data: None, });
+                analysis: self.name().to_string(),
+                data: None,
+            });
         }
 
         diags

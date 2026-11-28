@@ -529,7 +529,9 @@ impl RtaAnalysis {
                                     format_time(thread.deadline_ps),
                                 ),
                                 path: thread_path.clone(),
-                                analysis: self.name().to_string(), data: None, });
+                                analysis: self.name().to_string(),
+                                data: None,
+                            });
                         }
 
                         // ── ResponseBand (only when BCET is a real

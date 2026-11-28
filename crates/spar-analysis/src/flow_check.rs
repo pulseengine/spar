@@ -114,7 +114,9 @@ impl Analysis for FlowCheckAnalysis {
                                 flow.name, comp.name
                             ),
                             path: path.clone(),
-                            analysis: self.name().to_string(), data: None, });
+                            analysis: self.name().to_string(),
+                            data: None,
+                        });
                     }
                 }
             }

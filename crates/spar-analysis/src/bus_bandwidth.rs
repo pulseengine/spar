@@ -242,7 +242,9 @@ impl BusBandwidthAnalysis {
                         completeness,
                     ),
                     path: bus_path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             } else {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Info,
@@ -256,7 +258,9 @@ impl BusBandwidthAnalysis {
                         completeness,
                     ),
                     path: bus_path,
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             }
         }
 

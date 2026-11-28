@@ -1,8 +1,10 @@
 //! Property association validation rules (AS5506 §11).
 //!
 //! Validates property associations on the instance model:
-//! - **PROP-DUPLICATE** — No duplicate property associations for the same
-//!   property name within a component
+//! - **PROP-DUPLICATE** — not checked here. The instance's PropertyMap keeps
+//!   at most one non-append value per property (a later association replaces
+//!   the earlier ones), so duplicates are gone before this pass runs. The
+//!   former check could never fire and was removed (#684).
 //! - **PROP-VALUE-TYPE** — Property value expression variant should be
 //!   compatible with the declared property type
 //! - **PROP-RANGE-ORDER** — Range property values: lower bound <= upper bound
@@ -37,19 +39,13 @@ impl Analysis for PropertyRuleAnalysis {
     fn analyze(&self, instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
         // Severity rationale (STPA-REQ-016):
         //   Error   — inverted range ordering, unbalanced parentheses
-        //   Warning — duplicate non-append property, empty property value, mixed list element
+        //   Warning — empty property value, mixed list element
         //             types, malformed reference expression, property applied to wrong category
         let mut diags = Vec::new();
 
         for (comp_idx, _comp) in instance.all_components() {
             let path = component_path(instance, comp_idx);
             let prop_map = instance.properties_for(comp_idx);
-
-            // PROP-DUPLICATE: check for duplicate property names
-            // The PropertyMap already collapses non-append properties, but
-            // we can detect if a property set+name pair has multiple
-            // non-appended values by checking get_all.
-            check_duplicate_properties(prop_map, &path, &mut diags);
 
             // PROP-RANGE-ORDER: check range ordering
             check_range_ordering(prop_map, &path, &mut diags);
@@ -68,34 +64,6 @@ impl Analysis for PropertyRuleAnalysis {
         }
 
         diags
-    }
-}
-
-/// PROP-DUPLICATE: Detect properties that appear multiple times without append.
-fn check_duplicate_properties(
-    prop_map: &spar_hir_def::properties::PropertyMap,
-    path: &[String],
-    diags: &mut Vec<AnalysisDiagnostic>,
-) {
-    for ((_set_key, _name_key), values) in prop_map.iter() {
-        // If there are multiple values and not all are appends, that's a duplicate
-        if values.len() > 1 {
-            let non_append_count = values.iter().filter(|v| !v.is_append).count();
-            if non_append_count > 1 {
-                let prop_display = &values[0].name;
-                diags.push(AnalysisDiagnostic {
-                    severity: Severity::Warning,
-                    message: format!(
-                        "property '{}' has {} non-append associations \
-                         (only the last assignment takes effect)",
-                        prop_display, non_append_count
-                    ),
-                    path: path.to_vec(),
-                    analysis: "property_rules".to_string(),
-                    data: None,
-                });
-            }
-        }
     }
 }
 

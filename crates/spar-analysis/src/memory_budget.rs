@@ -157,7 +157,9 @@ impl MemoryBudgetAnalysis {
                         bound_components.len(),
                     ),
                     path: mem_path,
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             }
         }
 

@@ -388,7 +388,9 @@ fn check_impl_type_match(tree: &ItemTree) -> Vec<LegalityDiagnostic> {
                                 ci.type_name, ci.impl_name, ci.type_name, pkg.name
                             ),
                             path: vec![pkg.name.as_str().to_string(), format!("{}.{}", ci.type_name, ci.impl_name)],
-                            analysis: "legality".to_string(), data: None, },
+                            analysis: "legality".to_string(),
+                            data: None,
+                        },
                     });
                 }
             }

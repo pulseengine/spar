@@ -123,7 +123,9 @@ impl Analysis for ConnectivityAnalysis {
                                 child.name, comp.name
                             ),
                             path,
-                            analysis: self.name().to_string(), data: None, });
+                            analysis: self.name().to_string(),
+                            data: None,
+                        });
                     }
                 }
 
@@ -138,7 +140,9 @@ impl Analysis for ConnectivityAnalysis {
                             comp.name
                         ),
                         path,
-                        analysis: self.name().to_string(), data: None, });
+                        analysis: self.name().to_string(),
+                        data: None,
+                    });
                 }
             }
         }
@@ -769,6 +773,27 @@ mod tests {
             .filter(|d| d.severity == Severity::Warning && d.message.contains("no incoming"))
             .collect();
         assert_eq!(warnings.len(), 1, "inout port counts as input: {:?}", diags);
+    }
+
+    #[test]
+    fn analyze_in_mode_reports_an_unconnected_port_of_an_active_component() {
+        let mut b = TestBuilder::new();
+        let root = b.add_component("root", ComponentCategory::System, None);
+        let dst = b.add_component("dst", ComponentCategory::System, Some(root));
+        b.add_feature("in1", FeatureKind::DataPort, Some(Direction::In), dst);
+        b.set_children(root, vec![dst]);
+        let inst = b.build(root);
+        // No modal component, so every component is active in this SOM.
+        let som = spar_hir_def::instance::SystemOperationMode {
+            name: "nominal".to_string(),
+            mode_selections: vec![],
+        };
+        let diags = ConnectivityAnalysis.analyze_in_mode(&inst, &som);
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Warning
+                && d.message == "input port 'in1' has no incoming connection"),
+            "{diags:?}"
+        );
     }
 
     #[test]

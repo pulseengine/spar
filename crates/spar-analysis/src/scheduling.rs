@@ -90,7 +90,9 @@ impl Analysis for SchedulingAnalysis {
                         comp.name
                     ),
                     path: path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             }
 
             // STPA-REQ-013: Execution time range validation (min <= max, max <= period)
@@ -105,7 +107,9 @@ impl Analysis for SchedulingAnalysis {
                             max_ps as f64 / 1_000_000_000.0,
                         ),
                         path: path.clone(),
-                        analysis: self.name().to_string(), data: None, });
+                        analysis: self.name().to_string(),
+                        data: None,
+                    });
                 }
                 if let Some(period) = period_ps
                     && max_ps > period
@@ -119,7 +123,9 @@ impl Analysis for SchedulingAnalysis {
                             period as f64 / 1_000_000_000.0,
                         ),
                         path: path.clone(),
-                        analysis: self.name().to_string(), data: None, });
+                        analysis: self.name().to_string(),
+                        data: None,
+                    });
                 }
             }
 
@@ -134,7 +140,9 @@ impl Analysis for SchedulingAnalysis {
                         comp.name
                     ),
                     path: path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             }
 
             // Get processor binding
@@ -147,7 +155,9 @@ impl Analysis for SchedulingAnalysis {
                         comp.name
                     ),
                     path: path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             }
 
             let proc_key = groups.key(instance, comp_idx, binding.as_deref());
@@ -201,7 +211,9 @@ impl Analysis for SchedulingAnalysis {
                         n
                     ),
                     path: proc_path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             } else if utilization > rma_bound {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
@@ -415,7 +427,9 @@ impl Analysis for SchedulingAnalysis {
                     instance.system_operation_modes.len()
                 ),
                 path: vec!["root".to_string()],
-                analysis: self.name().to_string(), data: None, });
+                analysis: self.name().to_string(),
+                data: None,
+            });
         }
 
         diags
@@ -494,7 +508,9 @@ impl ModalAnalysis for SchedulingAnalysis {
                         n
                     ),
                     path: proc_path.clone(),
-                    analysis: self.name().to_string(), data: None, });
+                    analysis: self.name().to_string(),
+                    data: None,
+                });
             } else if utilization > rma_bound {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
