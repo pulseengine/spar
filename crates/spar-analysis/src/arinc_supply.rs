@@ -508,6 +508,7 @@ fn diagnostic_for(
         message,
         path,
         analysis: analysis.to_string(),
+        data: None,
     }
 }
 

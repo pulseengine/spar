@@ -114,6 +114,7 @@ pub fn check_property_set_refs(tree: &ItemTree, scope: &GlobalScope) -> Vec<Anal
                 message,
                 path: path.clone(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             }
         })
         .collect()

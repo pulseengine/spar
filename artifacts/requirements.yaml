@@ -8481,3 +8481,28 @@ artifacts:
       model: claude-opus-5-5
       timestamp: 2026-11-27T12:00:00Z
     release: v0.50.0
+
+  - id: REQ-ANALYZE-DIAGNOSTIC-DATA-001
+    type: requirement
+    title: "spar analyze --format json shall carry structured data on emv2_propagation chain, WcttBound and mode transition diagnostics"
+    status: implemented
+    description: >
+      Gates that need a number or a name from a diagnostic had to match the
+      English message, so a reworded message could turn a negative check
+      vacuously green (#674, pulseengine/zwinger architecture/check.sh). Each
+      AnalysisDiagnostic now has an optional `data` object, omitted from JSON
+      when empty, so existing output is unchanged. emv2_propagation chain
+      diagnostics carry error_type, origin, downstream (dotted instance paths)
+      and chain_length. The wctt WcttBound diagnostic carries stream, bound_ps
+      and hops (the hops that contributed). mode_reachability dead-transition
+      and mode_check transition diagnostics carry component, transition,
+      source, destination and trigger (null for an undeclared endpoint).
+      `message` is kept. Not covered: the spar-wasm WIT record and SARIF
+      output, which do not carry `data` yet, and the JSON contract document
+      (#673).
+    tags: [analyze, json, diagnostics, gates]
+    provenance:
+      created-by: ai-assisted
+      model: claude-opus-5-5
+      timestamp: 2026-11-28T12:00:00Z
+    release: v0.50.0

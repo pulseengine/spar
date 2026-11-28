@@ -79,6 +79,7 @@ fn check_type_extends(
                 ),
                 path: path.clone(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
     }
@@ -96,6 +97,7 @@ fn check_type_extends(
                 ),
                 path: path.clone(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
 
@@ -145,6 +147,7 @@ fn check_impl_extends(
             ),
             path: path.clone(),
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
 
@@ -162,6 +165,7 @@ fn check_impl_extends(
             ),
             path,
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
 }
@@ -194,6 +198,7 @@ fn check_impl_type_category_match(
                     ),
                     path,
                     analysis: ANALYSIS_NAME.to_string(),
+                    data: None,
                 });
             }
             return;
@@ -234,6 +239,7 @@ fn check_feature_compatibility(
                         ),
                         path: path.to_vec(),
                         analysis: ANALYSIS_NAME.to_string(),
+                        data: None,
                     });
                 }
             }

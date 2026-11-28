@@ -65,6 +65,7 @@ impl Analysis for BindingRuleAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -86,6 +87,7 @@ impl Analysis for BindingRuleAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -233,6 +235,7 @@ fn check_binding_target(
                     ),
                     path: path.to_vec(),
                     analysis: "binding_rules".to_string(),
+                    data: None,
                 });
             }
         }
@@ -245,6 +248,7 @@ fn check_binding_target(
                 ),
                 path: path.to_vec(),
                 analysis: "binding_rules".to_string(),
+                data: None,
             });
         }
     }

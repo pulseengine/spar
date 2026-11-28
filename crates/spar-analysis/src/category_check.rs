@@ -30,6 +30,7 @@ pub fn check_category_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
                     ),
                     path: vec![ct.name.as_str().to_string()],
                     analysis: "category_check".to_string(),
+                    data: None,
                 });
             }
         }
@@ -48,6 +49,7 @@ pub fn check_category_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
                     ),
                     path: vec![format!("{}.{}", ci.type_name, ci.impl_name)],
                     analysis: "category_check".to_string(),
+                    data: None,
                 });
             }
         }

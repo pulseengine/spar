@@ -50,6 +50,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                         ),
                         path: component_path(instance, conn.owner),
                         analysis: "feature_group_check".to_string(),
+                        data: None,
                     });
                     continue;
                 }
@@ -74,8 +75,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                             conn.name, src_end.feature
                         ),
                         path: component_path(instance, conn.owner),
-                        analysis: "feature_group_check".to_string(),
-                    });
+                        analysis: "feature_group_check".to_string(), data: None, });
                 }
             }
 
@@ -93,8 +93,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                             conn.name, dst_end.feature
                         ),
                         path: component_path(instance, conn.owner),
-                        analysis: "feature_group_check".to_string(),
-                    });
+                        analysis: "feature_group_check".to_string(), data: None, });
                 }
             }
         }
@@ -190,6 +189,7 @@ pub fn check_inverse_of_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
                 ),
                 path: vec![fgt.name.as_str().to_string()],
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
     }
@@ -258,6 +258,7 @@ pub fn check_feature_group_complements(
                 ),
                 path: conn_path.clone(),
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
 
@@ -281,6 +282,7 @@ pub fn check_feature_group_complements(
                 ),
                 path: conn_path.clone(),
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
     }

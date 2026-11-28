@@ -90,6 +90,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         if !is_input_compatible(dst_dir) {
@@ -102,6 +103,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -117,6 +119,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         if !is_output_compatible(dst_dir) {
@@ -129,6 +132,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -144,6 +148,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         if !is_input_compatible(dst_dir) {
@@ -156,6 +161,7 @@ impl Analysis for DirectionRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -173,6 +179,7 @@ impl Analysis for DirectionRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                     if dst_dir != Direction::InOut {
@@ -185,6 +192,7 @@ impl Analysis for DirectionRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }

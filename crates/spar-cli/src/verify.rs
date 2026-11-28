@@ -259,6 +259,7 @@ mod tests {
             message: message.to_string(),
             path: vec!["root".to_string()],
             analysis: analysis.to_string(),
+            data: None,
         }
     }
 

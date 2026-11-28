@@ -162,6 +162,7 @@ impl Analysis for WrpcBindingAnalysis {
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
+                    data: None,
                 });
                 continue;
             };
@@ -208,6 +209,7 @@ impl Analysis for WrpcBindingAnalysis {
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
+                    data: None,
                 }),
                 category => diagnostics.push(AnalysisDiagnostic {
                     severity: Severity::Warning,
@@ -218,6 +220,7 @@ impl Analysis for WrpcBindingAnalysis {
                     ),
                     path,
                     analysis: "wrpc-binding".to_string(),
+                    data: None,
                 }),
             }
         }

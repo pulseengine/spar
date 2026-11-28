@@ -36,7 +36,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use spar_hir_def::instance::{ComponentInstanceIdx, ConnectionInstanceIdx, SystemInstance};
 
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, DiagnosticData, Severity, component_path};
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -92,6 +92,8 @@ pub enum EmvDiagnosticSeverity {
 pub struct EmvDiagnostic {
     pub severity: EmvDiagnosticSeverity,
     pub message: String,
+    /// The chain as [`DiagnosticData::Emv2Chain`], for per-chain diagnostics.
+    pub data: Option<DiagnosticData>,
 }
 
 /// An end-to-end error propagation chain from an origin component to its
@@ -361,6 +363,15 @@ pub fn compute_error_propagation(
                         instance.component(origin).name.as_str(),
                         error_type
                     ),
+                    data: Some(DiagnosticData::Emv2Chain {
+                        error_type: error_type.clone(),
+                        origin: component_path(instance, origin).join("."),
+                        downstream: downstream
+                            .iter()
+                            .map(|&d| component_path(instance, d).join("."))
+                            .collect(),
+                        chain_length: downstream.len(),
+                    }),
                 });
             }
         }
@@ -456,6 +467,7 @@ impl Analysis for Emv2PropagationAnalysis {
                 message: emv_diag.message.clone(),
                 path: root_path.clone(),
                 analysis: self.name().to_string(),
+                data: emv_diag.data.clone(),
             });
         }
 
@@ -469,6 +481,7 @@ impl Analysis for Emv2PropagationAnalysis {
             ),
             path: root_path,
             analysis: self.name().to_string(),
+            data: None,
         });
 
         diags

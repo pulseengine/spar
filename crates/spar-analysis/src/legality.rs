@@ -388,8 +388,7 @@ fn check_impl_type_match(tree: &ItemTree) -> Vec<LegalityDiagnostic> {
                                 ci.type_name, ci.impl_name, ci.type_name, pkg.name
                             ),
                             path: vec![pkg.name.as_str().to_string(), format!("{}.{}", ci.type_name, ci.impl_name)],
-                            analysis: "legality".to_string(),
-                        },
+                            analysis: "legality".to_string(), data: None, },
                     });
                 }
             }
@@ -420,6 +419,7 @@ fn check_feature_group_nonempty(tree: &ItemTree) -> Vec<LegalityDiagnostic> {
                     ),
                     path: vec![fgt.name.as_str().to_string()],
                     analysis: "legality".to_string(),
+                    data: None,
                 },
             });
         }
@@ -1053,6 +1053,7 @@ mod tests {
             message: "component has empty name".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-1");
@@ -1065,6 +1066,7 @@ mod tests {
             message: "component has empty type name".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-1");
@@ -1077,6 +1079,7 @@ mod tests {
             message: "component has empty impl name".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-1");
@@ -1090,6 +1093,7 @@ mod tests {
             message: "duplicate entry 'Foo' in with clause".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-3");
@@ -1102,6 +1106,7 @@ mod tests {
             message: "package 'Foo' imports itself".to_string(),
             path: vec!["Foo".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-3");
@@ -1114,6 +1119,7 @@ mod tests {
             message: "duplicate property definition 'X'".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-4");
@@ -1126,6 +1132,7 @@ mod tests {
             message: "duplicate property type 'Y'".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-4");
@@ -1140,6 +1147,7 @@ mod tests {
             message: "duplicate feature name 'port_a'".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(rule.id, "N-2");
@@ -1153,6 +1161,7 @@ mod tests {
             message: "duplicate subcomponent name 'foo'".to_string(),
             path: vec!["Pkg".into()],
             analysis: "naming_rules".to_string(),
+            data: None,
         };
         let rule = classify_naming_rule(&d);
         assert_eq!(
@@ -1170,6 +1179,7 @@ mod tests {
             message: "feature 'p' not allowed on data component".to_string(),
             path: vec!["Pkg".into()],
             analysis: "category_check".to_string(),
+            data: None,
         };
         let rule = classify_category_rule(&d);
         assert_eq!(rule.id, "C-1");
@@ -1182,6 +1192,7 @@ mod tests {
             message: "subcomponent 'x' not allowed in data component".to_string(),
             path: vec!["Pkg".into()],
             analysis: "category_check".to_string(),
+            data: None,
         };
         let rule = classify_category_rule(&d);
         assert_eq!(rule.id, "C-2");
@@ -1196,6 +1207,7 @@ mod tests {
             message: "bidirectional connection requires in out".to_string(),
             path: vec![],
             analysis: "direction_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("direction_rules", &d);
         assert_eq!(rule.id, "D-4");
@@ -1208,6 +1220,7 @@ mod tests {
             message: "across connection direction mismatch".to_string(),
             path: vec![],
             analysis: "direction_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("direction_rules", &d);
         assert_eq!(rule.id, "D-1");
@@ -1220,6 +1233,7 @@ mod tests {
             message: "up connection direction mismatch".to_string(),
             path: vec![],
             analysis: "direction_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("direction_rules", &d);
         assert_eq!(rule.id, "D-2");
@@ -1232,6 +1246,7 @@ mod tests {
             message: "down connection direction mismatch".to_string(),
             path: vec![],
             analysis: "direction_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("direction_rules", &d);
         assert_eq!(rule.id, "D-3");
@@ -1244,6 +1259,7 @@ mod tests {
             message: "port direction mismatch".to_string(),
             path: vec![],
             analysis: "direction_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("direction_rules", &d);
         assert_eq!(rule.id, "D-1");
@@ -1256,6 +1272,7 @@ mod tests {
             message: "binding references non-existent target".to_string(),
             path: vec![],
             analysis: "binding_check".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("binding_check", &d);
         assert_eq!(rule.id, "B-2");
@@ -1268,6 +1285,7 @@ mod tests {
             message: "binding references something".to_string(),
             path: vec![],
             analysis: "binding_check".to_string(),
+            data: None,
         };
         // severity is Warning, not Error — should fallthrough to B-1
         let rule = classify_instance_rule("binding_check", &d);
@@ -1281,6 +1299,7 @@ mod tests {
             message: "missing deployment binding".to_string(),
             path: vec![],
             analysis: "binding_check".to_string(),
+            data: None,
         };
         // Contains no "references" keyword — should be B-1
         let rule = classify_instance_rule("binding_check", &d);
@@ -1294,6 +1313,7 @@ mod tests {
             message: "end-to-end flow has broken segment".to_string(),
             path: vec![],
             analysis: "flow_check".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("flow_check", &d);
         assert_eq!(rule.id, "F-2");
@@ -1306,6 +1326,7 @@ mod tests {
             message: "flow segment mismatch".to_string(),
             path: vec![],
             analysis: "flow_check".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("flow_check", &d);
         assert_eq!(rule.id, "F-2");
@@ -1318,6 +1339,7 @@ mod tests {
             message: "flow spec port inconsistency".to_string(),
             path: vec![],
             analysis: "flow_check".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("flow_check", &d);
         assert_eq!(rule.id, "F-1");
@@ -1330,6 +1352,7 @@ mod tests {
             message: "unconnected port".to_string(),
             path: vec![],
             analysis: "connectivity".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("connectivity", &d);
         assert_eq!(rule.id, "CONN-1");
@@ -1342,6 +1365,7 @@ mod tests {
             message: "hierarchy violation".to_string(),
             path: vec![],
             analysis: "hierarchy".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("hierarchy", &d);
         assert_eq!(rule.id, "H-1");
@@ -1354,6 +1378,7 @@ mod tests {
             message: "missing type".to_string(),
             path: vec![],
             analysis: "completeness".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("completeness", &d);
         assert_eq!(rule.id, "COMP-1");
@@ -1366,6 +1391,7 @@ mod tests {
             message: "connection self-loop detected".to_string(),
             path: vec![],
             analysis: "connection_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("connection_rules", &d);
         assert_eq!(rule.id, "CONN-SELF");
@@ -1378,6 +1404,7 @@ mod tests {
             message: "feature kind mismatch".to_string(),
             path: vec![],
             analysis: "connection_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("connection_rules", &d);
         assert_eq!(rule.id, "CONN-TYPE");
@@ -1390,6 +1417,7 @@ mod tests {
             message: "duplicate mode name 'active'".to_string(),
             path: vec![],
             analysis: "mode_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("mode_rules", &d);
         assert_eq!(rule.id, "MODE-UNIQUE");
@@ -1402,6 +1430,7 @@ mod tests {
             message: "mode transition trigger should be event port".to_string(),
             path: vec![],
             analysis: "mode_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("mode_rules", &d);
         assert_eq!(rule.id, "MODE-TRIGGER");
@@ -1414,6 +1443,7 @@ mod tests {
             message: "duplicate subcomponent name 'cpu'".to_string(),
             path: vec![],
             analysis: "subcomponent_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("subcomponent_rules", &d);
         assert_eq!(rule.id, "SUB-UNIQUE");
@@ -1426,6 +1456,7 @@ mod tests {
             message: "invalid subcomponent category".to_string(),
             path: vec![],
             analysis: "subcomponent_rules".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("subcomponent_rules", &d);
         assert_eq!(rule.id, "SUB-CAT");
@@ -1438,6 +1469,7 @@ mod tests {
             message: "something".to_string(),
             path: vec![],
             analysis: "unknown_analysis".to_string(),
+            data: None,
         };
         let rule = classify_instance_rule("unknown_analysis", &d);
         assert_eq!(rule.id, "UNKNOWN");

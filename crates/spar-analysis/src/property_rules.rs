@@ -92,6 +92,7 @@ fn check_duplicate_properties(
                     ),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
+                    data: None,
                 });
             }
         }
@@ -137,6 +138,7 @@ fn check_range_ordering(
                         ),
                         path: path.to_vec(),
                         analysis: "property_rules".to_string(),
+                        data: None,
                     });
                 }
             }
@@ -310,6 +312,7 @@ fn check_element_type_consistency(
                 ),
                 path: path.to_vec(),
                 analysis: "property_rules".to_string(),
+                data: None,
             });
             break;
         }
@@ -333,6 +336,7 @@ fn check_value_types(
                     message: format!("property '{}' has an empty value", pv.name),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
+                    data: None,
                 });
             }
             // PROP-ARITHMETIC (#546): arithmetic is not AADL. The property
@@ -349,6 +353,7 @@ fn check_value_types(
                     ),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
+                    data: None,
                 });
             }
             // Check for unbalanced parentheses
@@ -363,6 +368,7 @@ fn check_value_types(
                     ),
                     path: path.to_vec(),
                     analysis: "property_rules".to_string(),
+                    data: None,
                 });
             }
         }
@@ -395,6 +401,7 @@ fn check_constant_references(
                         ),
                         path: path.to_vec(),
                         analysis: "property_rules".to_string(),
+                        data: None,
                     });
                 }
             }
@@ -444,6 +451,7 @@ fn check_applies_to(
                 ),
                 path: path.to_vec(),
                 analysis: "property_rules".to_string(),
+                data: None,
             });
         }
     }

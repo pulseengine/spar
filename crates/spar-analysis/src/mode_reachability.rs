@@ -13,7 +13,7 @@ use std::fmt::Write as FmtWrite;
 
 use spar_hir_def::instance::{ComponentInstanceIdx, ModeTransitionInstance, SystemInstance};
 
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, DiagnosticData, Severity, component_path};
 
 /// Reachability matrix for a single modal component.
 #[derive(Debug, Clone)]
@@ -75,6 +75,7 @@ impl Analysis for ModeReachabilityAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -89,6 +90,13 @@ impl Analysis for ModeReachabilityAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: Some(DiagnosticData::ModeTransition {
+                        component: path.join("."),
+                        transition: dt.name.to_string(),
+                        source: dt.source.to_string(),
+                        destination: dt.destination.to_string(),
+                        trigger: Some(dt.trigger.to_string()),
+                    }),
                 });
             }
 
@@ -104,6 +112,7 @@ impl Analysis for ModeReachabilityAnalysis {
                 ),
                 path: path.clone(),
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 

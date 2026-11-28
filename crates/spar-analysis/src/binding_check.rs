@@ -94,6 +94,7 @@ impl BindingCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -114,6 +115,7 @@ impl BindingCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -210,6 +212,7 @@ fn validate_binding_target(
                 ),
                 path: path.to_vec(),
                 analysis: "binding_check".to_string(),
+                data: None,
             });
         }
     }

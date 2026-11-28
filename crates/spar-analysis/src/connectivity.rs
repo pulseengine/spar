@@ -74,6 +74,7 @@ impl Analysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         Some(Direction::Out) => {
@@ -85,6 +86,7 @@ impl Analysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         None => {
@@ -96,6 +98,7 @@ impl Analysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -120,8 +123,7 @@ impl Analysis for ConnectivityAnalysis {
                                 child.name, comp.name
                             ),
                             path,
-                            analysis: self.name().to_string(),
-                        });
+                            analysis: self.name().to_string(), data: None, });
                     }
                 }
 
@@ -136,8 +138,7 @@ impl Analysis for ConnectivityAnalysis {
                             comp.name
                         ),
                         path,
-                        analysis: self.name().to_string(),
-                    });
+                        analysis: self.name().to_string(), data: None, });
                 }
             }
         }
@@ -191,6 +192,7 @@ impl ModalAnalysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         Some(Direction::Out) => {
@@ -202,6 +204,7 @@ impl ModalAnalysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         None => {
@@ -213,6 +216,7 @@ impl ModalAnalysis for ConnectivityAnalysis {
                                 ),
                                 path,
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }

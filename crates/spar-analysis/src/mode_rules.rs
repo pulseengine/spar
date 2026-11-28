@@ -70,6 +70,7 @@ fn check_unique_mode_names(
                 ),
                 path: path.to_vec(),
                 analysis: "mode_rules".to_string(),
+                data: None,
             });
         } else {
             seen.push(name_lower);
@@ -111,6 +112,7 @@ fn check_transition_trigger_kinds(
                         ),
                         path: path.to_vec(),
                         analysis: "mode_rules".to_string(),
+                        data: None,
                     });
                 }
             }

@@ -58,6 +58,7 @@ impl Analysis for ModalRuleAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 } else if initial_count > 1 {
                     let initial_names: Vec<&str> = modes
@@ -76,6 +77,7 @@ impl Analysis for ModalRuleAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -106,6 +108,7 @@ impl Analysis for ModalRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
 
@@ -123,6 +126,7 @@ impl Analysis for ModalRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
 
@@ -141,6 +145,7 @@ impl Analysis for ModalRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -214,6 +219,7 @@ fn check_mode_reachability(
                 ),
                 path: path.to_vec(),
                 analysis: "modal_rules".to_string(),
+                data: None,
             });
         }
     }

@@ -99,6 +99,40 @@ pub struct AnalysisDiagnostic {
     pub path: Vec<String>,
     /// Which analysis produced this diagnostic.
     pub analysis: String,
+    /// Structured values for gates to read instead of matching `message`
+    /// (#674). Present only for the analyses that fill it; omitted from JSON
+    /// otherwise, so existing output is unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<DiagnosticData>,
+}
+
+/// Structured payload of an [`AnalysisDiagnostic`], one shape per analysis
+/// (#674). Serialized as a plain object; the diagnostic's `analysis` names
+/// the shape. Instance paths are dotted, as in `spar instance` output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum DiagnosticData {
+    /// `emv2_propagation`: one error propagation chain.
+    Emv2Chain {
+        error_type: String,
+        origin: String,
+        downstream: Vec<String>,
+        chain_length: usize,
+    },
+    /// `wctt`: the end-to-end bound of one stream.
+    WcttBound {
+        stream: String,
+        bound_ps: u64,
+        hops: usize,
+    },
+    /// `mode_reachability` and `mode_check`: one mode transition.
+    ModeTransition {
+        component: String,
+        transition: String,
+        source: String,
+        destination: String,
+        trigger: Option<String>,
+    },
 }
 
 /// Severity level for an analysis diagnostic.

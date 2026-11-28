@@ -400,6 +400,7 @@ impl Analysis for Emv2StpaBridgeAnalysis {
             ),
             path: root_path,
             analysis: self.name().to_string(),
+            data: None,
         });
 
         diags

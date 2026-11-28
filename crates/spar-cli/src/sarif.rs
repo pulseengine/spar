@@ -159,6 +159,7 @@ mod tests {
             severity,
             message: message.to_string(),
             path: path.iter().map(|s| s.to_string()).collect(),
+            data: None,
         }
     }
 

@@ -47,6 +47,7 @@ impl Analysis for HierarchyAnalysis {
                         ),
                         path: child_path,
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -73,6 +74,7 @@ impl Analysis for HierarchyAnalysis {
                         message: format!("implementation '{}' has no subcomponents", comp.name),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -88,6 +90,7 @@ impl Analysis for HierarchyAnalysis {
                     ),
                     path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }

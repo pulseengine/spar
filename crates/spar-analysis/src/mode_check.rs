@@ -8,7 +8,7 @@
 
 use spar_hir_def::instance::SystemInstance;
 
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, DiagnosticData, Severity, component_path};
 
 /// Validates mode declarations and mode transitions in the instance model.
 ///
@@ -49,6 +49,7 @@ impl Analysis for ModeCheckAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -66,6 +67,7 @@ impl Analysis for ModeCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 } else if initial_count > 1 {
                     let initial_names: Vec<&str> = modes
@@ -84,6 +86,7 @@ impl Analysis for ModeCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -116,6 +119,13 @@ impl Analysis for ModeCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: Some(DiagnosticData::ModeTransition {
+                            component: path.join("."),
+                            transition: mt_label.clone(),
+                            source: mt.source.as_str().to_string(),
+                            destination: mt.destination.as_str().to_string(),
+                            trigger: None,
+                        }),
                     });
                 }
 
@@ -134,6 +144,13 @@ impl Analysis for ModeCheckAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: Some(DiagnosticData::ModeTransition {
+                            component: path.join("."),
+                            transition: mt_label.clone(),
+                            source: mt.source.as_str().to_string(),
+                            destination: mt.destination.as_str().to_string(),
+                            trigger: None,
+                        }),
                     });
                 }
 
@@ -154,6 +171,13 @@ impl Analysis for ModeCheckAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: Some(DiagnosticData::ModeTransition {
+                                component: path.join("."),
+                                transition: mt_label.clone(),
+                                source: mt.source.as_str().to_string(),
+                                destination: mt.destination.as_str().to_string(),
+                                trigger: Some(trigger.as_str().to_string()),
+                            }),
                         });
                     }
                 }

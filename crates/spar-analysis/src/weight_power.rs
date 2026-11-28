@@ -121,8 +121,7 @@ fn check_weight_budgets(
                         (children_weight / limit) * 100.0,
                     ),
                     path: path.clone(),
-                    analysis: "weight_power".to_string(),
-                });
+                    analysis: "weight_power".to_string(), data: None, });
             } else if children_weight > 0.0 {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Info,
@@ -135,6 +134,7 @@ fn check_weight_budgets(
                     ),
                     path,
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             }
         }
@@ -193,8 +193,7 @@ fn check_power_budgets(
                         (children_power / capacity) * 100.0,
                     ),
                     path: path.clone(),
-                    analysis: "weight_power".to_string(),
-                });
+                    analysis: "weight_power".to_string(), data: None, });
             } else if children_power > 0.0 {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Info,
@@ -207,6 +206,7 @@ fn check_power_budgets(
                     ),
                     path,
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             }
         }

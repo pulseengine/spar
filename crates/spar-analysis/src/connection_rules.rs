@@ -91,6 +91,7 @@ fn check_feature_kind_compatibility(
             ),
             path,
             analysis: "connection_rules".to_string(),
+            data: None,
         });
     }
 }
@@ -127,6 +128,7 @@ fn check_connection_self_loop(
             ),
             path,
             analysis: "connection_rules".to_string(),
+            data: None,
         });
     }
 }

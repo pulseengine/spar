@@ -191,6 +191,7 @@ impl BusBandwidthAnalysis {
                     ),
                     path: bus_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -225,6 +226,7 @@ impl BusBandwidthAnalysis {
                     ),
                     path: bus_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else if utilization > 80.0 {
                 diags.push(AnalysisDiagnostic {
@@ -240,8 +242,7 @@ impl BusBandwidthAnalysis {
                         completeness,
                     ),
                     path: bus_path.clone(),
-                    analysis: self.name().to_string(),
-                });
+                    analysis: self.name().to_string(), data: None, });
             } else {
                 diags.push(AnalysisDiagnostic {
                     severity: Severity::Info,
@@ -255,8 +256,7 @@ impl BusBandwidthAnalysis {
                         completeness,
                     ),
                     path: bus_path,
-                    analysis: self.name().to_string(),
-                });
+                    analysis: self.name().to_string(), data: None, });
             }
         }
 
