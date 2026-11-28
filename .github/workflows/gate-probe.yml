@@ -9,9 +9,14 @@
 # on every PR and cannot fail open. Adding it to branch protection is a
 # separate admin step. Keep the job name stable: renaming a required check
 # silently drops the requirement.
+# merge_group: spar merges through a merge queue, and a required context must
+# report on the queue's commit too. With pull_request alone the context never
+# appeared there and the queue removed #680 with checks_timed_out. The action
+# reads only the checked-out tree, so it runs the same on either event.
 name: gate-probe
 on:
   pull_request:
+  merge_group:
 permissions:
   contents: read
 jobs:
