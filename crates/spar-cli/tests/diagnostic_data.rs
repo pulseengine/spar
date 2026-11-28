@@ -106,7 +106,14 @@ fn the_wctt_bound_carries_stream_bound_and_hops() {
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(data["stream"], quoted(m, "stream"), "{m}");
+    // The message names the stream as "conn (src → dst)"; data gives the
+    // connection and both end stations as instance paths.
+    let shown = quoted(m, "stream");
+    let (conn, ends) = shown.split_once(" (").unwrap();
+    let (src, dst) = ends.trim_end_matches(')').split_once(" → ").unwrap();
+    assert_eq!(data["stream"], format!("Mesh.TwoNodes.{conn}"), "{m}");
+    assert_eq!(data["source"], format!("Mesh.TwoNodes.{src}"), "{m}");
+    assert_eq!(data["destination"], format!("Mesh.TwoNodes.{dst}"), "{m}");
     assert_eq!(data["bound_ps"].as_u64().unwrap(), ps, "{m}");
     assert_eq!(data["hops"].as_u64().unwrap(), hops, "{m}");
 }

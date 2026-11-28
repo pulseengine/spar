@@ -8493,8 +8493,9 @@ artifacts:
       AnalysisDiagnostic now has an optional `data` object, omitted from JSON
       when empty, so existing output is unchanged. emv2_propagation chain
       diagnostics carry error_type, origin, downstream (dotted instance paths)
-      and chain_length. The wctt WcttBound diagnostic carries stream, bound_ps
-      and hops (the hops that contributed). mode_reachability dead-transition
+      and chain_length. The wctt WcttBound diagnostic carries stream (the
+      connection's instance path), source and destination (the end stations'
+      instance paths), bound_ps and hops (the hops that contributed). mode_reachability dead-transition
       and mode_check transition diagnostics carry component, transition,
       source, destination and trigger (null for an undeclared endpoint).
       `message` is kept. Not covered: the spar-wasm WIT record and SARIF

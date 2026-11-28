@@ -5507,7 +5507,7 @@ artifacts:
     description: |-
       crates/spar-cli/tests/diagnostic_data.rs, 5 cases, through `spar analyze --format json`:
       - the zwinger reference mesh (tests/fixtures/zwinger_profile) gives 12 emv2_propagation chains; each one's chain_length, downstream count, error_type and origin's last segment equal the values in its message;
-      - its one WcttBound carries the stream, bound_ps and hops its message prints;
+      - its one WcttBound carries the bound_ps and hops its message prints, and the stream connection and end stations it names, as instance paths;
       - every other diagnostic there has no `data` key;
       - an inline model with an unconnected trigger port gives a mode_reachability dead transition with component, transition, source, destination and trigger;
       - an inline model with an unknown trigger and an undeclared destination gives two mode_check entries, trigger "nosuch" and trigger null.

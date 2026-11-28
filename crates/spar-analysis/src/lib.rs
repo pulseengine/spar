@@ -119,9 +119,13 @@ pub enum DiagnosticData {
         downstream: Vec<String>,
         chain_length: usize,
     },
-    /// `wctt`: the end-to-end bound of one stream.
+    /// `wctt`: the end-to-end bound of one stream. `stream` is the
+    /// connection's instance path; `source` and `destination` are the end
+    /// stations' instance paths.
     WcttBound {
         stream: String,
+        source: String,
+        destination: String,
         bound_ps: u64,
         hops: usize,
     },
