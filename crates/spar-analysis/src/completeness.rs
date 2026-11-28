@@ -60,6 +60,7 @@ impl Analysis for CompletenessAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
                 continue;
             }
@@ -85,6 +86,7 @@ impl Analysis for CompletenessAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -114,6 +116,7 @@ impl Analysis for CompletenessAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -132,6 +135,7 @@ impl Analysis for CompletenessAnalysis {
                 message: inst_diag.message.clone(),
                 path,
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 

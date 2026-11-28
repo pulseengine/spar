@@ -175,6 +175,7 @@ fn check_processor_has_partitions(instance: &SystemInstance, diags: &mut Vec<Ana
                 ),
                 path: component_path(instance, proc_idx),
                 analysis: "arinc653".to_string(),
+                data: None,
             });
         }
     }
@@ -209,6 +210,7 @@ fn check_partition_assignment(
                 ),
                 path: component_path(instance, proc_idx),
                 analysis: "arinc653".to_string(),
+                data: None,
             });
         }
     }
@@ -355,6 +357,7 @@ fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<Analysis
                 ),
                 path: component_path(instance, *src_comp),
                 analysis: "arinc653".to_string(),
+                data: None,
             });
         }
     }
@@ -396,6 +399,7 @@ fn check_partition_isolation(instance: &SystemInstance, diags: &mut Vec<Analysis
             ),
             path: component_path(instance, resource),
             analysis: "arinc653".to_string(),
+            data: None,
         });
     }
 }
@@ -472,6 +476,7 @@ fn check_window_utilization(
                     ),
                     path: component_path(instance, proc_idx),
                     analysis: "arinc653".to_string(),
+                    data: None,
                 });
             } else {
                 diags.push(AnalysisDiagnostic {
@@ -485,6 +490,7 @@ fn check_window_utilization(
                     ),
                     path: component_path(instance, proc_idx),
                     analysis: "arinc653".to_string(),
+                    data: None,
                 });
             }
         }

@@ -78,6 +78,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -90,6 +91,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -106,6 +108,7 @@ impl Analysis for SchedulingAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
                 if let Some(period) = period_ps
@@ -121,6 +124,7 @@ impl Analysis for SchedulingAnalysis {
                         ),
                         path: path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -137,6 +141,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -151,6 +156,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -206,6 +212,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else if utilization > rma_bound {
                 diags.push(AnalysisDiagnostic {
@@ -220,6 +227,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -244,6 +252,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -259,6 +268,7 @@ impl Analysis for SchedulingAnalysis {
                 ),
                 path: proc_path,
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 
@@ -299,6 +309,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -316,6 +327,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -335,6 +347,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -363,6 +376,7 @@ impl Analysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -397,6 +411,7 @@ impl Analysis for SchedulingAnalysis {
                         ),
                         path: proc_path,
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -413,6 +428,7 @@ impl Analysis for SchedulingAnalysis {
                 ),
                 path: vec!["root".to_string()],
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 
@@ -493,6 +509,7 @@ impl ModalAnalysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else if utilization > rma_bound {
                 diags.push(AnalysisDiagnostic {
@@ -507,6 +524,7 @@ impl ModalAnalysis for SchedulingAnalysis {
                     ),
                     path: proc_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -521,6 +539,7 @@ impl ModalAnalysis for SchedulingAnalysis {
                 ),
                 path: proc_path,
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 

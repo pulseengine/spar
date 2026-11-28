@@ -53,6 +53,7 @@ impl Analysis for SubcomponentRuleAnalysis {
                         ),
                         path: child_path,
                         analysis: "subcomponent_rules".to_string(),
+                        data: None,
                     });
                 }
 
@@ -96,6 +97,7 @@ fn check_unique_subcomponent_names(
                 ),
                 path: path.to_vec(),
                 analysis: "subcomponent_rules".to_string(),
+                data: None,
             });
         } else {
             seen.push(name);

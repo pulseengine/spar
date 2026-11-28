@@ -85,6 +85,7 @@ fn check_inference_deadline(
                 .to_string(),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
         return;
     };
@@ -100,6 +101,7 @@ fn check_inference_deadline(
             ),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
     }
 }
@@ -122,6 +124,7 @@ fn check_fallback_coverage(
             ),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
     }
 }
@@ -160,6 +163,7 @@ fn check_fallback_timing(
             ),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
     }
 }
@@ -185,6 +189,7 @@ fn check_ood_coverage(
                 ),
                 path: path.to_vec(),
                 analysis: "ai_ml".to_string(),
+                data: None,
             });
         }
     }
@@ -209,6 +214,7 @@ fn check_model_deployment(
             ),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
     }
 }
@@ -266,6 +272,7 @@ fn check_redundancy(
             ),
             path: path.to_vec(),
             analysis: "ai_ml".to_string(),
+            data: None,
         });
     }
 }

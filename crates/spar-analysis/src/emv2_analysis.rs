@@ -142,6 +142,7 @@ impl Analysis for Emv2Analysis {
                             ),
                             path: root_path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -157,6 +158,7 @@ impl Analysis for Emv2Analysis {
                     ),
                     path: root_path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }
@@ -222,6 +224,7 @@ fn check_error_handling(
                 ),
                 path,
                 analysis: "emv2_fault_tree".to_string(),
+                data: None,
             });
         }
     }

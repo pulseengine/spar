@@ -129,6 +129,7 @@ fn check_port_classifier_match(
                     ),
                     path: path.to_vec(),
                     analysis: "classifier_match".to_string(),
+                    data: None,
                 });
             }
         }
@@ -142,6 +143,7 @@ fn check_port_classifier_match(
                 ),
                 path: path.to_vec(),
                 analysis: "classifier_match".to_string(),
+                data: None,
             });
         }
         (None, Some(cls)) => {
@@ -154,6 +156,7 @@ fn check_port_classifier_match(
                 ),
                 path: path.to_vec(),
                 analysis: "classifier_match".to_string(),
+                data: None,
             });
         }
         (None, None) => {
@@ -211,6 +214,7 @@ fn check_access_match(
                     ),
                     path: path.to_vec(),
                     analysis: "classifier_match".to_string(),
+                    data: None,
                 });
             }
         }
@@ -224,6 +228,7 @@ fn check_access_match(
                 ),
                 path: path.to_vec(),
                 analysis: "classifier_match".to_string(),
+                data: None,
             });
         }
         (None, Some(cls)) => {
@@ -236,6 +241,7 @@ fn check_access_match(
                 ),
                 path: path.to_vec(),
                 analysis: "classifier_match".to_string(),
+                data: None,
             });
         }
         (None, None) => {}
@@ -260,6 +266,7 @@ fn check_access_match(
                         ),
                         path: path.to_vec(),
                         analysis: "classifier_match".to_string(),
+                        data: None,
                     });
                 }
             } else if src_ak == dst_ak {
@@ -272,6 +279,7 @@ fn check_access_match(
                     ),
                     path: path.to_vec(),
                     analysis: "classifier_match".to_string(),
+                    data: None,
                 });
             }
         }

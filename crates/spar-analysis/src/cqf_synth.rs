@@ -182,6 +182,7 @@ fn synth_cqf(instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
             ),
             path: vec![name.clone()],
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
 
@@ -209,6 +210,7 @@ fn synth_cqf(instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
                 ),
                 path: vec![],
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
 
             // Soundness guard: T ≤ period for every flow (one frame per
@@ -231,6 +233,7 @@ fn synth_cqf(instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
                         ),
                         path: vec![name.clone()],
                         analysis: ANALYSIS_NAME.to_string(),
+                        data: None,
                     });
                 }
             }
@@ -246,6 +249,7 @@ fn synth_cqf(instance: &SystemInstance) -> Vec<AnalysisDiagnostic> {
                 ),
                 path: vec![],
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
     }

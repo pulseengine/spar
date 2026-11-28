@@ -57,6 +57,7 @@ impl Analysis for ResourceBudgetAnalysis {
                 ),
                 path: vec!["root".to_string()],
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 
@@ -157,6 +158,7 @@ fn check_memory_budgets(
                 ),
                 path: mem_path.clone(),
                 analysis: "resource_budget".to_string(),
+                data: None,
             });
         } else {
             diags.push(AnalysisDiagnostic {
@@ -171,6 +173,7 @@ fn check_memory_budgets(
                 ),
                 path: mem_path,
                 analysis: "resource_budget".to_string(),
+                data: None,
             });
         }
     }
@@ -276,6 +279,7 @@ fn check_bandwidth_budgets(instance: &SystemInstance, diags: &mut Vec<AnalysisDi
                 ),
                 path: bus_path,
                 analysis: "resource_budget".to_string(),
+                data: None,
             });
         }
     }

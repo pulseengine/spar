@@ -122,6 +122,7 @@ fn check_weight_budgets(
                     ),
                     path: path.clone(),
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             } else if children_weight > 0.0 {
                 diags.push(AnalysisDiagnostic {
@@ -135,6 +136,7 @@ fn check_weight_budgets(
                     ),
                     path,
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             }
         }
@@ -194,6 +196,7 @@ fn check_power_budgets(
                     ),
                     path: path.clone(),
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             } else if children_power > 0.0 {
                 diags.push(AnalysisDiagnostic {
@@ -207,6 +210,7 @@ fn check_power_budgets(
                     ),
                     path,
                     analysis: "weight_power".to_string(),
+                    data: None,
                 });
             }
         }

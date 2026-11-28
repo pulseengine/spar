@@ -66,6 +66,7 @@ impl Analysis for FlowRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -91,6 +92,7 @@ impl Analysis for FlowRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -131,6 +133,7 @@ impl Analysis for FlowRuleAnalysis {
                                 ),
                                 path: path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -216,6 +219,7 @@ impl Analysis for FlowRuleAnalysis {
                                     ),
                                     path: path.clone(),
                                     analysis: self.name().to_string(),
+                                    data: None,
                                 });
                             }
                         }
@@ -248,6 +252,7 @@ impl Analysis for FlowRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -270,6 +275,7 @@ impl Analysis for FlowRuleAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -350,6 +356,7 @@ fn check_flow_coverage(instance: &SystemInstance, diags: &mut Vec<AnalysisDiagno
                         ),
                         path,
                         analysis: "flow_rules".to_string(),
+                        data: None,
                     });
                 }
             }

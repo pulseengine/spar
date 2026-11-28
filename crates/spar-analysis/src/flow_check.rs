@@ -59,6 +59,7 @@ impl Analysis for FlowCheckAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -82,6 +83,7 @@ impl Analysis for FlowCheckAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -113,6 +115,7 @@ impl Analysis for FlowCheckAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -134,6 +137,7 @@ impl Analysis for FlowCheckAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
                 continue;
             }
@@ -152,6 +156,7 @@ impl Analysis for FlowCheckAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -175,6 +180,7 @@ impl Analysis for FlowCheckAnalysis {
                     ),
                     path: path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
                 continue;
             }
@@ -199,6 +205,7 @@ impl Analysis for FlowCheckAnalysis {
                             ),
                             path: path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }

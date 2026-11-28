@@ -72,6 +72,7 @@ impl MemoryBudgetAnalysis {
                         ),
                         path: mem_path,
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                     continue;
                 }
@@ -142,6 +143,7 @@ impl MemoryBudgetAnalysis {
                     ),
                     path: mem_path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else {
                 diags.push(AnalysisDiagnostic {
@@ -156,6 +158,7 @@ impl MemoryBudgetAnalysis {
                     ),
                     path: mem_path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }

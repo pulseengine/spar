@@ -86,6 +86,7 @@ fn check_with_clauses(
                 message: format!("duplicate with clause '{}'", with_name),
                 path: path.clone(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
     }
@@ -98,6 +99,7 @@ fn check_with_clauses(
                 message: format!("package '{}' imports itself via with clause", pkg_name),
                 path: path.clone(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
     }
@@ -121,6 +123,7 @@ fn check_component_type(
             message: "component type has an empty name".to_string(),
             path: vec![pkg_name.to_string()],
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
 
@@ -177,6 +180,7 @@ fn check_component_impl(
             ),
             path: vec![pkg_name.to_string()],
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
     if ci.impl_name.as_str().is_empty() {
@@ -188,6 +192,7 @@ fn check_component_impl(
             ),
             path: vec![pkg_name.to_string()],
             analysis: ANALYSIS_NAME.to_string(),
+            data: None,
         });
     }
 
@@ -274,6 +279,7 @@ fn check_duplicate_names<'a>(
                 message: format!("duplicate {} name '{}'", kind, name),
                 path: path.to_vec(),
                 analysis: ANALYSIS_NAME.to_string(),
+                data: None,
             });
         }
     }

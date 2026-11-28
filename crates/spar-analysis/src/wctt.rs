@@ -71,7 +71,7 @@ use spar_network::tsn::{
 use spar_network::types::{NetworkGraph, NodeKind, SwitchType};
 
 use crate::property_accessors::get_timing_property;
-use crate::{Analysis, AnalysisDiagnostic, Severity, component_path};
+use crate::{Analysis, AnalysisDiagnostic, DiagnosticData, Severity, component_path};
 
 const SPAR_NETWORK: &str = "Spar_Network";
 const DEPLOYMENT: &str = "Deployment_Properties";
@@ -259,6 +259,7 @@ impl WcttAnalysis {
                     ),
                     path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }
@@ -296,6 +297,7 @@ impl WcttAnalysis {
                     ),
                     path: stream_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -404,6 +406,7 @@ impl WcttAnalysis {
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                         // TAS service curve: rate = R_link · ρ_K, but the
                         // link itself still serializes one max-frame per
@@ -469,6 +472,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             if credits_explicit {
                                 diags.push(AnalysisDiagnostic {
@@ -485,6 +489,7 @@ impl WcttAnalysis {
                                     ),
                                     path: stream_path.clone(),
                                     analysis: self.name().to_string(),
+                                    data: None,
                                 });
                             }
                             beta
@@ -525,6 +530,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             ServiceCurve::rate_latency(
                                 svc_base.rate_bps,
@@ -550,6 +556,7 @@ impl WcttAnalysis {
                                     ),
                                     path: stream_path.clone(),
                                     analysis: self.name().to_string(),
+                                    data: None,
                                 });
                                 deferred_emitted = true;
                             }
@@ -592,6 +599,7 @@ impl WcttAnalysis {
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                         ServiceCurve::rate_latency(
                             svc_base.rate_bps,
@@ -616,6 +624,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             deferred_emitted = true;
                         }
@@ -709,6 +718,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             unservable_emitted = true;
                             break;
@@ -752,6 +762,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                     }
@@ -777,6 +788,7 @@ impl WcttAnalysis {
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                         unservable_emitted = true;
                         break;
@@ -835,6 +847,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             // The PMOO bound is no looser than SFA on the LP's
                             // canonical topology (Bondorf et al.); guard with a
@@ -866,6 +879,7 @@ impl WcttAnalysis {
                                 ),
                                 path: stream_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
                         // The remaining declines are correct PMOO preconditions
@@ -894,6 +908,7 @@ impl WcttAnalysis {
                     ),
                     path: stream_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -929,6 +944,7 @@ impl WcttAnalysis {
                             ),
                             path: stream_path.clone(),
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -962,6 +978,7 @@ impl WcttAnalysis {
                     ),
                     path: stream_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else {
                 // A PARTIAL walk is still a real bound, but it must not claim the
@@ -979,6 +996,7 @@ impl WcttAnalysis {
                         ),
                         path: stream_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
                 diags.push(AnalysisDiagnostic {
@@ -992,6 +1010,17 @@ impl WcttAnalysis {
                     ),
                     path: stream_path.clone(),
                     analysis: self.name().to_string(),
+                    data: Some(DiagnosticData::WcttBound {
+                        stream: format!(
+                            "{}.{}",
+                            component_path(instance, stream.owner_idx).join("."),
+                            stream.name
+                        ),
+                        source: component_path(instance, stream.src_idx).join("."),
+                        destination: component_path(instance, stream.sink_idx).join("."),
+                        bound_ps: total_delay_ps,
+                        hops: hops_counted as usize,
+                    }),
                 });
 
                 // Step 6c: DEADLINE (#478 / #455 root shape). `Timing_Properties::
@@ -1014,6 +1043,7 @@ impl WcttAnalysis {
                         ),
                         path: stream_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -1067,6 +1097,7 @@ impl WcttAnalysis {
                     ),
                     path: stream_path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }
@@ -1202,6 +1233,7 @@ fn network_wide_nc_bounds(
             ),
             path: component_path(instance, s.src_idx),
             analysis: analysis.to_string(),
+            data: None,
         });
     }
 
@@ -1250,6 +1282,7 @@ fn network_wide_nc_bounds(
                     ),
                     path: component_path(instance, s.src_idx),
                     analysis: analysis.to_string(),
+                    data: None,
                 });
             }
             // Tighten the authoritative bound to min(PLP, TFA) per flow.
@@ -1275,6 +1308,7 @@ fn network_wide_nc_bounds(
             ),
             path: component_path(instance, s.src_idx),
             analysis: analysis.to_string(),
+            data: None,
         });
     }
 }
@@ -1805,11 +1839,13 @@ fn extract_time_ps(expr: &PropertyExpr) -> Option<u64> {
 pub(crate) struct Stream {
     /// Stable connection name from AADL, used in diagnostics.
     pub(crate) name: String,
+    /// Component that declares the connection; with `name`, the
+    /// connection's instance path (`DiagnosticData::WcttBound::stream`).
+    pub(crate) owner_idx: ComponentInstanceIdx,
     /// Source end-station component (device/processor) idx.
     pub(crate) src_idx: ComponentInstanceIdx,
-    /// Sink end-station component idx (kept for future PMOO/SFA use).
-    #[allow(dead_code)]
-    sink_idx: ComponentInstanceIdx,
+    /// Sink end-station component idx.
+    pub(crate) sink_idx: ComponentInstanceIdx,
     /// Ordered list of switched buses this stream traverses.
     pub(crate) hops: Vec<ComponentInstanceIdx>,
     /// Source-side arrival curve.
@@ -2032,6 +2068,7 @@ pub(crate) fn collect_streams(
 
             streams.push(Stream {
                 name: conn.name.as_str().to_string(),
+                owner_idx,
                 src_idx,
                 sink_idx: dst_idx,
                 hops,

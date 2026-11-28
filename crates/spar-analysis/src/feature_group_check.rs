@@ -50,6 +50,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                         ),
                         path: component_path(instance, conn.owner),
                         analysis: "feature_group_check".to_string(),
+                        data: None,
                     });
                     continue;
                 }
@@ -75,6 +76,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                         ),
                         path: component_path(instance, conn.owner),
                         analysis: "feature_group_check".to_string(),
+                        data: None,
                     });
                 }
             }
@@ -94,6 +96,7 @@ impl Analysis for FeatureGroupCheckAnalysis {
                         ),
                         path: component_path(instance, conn.owner),
                         analysis: "feature_group_check".to_string(),
+                        data: None,
                     });
                 }
             }
@@ -190,6 +193,7 @@ pub fn check_inverse_of_rules(tree: &ItemTree) -> Vec<AnalysisDiagnostic> {
                 ),
                 path: vec![fgt.name.as_str().to_string()],
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
     }
@@ -258,6 +262,7 @@ pub fn check_feature_group_complements(
                 ),
                 path: conn_path.clone(),
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
 
@@ -281,6 +286,7 @@ pub fn check_feature_group_complements(
                 ),
                 path: conn_path.clone(),
                 analysis: "feature_group_check".to_string(),
+                data: None,
             });
         }
     }
@@ -1258,5 +1264,61 @@ mod tests {
         assert_eq!(diags.len(), 1, "expected 1 warning: {diags:?}");
         assert!(diags[0].message.contains("source feature"));
         assert!(diags[0].message.contains("sensors"));
+    }
+
+    /// `check_feature_group_complements` resolves both feature group types
+    /// through the scope and reports a source feature the destination lacks.
+    #[test]
+    fn complements_through_the_scope_report_an_unmatched_feature() {
+        let src = "package FG
+public
+  feature group Out_FG
+    features
+      p : out data port;
+  end Out_FG;
+  feature group In_FG
+    features
+      q : in data port;
+  end In_FG;
+  process A
+    features
+      fg : feature group Out_FG;
+  end A;
+  process implementation A.impl
+  end A.impl;
+  process B
+    features
+      fg : feature group In_FG;
+  end B;
+  process implementation B.impl
+  end B.impl;
+  system Top
+  end Top;
+  system implementation Top.impl
+    subcomponents
+      a : process A.impl;
+      b : process B.impl;
+    connections
+      c : feature group a.fg -> b.fg;
+  end Top.impl;
+end FG;
+";
+        let db = spar_hir_def::HirDefDatabase::default();
+        let file = spar_base_db::SourceFile::new(&db, "fg.aadl".to_string(), src.to_string());
+        let tree = spar_hir_def::file_item_tree(&db, file);
+        let scope = GlobalScope::from_trees(vec![tree]);
+        let inst = SystemInstance::instantiate(
+            &scope,
+            &Name::new("FG"),
+            &Name::new("Top"),
+            &Name::new("impl"),
+        );
+        let diags = check_feature_group_complements(&inst, &scope);
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("source feature 'p' has no matching")),
+            "{diags:?}"
+        );
     }
 }

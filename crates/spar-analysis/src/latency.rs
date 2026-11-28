@@ -131,6 +131,7 @@ impl Analysis for LatencyAnalysis {
                                 ),
                                 path: owner_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                             chain_unservable = true;
                             break;
@@ -265,6 +266,7 @@ impl Analysis for LatencyAnalysis {
                     ),
                     path: owner_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -287,6 +289,7 @@ impl Analysis for LatencyAnalysis {
                     ),
                     path: owner_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
                 continue;
             }
@@ -303,6 +306,7 @@ impl Analysis for LatencyAnalysis {
                 ),
                 path: owner_path.clone(),
                 analysis: self.name().to_string(),
+                data: None,
             });
 
             // Per-hop diagnostics and the mixed-hop marker only fire on
@@ -321,6 +325,7 @@ impl Analysis for LatencyAnalysis {
                         ),
                         path: owner_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
                 for hop in &compute_hops {
@@ -334,6 +339,7 @@ impl Analysis for LatencyAnalysis {
                         ),
                         path: owner_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
 
@@ -352,6 +358,7 @@ impl Analysis for LatencyAnalysis {
                         ),
                         path: owner_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
             }
@@ -409,6 +416,7 @@ impl Analysis for LatencyAnalysis {
                     ),
                     path: owner_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             } else if let Some(budget) = budget
                 && let Some(min_ps) = budget.min_ps
@@ -425,6 +433,7 @@ impl Analysis for LatencyAnalysis {
                     ),
                     path: owner_path.clone(),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
             if let Some(budget) = budget
@@ -439,6 +448,7 @@ impl Analysis for LatencyAnalysis {
                     ),
                     path: owner_path,
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }
@@ -519,6 +529,7 @@ impl Analysis for LatencyAnalysis {
                             ),
                             path: owner_path,
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }
@@ -536,6 +547,7 @@ impl Analysis for LatencyAnalysis {
                 ),
                 path: vec!["root".to_string()],
                 analysis: self.name().to_string(),
+                data: None,
             });
         }
 

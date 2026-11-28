@@ -5499,3 +5499,26 @@ artifacts:
         target: REQ-WASM-COMPONENT-HEADLESS-001
       - type: verifies
         target: REQ-WASM-COMPONENT-HEADLESS-001
+
+  - id: TEST-ANALYZE-DIAGNOSTIC-DATA-001
+    type: feature
+    title: Diagnostic data restates its message on the zwinger reference mesh and on inline modal models, and is absent elsewhere
+    status: implemented
+    description: |-
+      crates/spar-cli/tests/diagnostic_data.rs, 5 cases, through `spar analyze --format json`:
+      - the zwinger reference mesh (tests/fixtures/zwinger_profile) gives 12 emv2_propagation chains; each one's chain_length, downstream count, error_type and origin's last segment equal the values in its message;
+      - its one WcttBound carries the bound_ps and hops its message prints, and the stream connection and end stations it names, as instance paths;
+      - every other diagnostic there has no `data` key;
+      - an inline model with an unconnected trigger port gives a mode_reachability dead transition with component, transition, source, destination and trigger;
+      - an inline model with an unknown trigger and an undeclared destination gives two mode_check entries, trigger "nosuch" and trigger null.
+    release: v0.50.0
+    tags: [analyze, json, diagnostics]
+    fields:
+      method: automated-test
+      steps:
+        - run: cargo test -p spar --test diagnostic_data
+    links:
+      - type: satisfies
+        target: REQ-ANALYZE-DIAGNOSTIC-DATA-001
+      - type: verifies
+        target: REQ-ANALYZE-DIAGNOSTIC-DATA-001

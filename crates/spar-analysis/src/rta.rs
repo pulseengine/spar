@@ -219,6 +219,7 @@ impl RtaAnalysis {
                         ),
                         path: component_path(instance, idx),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
 
@@ -251,6 +252,7 @@ impl RtaAnalysis {
                         ),
                         path: component_path(instance, idx),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
 
@@ -319,6 +321,7 @@ impl RtaAnalysis {
                     ),
                     path: component_path(instance, idx),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -366,6 +369,7 @@ impl RtaAnalysis {
                     ),
                     path: component_path(instance, idx),
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
 
@@ -418,6 +422,7 @@ impl RtaAnalysis {
                     ),
                     path: vec![groups.display(cpu).to_string()],
                     analysis: self.name().to_string(),
+                    data: None,
                 });
             }
         }
@@ -483,6 +488,7 @@ impl RtaAnalysis {
                         ),
                         path: thread_path.clone(),
                         analysis: self.name().to_string(),
+                        data: None,
                     });
                 }
 
@@ -510,6 +516,7 @@ impl RtaAnalysis {
                                 ),
                                 path: thread_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         } else {
                             diags.push(AnalysisDiagnostic {
@@ -523,6 +530,7 @@ impl RtaAnalysis {
                                 ),
                                 path: thread_path.clone(),
                                 analysis: self.name().to_string(),
+                                data: None,
                             });
                         }
 
@@ -554,6 +562,7 @@ impl RtaAnalysis {
                                     ),
                                     path: thread_path.clone(),
                                     analysis: self.name().to_string(),
+                                    data: None,
                                 });
                             }
                         }
@@ -584,6 +593,7 @@ impl RtaAnalysis {
                                         ),
                                         path: thread_path.clone(),
                                         analysis: self.name().to_string(),
+                                        data: None,
                                     });
                                 } else {
                                     let slack = thread.deadline_ps - predicted;
@@ -599,6 +609,7 @@ impl RtaAnalysis {
                                         ),
                                         path: thread_path.clone(),
                                         analysis: self.name().to_string(),
+                                        data: None,
                                     });
                                 }
                             }
@@ -616,6 +627,7 @@ impl RtaAnalysis {
                             ),
                             path: thread_path,
                             analysis: self.name().to_string(),
+                            data: None,
                         });
                     }
                 }

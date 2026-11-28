@@ -563,18 +563,21 @@ mod tests {
                 message: "processor utilization exceeds 80%".to_string(),
                 path: vec!["root".to_string(), "cpu".to_string()],
                 analysis: "scheduling".to_string(),
+                data: None,
             },
             AnalysisDiagnostic {
                 severity: Severity::Error,
                 message: "missing binding".to_string(),
                 path: vec!["root".to_string(), "thread1".to_string()],
                 analysis: "binding_check".to_string(),
+                data: None,
             },
             AnalysisDiagnostic {
                 severity: Severity::Info,
                 message: "all ports connected".to_string(),
                 path: vec!["root".to_string()],
                 analysis: "connectivity".to_string(),
+                data: None,
             },
         ]
     }
