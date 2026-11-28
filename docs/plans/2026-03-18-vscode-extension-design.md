@@ -136,7 +136,7 @@ File content sources (save-only — consistent with diagram updating on save):
 - For open documents: `TextDocument.getText()` (includes unsaved edits at save time)
 - For closed files: `workspace.fs.readFile()` (disk content)
 
-The shim pattern is proven — rivet already does this for its dashboard (see `/Volumes/Home/git/sdlc/scripts/build-wasm.sh` and the transpiled output at `rivet-cli/assets/wasm/js/`).
+The shim pattern is proven — rivet already does this for its dashboard (see `../rivet/scripts/build-wasm.sh` and the transpiled output at `rivet-cli/assets/wasm/js/`).
 
 **Rendering call:**
 ```typescript

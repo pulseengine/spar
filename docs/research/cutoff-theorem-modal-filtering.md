@@ -308,7 +308,7 @@ helpers in `modal.rs` are tight.
   Z3-based implementation; 552/899 properties proved, 345
   counterexamples, 2 undecided across ATL Zoo benchmarks.
 - spar source references (all under
-  `/Users/r/git/pulseengine/spar/`):
+  the repository root):
   - `crates/spar-analysis/src/modal.rs:42-105` — filter predicates.
   - `crates/spar-analysis/src/lib.rs:290-311` — per-SOM driver.
   - `crates/spar-hir-def/src/instance.rs:31-85` — instance + SOM

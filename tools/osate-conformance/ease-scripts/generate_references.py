@@ -1,13 +1,13 @@
 # OSATE Conformance Reference Data Generator
 # In OSATE Script Shell (Python Py4J), run:
-#   with open('/Volumes/Home/git/pulseengine/spar/tools/osate-conformance/ease-scripts/generate_references.py') as f:
+#   with open('tools/osate-conformance/ease-scripts/generate_references.py') as f:
 #       c = compile(f.read(), 'gen.py', 'exec')
 #   Then: exec(c)
 
 import os
 import json
 
-SPAR_ROOT = "/Volumes/Home/git/pulseengine/spar"
+SPAR_ROOT = "/path/to/spar"  # set to your spar checkout
 TEST_DATA = os.path.join(SPAR_ROOT, "test-data", "osate2")
 OUTPUT_DIR = os.path.join(SPAR_ROOT, "tools", "osate-conformance", "reference-data")
 
